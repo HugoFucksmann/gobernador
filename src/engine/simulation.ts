@@ -48,6 +48,7 @@ export function getStage(edad: number): 'menor' | 'adulto' | 'jubilado' {
 export function getEffectiveTrait(npc: Npc, trait: PersonalityTrait): number {
   let delta = 0;
   for (const mod of npc.modificadores) {
+    if (mod.duracionDias <= 0) continue;
     const val = mod.afecta[trait];
     if (typeof val === 'number') delta += val;
   }
@@ -57,6 +58,7 @@ export function getEffectiveTrait(npc: Npc, trait: PersonalityTrait): number {
 export function getModifierDelta(npc: Npc, key: PersonalityTrait | NpcVariable | 'productividad'): number {
   let delta = 0;
   for (const mod of npc.modificadores) {
+    if (mod.duracionDias <= 0) continue;
     const val = mod.afecta[key];
     if (typeof val === 'number') delta += val;
   }
@@ -85,6 +87,8 @@ export function getEffectiveZone(npc: Npc, zonesCount: number): ZoneId {
   return npc.zona || 'centro';
 }
 
+const shortestPathCache = new Map<string, ZoneId[]>();
+
 export function shortestZonePath(
   from: ZoneId,
   to: ZoneId,
@@ -92,6 +96,10 @@ export function shortestZonePath(
 ): ZoneId[] {
   if (from === to) return [from];
   const order = Object.keys(zonas) as ZoneId[];
+  const cacheKey = `${from}|${to}|${order.join(',')}`;
+  const cached = shortestPathCache.get(cacheKey);
+  if (cached) return cached;
+
   const visited = new Set<ZoneId>([from]);
   const parent: Partial<Record<ZoneId, ZoneId>> = {};
   const queue: ZoneId[] = [from];
@@ -111,12 +119,15 @@ export function shortestZonePath(
           step = parent[step];
           if (step) path.unshift(step);
         }
+        shortestPathCache.set(cacheKey, path);
         return path;
       }
       queue.push(next);
     }
   }
-  return [from, to];
+  const fallback = [from, to];
+  shortestPathCache.set(cacheKey, fallback);
+  return fallback;
 }
 
 export function emitSimEvent(state: GameState, event: SimEvent): void {
@@ -443,6 +454,34 @@ export function applyModifierToNpc(npc: Npc, mod: Omit<Modifier, 'id' | 'diasRes
     if (typeof val === 'number') {
       npc.variables[key] = clamp(npc.variables[key] + val * 0.6, 0, 100);
     }
+  }
+}
+
+export function applyInstantModifierToNpc(
+  npc: Npc,
+  mod: {
+    afecta: Partial<Record<NpcVariable, number>>;
+    origen: string;
+    texto: string;
+    recordOnNpc?: boolean;
+  }
+): void {
+  const varKeys: NpcVariable[] = ['salud', 'hambre', 'miedo', 'satisfaccion', 'lealtad'];
+  for (const key of varKeys) {
+    const val = mod.afecta[key];
+    if (typeof val === 'number') {
+      npc.variables[key] = clamp(npc.variables[key] + val, 0, 100);
+    }
+  }
+  if (mod.recordOnNpc) {
+    npc.modificadores.push({
+      id: `imod_${Math.random().toString(36).slice(2, 8)}`,
+      afecta: mod.afecta,
+      duracionDias: 0,
+      diasRestantes: 0,
+      origen: mod.origen,
+      texto: mod.texto,
+    });
   }
 }
 
@@ -956,6 +995,10 @@ function handleRolesAndAging(state: GameState): void {
         counts.desempleado--;
         counts[chosen]++;
         npc.rol = chosen;
+        const allowedZones = preset.zonaPorRol[chosen] || ['centro'];
+        if (!allowedZones.includes(npc.zona)) {
+          npc.zona = allowedZones[counts[chosen] % allowedZones.length];
+        }
         npc.mapa.destino = getDistrictPosition(chosen);
         npc.mapa.accion = 'trabajando';
       }
@@ -1001,8 +1044,10 @@ function handleRolesAndAging(state: GameState): void {
 function killNpc(state: GameState, npc: Npc, causa: string, zonesCount: number): void {
   if (!npc.vivo) return;
   const effZone = getEffectiveZone(npc, zonesCount);
+  const wasWaitingBed = npc.hospital.esperandoCama;
   npc.vivo = false;
   npc.hospital.internado = false;
+  npc.hospital.esperandoCama = false;
   npc.accionIa = null;
   npc.mapa.accion = 'fallecido';
 
@@ -1018,6 +1063,7 @@ function killNpc(state: GameState, npc: Npc, causa: string, zonesCount: number):
     zona: effZone,
     npcId: npc.id,
     causa,
+    ...(wasWaitingBed ? { esperandoCama: true } : {}),
   });
 }
 
@@ -1121,11 +1167,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   for (const fen of activePhenomena) {
     const k = fen.intensidad / 100;
     if (fen.tipo === 'sequia') {
-      agroClimaFactor *= 1 - 0.5 * k;
-      climaPrecioFactor *= 1 + 0.65 * k;
+      agroClimaFactor *= 1 - ECON_CONSTANTS.coefSequiaProduccion * k;
+      climaPrecioFactor *= 1 + ECON_CONSTANTS.coefSequiaPrecio * k;
     } else if (fen.tipo === 'plaga') {
-      agroClimaFactor *= 1 - 0.45 * k;
-      climaPrecioFactor *= 1 + 0.5 * k;
+      agroClimaFactor *= 1 - ECON_CONSTANTS.coefPlagaProduccion * k;
+      climaPrecioFactor *= 1 + ECON_CONSTANTS.coefPlagaPrecio * k;
     }
   }
 
@@ -1366,7 +1412,12 @@ function runDailyEconomyAndNeeds(state: GameState): void {
         });
       } else {
         const dano = Math.round(cfg.danoMin + Math.random() * (cfg.danoMax - cfg.danoMin));
-        npc.variables.salud = clamp(npc.variables.salud - dano, 0, 100);
+        applyInstantModifierToNpc(npc, {
+          afecta: { salud: -dano },
+          origen: causa,
+          texto: `Recibió golpe (${fen.nombre}, -${dano} salud)`,
+          recordOnNpc: true,
+        });
         npc.ultimoGolpeOrigen = causa;
         state.golpesPorZonaHistorial[effZone].push(state.reloj.dia);
 
@@ -1394,15 +1445,18 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
-  // (2) Critical hunger damage (hambre > 80 -> -2)
+  // (2) Critical hunger damage (hambre > 80 -> -2, aggregated daily cause)
+  let hungerDamageCount = 0;
   for (const npc of vivos) {
     if (!npc.vivo) continue;
     if (npc.variables.hambre > 80) {
-      npc.variables.salud = clamp(
-        npc.variables.salud - ECON_CONSTANTS.coefDanoHambreCritica,
-        0,
-        100
-      );
+      applyInstantModifierToNpc(npc, {
+        afecta: { salud: -ECON_CONSTANTS.coefDanoHambreCritica },
+        origen: 'hambre:critica',
+        texto: 'Daño por hambre crítica',
+        recordOnNpc: false,
+      });
+      hungerDamageCount++;
       if (npc.variables.salud <= 0 && !npc.ultimoGolpeOrigen) {
         npc.ultimoGolpeOrigen = 'hambre:critica';
       }
@@ -1410,6 +1464,15 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     if (npc.variables.salud <= 0) {
       killNpc(state, npc, npc.ultimoGolpeOrigen || 'salud:cero', zonesCount);
     }
+  }
+  if (hungerDamageCount > 0) {
+    addLog(
+      state,
+      'sistema',
+      'hambre:critica',
+      `Daño por hambre crítica (${hungerDamageCount} habitantes)`,
+      `Modificador instantáneo -${ECON_CONSTANTS.coefDanoHambreCritica} salud aplicado a ${hungerDamageCount} NPCs.`
+    );
   }
 
   // (3) Hospital admission (ESTADOS §12)
@@ -1458,14 +1521,22 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
-  // (4) Cure (interned & natural outside) + (5) Death check
+  // (4) Cure (interned & natural outside, instant modifiers aggregated daily) + (5) Death check
   const saludService = state.gobierno.indicadores.salud / 100;
   const curaInternadoDia = ECON_CONSTANTS.curaBaseHospital * (0.5 + 0.5 * saludService);
+  let hospitalCuredCount = 0;
+  let naturalCuredCount = 0;
 
   for (const npc of vivos) {
     if (!npc.vivo) continue;
     if (npc.hospital.internado) {
-      npc.variables.salud = clamp(npc.variables.salud + curaInternadoDia, 0, 100);
+      applyInstantModifierToNpc(npc, {
+        afecta: { salud: curaInternadoDia },
+        origen: 'hospital:cura',
+        texto: 'Atención hospitalaria diaria',
+        recordOnNpc: false,
+      });
+      hospitalCuredCount++;
       npc.hospital.diasInternado += 1;
       if (npc.variables.salud >= ECON_CONSTANTS.altaHospital) {
         npc.hospital.internado = false;
@@ -1482,17 +1553,28 @@ function runDailyEconomyAndNeeds(state: GameState): void {
           causa: 'hospital:alta',
         });
       }
-    } else if (npc.variables.hambre < 50) {
-      npc.variables.salud = clamp(
-        npc.variables.salud + ECON_CONSTANTS.curaNaturalSalud,
-        0,
-        100
-      );
+    } else if (npc.variables.hambre < 50 && npc.variables.salud < 100) {
+      applyInstantModifierToNpc(npc, {
+        afecta: { salud: ECON_CONSTANTS.curaNaturalSalud },
+        origen: 'salud:cura_natural',
+        texto: 'Recuperación natural diaria',
+        recordOnNpc: false,
+      });
+      naturalCuredCount++;
     }
 
     if (npc.variables.salud <= 0) {
       killNpc(state, npc, npc.ultimoGolpeOrigen || 'salud:cero', zonesCount);
     }
+  }
+  if (hospitalCuredCount > 0 || naturalCuredCount > 0) {
+    addLog(
+      state,
+      'sistema',
+      'salud:cura_diaria',
+      `Curas diarias (${hospitalCuredCount} hospital, ${naturalCuredCount} natural)`,
+      `Hospital +${curaInternadoDia.toFixed(1)} salud; natural +${ECON_CONSTANTS.curaNaturalSalud} salud.`
+    );
   }
 
   // 7. Fear, Satisfaction & Loyalty for surviving NPCs

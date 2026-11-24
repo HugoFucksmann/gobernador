@@ -389,6 +389,7 @@ export type SimEvent =
       zona: ZoneId;
       npcId: string;
       causa: string;
+      esperandoCama?: boolean;
     }
   | {
       id: string;
