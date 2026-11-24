@@ -63,10 +63,15 @@ function buildTemplatePress(
     tema: topic.tema,
     tono: topic.tono,
     alcance: medio.alcancePct,
+    credibilidad: medio.credibilidad,
     titulo,
     texto: `${topic.detalle} Desde la redacción de ${medio.nombre}, ${autor.nombre} señala que el desenlace dependerá de las próximas decisiones fiscales.`,
     origen: topic.origen,
     fuente: 'plantilla',
+    zonaOrigen: topic.zonaOrigen,
+    fenomenoId: topic.fenomenoId,
+    esAviso: topic.esAviso,
+    vigenteHastaDia: topic.vigenteHastaDia,
   };
 }
 
@@ -218,10 +223,15 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
       tema: topic.tema,
       tono: topic.tono,
       alcance: medio.alcancePct,
+      credibilidad: medio.credibilidad,
       titulo: data.titulo || 'Edición del día',
       texto: data.texto || topic.detalle,
       origen: topic.origen,
       fuente: 'ia',
+      zonaOrigen: topic.zonaOrigen,
+      fenomenoId: topic.fenomenoId,
+      esAviso: topic.esAviso,
+      vigenteHastaDia: topic.vigenteHastaDia,
     };
     return {
       type: 'press',

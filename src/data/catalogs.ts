@@ -8,10 +8,37 @@ import {
   RoleGroupId,
   RoleId,
   ScenarioPreset,
+  ZoneId,
 } from '../types/game';
 
 export const FISCAL_PERIOD_DAYS = 7;
 export const LEVER_MAX_CHANGE_PCT = 20;
+
+export const ZONE_IDS: ZoneId[] = ['centro', 'norte', 'este', 'sur', 'oeste'];
+
+export const DEFAULT_ZONAS: Record<ZoneId, { vecinas: ZoneId[] }> = {
+  centro: { vecinas: ['norte', 'este', 'sur', 'oeste'] },
+  norte: { vecinas: ['este', 'oeste', 'centro'] },
+  este: { vecinas: ['norte', 'sur', 'centro'] },
+  sur: { vecinas: ['este', 'oeste', 'centro'] },
+  oeste: { vecinas: ['sur', 'norte', 'centro'] },
+};
+
+export const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
+  agricultor: ['norte', 'este', 'sur', 'oeste'],
+  obrero: ['sur', 'oeste', 'norte', 'este'],
+  tecnico: ['sur', 'oeste', 'norte'],
+  comerciante: ['centro', 'este', 'sur'],
+  periodista: ['centro', 'norte', 'oeste'],
+  policia: ['centro', 'norte', 'este', 'sur', 'oeste'],
+  estatal: ['centro'],
+  medico: ['centro'],
+  ingeniero: ['centro'],
+  docente: ['centro', 'norte', 'sur', 'oeste', 'este'],
+  estudiante: ['centro', 'norte', 'este', 'sur', 'oeste'],
+  desempleado: ['centro', 'norte', 'este', 'sur', 'oeste'],
+  jubilado: ['centro', 'norte', 'este', 'sur', 'oeste'],
+};
 
 export const ECON_CONSTANTS = {
   salarioBasePublico: 9,
@@ -19,14 +46,45 @@ export const ECON_CONSTANTS = {
   empleadosPorComerciante: 4,
   precioBaseAlimento: 1.0,
   consumoPorNpc: 1.0,
-  produccionBaseAgricultor: 5.42, // 30 farmers at ~0.655 prod = ~106.5 food/day >= 105 (1.05x cons)
+  produccionBaseAgricultor: 5.42,
   perdidaAdminMax: 0.30,
-  costoBaseServicioPorPoblacion: 0.19, // scales with population (100 -> 19/day, 133/week)
+  costoBaseServicioPorPoblacion: 0.19,
   comisionComercioFactor: 0.14,
   coefSubsidioSimple: 11.9,
   coefImpuestoSimple: 1.17,
+  coefSatisfaccionSubsidioSimple: 1.8,
+  topeSatisfaccionSubsidioSimple: 12,
+  coefHambreSubida: 26,
+  coefHambreBaja: 14,
+  coefDanoHambreCritica: 2,
   fiscalUmbral: 40,
   fiscalPendiente: 0.01,
+  umbralHospital: 60,
+  pacientesPorMedico: 3,
+  curaBaseHospital: 15,
+  altaHospital: 90,
+  curaNaturalSalud: 0.5,
+  proteccionMaxZona: 0.9,
+  movilidadDefensa: 0.4,
+  reubicacionPoliciasPct: 20,
+  golpeAmenazaPeso: 20,
+  golpeAmenazaVentanaDias: 5,
+  fenomenosSalud: {
+    plaga_zombie: {
+      exposicionMax: 1.0,
+      danoMin: 20,
+      danoMax: 50,
+      atenuacion: 0.7,
+      usaProteccion: true,
+    },
+    pandemia: {
+      exposicionMax: 0.25,
+      danoMin: 10,
+      danoMax: 35,
+      atenuacion: 1.0,
+      usaProteccion: false,
+    },
+  },
   objetivoCobertura: {
     medico: 0.05,
     policia: 0.05,
@@ -343,6 +401,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
     afinidad: { resiliencia: '+', laboriosidad: '-' },
     efecto: {
       reemplazaTrabajo: true,
+      zonaDestino: 'centro',
       variables: { satisfaccion: 12, miedo: -8 },
       rumorSocial: {
         afecta: { satisfaccion: 6, laboriosidad: -8 },
@@ -454,6 +513,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
     afinidad: { rebeldia: '+', valentia: '+' },
     efecto: {
       reemplazaTrabajo: true,
+      zonaDestino: 'centro',
       variables: { lealtad: -10, rebeldia: 12 },
     },
     duracionDias: [3, 7],
@@ -512,6 +572,8 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       medico: 5,
       ingeniero: 3,
     },
+    zonas: structuredClone(DEFAULT_ZONAS),
+    zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     victoria: {
       metrica: 'apoyoPct',
       op: '>=',
@@ -537,7 +599,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     poblacionDefault: 100,
     mediosDefault: 2,
     inflacionInicial: 12,
-    reservaInicial: 700,
+    reservaInicial: 1800,
     stockAlimentoInicial: 1800,
     topesPrivados: {
       agricultor: 30,
@@ -553,6 +615,11 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       medico: 5,
       ingeniero: 3,
     },
+    objetivoCobertura: {
+      policia: 0.15,
+    },
+    zonas: structuredClone(DEFAULT_ZONAS),
+    zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     victoria: {
       metrica: 'poblacion',
       op: '>=',

@@ -15,6 +15,7 @@ import {
   LEVER_MAX_CHANGE_PCT,
   ROLE_CATALOG,
   ROLE_GROUPS,
+  SCENARIO_PRESETS,
 } from '../../data/catalogs';
 import {
   adjustPublicCapInLevers,
@@ -662,9 +663,12 @@ export const PolicyDrawers: React.FC<PolicyDrawersProps> = ({
                     const indVal = Math.round(state.gobierno.indicadores[s.area]);
                     const ocupados = derived.roles[s.role];
                     const cupo = obj.cupos[s.role];
+                    const targetCov =
+                      SCENARIO_PRESETS[state.config.escenarioId].objetivoCobertura?.[s.role] ??
+                      ECON_CONSTANTS.objetivoCobertura[s.role];
                     const rec = Math.max(
                       1,
-                      Math.round(derived.poblacion * ECON_CONSTANTS.objetivoCobertura[s.role])
+                      Math.round(derived.poblacion * targetCov)
                     );
                     return (
                       <div

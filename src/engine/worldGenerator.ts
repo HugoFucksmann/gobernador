@@ -8,12 +8,14 @@ import {
   SPANISH_NAMES,
 } from '../data/catalogs';
 import {
+  ClimatePhenomenon,
   GameState,
   GovernorLevers,
   MediaOutlet,
   Npc,
   RoleId,
   WorldConfig,
+  ZoneId,
 } from '../types/game';
 
 function randRange(min: number, max: number): number {
@@ -178,10 +180,12 @@ export function createInitialGameState(config: WorldConfig): GameState {
 
   for (const entry of baseDistribution) {
     const def = ROLE_CATALOG[entry.rol];
+    const allowedZones = preset.zonaPorRol[entry.rol] || ['centro'];
     for (let i = 0; i < entry.count; i++) {
       const id = `npc_${String(idx + 1).padStart(3, '0')}`;
       const baseName = SPANISH_NAMES[idx % SPANISH_NAMES.length];
       const nombre = idx >= SPANISH_NAMES.length ? `${baseName} ${Math.floor(idx / SPANISH_NAMES.length) + 1}` : baseName;
+      const zona: ZoneId = allowedZones[i % allowedZones.length];
 
       let edad = randInt(22, 58);
       if (entry.rol === 'estudiante') edad = randInt(8, 21);
@@ -221,6 +225,12 @@ export function createInitialGameState(config: WorldConfig): GameState {
           ultimoIngresoNeto: 0,
         },
         rol: entry.rol,
+        zona,
+        hospital: {
+          internado: false,
+          esperandoCama: false,
+          diasInternado: 0,
+        },
         mapa: {
           x: pos.x,
           y: pos.y,
@@ -322,16 +332,39 @@ export function createInitialGameState(config: WorldConfig): GameState {
   };
 
   const stockInicial = Math.round(preset.stockAlimentoInicial * scale);
-  const initialPhenomena =
+  const initialPhenomena: ClimatePhenomenon[] =
     config.escenarioId === 'zombies'
       ? [
           {
             id: 'fen_zombie_init',
-            tipo: 'plaga_zombie' as const,
+            tipo: 'plaga_zombie',
             nombre: 'Brote Zombie Periférico',
-            intensidad: 18,
+            intensidad: 10,
             inicioDia: 1,
-            duracionDias: 180,
+            duracionDias: 185,
+            crecimientoDia: 0.5,
+            origen: 'este',
+            avisoDias: 0,
+          },
+          {
+            id: 'fen_zombie_horda_1',
+            tipo: 'plaga_zombie',
+            nombre: 'Horda Zombie del Oeste',
+            intensidad: 65,
+            inicioDia: 55,
+            duracionDias: 12,
+            origen: 'oeste',
+            avisoDias: 8,
+          },
+          {
+            id: 'fen_zombie_horda_2',
+            tipo: 'plaga_zombie',
+            nombre: 'Horda Zombie del Norte',
+            intensidad: 80,
+            inicioDia: 115,
+            duracionDias: 14,
+            origen: 'norte',
+            avisoDias: 10,
           },
         ]
       : [];
@@ -383,18 +416,42 @@ export function createInitialGameState(config: WorldConfig): GameState {
         infraestructura: 56,
       },
       coberturas: {
-        policia: 1,
-        estatal: 1,
-        docente: 1,
-        medico: 1,
-        ingeniero: 1,
-        comercio: 1,
+        policia: clamp(
+          cupos.policia / Math.max(1, pop * (preset.objetivoCobertura?.policia ?? ECON_CONSTANTS.objetivoCobertura.policia)),
+          0,
+          1
+        ),
+        estatal: clamp(
+          cupos.estatal / Math.max(1, pop * (preset.objetivoCobertura?.estatal ?? ECON_CONSTANTS.objetivoCobertura.estatal)),
+          0,
+          1
+        ),
+        docente: clamp(
+          cupos.docente / Math.max(1, pop * (preset.objetivoCobertura?.docente ?? ECON_CONSTANTS.objetivoCobertura.docente)),
+          0,
+          1
+        ),
+        medico: clamp(
+          cupos.medico / Math.max(1, pop * (preset.objetivoCobertura?.medico ?? ECON_CONSTANTS.objetivoCobertura.medico)),
+          0,
+          1
+        ),
+        ingeniero: clamp(
+          cupos.ingeniero / Math.max(1, pop * (preset.objetivoCobertura?.ingeniero ?? ECON_CONSTANTS.objetivoCobertura.ingeniero)),
+          0,
+          1
+        ),
+        comercio: clamp(
+          preset.topesPrivados.comerciante / Math.max(1, pop * (preset.objetivoCobertura?.comercio ?? ECON_CONSTANTS.objetivoCobertura.comercio)),
+          0,
+          1
+        ),
       },
       palancasVigentes: structuredClone(initialLevers),
       palancasObjetivo: structuredClone(initialLevers),
       prensaObjetivo,
     },
-  alimento: {
+    alimento: {
       stock: stockInicial,
       consumoPorNpc: ECON_CONSTANTS.consumoPorNpc,
       diasStock: Math.round(stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)),
@@ -420,6 +477,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
         tema: 'asuncion',
         tono: 'informativo',
         alcance: medios[0].alcancePct,
+        credibilidad: medios[0].credibilidad,
         titulo:
           config.escenarioId === 'zombies'
             ? 'Asume nuevo gobernador bajo alerta sanitaria en las afueras'
@@ -451,6 +509,23 @@ export function createInitialGameState(config: WorldConfig): GameState {
       descontento: 0,
       hambre: 0,
     },
+    eventos: [],
+    eventosDiaActual: [],
+    golpesPorZonaHistorial: {
+      centro: [],
+      norte: [],
+      este: [],
+      sur: [],
+      oeste: [],
+    },
+    ultimaDefensaZona: {
+      centro: config.escenarioId === 'zombies' ? 52 : 55,
+      norte: config.escenarioId === 'zombies' ? 52 : 55,
+      este: config.escenarioId === 'zombies' ? 52 : 55,
+      sur: config.escenarioId === 'zombies' ? 52 : 55,
+      oeste: config.escenarioId === 'zombies' ? 52 : 55,
+    },
+    avisosEmitidos: [],
     bitacora: [
       {
         id: 'log_init',

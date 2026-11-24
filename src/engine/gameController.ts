@@ -31,7 +31,7 @@ export interface GameControllerSnapshot {
   thoughtLoading: boolean;
 }
 
-const SIMULATION_TICK_MS = 150;
+const SIMULATION_TICK_MS = 167;
 
 export class GameController {
   private state: GameState;

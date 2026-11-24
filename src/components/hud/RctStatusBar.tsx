@@ -35,7 +35,9 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const plazo = preset.victoria.plazoDia ?? 365;
   const latestHeadline = state.noticias[0];
-  const activeFen = state.clima.fenomenos[0];
+  const activeFen = state.clima.fenomenos.find(
+    (f) => state.reloj.dia >= f.inicioDia && state.reloj.dia < f.inicioDia + f.duracionDias
+  );
 
   return (
     <footer className="pointer-events-auto fixed bottom-0 inset-x-0 z-30 bg-slate-800/95 backdrop-blur-sm border-t border-slate-600/60 px-2.5 py-1 flex items-center justify-between gap-3 text-[11px] text-slate-200">

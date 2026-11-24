@@ -1040,10 +1040,13 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             .filter((p) => p.alpha > 0.02);
 
           // 4. Climate & Day Phase
-          const hasDrought = st.clima.fenomenos.some((f) => f.tipo === 'sequia');
-          const hasPlague = st.clima.fenomenos.some((f) => f.tipo === 'plaga');
-          const hasPandemic = st.clima.fenomenos.some((f) => f.tipo === 'pandemia');
-          const hasZombie = st.clima.fenomenos.some((f) => f.tipo === 'plaga_zombie');
+          const activeFens = st.clima.fenomenos.filter(
+            (f) => st.reloj.dia >= f.inicioDia && st.reloj.dia < f.inicioDia + f.duracionDias
+          );
+          const hasDrought = activeFens.some((f) => f.tipo === 'sequia');
+          const hasPlague = activeFens.some((f) => f.tipo === 'plaga');
+          const hasPandemic = activeFens.some((f) => f.tipo === 'pandemia');
+          const hasZombie = activeFens.some((f) => f.tipo === 'plaga_zombie');
 
           const dayPhase = (st.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY;
           const duskAmount = dayPhase > 0.72 ? Math.sin(((dayPhase - 0.72) / 0.28) * Math.PI) * 0.45 : 0;

@@ -41,6 +41,8 @@ export interface RoleDefinition {
   distrito: DistrictId;
 }
 
+export type ZoneId = 'centro' | 'norte' | 'este' | 'sur' | 'oeste';
+
 export type DistrictId = 'campos' | 'taller' | 'mercado' | 'civico' | 'residencial';
 
 export interface DistrictZone {
@@ -68,10 +70,17 @@ export interface ActiveNpcAction {
   nombre: string;
   tipo: 'espontanea' | 'condicion';
   reemplazaTrabajo: boolean;
+  zonaDestino?: ZoneId;
   diasRestantes: number;
   duracionTotal: number;
   origen: string;
   texto: string;
+}
+
+export interface NpcHospitalState {
+  internado: boolean;
+  esperandoCama: boolean;
+  diasInternado: number;
 }
 
 export interface Npc {
@@ -90,6 +99,9 @@ export interface Npc {
     ultimoIngresoNeto: number;
   };
   rol: RoleId;
+  zona: ZoneId;
+  hospital: NpcHospitalState;
+  ultimoGolpeOrigen?: string;
   mapa: {
     x: number;
     y: number;
@@ -125,6 +137,7 @@ export interface ActionDefinition {
   afinidad: Partial<Record<PersonalityTrait, '+' | '-'>>;
   efecto: {
     reemplazaTrabajo: boolean;
+    zonaDestino?: ZoneId;
     variables?: Partial<Record<ModifiableKey, number>>;
     rumorSocial?: {
       afecta: Partial<Record<ModifiableKey, number>>;
@@ -146,6 +159,9 @@ export interface ClimatePhenomenon {
   intensidad: number; // 0..100
   inicioDia: number;
   duracionDias: number;
+  avisoDias?: number;
+  crecimientoDia?: number;
+  origen?: ZoneId;
 }
 
 export interface MediaOutlet {
@@ -181,10 +197,15 @@ export interface NewsArticle {
   tema: string;
   tono: NewsTone;
   alcance: number;
+  credibilidad?: number;
   titulo: string;
   texto: string;
   origen: string;
   fuente: 'ia' | 'plantilla';
+  zonaOrigen?: ZoneId;
+  fenomenoId?: string;
+  esAviso?: boolean;
+  vigenteHastaDia?: number;
 }
 
 export interface GovernorLevers {
@@ -272,6 +293,12 @@ export interface CommunityDerived {
   descontentosPct: number;
   hambreCriticaPct: number;
   sinDineroPct: number;
+  hospitalOcupacionPct: number;
+  camasHospital: number;
+  internados: number;
+  esperandoCama: number;
+  defensa: Record<ZoneId, number>;
+  amenazaPercibida: Record<ZoneId, number>;
   productividadTotal: number;
   roles: Record<RoleId, number>;
 }
@@ -297,6 +324,9 @@ export interface ScenarioPreset {
   stockAlimentoInicial: number;
   topesPrivados: Record<PrivateRoleId, number>;
   cuposIniciales: Record<PublicRoleId, number>;
+  objetivoCobertura?: Partial<Record<PublicRoleId | 'comercio', number>>;
+  zonas: Record<ZoneId, { vecinas: ZoneId[] }>;
+  zonaPorRol: Record<RoleId, ZoneId[]>;
   victoria: ObjectiveCondition;
   derrota: ObjectiveCondition;
   caosDefault: ChaosLimits;
@@ -330,6 +360,99 @@ export interface EventLogEntry {
   titulo: string;
   detalle: string;
 }
+
+export type SimEvent =
+  | {
+      id: string;
+      dia: number;
+      tipo: 'ataque';
+      zona: ZoneId;
+      zonaOrigen?: ZoneId;
+      zonaDestino: ZoneId;
+      resultado: 'repelido' | 'golpe';
+      npcId?: string;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'golpe';
+      zona: ZoneId;
+      npcId: string;
+      dano: number;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'muerte';
+      zona: ZoneId;
+      npcId: string;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'internacion';
+      zona: ZoneId;
+      npcId: string;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'alta';
+      zona: ZoneId;
+      npcId: string;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'accion_inicio';
+      zona: ZoneId;
+      accion: string;
+      npcIds: string[];
+      zonaDestino: ZoneId;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'accion_fin';
+      zona: ZoneId;
+      accion: string;
+      npcIds: string[];
+      zonaDestino: ZoneId;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'aviso';
+      zona: ZoneId;
+      fenomeno: string;
+      diasRestantes: number;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'reubicacion';
+      zona: ZoneId;
+      npcs: string[];
+      deZona: ZoneId;
+      aZona: ZoneId;
+      causa: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'defensa';
+      zona: ZoneId;
+      valor: number;
+      causa: string;
+    };
 
 export interface HistoryPoint {
   dia: number;
@@ -382,6 +505,11 @@ export interface GameState {
     descontento: number;
     hambre: number;
   };
+  eventos: SimEvent[];
+  eventosDiaActual: SimEvent[];
+  golpesPorZonaHistorial: Record<ZoneId, number[]>;
+  ultimaDefensaZona: Record<ZoneId, number>;
+  avisosEmitidos: string[];
   bitacora: EventLogEntry[];
   historial: HistoryPoint[];
   resultado: {
