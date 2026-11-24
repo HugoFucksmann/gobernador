@@ -1,5 +1,6 @@
 import {
   DISTRICTS,
+  ECON_CONSTANTS,
   MEDIA_TEMPLATES,
   PUBLIC_ROLES,
   ROLE_CATALOG,
@@ -30,10 +31,102 @@ function clamp(v: number, min: number, max: number): number {
 export function getDistrictPosition(role: RoleId): { x: number; y: number } {
   const def = ROLE_CATALOG[role];
   const zone = DISTRICTS.find((d) => d.id === def.distrito) || DISTRICTS[0];
+
+  // Place roles near their thematic landmarks inside each district
+  if (role === 'docente' || role === 'estudiante') {
+    // Schoolyard in upper half of residencial
+    return {
+      x: zone.x + 34 + Math.random() * (zone.w - 68),
+      y: zone.y + 62 + Math.random() * 170,
+    };
+  }
+  if (role === 'jubilado' || role === 'desempleado') {
+    // Homes & park in lower half of residencial
+    return {
+      x: zone.x + 34 + Math.random() * (zone.w - 68),
+      y: zone.y + 245 + Math.random() * (zone.h - 275),
+    };
+  }
+  if (role === 'medico') {
+    // Clinic area (left side of civico)
+    return {
+      x: zone.x + 28 + Math.random() * 115,
+      y: zone.y + 65 + Math.random() * (zone.h - 90),
+    };
+  }
+  if (role === 'estatal' || role === 'ingeniero') {
+    // City Hall & works (right side of civico)
+    return {
+      x: zone.x + 145 + Math.random() * (zone.w - 175),
+      y: zone.y + 65 + Math.random() * (zone.h - 90),
+    };
+  }
+
   return {
-    x: zone.x + 28 + Math.random() * (zone.w - 56),
-    y: zone.y + 44 + Math.random() * (zone.h - 68),
+    x: zone.x + 30 + Math.random() * (zone.w - 60),
+    y: zone.y + 56 + Math.random() * (zone.h - 80),
   };
+}
+
+export function getCityErrandPosition(role: RoleId): { x: number; y: number; accion: string } {
+  // Police patrol the avenues & plaza
+  if (role === 'policia') {
+    const patrolSpots = [
+      { x: 355, y: 120 + Math.random() * 340, accion: 'patrullando avenida oeste' },
+      { x: 665, y: 120 + Math.random() * 340, accion: 'patrullando avenida este' },
+      { x: 140 + Math.random() * 480, y: 295, accion: 'patrullando bulevar central' },
+      { x: 430 + Math.random() * 160, y: 140 + Math.random() * 100, accion: 'vigilando la plaza' },
+    ];
+    return patrolSpots[Math.floor(Math.random() * patrolSpots.length)];
+  }
+
+  // Journalists roam between press plaza, civic center, and neighborhoods
+  if (role === 'periodista') {
+    const spots = [
+      { x: 420 + Math.random() * 180, y: 100 + Math.random() * 140, accion: 'cubriendo la plaza' },
+      { x: 420 + Math.random() * 180, y: 360 + Math.random() * 150, accion: 'entrevistando en Centro Cívico' },
+      { x: 100 + Math.random() * 200, y: 100 + Math.random() * 140, accion: 'reportando en los campos' },
+    ];
+    return spots[Math.floor(Math.random() * spots.length)];
+  }
+
+  // Occasional trip to Plaza y Mercado or stroll along avenue
+  if (Math.random() < 0.28) {
+    const plaza = DISTRICTS.find((d) => d.id === 'mercado')!;
+    return {
+      x: plaza.x + 36 + Math.random() * (plaza.w - 72),
+      y: plaza.y + 62 + Math.random() * (plaza.h - 86),
+      accion: 'en el mercado central',
+    };
+  }
+
+  // Occasional trip home to Barrio Sur
+  if (Math.random() < 0.18) {
+    const home = DISTRICTS.find((d) => d.id === 'residencial')!;
+    return {
+      x: home.x + 36 + Math.random() * (home.w - 72),
+      y: home.y + 240 + Math.random() * (home.h - 270),
+      accion: 'pasando por su barrio',
+    };
+  }
+
+  const workPos = getDistrictPosition(role);
+  const workAction =
+    role === 'estudiante'
+      ? 'estudiando en la escuela'
+      : role === 'jubilado'
+      ? 'paseando por el parque'
+      : role === 'desempleado'
+      ? 'buscando trabajo'
+      : role === 'agricultor'
+      ? 'trabajando en los cultivos'
+      : role === 'medico'
+      ? 'atendiendo en la clínica'
+      : role === 'comerciante'
+      ? 'atendiendo su puesto'
+      : 'trabajando';
+
+  return { ...workPos, accion: workAction };
 }
 
 export function isTestConfig(config: WorldConfig): boolean {
@@ -192,29 +285,29 @@ export function createInitialGameState(config: WorldConfig): GameState {
 
   const initialLevers: GovernorLevers = {
     recaudacion: {
-      impuestoUnico: 28,
+      impuestoUnico: 26,
       impuestoGrupo: {
         agro: 24,
-        industria: 28,
-        comercio: 30,
+        industria: 26,
+        comercio: 28,
         publico: 22,
       },
     },
     gasto: {
       salarioPublico: 100,
       presupuesto: {
-        salud: 22,
-        seguridad: config.escenarioId === 'zombies' ? 28 : 18,
-        infraestructura: 20,
-        educacion: 16,
+        salud: 18,
+        seguridad: config.escenarioId === 'zombies' ? 28 : 12,
+        infraestructura: 18,
+        educacion: 12,
       },
-      prensa: 6,
+      prensa: 5,
       subsidios: {
-        agro: 0,
+        agro: 9,
         industria: 0,
         comercio: 0,
         publico: 0,
-        sin_ingreso: 8,
+        sin_ingreso: 6,
       },
     },
     alimento: {
@@ -301,14 +394,14 @@ export function createInitialGameState(config: WorldConfig): GameState {
       palancasObjetivo: structuredClone(initialLevers),
       prensaObjetivo,
     },
-    alimento: {
+  alimento: {
       stock: stockInicial,
-      consumoPorNpc: 1,
-      diasStock: Math.round(stockInicial / pop),
-      precio: 1.0,
-      precioBase: 1.0,
+      consumoPorNpc: ECON_CONSTANTS.consumoPorNpc,
+      diasStock: Math.round(stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)),
+      precio: ECON_CONSTANTS.precioBaseAlimento,
+      precioBase: ECON_CONSTANTS.precioBaseAlimento,
       produccionDiaria: pop * 1.05,
-      consumoDiario: pop,
+      consumoDiario: pop * ECON_CONSTANTS.consumoPorNpc,
     },
     clima: {
       fenomenos: initialPhenomena,

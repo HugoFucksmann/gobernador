@@ -40,7 +40,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
       aria-labelledby="world-config-title"
       className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[2px] flex items-center justify-center p-4 overflow-y-auto"
     >
-      <div className="bg-white border border-slate-200 rounded-xl max-w-3xl w-full p-6 space-y-6 my-8 shadow-xl">
+      <div className="bg-white text-slate-900 border border-slate-200 rounded-xl max-w-3xl w-full p-6 space-y-6 my-8 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="world-config-title" className="font-display text-2xl font-bold text-slate-900">
@@ -181,7 +181,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                   <span className="text-slate-500">
                     {aiAvailable
                       ? 'Redacta columnas de prensa, pensamientos y elige acciones sin bloquear la simulación.'
-                      : 'Sin clave de Gemini configurada en servidor; correrá con plantillas y respaldo.'}
+                      : 'La ciudad generará prensa y decisiones de forma local automáticamente.'}
                   </span>
                 </span>
               </label>

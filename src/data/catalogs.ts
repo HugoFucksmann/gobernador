@@ -14,15 +14,19 @@ export const FISCAL_PERIOD_DAYS = 7;
 export const LEVER_MAX_CHANGE_PCT = 20;
 
 export const ECON_CONSTANTS = {
-  salarioBasePublico: 12,
+  salarioBasePublico: 9,
   pensionBase: 6,
   empleadosPorComerciante: 4,
   precioBaseAlimento: 1.0,
   consumoPorNpc: 1.0,
-  produccionBaseAgricultor: 4.1, // 30 farmers at ~0.9 prod = ~110 food/day >= 100 pop
+  produccionBaseAgricultor: 5.42, // 30 farmers at ~0.655 prod = ~106.5 food/day >= 105 (1.05x cons)
   perdidaAdminMax: 0.30,
-  costoBaseServicioPorPoblacion: 0.42, // scales with population (100 -> 42/week)
+  costoBaseServicioPorPoblacion: 0.19, // scales with population (100 -> 19/day, 133/week)
   comisionComercioFactor: 0.14,
+  coefSubsidioSimple: 11.9,
+  coefImpuestoSimple: 1.17,
+  fiscalUmbral: 40,
+  fiscalPendiente: 0.01,
   objetivoCobertura: {
     medico: 0.05,
     policia: 0.05,
@@ -108,7 +112,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 0,
     afinidad: 'laboriosidad',
     produce: { alimento: ECON_CONSTANTS.produccionBaseAgricultor },
-    ingreso: [14, 22],
+    ingreso: [18, 28],
     color: '#16a34a',
     distrito: 'campos',
   },
@@ -121,7 +125,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 0,
     afinidad: 'laboriosidad',
     produce: {},
-    ingreso: [16, 26],
+    ingreso: [20, 30],
     color: '#64748b',
     distrito: 'taller',
   },
@@ -160,7 +164,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 1,
     afinidad: 'codicia',
     produce: { comercio: 1 },
-    ingreso: [20, 34],
+    ingreso: [24, 38],
     color: '#d97706',
     distrito: 'mercado',
   },
@@ -173,7 +177,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 2,
     afinidad: 'laboriosidad',
     produce: {},
-    ingreso: [26, 38],
+    ingreso: [30, 44],
     color: '#334155',
     distrito: 'taller',
   },
@@ -199,7 +203,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 2,
     afinidad: 'rebeldia',
     produce: { informacion: 1 },
-    ingreso: [16, 26],
+    ingreso: [20, 30],
     color: '#be185d',
     distrito: 'mercado',
   },
@@ -492,8 +496,8 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     poblacionDefault: 100,
     mediosDefault: 2,
     inflacionInicial: 10,
-    reservaInicial: 650,
-    stockAlimentoInicial: 1700,
+    reservaInicial: 4200,
+    stockAlimentoInicial: 1500,
     topesPrivados: {
       agricultor: 30,
       obrero: 14,

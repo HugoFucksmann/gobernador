@@ -15,7 +15,21 @@ export interface AiDirectorResult {
   type: 'press' | 'action' | 'condition' | 'thought';
   apply: (state: GameState) => void;
   source: 'ia' | 'plantilla';
-  error?: string;
+}
+
+let aiDisabledForSession = false;
+
+function shouldDisableAi(status: number, errMessage?: string): boolean {
+  if (status === 402 || status === 403 || status === 429 || status === 503) return true;
+  if (!errMessage) return false;
+  const lower = errMessage.toLowerCase();
+  return (
+    lower.includes('quota') ||
+    lower.includes('credit') ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('billing') ||
+    lower.includes('api_key')
+  );
 }
 
 function buildTemplatePress(
@@ -78,8 +92,8 @@ export function buildTemplateThought(npc: Npc, state: GameState): string {
 export async function requestNpcThought(
   npc: Npc,
   state: GameState
-): Promise<{ texto: string; fuente: 'ia' | 'plantilla'; error?: string }> {
-  if (!state.config.usarIaGemini) {
+): Promise<{ texto: string; fuente: 'ia' | 'plantilla' }> {
+  if (!state.config.usarIaGemini || aiDisabledForSession) {
     return { texto: buildTemplateThought(npc, state), fuente: 'plantilla' };
   }
 
@@ -107,11 +121,11 @@ export async function requestNpcThought(
     });
 
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: 'Error de servidor' }));
+      const errData = await res.json().catch(() => ({ error: '' }));
+      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
       return {
         texto: buildTemplateThought(npc, state),
         fuente: 'plantilla',
-        error: errData.error || `HTTP ${res.status}`,
       };
     }
 
@@ -120,11 +134,10 @@ export async function requestNpcThought(
       return { texto: data.pensamiento, fuente: 'ia' };
     }
     return { texto: buildTemplateThought(npc, state), fuente: 'plantilla' };
-  } catch (err: unknown) {
+  } catch {
     return {
       texto: buildTemplateThought(npc, state),
       fuente: 'plantilla',
-      error: err instanceof Error ? err.message : 'Error de red',
     };
   }
 }
@@ -139,7 +152,7 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
   const topic = pickPressTopicAndTone(state);
   const derived = deriveCommunityStats(state);
 
-  if (!state.config.usarIaGemini) {
+  if (!state.config.usarIaGemini || aiDisabledForSession) {
     const article = buildTemplatePress(state, medio.id, periodista.id, topic);
     return {
       type: 'press',
@@ -184,12 +197,12 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
     });
 
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: 'Error al generar prensa' }));
+      const errData = await res.json().catch(() => ({ error: '' }));
+      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
       const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
       return {
         type: 'press',
         source: 'plantilla',
-        error: errData.error,
         apply: (s) => applyPressArticleEffects(s, fallback),
       };
     }
@@ -215,12 +228,11 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
       source: 'ia',
       apply: (s) => applyPressArticleEffects(s, article),
     };
-  } catch (err: unknown) {
+  } catch {
     const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
     return {
       type: 'press',
       source: 'plantilla',
-      error: err instanceof Error ? err.message : 'Error de red',
       apply: (s) => applyPressArticleEffects(s, fallback),
     };
   }
@@ -245,7 +257,7 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
     };
   };
 
-  if (!state.config.usarIaGemini) {
+  if (!state.config.usarIaGemini || aiDisabledForSession) {
     const { chosen, texto } = pickRandomFallback();
     return {
       type: 'action',
@@ -295,12 +307,12 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
     });
 
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: 'Error AI action' }));
+      const errData = await res.json().catch(() => ({ error: '' }));
+      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
       const { chosen, texto } = pickRandomFallback();
       return {
         type: 'action',
         source: 'plantilla',
-        error: errData.error,
         apply: (s) => {
           const target = s.npcs.find((n) => n.id === npc.id);
           if (!target || !target.vivo || target.accionIa) return;
@@ -334,12 +346,11 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
         });
       },
     };
-  } catch (err: unknown) {
+  } catch {
     const { chosen, texto } = pickRandomFallback();
     return {
       type: 'action',
       source: 'plantilla',
-      error: err instanceof Error ? err.message : 'Error de red',
       apply: (s) => {
         const target = s.npcs.find((n) => n.id === npc.id);
         if (!target || !target.vivo || target.accionIa) return;
@@ -361,7 +372,7 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
     .map((n) => `${n.nombre} (${n.rol})`)
     .join(', ');
 
-  if (!state.config.usarIaGemini) {
+  if (!state.config.usarIaGemini || aiDisabledForSession) {
     const chosen = pending.candidatas[0] || ACTION_TABLE.find((a) => a.tipo === 'condicion')!;
     return {
       type: 'condition',
@@ -394,11 +405,11 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
     });
 
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: 'Error AI condition' }));
+      const errData = await res.json().catch(() => ({ error: '' }));
+      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
       return {
         type: 'condition',
         source: 'plantilla',
-        error: errData.error,
         apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, undefined, 'respaldo'),
       };
     }
@@ -410,11 +421,10 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
       apply: (s) =>
         resolveConditionWindowWithFallback(s, pending.id, data.accionId, data.texto, 'ia'),
     };
-  } catch (err: unknown) {
+  } catch {
     return {
       type: 'condition',
       source: 'plantilla',
-      error: err instanceof Error ? err.message : 'Error de red',
       apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, undefined, 'respaldo'),
     };
   }

@@ -23,7 +23,7 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
       aria-modal="true"
       className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-[2px] flex items-center justify-center p-4"
     >
-      <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-5 shadow-xl">
+      <div className="bg-white text-slate-900 border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-5 shadow-xl">
         <div className="flex items-center gap-3">
           {isWin ? (
             <div className="p-2.5 rounded-lg bg-emerald-50 text-emerald-700">

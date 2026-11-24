@@ -32,7 +32,7 @@ import {
   ServiceAreaId,
   TaxableGroupId,
 } from '../types/game';
-import { getDistrictPosition } from './worldGenerator';
+import { getCityErrandPosition, getDistrictPosition } from './worldGenerator';
 
 export function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
@@ -158,7 +158,10 @@ export function getNpcProductivity(npc: Npc, state: GameState): number {
 
   const infraFactor = 0.85 + 0.3 * (state.gobierno.indicadores.infraestructura / 100);
   const taxRate = getTaxRateForNpc(npc, state);
-  const fiscalFactor = taxRate <= 40 ? 1 : Math.max(0.5, 1 - 0.01 * (taxRate - 40));
+  const fiscalFactor =
+    taxRate <= ECON_CONSTANTS.fiscalUmbral
+      ? 1
+      : Math.max(0.5, 1 - ECON_CONSTANTS.fiscalPendiente * (taxRate - ECON_CONSTANTS.fiscalUmbral));
 
   const modProd = getModifierDelta(npc, 'productividad') / 100;
   const impagoPenalty =
@@ -530,30 +533,70 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
 }
 
 function stepNpcPositions(state: GameState, dtTicks: number): void {
-  const speed = 4.2 * dtTicks;
+  const baseSpeed = 5.6 * dtTicks;
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
+    const isUrgent = Boolean(
+      npc.accionIa && ['protesta', 'huelga', 'saqueo'].includes(npc.accionIa.id)
+    );
+    const speed = isUrgent ? baseSpeed * 1.35 : npc.rol === 'policia' ? baseSpeed * 1.25 : baseSpeed;
     const dx = npc.mapa.destino.x - npc.mapa.x;
     const dy = npc.mapa.destino.y - npc.mapa.y;
     const dist = Math.hypot(dx, dy);
-    if (dist <= speed + 1) {
+
+    if (dist <= speed + 1.5) {
       npc.mapa.x = npc.mapa.destino.x;
       npc.mapa.y = npc.mapa.destino.y;
-      if (Math.random() < 0.14) {
+      if (Math.random() < 0.42) {
         if (npc.accionIa && ['protesta', 'huelga', 'predicar', 'saqueo'].includes(npc.accionIa.id)) {
           const zoneId = npc.accionIa.id === 'huelga' ? 'civico' : 'mercado';
           const zone = DISTRICTS.find((d) => d.id === zoneId)!;
           npc.mapa.destino = {
-            x: zone.x + 28 + Math.random() * (zone.w - 56),
-            y: zone.y + 44 + Math.random() * (zone.h - 68),
+            x: zone.x + 40 + Math.random() * (zone.w - 80),
+            y: zone.y + 60 + Math.random() * (zone.h - 90),
           };
+        } else if (npc.accionIa?.id === 'organizar_fiesta') {
+          const zone = DISTRICTS.find((d) => d.id === 'residencial')!;
+          npc.mapa.destino = {
+            x: zone.x + 50 + Math.random() * (zone.w - 100),
+            y: zone.y + 240 + Math.random() * (zone.h - 280),
+          };
+        } else if (npc.variables.hambre > 75 && Math.random() < 0.65) {
+          const market = DISTRICTS.find((d) => d.id === 'mercado')!;
+          npc.mapa.destino = {
+            x: market.x + 42 + Math.random() * (market.w - 84),
+            y: market.y + 66 + Math.random() * (market.h - 94),
+          };
+          if (!npc.accionIa) npc.mapa.accion = 'buscando alimento';
         } else {
-          npc.mapa.destino = getDistrictPosition(npc.rol);
+          const nextSpot = getCityErrandPosition(npc.rol);
+          npc.mapa.destino = { x: nextSpot.x, y: nextSpot.y };
+          if (!npc.accionIa) {
+            npc.mapa.accion = nextSpot.accion;
+          }
         }
       }
     } else {
-      npc.mapa.x += (dx / dist) * speed;
-      npc.mapa.y += (dy / dist) * speed;
+      // Street-aligned movement bias when crossing districts so citizens use avenues
+      let moveX = dx / dist;
+      let moveY = dy / dist;
+      if (dist > 140) {
+        const nearAvenueX = Math.abs(npc.mapa.x - 355) < 16 || Math.abs(npc.mapa.x - 665) < 16;
+        const nearAvenueY = Math.abs(npc.mapa.y - 295) < 16;
+        if (!nearAvenueX && !nearAvenueY) {
+          // Slight pull toward nearest axis
+          if (Math.abs(dx) > Math.abs(dy)) {
+            moveY *= 1.18;
+          } else {
+            moveX *= 1.18;
+          }
+          const norm = Math.hypot(moveX, moveY) || 1;
+          moveX /= norm;
+          moveY /= norm;
+        }
+      }
+      npc.mapa.x += moveX * speed;
+      npc.mapa.y += moveY * speed;
     }
   }
 }
@@ -869,9 +912,9 @@ function runDailyEconomyAndNeeds(state: GameState): void {
 
     if (mod === 'simple') {
       const subPct = pal.gasto.subsidios[def.grupo] || 0;
-      const subBonus = Math.sqrt(subPct) * 3.5;
+      const subBonus = Math.sqrt(subPct) * ECON_CONSTANTS.coefSubsidioSimple;
       const codiciaFactor = 0.6 + 0.8 * (getEffectiveTrait(npc, 'codicia') / 100);
-      const taxPenalty = taxRate * 0.45 * codiciaFactor;
+      const taxPenalty = taxRate * ECON_CONSTANTS.coefImpuestoSimple * codiciaFactor;
       const empPenalty = npc.rol === 'desempleado' ? 18 : 0;
       poderAdquisitivo[npc.id] = clamp(56 + subBonus - taxPenalty - empPenalty, 0, 100);
     } else {
@@ -1456,7 +1499,37 @@ function advanceDay(state: GameState): void {
 export const TICKS_PER_DAY = 10;
 
 export function stepSimulation(state: GameState, ticksToRun: number): GameState {
-  if (state.resultado.estado !== 'jugando') return state;
+  if (state.resultado.estado !== 'jugando' || ticksToRun <= 0) return state;
+
+  const startTick = state.reloj.tick;
+  const crossesDay =
+    Math.floor((startTick + ticksToRun) / TICKS_PER_DAY) > Math.floor(startTick / TICKS_PER_DAY);
+
+  // Fast path: pure movement ticks do not need to deep-clone history, logs, news, or modifiers
+  if (!crossesDay) {
+    const nextNpcs = state.npcs.map((npc) =>
+      npc.vivo
+        ? {
+            ...npc,
+            mapa: {
+              ...npc.mapa,
+              destino: { ...npc.mapa.destino },
+            },
+          }
+        : npc
+    );
+    const next: GameState = {
+      ...state,
+      reloj: {
+        ...state.reloj,
+        tick: startTick + ticksToRun,
+      },
+      npcs: nextNpcs,
+    };
+    stepNpcPositions(next, ticksToRun);
+    return next;
+  }
+
   const next = structuredClone(state);
   for (let i = 0; i < ticksToRun; i++) {
     if (next.resultado.estado !== 'jugando') break;
