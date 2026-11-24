@@ -1,0 +1,6 @@
+{
+  "name": "El Gobernador",
+  "description": "Simulación política y económica de comunidad con NPCs autónomos, prensa y Director de IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
