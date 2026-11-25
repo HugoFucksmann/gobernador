@@ -185,7 +185,7 @@ El texto aceptado se guarda (`texto_origen: generativo`) y no se pide de nuevo.
 
 `ofertas_por_dia`, `k_extremo`, `k_descontento`, `k_reciente`, `candidatas_max`, `k_afinidad`, `relevancia_min`, la relevancia de cada tema, `noticias_por_columnista`, `ventana_repeticion_dias`, los pesos de tono, la base de efecto de cada tono, `duracion_efecto_noticia`, `max_efecto_noticias_dia`, `plazo_clasificador_ms`, `plazo_generativo_ms`, `max_pct_accion`.
 
-## 9. Preguntas abiertas
+## 9. Decisiones y pendientes
 
-1. ¿La prensa debería poder **adelantarse** a un hecho que todavía no pasó (por ejemplo, "se viene una crisis" cuando la reserva cae rápido)? La base dice que no: solo cuenta hechos ya ocurridos, salvo el aviso del clima.
-2. ¿Las noticias deberían mover también la **satisfacción**, o solo la lealtad y el miedo? La base las deja en lealtad y miedo para que la prensa toque el apoyo y el pánico sin duplicar el efecto del hambre o el precio.
+- **[decidido] La prensa no se adelanta a los hechos:** solo cuenta lo que ya pasó, salvo el aviso del clima. Es lo que sostiene el principio de que nunca inventa un hecho (sección 1) y evita noticias sin causa en la cadena (ESTADOS §8).
+- **[pendiente de prueba] ¿Las noticias mueven también la satisfacción?** La base solo mueve lealtad y miedo. El agente de prototipo prueba las dos variantes (con un interruptor `noticias_mueven_satisfaccion`) y se decide con los resultados: si sin él la prensa no se siente, se activa; si con él duplica el efecto del hambre o el precio, se deja apagado.

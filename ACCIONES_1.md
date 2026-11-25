@@ -1,6 +1,6 @@
-# Tabla inicial de acciones (BORRADOR v0.2)
+# Tabla inicial de acciones (v1.0)
 
-> Base de arranque del director de caos. Los efectos están en ESTADOS §7.1, el formato de cada acción en ESTADOS §7 y la selección en ESTADOS §9. Todo valor numérico (intensidades, topes, pesos) vive en CALIBRACION.md; acá solo la forma. Cada acción trae un texto base: las variantes y los textos de las noticias son del doc del director y la prensa (IDEA §13). **[propuesta]** es base para pulir con las corridas.
+> Base de arranque del director de caos. Formato, efectos, contagio y selección: CAOS_PRENSA.md. Valores (intensidades, umbrales, topes): CALIBRACION.md. Toda la tabla es **[propuesta]** y se afina con las corridas. Las variantes de texto y la animación de cada acción las agrega el agente de prototipo.
 
 ---
 
@@ -9,14 +9,14 @@
 - **Quién puede:** requisitos del NPC. "Adulto" = etapa adulto (18-64). Salvo que se diga, vale para cualquier rol.
 - **Contexto:** condición del mundo para que sea candidata. "Siempre" = sin condición.
 - **Afinidad:** rasgos que la hacen más probable (`+`) o menos probable (`−`).
-- **Efectos:** del catálogo (ESTADOS §7.1), con intensidad `baja`, `media` o `alta` cuando aplica.
+- **Efectos:** del catálogo (CAOS_PRENSA §5), con intensidad `baja`, `media` o `alta` cuando aplica.
 - **Días:** duración en días de juego, siempre finita.
-- **Contagio:** de 0 a 1 (ESTADOS §7.2). Solo las espontáneas se frenan con orden y satisfacción.
+- **Contagio:** de 0 a 1 (CAOS_PRENSA §4). Solo las espontáneas se frenan con orden y satisfacción.
 - **Zona:** `zona_destino` si la acción mueve a los participantes.
 
 ## 2. Acciones espontáneas (19)
 
-Las elige el director de caos y cuentan contra los límites del caos (ESTADOS §9).
+Las elige el director y cuentan contra los límites del caos.
 
 ### Rarezas y trabajo
 
@@ -59,7 +59,7 @@ Las elige el director de caos y cuentan contra los límites del caos (ESTADOS §
 
 ## 3. Acciones de condición (3)
 
-Las abre el motor cuando se cumple el disparador, y el director elige cómo se expresan entre las válidas (ESTADOS §7). No cuentan contra los límites del caos, no se frenan con orden y duran un tiempo finito.
+Las abre el motor cuando se cumple el disparador (CAOS_PRENSA §3).
 
 | Id | Texto base | Disparador | Quién puede | Afinidad | Efectos | Días | Contagio | Zona |
 |---|---|---|---|---|---|---|---|---|
@@ -67,11 +67,9 @@ Las abre el motor cuando se cumple el disparador, y el director elige cómo se e
 | `protesta` | {nombre} marcha al centro a reclamar | `descontentos_pct` sobre su umbral | Adulto | rebeldía+, resiliencia− | `moviliza`, `agita` media, `fuera_de_puesto` | 2-6 | 0,25 | `centro` |
 | `saqueo` | {nombre} se lleva comida sin pagar | `hambre_critica_pct` sobre su umbral | Adulto con hambre | codicia+, valentía+, rebeldía+ | `toma` media, `moviliza`, `agita` baja, `fuera_de_puesto` | 2-5 | 0,20 | `centro` |
 
-Fuera de la v1: `disturbios` (daño a la zona por una protesta sin orden) y `patrullar_vecinal` (ronda vecinal que suma a la policía). Vuelven si las corridas muestran que descuidar la seguridad no tiene consecuencias.
+Fuera del nivel 1: `disturbios` y `patrullar_vecinal`. Vuelven si las corridas muestran que descuidar la seguridad no tiene consecuencias.
 
 ## 4. Cómo se cubre cada situación
-
-Para comprobar que la base alcanza, estas son las situaciones del juego y qué acciones las expresan.
 
 | Situación | Qué pasa | Acciones |
 |---|---|---|
@@ -85,17 +83,7 @@ Para comprobar que la base alcanza, estas son las situaciones del juego y qué a
 | Falta de orden | Ruido y agitación que se contagia | `predicar`, `organizar_asamblea` |
 | Caos creativo sin causa | Rarezas que cuentan una historia | `cavar_pozo`, `ver_nubes`, `coleccionar_piedras`, `hablar_con_gallinas` |
 
-## 5. Parámetros nuevos para CALIBRACION
+## 5. Pendiente
 
-- **Intensidades** (`baja`, `media`, `alta`) de `anima`, `agita`, `acapara`, `gasta`, `ahorra`, `comparte`, `difunde`, `repara`, `cuida` y `toma`.
-- `max_pct_despensa_cedida` (por día).
-- Tope diario de `toma` por intensidad.
-- Umbral de "despensa baja" y de "salud baja" para los contextos de `compartir_comida` y `cuidar_vecinos`.
-- Multiplicador de la propensión al gasto de `gasta` y de `ahorra`.
-
-## 6. Qué falta
-
-- Variantes de texto por acción y los textos de noticias (doc del director y la prensa).
-- Animación de cada acción en la vista (UI §9). Al ser un conjunto cerrado, cada una tiene la suya.
-- Acciones propias de cada escenario más allá de las de zombies que están acá.
-- Qué efectos nuevos pide la economía cuando llegue la extensión `fiscal` (por ejemplo, reacciones a la inflación).
+- Acciones propias de cada escenario, más allá de las de zombies.
+- Reacciones a la inflación cuando llegue la extensión `fiscal`.
