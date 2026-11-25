@@ -2,8 +2,13 @@ import React, { useState } from 'react';
 import { X, AlertCircle, Save, FolderOpen } from 'lucide-react';
 import { DEFAULT_CHAOS_LIMITS, SCENARIO_PRESETS } from '../data/catalogs';
 import { SaveSlotMeta } from '../engine/gameController';
-import { isTestConfig } from '../engine/worldGenerator';
-import { EconomyModule, WorldConfig } from '../types/game';
+import { isTestConfig, resolveComplexityConfig } from '../engine/worldGenerator';
+import {
+  EconomyModule,
+  GovernorComplexityLevel,
+  WorldComplexityLevel,
+  WorldConfig,
+} from '../types/game';
 
 interface WorldConfigModalProps {
   initialConfig: WorldConfig;
@@ -33,17 +38,24 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
   const [config, setConfig] = useState<WorldConfig>(() => {
     const cloned = structuredClone(initialConfig);
     cloned.poblacionInicial = SCENARIO_PRESETS[cloned.escenarioId].poblacionDefault;
-    return cloned;
+    const resolved = resolveComplexityConfig(cloned);
+    return { ...cloned, ...resolved };
   });
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const testMode = isTestConfig(config);
+  const worldLevel: WorldComplexityLevel = config.nivelMundo ?? 'M1';
+  const govLevel: GovernorComplexityLevel = config.nivelGobernador ?? 'G2';
 
   const handleSelectScenario = (id: 'elecciones' | 'zombies') => {
     const nextPreset = SCENARIO_PRESETS[id];
+    const nextWorld: WorldComplexityLevel = nextPreset.economiaDefault === 'fiscal' ? 'M2' : 'M1';
+    const nextGov: GovernorComplexityLevel = nextWorld === 'M2' ? 'G3' : 'G2';
     setConfig({
       escenarioId: id,
       economiaModulo: nextPreset.economiaDefault,
+      nivelMundo: nextWorld,
+      nivelGobernador: nextGov,
       cantidadMedios: nextPreset.mediosDefault,
       poblacionInicial: nextPreset.poblacionDefault,
       caos: { ...nextPreset.caosDefault },
@@ -169,19 +181,104 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                Nivel de mundo (complejidad del entorno)
+              </label>
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-lg">
+                {(
+                  [
+                    { id: 'M0', label: 'M0 · Base mínima' },
+                    { id: 'M1', label: 'M1 · Mundo base' },
+                    { id: 'M2', label: 'M2 · Fiscal' },
+                  ] as Array<{ id: WorldComplexityLevel; label: string }>
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() =>
+                      setConfig({
+                        ...config,
+                        nivelMundo: m.id,
+                        economiaModulo: m.id === 'M2' ? 'fiscal' : 'base',
+                      })
+                    }
+                    className={`py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      worldLevel === m.id
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {worldLevel === 'M0' &&
+                  '1 zona (centro), sin clima ni caos espontáneo ni contagio de acciones; útil para aislar economía.'}
+                {worldLevel === 'M1' &&
+                  '5 zonas, clima completo, prensa, caos acotado y contagio diario con economía cerrada.'}
+                {worldLevel === 'M2' &&
+                  'Todo M1 más extensión fiscal: emisión monetaria con tope e inflación dinámica.'}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                Nivel de gobernador (controles disponibles)
+              </label>
+              <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-lg">
+                {(
+                  [
+                    { id: 'G0', label: 'G0 · Auto' },
+                    { id: 'G1', label: 'G1 · Reducido' },
+                    { id: 'G2', label: 'G2 · Base' },
+                    { id: 'G3', label: 'G3 · Fiscal' },
+                  ] as Array<{ id: GovernorComplexityLevel; label: string }>
+                ).map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setConfig({ ...config, nivelGobernador: g.id })}
+                    className={`py-1.5 text-[11px] font-medium rounded-md transition-colors ${
+                      govLevel === g.id
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {govLevel === 'G0' && 'Sin intervención humana: controles en solo lectura.'}
+                {govLevel === 'G1' &&
+                  'Solo impuesto, seguridad, salud, ayuda social y garantía alimentaria.'}
+                {govLevel === 'G2' && 'Las 10 palancas base (sin tope de emisión monetaria).'}
+                {govLevel === 'G3' &&
+                  'Todas las palancas base más tope de emisión monetaria (si M2/fiscal está activo).'}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">
                 Módulo de economía (preset: {preset.economiaDefault === 'fiscal' ? 'Fiscal' : 'Base'})
               </label>
               <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-lg">
                 {(
                   [
-                    { id: 'base', label: 'Base (nivel 1)' },
-                    { id: 'fiscal', label: 'Extensión fiscal (nivel 1.1)' },
+                    { id: 'base', label: 'Base (M0/M1)' },
+                    { id: 'fiscal', label: 'Extensión fiscal (M2)' },
                   ] as Array<{ id: EconomyModule; label: string }>
                 ).map((m) => (
                   <button
                     key={m.id}
                     type="button"
-                    onClick={() => setConfig({ ...config, economiaModulo: m.id })}
+                    onClick={() =>
+                      setConfig({
+                        ...config,
+                        economiaModulo: m.id,
+                        nivelMundo: m.id === 'fiscal' ? 'M2' : worldLevel === 'M0' ? 'M0' : 'M1',
+                      })
+                    }
                     className={`py-1.5 text-xs font-medium rounded-md transition-colors ${
                       config.economiaModulo === m.id
                         ? 'bg-white text-slate-900 shadow-xs'
@@ -209,6 +306,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Medios de prensa"
                 min={1}
                 max={3}
                 value={config.cantidadMedios}
@@ -236,7 +334,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                   max={999999999}
                   value={config.semilla}
                   onChange={(e) => {
-                    const val = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                    const val = Math.min(999999999, Math.max(1, Math.floor(Number(e.target.value) || 1)));
                     setConfig({ ...config, semilla: val });
                   }}
                   className="w-28 px-2 py-1 text-right font-mono font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-md"
@@ -285,6 +383,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Acciones máximas por período"
                 min={0}
                 max={10}
                 value={config.caos.maxAccionesPorPeriodo}
@@ -305,6 +404,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Duración del período de caos"
                 min={2}
                 max={15}
                 value={config.caos.periodoDias}
@@ -325,6 +425,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Tope de rol fuera de puesto"
                 min={5}
                 max={50}
                 step={5}
@@ -346,6 +447,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Duración máxima de acciones"
                 min={3}
                 max={20}
                 value={config.caos.duracionMaxDias}
@@ -368,6 +470,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Respiro si satisfacción media menor a"
                 min={10}
                 max={60}
                 step={5}

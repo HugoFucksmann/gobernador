@@ -1,25 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CloudRain, Compass, GitBranch, Search } from 'lucide-react';
-import { ROLE_CATALOG, SCENARIO_PRESETS } from '../../data/catalogs';
-import { getActivePhenomena, getAnnouncedPhenomena, getEffectiveZone } from '../../engine/simulation';
+import { ROLE_CATALOG, SCENARIO_PRESETS, ZONE_TO_DISTRICT } from '../../data/catalogs';
+import {
+  getActivePhenomena,
+  getAnnouncedPhenomena,
+  getEffectiveZone,
+  getWorldZones,
+} from '../../engine/simulation';
 import {
   CommunityDerived,
   DistrictId,
   EventLogEntry,
   GameState,
   RoleId,
-  ZoneId,
 } from '../../types/game';
 import { CityTab } from '../../types/ui';
 import { RctWindow } from './RctWindow';
-
-const ZONE_TO_DISTRICT: Record<ZoneId, DistrictId | 'all'> = {
-  centro: 'civico',
-  norte: 'campos',
-  este: 'residencial',
-  sur: 'taller',
-  oeste: 'campos',
-};
 
 interface CityWindowProps {
   state: GameState;
@@ -57,7 +53,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   }, [ciudadTabRequest]);
 
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
-  const zoneIds = Object.keys(preset.zonas) as ZoneId[];
+  const zoneIds = getWorldZones(state);
   const zonesCount = zoneIds.length;
   const activeFenomenos = getActivePhenomena(state);
   const announcedFenomenos = getAnnouncedPhenomena(state);
@@ -135,18 +131,20 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       causalRef: ev?.id || `clima:${fen.tipo}`,
     });
   }
-  for (const ev of state.eventos.filter((e) => e.tipo === 'golpe' && state.reloj.dia - e.dia <= 3).slice(0, 3)) {
-    if (ev.tipo === 'golpe') {
-      const npc = state.npcs.find((n) => n.id === ev.npcId);
-      activeAlerts.push({
-        id: `al_hit_${ev.id}`,
-        severity: 'critica',
-        title: `Ataque en zona ${ev.zona} (${npc?.nombre || 'vecino'})`,
-        detail: `Daño -${ev.dano} salud (Día ${ev.dia}).`,
-        district: ZONE_TO_DISTRICT[ev.zona],
-        causalRef: ev.id,
-      });
-    }
+  let hitAlerts = 0;
+  for (const ev of state.eventos) {
+    if (ev.tipo !== 'golpe' || state.reloj.dia - ev.dia > 3) continue;
+    const npc = state.npcs.find((n) => n.id === ev.npcId);
+    activeAlerts.push({
+      id: `al_hit_${ev.id}`,
+      severity: 'critica',
+      title: `Ataque en zona ${ev.zona} (${npc?.nombre || 'vecino'})`,
+      detail: `Daño -${ev.dano} salud (Día ${ev.dia}).`,
+      district: ZONE_TO_DISTRICT[ev.zona],
+      causalRef: ev.id,
+    });
+    hitAlerts += 1;
+    if (hitAlerts >= 3) break;
   }
 
   const objetivoPerdido = state.eventos.find((e) => e.tipo === 'objetivo_perdido');
@@ -324,41 +322,44 @@ export const CityWindow: React.FC<CityWindowProps> = ({
               </div>
 
               <div className="max-h-[190px] overflow-y-auto divide-y divide-slate-800/80 bg-slate-800/35 border border-slate-800 rounded-md">
-                {state.npcs
-                  .filter((n) => n.vivo)
-                  .filter((n) => {
-                    if (!npcQuery.trim()) return true;
-                    const q = npcQuery.toLowerCase();
-                    const roleLabel = ROLE_CATALOG[n.rol].nombre.toLowerCase();
+                {(() => {
+                  const q = npcQuery.trim().toLowerCase();
+                  const matches: Array<{ npc: (typeof state.npcs)[number]; z: ReturnType<typeof getEffectiveZone> }> = [];
+                  for (const n of state.npcs) {
+                    if (!n.vivo) continue;
                     const z = getEffectiveZone(n, zonesCount);
-                    return (
-                      n.nombre.toLowerCase().includes(q) ||
-                      roleLabel.includes(q) ||
-                      z.includes(q)
-                    );
-                  })
-                  .slice(0, 45)
-                  .map((n) => {
-                    const z = getEffectiveZone(n, zonesCount);
-                    return (
-                      <button
-                        key={n.id}
-                        type="button"
-                        onClick={() => onSelectNpc(n.id)}
-                        className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-slate-800 text-[11px]"
-                      >
-                        <span className="truncate text-slate-100">
-                          <strong>{n.nombre}</strong>{' '}
-                          <span className="text-slate-400">
-                            ({ROLE_CATALOG[n.rol].nombre} · {z})
-                          </span>
+                    if (q) {
+                      const roleLabel = ROLE_CATALOG[n.rol].nombre.toLowerCase();
+                      if (
+                        !n.nombre.toLowerCase().includes(q) &&
+                        !roleLabel.includes(q) &&
+                        !z.includes(q)
+                      ) {
+                        continue;
+                      }
+                    }
+                    matches.push({ npc: n, z });
+                    if (matches.length >= 45) break;
+                  }
+                  return matches.map(({ npc: n, z }) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => onSelectNpc(n.id)}
+                      className="w-full px-2.5 py-1.5 flex items-center justify-between text-left hover:bg-slate-800 text-[11px]"
+                    >
+                      <span className="truncate text-slate-100">
+                        <strong>{n.nombre}</strong>{' '}
+                        <span className="text-slate-400">
+                          ({ROLE_CATALOG[n.rol].nombre} · {z})
                         </span>
-                        <span className="font-mono text-[10px] text-slate-400 tabular-nums shrink-0 ml-2">
-                          S:{Math.round(n.variables.salud)} H:{Math.round(n.variables.hambre)}
-                        </span>
-                      </button>
-                    );
-                  })}
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400 tabular-nums shrink-0 ml-2">
+                        S:{Math.round(n.variables.salud)} H:{Math.round(n.variables.hambre)}
+                      </span>
+                    </button>
+                  ));
+                })()}
               </div>
 
               <div className="pt-2 border-t border-slate-800 space-y-1.5">

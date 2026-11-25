@@ -15,10 +15,10 @@
 
 | Actor | Guarda | Le entra | Le sale |
 |---|---|---|---|
-| NPC | `dinero` | Sueldo, salario público, pensión, ayuda social, ganancia, garantía | Impuesto, comida, gasto de vida |
+| NPC | `dinero` | Sueldo, salario público, pensión, ayuda social, ganancia, garantía | Impuesto, comida, gasto de vida; los dueños, sus locales y campos |
 | Empresa de alimento | Ventas del período | Su parte de la venta de comida, exportación | Sueldos (agricultores, técnicos), ganancia (empresario) |
-| Empresa de comercio | Ventas del período | Margen de la comida, gasto de vida, operación de servicios | Sueldos (obreros), ganancia (comerciantes) |
-| Estado | `reserva` | Impuesto | Nómina, pensiones, ayuda, garantía, comida de menores, operación, prensa, importación |
+| Empresa de comercio | Ventas del período | Margen de la comida, gasto de vida, obras y mantenimiento (públicos y privados) | Sueldos (obreros), ganancia (comerciantes) |
+| Estado | `reserva` | Impuesto | Nómina, pensiones, ayuda, garantía, comida de menores, obras, mantenimiento, operación de obras, prensa, importación |
 | Medios | Nada | Ingresos propios (exterior), fondos de prensa | Sueldos de periodistas; el resto sale |
 
 **Calendario.** Cada día: producción → comercio exterior → precio → compras de comida (con garantía y comida de menores) → gasto de vida → consumo. Cada día de pago: empresas → estado → medios → evaluación del impago. El impuesto se retiene en cada pago a un NPC.
@@ -45,6 +45,8 @@
 2. **Gasto de vida** = `propension_gasto`/100 × ingreso neto diario del último período + `k_riqueza` × (`dinero` − colchón), con el segundo término solo si es positivo. Colchón = `colchon_dias` × gasto diario en comida. Va a la empresa de comercio.
 3. **Ahorro:** lo que sobra queda en `dinero`.
 
+**Inversión de los dueños:** cuando su empresa construye un local o un campo (MUNDO §13), los dueños pagan el costo con su `dinero`, en partes iguales. Si no les alcanza, no se construye. El pago va a comercio.
+
 **Poder adquisitivo** (0-100): sale del `dinero` y del ingreso neto frente al precio de la comida, y entra en la satisfacción.
 
 ## 4. Empresas
@@ -59,7 +61,7 @@ Dos, siempre presentes. **Alimento:** dueño el empresario (puesto que puede que
 **Sueldos: reparto de las ventas.** Cada empresa destina `parte_sueldos` de lo que vende a sueldos; el resto es de los dueños. El generador fija `parte_sueldos` para que el factor inicial sea 1. Cada día de pago:
 
 1. Fondo de sueldos = `parte_sueldos` × ventas del período.
-2. **Contrata** de a uno si hay vacantes y el fondo alcanza para pagar la referencia de todos más la del nuevo, hasta `max_contrataciones_por_periodo`. El nuevo cobra desde el período siguiente.
+2. **Contrata** de a uno si hay vacantes (los puestos los dan sus locales o campos, MUNDO §13) y el fondo alcanza para pagar la referencia de todos más la del nuevo, hasta `max_contrataciones_por_periodo`. El nuevo cobra desde el período siguiente.
 3. `factor` = fondo ÷ sueldos de referencia, con tope `factor_max`. Sueldo de referencia = (min + `ingreso_pos`/100 × (max − min)) × productividad/100, con el rango del rol.
 4. Cada empleado cobra referencia × `factor`. La ganancia (ventas − sueldos) va a los dueños; sin dueños, sale del mundo.
 5. Las ventas vuelven a 0: la empresa no guarda caja.
@@ -78,14 +80,15 @@ Cada evento lleva origen `empresa:<id>/respuesta` y como causa el evento que má
 
 - **Entra:** el impuesto.
 - **Sale cada día** (de la `reserva`): garantía, comida de los menores e importaciones.
-- **Sale el día de pago,** en este orden: pensiones → nómina → ayuda social → operación de servicios (se le compra a comercio) → prensa (a los medios).
+- **Sale al ordenar una obra:** su costo, de una vez. Si la reserva no alcanza, no se puede ordenar.
+- **Sale el día de pago,** en este orden: pensiones → nómina → ayuda social → mantenimiento de edificios y operación de obras (se le compran a comercio) → prensa (a los medios).
 - **Si no alcanza:** se paga en ese orden y lo que queda se prorratea. Una importación se reduce a lo que cubre la reserva; la garantía se prorratea; la comida de los menores se paga siempre, antes que nada.
 - **Impago:** cualquier faltante emite `impago {faltante, alcanza_nomina}` y dura hasta el primer día de pago sin faltante (`impago_fin`). Si alcanza la nómina, los públicos pierden satisfacción y productividad y se dispara la huelga (CAOS_PRENSA §3).
 - **Saldo del período** = ingresos − gastos, sin las importaciones (se ven aparte).
 
 ```json
 { "reserva": 4200, "inflacion": 0, "impago": false,
-  "finanzas": { "ingresos": 0, "nomina": 0, "pensiones": 0, "garantia": 0, "comida_menores": 0, "ayuda_social": 0, "operacion": 0, "prensa": 0, "saldo": 0, "importacion": 0 } }
+  "finanzas": { "ingresos": 0, "nomina": 0, "pensiones": 0, "garantia": 0, "comida_menores": 0, "ayuda_social": 0, "obras": 0, "mantenimiento": 0, "operacion_obras": 0, "prensa": 0, "saldo": 0, "importacion": 0 } }
 ```
 
 ## 6. Comida
@@ -93,6 +96,7 @@ Cada evento lleva origen `empresa:<id>/respuesta` y como causa el evento que má
 - **Stock:** la producción va al `stock` de la empresa de alimento, con tope `silo_dias` días de consumo; lo que excede se pierde.
 - **Despensa:** cada NPC consume un día por día. Su **objetivo** = `objetivo_base_dias` × (1 + `k_prudencia` × (1 − valentía/100) + `k_miedo` × miedo/100), con tope `despensa_max_dias`; la acción `acapara` le suma días. Con la despensa bajo `umbral_recompra_dias`, recompra hasta el objetivo. Si el stock no alcanza para todos, se reparte parejo. De acá salen las corridas: miedo → compra de más → stock bajo → precio sube.
 - **Venta:** pasa por comercio con `margen_comercial_pct`; el resto va a alimento. No depende de cuántos comerciantes haya.
+- **Retención:** durante una medida de actor (ACTORES.md), alimento vende solo `pct_retencion` del stock por día; el precio sube por escasez aunque haya comida guardada.
 - **Precio** = min(precio de mercado, tope), con precio de mercado = `precio_base` × escasez (según días de stock) × clima × (1 + inflación/100). El tope es un control.
 - **Quién paga la comida de quien no puede:** la de los menores, siempre el estado; la de los demás, la garantía en su %.
 
@@ -134,7 +138,8 @@ interface SalidaEconomica {
 ## 11. Cadenas que salen solas
 
 - **Recorte que se contagia:** más impuesto → menos gasto de vida → comercio recorta → los obreros gastan menos.
-- **El estado como cliente:** bajar un servicio ahorra, pero comercio vende menos y los públicos sin puesto quedan desempleados.
+- **El estado como cliente:** construir y mantener edificios le da ventas a comercio; demoler o no pagar el mantenimiento ahorra, pero comercio vende menos y los públicos sin puesto quedan desempleados.
+- **Inversión privada:** comercio vende bien → los socios construyen un local → más puestos → menos desempleo → más consumo.
 - **Comida barata:** tope bajo → despensas llenas → stock vacío → alimento recorta → menos producción.
 - **Sequía:** menos producción → precio sube → garantía más cara → reserva baja → impago y huelga.
 - **Pánico:** noticia alarmista → miedo → corrida → precio sube → hambre → protesta.
@@ -143,7 +148,7 @@ interface SalidaEconomica {
 
 ## 12. Arranque y validación
 
-El generador ajusta `precio_base`, los rangos de sueldo, `pension_base`, `parte_sueldos` y la operación de cada nivel para que el primer período cierre: las dos empresas con factor 1 y ganancia positiva, el estado con un saldo chico positivo, cada empleado con ingreso neto por encima de su comida, producción ≈ consumo y cada NPC con su colchón.
+El generador ajusta `precio_base`, los rangos de sueldo, `pension_base`, `parte_sueldos`, el mantenimiento de los edificios y la operación de obras para que el primer período cierre: las dos empresas con factor 1 y ganancia positiva, el estado con un saldo chico positivo, cada empleado con ingreso neto por encima de su comida, producción ≈ consumo y cada NPC con su colchón.
 
 El agente de prototipo valida:
 

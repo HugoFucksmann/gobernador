@@ -1,31 +1,41 @@
 import {
   ActionDefinition,
+  BuildingDefinition,
+  BuildingType,
   ChaosLimits,
+  DistrictId,
   DistrictZone,
   ForeignTradeStep,
-  PriceCapMode,
-  PrivateRoleId,
-  PublicRoleId,
-  RoleDefinition,
-  RoleGroupId,
-  RoleId,
-  ScenarioPreset,
-  ServiceAreaId,
-  ServiceLevel,
-  ServiceLeverId,
-  ServicePublicRoleId,
-  ZoneId,
+  HitoDef,
   NewsTone,
   NewsTopic,
   PressValence,
+  PriceCapMode,
+  PublicRoleId,
+  RoleDefinition,
+  RoleId,
+  ScenarioParcelDef,
+  ScenarioPreset,
+  ServiceAreaId,
+  ServiceLevel,
+  ServicePublicRoleId,
+  ZoneId,
 } from '../types/game';
 
-export const SAVE_FORMAT_VERSION = 3;
+export const SAVE_FORMAT_VERSION = 4;
 export const PERIOD_DAYS = 7;
 
 export const ZONE_IDS: ZoneId[] = ['centro', 'norte', 'este', 'sur', 'oeste'];
 
-export const DEFAULT_ZONAS: Record<ZoneId, { vecinas: ZoneId[] }> = {
+export const ZONE_TO_DISTRICT: Record<ZoneId, DistrictId | 'all'> = {
+  centro: 'civico',
+  norte: 'campos',
+  este: 'residencial',
+  sur: 'taller',
+  oeste: 'campos',
+};
+
+const DEFAULT_ZONAS: Record<ZoneId, { vecinas: ZoneId[] }> = {
   centro: { vecinas: ['norte', 'este', 'sur', 'oeste'] },
   norte: { vecinas: ['este', 'oeste', 'centro'] },
   este: { vecinas: ['norte', 'sur', 'centro'] },
@@ -33,7 +43,7 @@ export const DEFAULT_ZONAS: Record<ZoneId, { vecinas: ZoneId[] }> = {
   oeste: { vecinas: ['sur', 'norte', 'centro'] },
 };
 
-export const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
+const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
   agricultor: ['norte', 'este', 'sur', 'oeste'],
   tecnico: ['norte', 'este', 'sur', 'oeste'],
   obrero: ['sur', 'oeste', 'norte', 'este'],
@@ -50,47 +60,185 @@ export const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
   jubilado: ['centro', 'norte', 'este', 'sur', 'oeste'],
 };
 
-export const SERVICE_LEVEL_TABLE: Record<
-  ServiceLeverId,
-  Record<ServiceLevel, { puestosPct: number; operacionPeriodo: number; label: string }>
+export const OBRAS_LEVEL_TABLE: Record<
+  ServiceLevel,
+  { puestosPct: number; operacionPeriodo: number; diasObraFactor: number; label: string }
 > = {
-  seguridad: {
-    0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
-    1: { puestosPct: 3, operacionPeriodo: 8, label: 'Mínimo' },
-    2: { puestosPct: 5, operacionPeriodo: 18, label: 'Básico' },
-    3: { puestosPct: 8, operacionPeriodo: 32, label: 'Reforzado' },
-    4: { puestosPct: 12, operacionPeriodo: 46, label: 'Alto' },
-    5: { puestosPct: 16, operacionPeriodo: 76, label: 'Máximo' },
+  0: { puestosPct: 0, operacionPeriodo: 0, diasObraFactor: 1.35, label: 'Desactivado' },
+  1: { puestosPct: 1, operacionPeriodo: 8, diasObraFactor: 1.15, label: 'Mínimo' },
+  2: { puestosPct: 3, operacionPeriodo: 18, diasObraFactor: 1.0, label: 'Básico' },
+  3: { puestosPct: 4, operacionPeriodo: 30, diasObraFactor: 0.85, label: 'Activo' },
+  4: { puestosPct: 6, operacionPeriodo: 48, diasObraFactor: 0.72, label: 'Intensivo' },
+  5: { puestosPct: 8, operacionPeriodo: 78, diasObraFactor: 0.6, label: 'Máximo' },
+};
+
+export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
+  hospital: {
+    tipo: 'hospital',
+    nombre: 'Hospital',
+    categoria: 'publico',
+    duenoBase: 'estado',
+    construibleGobernador: true,
+    costoObra: 380,
+    diasObra: 4,
+    mantenimientoPeriodo: 30,
+    areaServicio: 'salud',
+    rolOperario: 'medico',
+    puestosRol: 4,
+    camasHospital: 12,
+    educMin: 3,
+    descripcion: 'Brinda 4 puestos de médico y 12 camas para internación y cura diaria.',
   },
-  salud: {
-    0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
-    1: { puestosPct: 2, operacionPeriodo: 8, label: 'Mínimo' },
-    2: { puestosPct: 3, operacionPeriodo: 18, label: 'Básico' },
-    3: { puestosPct: 5, operacionPeriodo: 32, label: 'Estándar' },
-    4: { puestosPct: 7, operacionPeriodo: 52, label: 'Reforzado' },
-    5: { puestosPct: 10, operacionPeriodo: 76, label: 'Máximo' },
+  comisaria: {
+    tipo: 'comisaria',
+    nombre: 'Comisaría',
+    categoria: 'publico',
+    duenoBase: 'estado',
+    construibleGobernador: true,
+    costoObra: 300,
+    diasObra: 3,
+    mantenimientoPeriodo: 22,
+    areaServicio: 'seguridad',
+    rolOperario: 'policia',
+    puestosRol: 4,
+    bonusDefensa: 14,
+    educMin: 1,
+    descripcion: 'Abre 4 puestos de policía y refuerza la defensa y el orden en su zona.',
   },
-  obras: {
-    0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
-    1: { puestosPct: 1, operacionPeriodo: 8, label: 'Mínimo' },
-    2: { puestosPct: 3, operacionPeriodo: 18, label: 'Básico' },
-    3: { puestosPct: 4, operacionPeriodo: 30, label: 'Activo' },
-    4: { puestosPct: 6, operacionPeriodo: 48, label: 'Intensivo' },
-    5: { puestosPct: 8, operacionPeriodo: 78, label: 'Máximo' },
+  escuela: {
+    tipo: 'escuela',
+    nombre: 'Escuela',
+    categoria: 'publico',
+    duenoBase: 'estado',
+    construibleGobernador: false,
+    costoObra: 0,
+    diasObra: 0,
+    mantenimientoPeriodo: 0,
+    rolOperario: 'docente',
+    puestosRol: 4,
+    educMin: 2,
+    descripcion: 'Sostiene los puestos fijos de docentes e instrucción comunitaria.',
+  },
+  oficina_publica: {
+    tipo: 'oficina_publica',
+    nombre: 'Oficina Pública',
+    categoria: 'publico',
+    duenoBase: 'estado',
+    construibleGobernador: false,
+    costoObra: 0,
+    diasObra: 0,
+    mantenimientoPeriodo: 0,
+    rolOperario: 'estatal',
+    puestosRol: 4,
+    educMin: 1,
+    descripcion: 'Sede administrativa donde trabajan los empleados estatales fijos.',
+  },
+  campo: {
+    tipo: 'campo',
+    nombre: 'Campo Productivo',
+    categoria: 'privado',
+    duenoBase: 'alimento',
+    construibleGobernador: false,
+    costoObra: 260,
+    diasObra: 3,
+    mantenimientoPeriodo: 0,
+    puestosAgricultor: 6,
+    descripcion: 'Parcela privada de la Productora de Alimento (+6 puestos de agricultor).',
+  },
+  local_comercio: {
+    tipo: 'local_comercio',
+    nombre: 'Local Comercial',
+    categoria: 'privado',
+    duenoBase: 'comercio',
+    construibleGobernador: false,
+    costoObra: 280,
+    diasObra: 3,
+    mantenimientoPeriodo: 0,
+    puestosObrero: 4,
+    puestosComerciante: 1,
+    descripcion: 'Edificio privado de Comercio y Servicios (+4 obreros, +1 comerciante).',
+  },
+  muralla: {
+    tipo: 'muralla',
+    nombre: 'Muralla Zonal',
+    categoria: 'suceso',
+    duenoBase: 'estado',
+    construibleGobernador: true,
+    requiereG2: true,
+    costoObra: 320,
+    diasObra: 3,
+    mantenimientoPeriodo: 12,
+    areaServicio: 'seguridad',
+    defensaMuralla: 20,
+    descripcion: 'Suma +20 de defensa en su zona ante ataques y acompaña su integridad.',
+  },
+  silo: {
+    tipo: 'silo',
+    nombre: 'Silo de Granos',
+    categoria: 'suceso',
+    duenoBase: 'estado',
+    construibleGobernador: true,
+    requiereG2: true,
+    costoObra: 260,
+    diasObra: 3,
+    mantenimientoPeriodo: 8,
+    areaServicio: 'infraestructura',
+    siloExtraDias: 10,
+    descripcion: 'Amplía en +10 días el tope de reserva alimentaria sin pérdida.',
+  },
+  riego: {
+    tipo: 'riego',
+    nombre: 'Canal de Riego',
+    categoria: 'suceso',
+    duenoBase: 'estado',
+    construibleGobernador: true,
+    requiereG2: true,
+    costoObra: 280,
+    diasObra: 3,
+    mantenimientoPeriodo: 10,
+    areaServicio: 'infraestructura',
+    reduccionSequiaPct: 50,
+    descripcion: 'Reduce a la mitad la caída de producción agrícola durante sequías.',
+  },
+  hospital_campana: {
+    tipo: 'hospital_campana',
+    nombre: 'Hospital de Campaña',
+    categoria: 'suceso',
+    duenoBase: 'estado',
+    construibleGobernador: true,
+    requiereG2: true,
+    costoObra: 220,
+    diasObra: 2,
+    mantenimientoPeriodo: 14,
+    areaServicio: 'salud',
+    camasHospital: 8,
+    diasCampana: 25,
+    descripcion: 'Suma 8 camas temporales durante 25 días (cura al 50%, sin requerir médicos).',
   },
 };
 
-export const SERVICE_LEVER_TO_AREA: Record<ServiceLeverId, ServiceAreaId> = {
-  seguridad: 'seguridad',
-  salud: 'salud',
-  obras: 'infraestructura',
-};
+export const GOVERNOR_BUILDABLE_TYPES: BuildingType[] = [
+  'hospital',
+  'comisaria',
+  'muralla',
+  'silo',
+  'riego',
+  'hospital_campana',
+];
 
-export const SERVICE_LEVER_TO_ROLE: Record<ServiceLeverId, ServicePublicRoleId> = {
-  seguridad: 'policia',
-  salud: 'medico',
-  obras: 'ingeniero',
-};
+export const ACTOR_CONSTANTS = {
+  diasRespuesta: 5,
+  diasCompromiso: 28,
+  diasMedida: 14,
+  diasEntreDemandas: 14,
+  umbralImpuestoDemanda: 42,
+  umbralPautaPct: 24,
+  despidosMedida: 2,
+  pctVentaRetencionStock: 0.45,
+  maxDemandasSimultaneas: 2,
+  periodosParaInvertirPrivado: 2,
+  periodosBajoParaDemanda: 2,
+} as const;
 
 export const PRICE_CAP_FACTORS: Record<PriceCapMode, number | null> = {
   libre: null,
@@ -309,6 +457,10 @@ export const DISTRICTS: DistrictZone[] = [
   },
 ];
 
+export const DISTRICT_BY_ID: Record<DistrictId, DistrictZone> = Object.fromEntries(
+  DISTRICTS.map((d) => [d.id, d])
+) as Record<DistrictId, DistrictZone>;
+
 export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   estudiante: {
     id: 'estudiante',
@@ -487,24 +639,8 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   },
 };
 
-export const ROLE_GROUPS: Record<RoleGroupId, { nombre: string; roles: RoleId[] }> = {
-  agro: { nombre: 'Agro', roles: ['agricultor', 'tecnico'] },
-  industria: { nombre: 'Industria', roles: ['obrero'] },
-  comercio: { nombre: 'Comercio y Prensa', roles: ['comerciante', 'empresario', 'periodista'] },
-  publico: { nombre: 'Sector Público', roles: ['policia', 'estatal', 'docente', 'medico', 'ingeniero'] },
-  sin_ingreso: { nombre: 'Sin Ingreso', roles: ['desempleado', 'jubilado', 'estudiante'] },
-};
-
 export const PUBLIC_ROLES: PublicRoleId[] = ['policia', 'estatal', 'docente', 'medico', 'ingeniero'];
 export const SERVICE_PUBLIC_ROLES: ServicePublicRoleId[] = ['policia', 'medico', 'ingeniero'];
-export const PRIVATE_ROLES: PrivateRoleId[] = [
-  'agricultor',
-  'obrero',
-  'comerciante',
-  'empresario',
-  'tecnico',
-  'periodista',
-];
 
 export const ACTION_TABLE: ActionDefinition[] = [
   // === 19 Acciones espontáneas (ACCIONES.md §2) ===
@@ -923,13 +1059,305 @@ export const DEFAULT_CHAOS_LIMITS: ChaosLimits = {
   respiroSiSatisfaccionMediaMenorA: 35,
 };
 
+const DEFAULT_PARCELAS: ScenarioParcelDef[] = [
+  {
+    id: 'p_hospital_centro',
+    nombre: 'Hospital Central',
+    zona: 'centro',
+    distrito: 'civico',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'hospital',
+    wx: 382,
+    wy: 356,
+    ww: 102,
+    wh: 70,
+  },
+  {
+    id: 'p_comisaria_centro',
+    nombre: 'Comisaría Central',
+    zona: 'centro',
+    distrito: 'civico',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'comisaria',
+    wx: 382,
+    wy: 452,
+    ww: 98,
+    wh: 64,
+  },
+  {
+    id: 'p_oficina_centro',
+    nombre: 'Oficina Pública',
+    zona: 'centro',
+    distrito: 'civico',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'oficina_publica',
+    wx: 518,
+    wy: 482,
+    ww: 100,
+    wh: 56,
+  },
+  {
+    id: 'p_escuela_este',
+    nombre: 'Escuela del Valle',
+    zona: 'este',
+    distrito: 'residencial',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'escuela',
+    wx: 718,
+    wy: 80,
+    ww: 146,
+    wh: 74,
+  },
+  {
+    id: 'p_comercio_1',
+    nombre: 'Galería Norte',
+    zona: 'centro',
+    distrito: 'mercado',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'local_comercio',
+    wx: 416,
+    wy: 74,
+    ww: 80,
+    wh: 52,
+  },
+  {
+    id: 'p_comercio_2',
+    nombre: 'Mercado Este',
+    zona: 'centro',
+    distrito: 'mercado',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'local_comercio',
+    wx: 526,
+    wy: 74,
+    ww: 80,
+    wh: 52,
+  },
+  {
+    id: 'p_comercio_3',
+    nombre: 'Taller Oeste',
+    zona: 'sur',
+    distrito: 'taller',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'local_comercio',
+    wx: 48,
+    wy: 360,
+    ww: 118,
+    wh: 68,
+  },
+  {
+    id: 'p_comercio_4',
+    nombre: 'Taller Sur',
+    zona: 'sur',
+    distrito: 'taller',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'local_comercio',
+    wx: 192,
+    wy: 360,
+    ww: 118,
+    wh: 68,
+  },
+  {
+    id: 'p_campo_1',
+    nombre: 'Campo Norte I',
+    zona: 'norte',
+    distrito: 'campos',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'campo',
+    wx: 184,
+    wy: 76,
+    ww: 128,
+    wh: 76,
+  },
+  {
+    id: 'p_campo_2',
+    nombre: 'Campo Norte II',
+    zona: 'norte',
+    distrito: 'campos',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'campo',
+    wx: 184,
+    wy: 170,
+    ww: 128,
+    wh: 82,
+  },
+  {
+    id: 'p_campo_3',
+    nombre: 'Campo Oeste I',
+    zona: 'oeste',
+    distrito: 'campos',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'campo',
+    wx: 42,
+    wy: 76,
+    ww: 120,
+    wh: 76,
+  },
+  {
+    id: 'p_campo_4',
+    nombre: 'Campo Oeste II',
+    zona: 'oeste',
+    distrito: 'campos',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'campo',
+    wx: 42,
+    wy: 170,
+    ww: 120,
+    wh: 82,
+  },
+  {
+    id: 'p_campo_5',
+    nombre: 'Quinta del Río',
+    zona: 'oeste',
+    distrito: 'taller',
+    estadoInicial: 'ocupada',
+    edificioInicial: 'campo',
+    wx: 48,
+    wy: 454,
+    ww: 118,
+    wh: 74,
+  },
+  {
+    id: 'p_centro_libre',
+    nombre: 'Solar Plaza Cívica',
+    zona: 'centro',
+    distrito: 'mercado',
+    estadoInicial: 'libre',
+    wx: 396,
+    wy: 186,
+    ww: 86,
+    wh: 62,
+  },
+  {
+    id: 'p_norte_libre',
+    nombre: 'Solar Camino Norte',
+    zona: 'norte',
+    distrito: 'campos',
+    estadoInicial: 'libre',
+    wx: 204,
+    wy: 24,
+    ww: 102,
+    wh: 42,
+  },
+  {
+    id: 'p_oeste_libre',
+    nombre: 'Solar del Molino',
+    zona: 'oeste',
+    distrito: 'campos',
+    estadoInicial: 'libre',
+    wx: 46,
+    wy: 24,
+    ww: 102,
+    wh: 42,
+  },
+  {
+    id: 'p_sur_libre',
+    nombre: 'Solar Industrial Sur',
+    zona: 'sur',
+    distrito: 'taller',
+    estadoInicial: 'libre',
+    wx: 192,
+    wy: 454,
+    ww: 118,
+    wh: 74,
+  },
+  {
+    id: 'p_este_libre',
+    nombre: 'Solar del Barrio',
+    zona: 'este',
+    distrito: 'residencial',
+    estadoInicial: 'libre',
+    wx: 874,
+    wy: 80,
+    ww: 88,
+    wh: 68,
+  },
+  {
+    id: 'p_hito_este_1',
+    nombre: 'Ensanche del Valle',
+    zona: 'este',
+    distrito: 'residencial',
+    estadoInicial: 'bloqueada',
+    wx: 874,
+    wy: 178,
+    ww: 88,
+    wh: 68,
+    hitoRequerido: 'hito_estabilidad',
+  },
+  {
+    id: 'p_hito_este_2',
+    nombre: 'Parque Nuevo',
+    zona: 'este',
+    distrito: 'residencial',
+    estadoInicial: 'bloqueada',
+    wx: 854,
+    wy: 454,
+    ww: 98,
+    wh: 74,
+    hitoRequerido: 'hito_prosperidad',
+  },
+];
+
+const HITOS_ELECCIONES: HitoDef[] = [
+  {
+    id: 'hito_estabilidad',
+    nombre: 'Estabilidad Social',
+    descripcion: 'Mantener al menos 52% de satisfacción media durante 2 períodos seguidos.',
+    condicion: {
+      metrica: 'satisfaccionMedia',
+      op: '>=',
+      umbral: 52,
+      periodos: 2,
+    },
+    habilita: 'p_hito_este_1',
+  },
+  {
+    id: 'hito_prosperidad',
+    nombre: 'Impulso Popular',
+    descripcion: 'Mantener 55% de apoyo electoral y hambre crítica <= 10% (2 períodos).',
+    condicion: {
+      metrica: 'apoyoPct',
+      op: '>=',
+      umbral: 55,
+      periodos: 2,
+    },
+    habilita: 'p_hito_este_2',
+  },
+];
+
+const HITOS_ZOMBIES: HitoDef[] = [
+  {
+    id: 'hito_estabilidad',
+    nombre: 'Orden y Abasto',
+    descripcion: 'Mantener hambre crítica <= 15% durante 2 períodos seguidos.',
+    condicion: {
+      metrica: 'hambreCriticaPct',
+      op: '<=',
+      umbral: 15,
+      periodos: 2,
+    },
+    habilita: 'p_hito_este_1',
+  },
+  {
+    id: 'hito_prosperidad',
+    nombre: 'Baluarte en Pie',
+    descripcion: 'Sostener al menos 80% de la población viva durante 3 períodos.',
+    condicion: {
+      metrica: 'poblacionPct',
+      op: '>=',
+      umbral: 80,
+      periodos: 3,
+    },
+    habilita: 'p_hito_este_2',
+  },
+];
+
 export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> = {
   elecciones: {
     id: 'elecciones',
     nombre: 'Año Electoral',
     subtitulo: 'Gobernar y ganar las elecciones al día 365',
     historia:
-      'La comunidad arranca estable tras años de calma, pero las urnas esperan al cabo de un año. Equilibra impuestos, empresas, precios y servicios públicos sin vaciar la reserva ni desatar el hambre.',
+      'La comunidad arranca con un núcleo chico y una sola clínica y comisaría. Construye obras en las parcelas libres, equilibra impuestos y precios, responde presiones y llega con apoyo mayoritario al día 365.',
     economiaDefault: 'base',
     poblacionDefault: 100,
     mediosDefault: 2,
@@ -938,7 +1366,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     stockAlimentoInicial: 1600,
     topesPrivados: {
       agricultor: 30,
-      obrero: 14,
+      obrero: 16,
       comerciante: 4,
       empresario: 1,
       tecnico: 3,
@@ -948,19 +1376,11 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       estatal: 4,
       docente: 4,
     },
-    serviciosIniciales: {
-      seguridad: 2,
-      salud: 3,
-      obras: 2,
-    },
+    nivelObrasInicial: 2,
     initialLevers: {
       impuesto: 38,
       salarioPublico: 100,
-      servicios: {
-        seguridad: 2,
-        salud: 3,
-        obras: 2,
-      },
+      nivelObras: 2,
       ayudaSocial: 0,
       garantiaAlimentaria: 85,
       precioMaximo: 'libre',
@@ -968,6 +1388,8 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       prensa: 12,
       topeEmision: 10,
     },
+    parcelas: structuredClone(DEFAULT_PARCELAS),
+    hitos: structuredClone(HITOS_ELECCIONES),
     zonas: structuredClone(DEFAULT_ZONAS),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     victoria: {
@@ -990,7 +1412,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     nombre: 'Apocalipsis Zombie',
     subtitulo: 'Sostener la comunidad con vida durante 180 días',
     historia:
-      'Los primeros brotes en las afueras anuncian una plaga creciente. Deberás reforzar la policía y la salud sin descuidar el alimento, las empresas ni la economía de los vecinos.',
+      'Los primeros brotes en las afueras anuncian una plaga creciente y tus defensas iniciales no bastan. Construye comisarías, hospitales y obras de emergencia sin fundir la reserva ni quebrar las empresas.',
     economiaDefault: 'base',
     poblacionDefault: 100,
     mediosDefault: 2,
@@ -999,7 +1421,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     stockAlimentoInicial: 1800,
     topesPrivados: {
       agricultor: 30,
-      obrero: 14,
+      obrero: 16,
       comerciante: 4,
       empresario: 1,
       tecnico: 3,
@@ -1009,19 +1431,11 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       estatal: 4,
       docente: 3,
     },
-    serviciosIniciales: {
-      seguridad: 2,
-      salud: 3,
-      obras: 2,
-    },
+    nivelObrasInicial: 2,
     initialLevers: {
       impuesto: 40,
       salarioPublico: 100,
-      servicios: {
-        seguridad: 2,
-        salud: 3,
-        obras: 2,
-      },
+      nivelObras: 2,
       ayudaSocial: 0,
       garantiaAlimentaria: 85,
       precioMaximo: 'libre',
@@ -1029,9 +1443,8 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       prensa: 12,
       topeEmision: 10,
     },
-    objetivoCobertura: {
-      policia: 0.12,
-    },
+    parcelas: structuredClone(DEFAULT_PARCELAS),
+    hitos: structuredClone(HITOS_ZOMBIES),
     zonas: structuredClone(DEFAULT_ZONAS),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     victoria: {
@@ -1075,6 +1488,8 @@ export const PRESS_CONSTANTS = {
     impago: 80,
     conflicto: 78,
     clima: 75,
+    presiones: 72,
+    obras: 64,
     precio: 55,
     empresas: 55,
     gobierno: 50,
@@ -1103,20 +1518,32 @@ export const PRESS_CONSTANTS = {
 } as const;
 
 export const LEVER_VALENCIA: Record<string, { alSubir: PressValence; alBajar: PressValence }> = {
+  tasa_impuesto: { alSubir: 'mala', alBajar: 'buena' },
   impuesto: { alSubir: 'mala', alBajar: 'buena' },
+  salario_publico: { alSubir: 'buena', alBajar: 'mala' },
   salarioPublico: { alSubir: 'buena', alBajar: 'mala' },
-  'servicios.seguridad': { alSubir: 'buena', alBajar: 'mala' },
-  'servicios.salud': { alSubir: 'buena', alBajar: 'mala' },
-  'servicios.obras': { alSubir: 'buena', alBajar: 'mala' },
+  'puestos.ingeniero': { alSubir: 'buena', alBajar: 'mala' },
+  'operacion.obras': { alSubir: 'buena', alBajar: 'mala' },
+  nivelObras: { alSubir: 'buena', alBajar: 'mala' },
+  ayuda_social: { alSubir: 'buena', alBajar: 'mala' },
   ayudaSocial: { alSubir: 'buena', alBajar: 'mala' },
+  garantia_pct: { alSubir: 'buena', alBajar: 'mala' },
+  garantia_alimentaria: { alSubir: 'buena', alBajar: 'mala' },
   garantiaAlimentaria: { alSubir: 'buena', alBajar: 'mala' },
-  precioMaximo: { alSubir: 'neutra', alBajar: 'buena' },
+  tope_precio: { alSubir: 'mala', alBajar: 'buena' },
+  precio_maximo: { alSubir: 'mala', alBajar: 'buena' },
+  precioMaximo: { alSubir: 'mala', alBajar: 'buena' },
+  flujo_exterior_pct: { alSubir: 'neutra', alBajar: 'neutra' },
+  comercio_exterior: { alSubir: 'neutra', alBajar: 'neutra' },
   comercioExterior: { alSubir: 'neutra', alBajar: 'neutra' },
+  fondos_prensa: { alSubir: 'neutra', alBajar: 'neutra' },
   prensa: { alSubir: 'neutra', alBajar: 'neutra' },
+  tope_emision_pct: { alSubir: 'mala', alBajar: 'buena' },
+  tope_emision: { alSubir: 'mala', alBajar: 'buena' },
   topeEmision: { alSubir: 'mala', alBajar: 'buena' },
 };
 
-export interface NewsTemplateVariant {
+interface NewsTemplateVariant {
   titulo: string;
   texto: string;
 }
@@ -1453,42 +1880,42 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
   gobierno: {
     favorable: [
       {
-        titulo: 'Respaldo al ajuste en {palanca}: pasa a {valor_nuevo}',
-        texto: '{autor} elogia en {medio} la medida oficial que llevó {palanca} de {valor_anterior} a {valor_nuevo}.',
+        titulo: 'Respaldo al ajuste en {control}: pasa a {valor_nuevo}',
+        texto: '{autor} elogia en {medio} la medida oficial que llevó {control} de {valor_anterior} a {valor_nuevo}.',
       },
       {
-        titulo: 'Ven con buenos ojos el cambio en {palanca}',
-        texto: 'La decisión de fijar {palanca} en {valor_nuevo} genera expectativas positivas en {zona}, señala {medio}.',
+        titulo: 'Ven con buenos ojos el cambio en {control}',
+        texto: 'La decisión de fijar {control} en {valor_nuevo} genera expectativas positivas en {zona}, señala {medio}.',
       },
     ],
     neutral: [
       {
-        titulo: 'Entra en vigor cambio en {palanca}: {valor_nuevo}',
-        texto: '{autor} informa en {medio} que {palanca} pasó de {valor_anterior} a {valor_nuevo} desde hoy.',
+        titulo: 'Entra en vigor cambio en {control}: {valor_nuevo}',
+        texto: '{autor} informa en {medio} que {control} pasó de {valor_anterior} a {valor_nuevo} desde hoy.',
       },
       {
-        titulo: 'Nueva disposición para {palanca}',
-        texto: 'El gobierno modificó {palanca} de {valor_anterior} a {valor_nuevo} en todo el distrito, consigna {medio}.',
+        titulo: 'Nueva disposición para {control}',
+        texto: 'El gobierno modificó {control} de {valor_anterior} a {valor_nuevo} en todo el distrito, consigna {medio}.',
       },
     ],
     critico: [
       {
-        titulo: 'Cuestionan la suba o giro en {palanca} a {valor_nuevo}',
-        texto: '{autor} advierte en {medio} sobre los costos de mover {palanca} desde {valor_anterior} hacia {valor_nuevo}.',
+        titulo: 'Cuestionan la suba o giro en {control} a {valor_nuevo}',
+        texto: '{autor} advierte en {medio} sobre los costos de mover {control} desde {valor_anterior} hacia {valor_nuevo}.',
       },
       {
-        titulo: 'Críticas al decreto sobre {palanca}',
-        texto: 'Sectores locales miran con recelo el paso de {palanca} a {valor_nuevo}, según {medio}.',
+        titulo: 'Críticas al decreto sobre {control}',
+        texto: 'Sectores locales miran con recelo el paso de {control} a {valor_nuevo}, según {medio}.',
       },
     ],
     alarmista: [
       {
-        titulo: '¡Fuerte giro en {palanca} desata inquietud!',
-        texto: '{autor} señala en {medio} sorpresa y nerviosismo por el salto de {palanca} de {valor_anterior} a {valor_nuevo}.',
+        titulo: '¡Fuerte giro en {control} desata inquietud!',
+        texto: '{autor} señala en {medio} sorpresa y nerviosismo por el salto de {control} de {valor_anterior} a {valor_nuevo}.',
       },
       {
-        titulo: 'Alerta en la plaza tras cambio en {palanca}',
-        texto: 'El paso de {palanca} a {valor_nuevo} reconfigura el humor social de inmediato, advierte {medio}.',
+        titulo: 'Alerta en la plaza tras cambio en {control}',
+        texto: 'El paso de {control} a {valor_nuevo} reconfigura el humor social de inmediato, advierte {medio}.',
       },
     ],
   },
@@ -1531,6 +1958,78 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
       {
         titulo: 'Revuelo creciente en las calles de {zona}',
         texto: 'Un episodio con {cifra} participantes despierta preocupación en {zona}, reporta {medio}.',
+      },
+    ],
+  },
+  obras: {
+    favorable: [
+      {
+        titulo: 'Inauguran {edificio} en {zona}',
+        texto: '{autor} destaca en {medio} la habilitación de {edificio} en {parcela} ({zona}), ampliando la capacidad de la ciudad.',
+      },
+      {
+        titulo: 'Nuevo impulso en {zona}: abre {edificio}',
+        texto: 'Con el cierre de obra en {parcela}, {medio} subraya el impacto positivo de {edificio} para los vecinos de {zona}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Movimiento de obras en {zona}: {edificio}',
+        texto: '{autor} informa en {medio} novedades sobre {edificio} en {parcela} ({zona}).',
+      },
+      {
+        titulo: 'Actualización de parcelas en {zona}',
+        texto: 'La parcela {parcela} registra novedades de {edificio}, consigna {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Cuestionan demolición o cierre de {edificio} en {zona}',
+        texto: '{autor} critica en {medio} la decisión sobre {edificio} en {parcela} ({zona}) y su costo para el barrio.',
+      },
+      {
+        titulo: 'Debate por el uso de suelo tras baja en {parcela}',
+        texto: 'El desmantelamiento de {edificio} en {zona} abre reclamos vecinales, reporta {medio}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Tensión por demolición de {edificio} en {zona}!',
+        texto: '{autor} advierte en {medio} malestar fuerte en {zona} tras la pérdida de {edificio} en {parcela}.',
+      },
+    ],
+  },
+  presiones: {
+    favorable: [
+      {
+        titulo: 'Acuerdo con {actor}: compromiso en {demanda}',
+        texto: '{autor} celebra en {medio} el entendimiento alcanzado con {actor} en torno a {demanda}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: '{actor} plantea demanda: {demanda}',
+        texto: '{autor} reporta en {medio} la exigencia formal de {actor} ({demanda}), a la espera de respuesta oficial.',
+      },
+      {
+        titulo: 'Cruce en la mesa política por {actor}',
+        texto: 'El reclamo de {actor} ({demanda}) marca la agenda del día, señala {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Conflicto abierto con {actor} tras rechazo en {demanda}',
+        texto: '{autor} señala en {medio} que la negativa ante {actor} derivó en medidas de fuerza ({medida}).',
+      },
+      {
+        titulo: 'Escalan las presiones de {actor} sobre el despacho',
+        texto: 'Sin acuerdo por {demanda}, {actor} activa {medida} y tensa el clima en {zona}, según {medio}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Ruptura con {actor}! Activan {medida}',
+        texto: '{autor} alerta en {medio} que el choque con {actor} desató {medida} con impacto directo en la comunidad.',
       },
     ],
   },

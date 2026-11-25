@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { GameController } from '../engine/gameController';
 import { hasActiveCrisisAlert } from '../engine/policies';
-import { DistrictId, GovernorLevers, PhenomenonType, RoleId, WorldConfig, ZoneId } from '../types/game';
+import {
+  DistrictId,
+  GovernorComplexityLevel,
+  GovernorLevers,
+  PhenomenonType,
+  RoleId,
+  WorldComplexityLevel,
+  WorldConfig,
+  ZoneId,
+} from '../types/game';
 import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
 
-export interface CausalInspectTarget {
+interface CausalInspectTarget {
   title: string;
   ref?: string;
   fallbackText?: string;
@@ -26,13 +35,14 @@ export function useGameSession() {
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
   const [mapFilter, setMapFilter] = useState<MapFilter>('todos');
-  const [mapLens, setMapLens] = useState<MapLens>('roles');
+  const [mapLens, setMapLens] = useState<MapLens>('ninguna');
   const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; seq: number } | null>(null);
   const [hoverInfo, setHoverInfo] = useState<string | null>(null);
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [milestoneBannerDismissed, setMilestoneBannerDismissed] = useState<boolean>(false);
   const [causalInspect, setCausalInspect] = useState<CausalInspectTarget | null>(null);
+  const uiSeqRef = useRef(0);
 
   // Start controller paused on Day 1 until player confirms scenario briefing
   useEffect(() => {
@@ -57,15 +67,13 @@ export function useGameSession() {
           setSelectedNpcId(null);
           setFollowSelected(false);
         }
-      } else if (
-        e.key === ' ' &&
-        hasStarted &&
-        !showConfigModal &&
-        document.activeElement?.tagName !== 'INPUT' &&
-        document.activeElement?.tagName !== 'SELECT'
-      ) {
-        e.preventDefault();
-        controller.togglePause();
+      } else if (e.key === ' ' && hasStarted && !showConfigModal && !causalInspect) {
+        const activeEl = document.activeElement as HTMLElement | null;
+        const tag = activeEl?.tagName;
+        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA' && !activeEl?.isContentEditable) {
+          e.preventDefault();
+          controller.togglePause();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -107,6 +115,11 @@ export function useGameSession() {
   const stepDay = useCallback(() => controller.stepDay(), [controller]);
   const setDevMode = useCallback((enabled: boolean) => controller.setDevMode(enabled), [controller]);
   const setDevPopulation = useCallback((pop: number) => controller.setDevPopulation(pop), [controller]);
+  const setDevComplexity = useCallback(
+    (nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel) =>
+      controller.setDevComplexity(nivelMundo, nivelGobernador),
+    [controller]
+  );
 
   const forceClimatePhenomenon = useCallback(
     (tipo: PhenomenonType, zona?: ZoneId) => controller.forceClimatePhenomenon(tipo, zona),
@@ -191,7 +204,8 @@ export function useGameSession() {
 
   const jumpToDistrict = useCallback((district: DistrictId | 'all') => {
     setFollowSelected(false);
-    setCameraTarget({ district, seq: Date.now() + Math.random() });
+    uiSeqRef.current += 1;
+    setCameraTarget({ district, seq: uiSeqRef.current });
   }, []);
 
   const focusWindow = useCallback((winId: WindowId) => {
@@ -219,27 +233,26 @@ export function useGameSession() {
   const openCiudadTab = useCallback(
     (tab: CityTab) => {
       openWindow('ciudad');
-      setCiudadTabRequest({ tab, seq: Date.now() + Math.random() });
+      uiSeqRef.current += 1;
+      setCiudadTabRequest({ tab, seq: uiSeqRef.current });
     },
     [openWindow]
   );
-
-  const openAlertsDrawer = useCallback(() => {
-    openCiudadTab('alertas');
-  }, [openCiudadTab]);
 
   const openLandmarkWindow = useCallback(
     (winId: WindowId, tabHint?: CityTab) => {
       openWindow(winId);
       if (winId === 'ciudad' && tabHint) {
-        setCiudadTabRequest({ tab: tabHint, seq: Date.now() + Math.random() });
+        uiSeqRef.current += 1;
+        setCiudadTabRequest({ tab: tabHint, seq: uiSeqRef.current });
       }
     },
     [openWindow]
   );
 
   const requestZoom = useCallback((delta: number) => {
-    setZoomRequest({ delta, seq: Date.now() + Math.random() });
+    uiSeqRef.current += 1;
+    setZoomRequest({ delta, seq: uiSeqRef.current });
   }, []);
 
   const cancelFollow = useCallback(() => setFollowSelected(false), []);
@@ -280,7 +293,6 @@ export function useGameSession() {
     closeWindow,
     toggleWindow,
     focusWindow,
-    openAlertsDrawer,
     openCiudadTab,
     openLandmarkWindow,
     setFollowSelected,
@@ -303,6 +315,7 @@ export function useGameSession() {
     stepDay,
     setDevMode,
     setDevPopulation,
+    setDevComplexity,
     forceClimatePhenomenon,
     saveManual,
     loadManual,

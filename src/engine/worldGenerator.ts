@@ -1,28 +1,34 @@
 import {
-  DISTRICTS,
+  DISTRICT_BY_ID,
   ECON_CONSTANTS,
   MEDIA_TEMPLATES,
   PERIOD_DAYS,
   ROLE_CATALOG,
   SAVE_FORMAT_VERSION,
   SCENARIO_PRESETS,
-  SERVICE_LEVEL_TABLE,
-  SERVICE_LEVER_TO_ROLE,
-  SERVICE_PUBLIC_ROLES,
   SPANISH_NAMES,
 } from '../data/catalogs';
 import {
+  BuildingInstance,
   ClimatePhenomenon,
+  EconomyModule,
   GameState,
+  GovernorComplexityLevel,
   GovernorLevers,
   MediaOutlet,
   Npc,
+  Parcela,
   RoleId,
-  ServiceLeverId,
   ServicePublicRoleId,
+  WorldComplexityLevel,
   WorldConfig,
   ZoneId,
 } from '../types/game';
+import {
+  computeMaintenanceBreakdown,
+  getBuildingJobCaps,
+  getObrasTargetJobs,
+} from './policies';
 import { nextRand, normalizeSeed, randInt, randRange } from './rng';
 
 interface RngHolder {
@@ -54,7 +60,7 @@ export function getZoneCanvasPosition(zone: ZoneId, rng?: RngHolder): { x: numbe
 
 export function getDistrictPosition(role: RoleId, rng?: RngHolder): { x: number; y: number } {
   const def = ROLE_CATALOG[role];
-  const zone = DISTRICTS.find((d) => d.id === def.distrito) || DISTRICTS[0];
+  const zone = DISTRICT_BY_ID[def.distrito] || DISTRICT_BY_ID.campos;
 
   if (role === 'docente' || role === 'estudiante') {
     return {
@@ -116,7 +122,7 @@ export function getCityErrandPosition(
   }
 
   if (drawRand(rng) < 0.28) {
-    const plaza = DISTRICTS.find((d) => d.id === 'mercado')!;
+    const plaza = DISTRICT_BY_ID.mercado;
     return {
       x: plaza.x + 36 + drawRand(rng) * (plaza.w - 72),
       y: plaza.y + 62 + drawRand(rng) * (plaza.h - 86),
@@ -125,7 +131,7 @@ export function getCityErrandPosition(
   }
 
   if (drawRand(rng) < 0.18) {
-    const home = DISTRICTS.find((d) => d.id === 'residencial')!;
+    const home = DISTRICT_BY_ID.residencial;
     return {
       x: home.x + 36 + drawRand(rng) * (home.w - 72),
       y: home.y + 240 + drawRand(rng) * (home.h - 270),
@@ -156,9 +162,32 @@ export function getCityErrandPosition(
   return { ...workPos, accion: workAction };
 }
 
+export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
+  nivelMundo: WorldComplexityLevel;
+  nivelGobernador: GovernorComplexityLevel;
+  economiaModulo: EconomyModule;
+} {
+  const preset = SCENARIO_PRESETS[raw.escenarioId ?? 'elecciones'];
+  const defaultWorld: WorldComplexityLevel = preset.economiaDefault === 'fiscal' ? 'M2' : 'M1';
+  const nivelMundo: WorldComplexityLevel =
+    raw.nivelMundo ??
+    (raw.economiaModulo === 'fiscal' ? 'M2' : raw.economiaModulo === 'base' ? defaultWorld : defaultWorld);
+  const economiaModulo: EconomyModule = nivelMundo === 'M2' ? 'fiscal' : 'base';
+  const defaultGov: GovernorComplexityLevel = nivelMundo === 'M2' ? 'G3' : 'G2';
+  const nivelGobernador: GovernorComplexityLevel = raw.nivelGobernador ?? defaultGov;
+  return { nivelMundo, nivelGobernador, economiaModulo };
+}
+
 export function isTestConfig(config: WorldConfig): boolean {
   const preset = SCENARIO_PRESETS[config.escenarioId];
-  if (config.economiaModulo !== preset.economiaDefault) return true;
+  const { nivelMundo, nivelGobernador, economiaModulo } = resolveComplexityConfig(config);
+  const defaultWorld: WorldComplexityLevel = preset.economiaDefault === 'fiscal' ? 'M2' : 'M1';
+  if (economiaModulo !== preset.economiaDefault) return true;
+  if (nivelMundo !== defaultWorld) return true;
+  const defaultGov: GovernorComplexityLevel = defaultWorld === 'M2' ? 'G3' : 'G2';
+  if (nivelGobernador !== defaultGov && !(defaultWorld === 'M2' && nivelGobernador === 'G2')) {
+    return true;
+  }
   if (config.poblacionInicial !== preset.poblacionDefault) return true;
   if (config.cantidadMedios !== preset.mediosDefault) return true;
   const c = config.caos;
@@ -172,10 +201,56 @@ export function isTestConfig(config: WorldConfig): boolean {
   );
 }
 
+export function buildInitialParcelas(
+  escenarioId: 'elecciones' | 'zombies',
+  nivelMundo: WorldComplexityLevel
+): Parcela[] {
+  const preset = SCENARIO_PRESETS[escenarioId];
+  return preset.parcelas.map((def, idx) => {
+    const zona: ZoneId = nivelMundo === 'M0' ? 'centro' : def.zona;
+    let edificio: BuildingInstance | null = null;
+    if (def.estadoInicial === 'ocupada' && def.edificioInicial) {
+      const dueno =
+        def.edificioInicial === 'campo'
+          ? 'alimento'
+          : def.edificioInicial === 'local_comercio'
+          ? 'comercio'
+          : 'estado';
+      edificio = {
+        id: `ed_init_${idx + 1}`,
+        tipo: def.edificioInicial,
+        parcelaId: def.id,
+        dueno,
+        estado: 'ocupada',
+        activo: true,
+        diasObraRestantes: 0,
+        diasObraTotal: 0,
+        zona,
+      };
+    }
+    return {
+      id: def.id,
+      nombre: def.nombre,
+      zona,
+      distrito: def.distrito,
+      estado: def.estadoInicial,
+      edificio,
+      wx: def.wx,
+      wy: def.wy,
+      ww: def.ww,
+      wh: def.wh,
+      hitoRequerido: def.hitoRequerido,
+      orden: idx,
+    };
+  });
+}
+
 export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const semilla = normalizeSeed(rawConfig.semilla);
+  const resolved = resolveComplexityConfig(rawConfig);
   const config: WorldConfig = {
     ...rawConfig,
+    ...resolved,
     semilla,
   };
   const rng: RngHolder = { rngState: semilla };
@@ -183,33 +258,28 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const pop = config.poblacionInicial;
   const scale = pop / 100;
 
-  const getServiceSpawnCount = (lever: ServiceLeverId): number => {
-    const lvl = preset.serviciosIniciales[lever];
-    if (lvl === 0) return 0;
-    const pct = SERVICE_LEVEL_TABLE[lever][lvl].puestosPct;
-    return Math.max(1, Math.round((pop * pct) / 100));
-  };
-
+  const parcelas = buildInitialParcelas(config.escenarioId, config.nivelMundo ?? 'M1');
   const cuposFijos = {
     estatal: Math.max(1, Math.round(preset.cuposFijos.estatal * scale)),
     docente: Math.max(1, Math.round(preset.cuposFijos.docente * scale)),
   };
 
   const initialLevers: GovernorLevers = structuredClone(preset.initialLevers);
+  const jobCaps = getBuildingJobCaps(parcelas, pop, initialLevers.nivelObras, pop, cuposFijos);
 
   // ESTADOS §10 exact composition across all 14 roles (100 NPCs default)
   const baseDistribution: Array<{ rol: RoleId; count: number }> = [
-    { rol: 'agricultor', count: Math.round(preset.topesPrivados.agricultor * scale) },
-    { rol: 'obrero', count: Math.round(preset.topesPrivados.obrero * scale) },
+    { rol: 'agricultor', count: jobCaps.agricultor },
+    { rol: 'obrero', count: jobCaps.obrero },
     { rol: 'tecnico', count: Math.max(1, Math.round(preset.topesPrivados.tecnico * scale)) },
-    { rol: 'comerciante', count: Math.max(2, Math.round(preset.topesPrivados.comerciante * scale)) },
+    { rol: 'comerciante', count: Math.max(2, jobCaps.comerciante) },
     { rol: 'empresario', count: Math.max(1, preset.topesPrivados.empresario) },
     { rol: 'periodista', count: Math.max(config.cantidadMedios, Math.round(preset.topesPrivados.periodista * scale)) },
-    { rol: 'policia', count: getServiceSpawnCount('seguridad') },
+    { rol: 'policia', count: jobCaps.policia },
     { rol: 'estatal', count: cuposFijos.estatal },
     { rol: 'docente', count: cuposFijos.docente },
-    { rol: 'medico', count: getServiceSpawnCount('salud') },
-    { rol: 'ingeniero', count: getServiceSpawnCount('obras') },
+    { rol: 'medico', count: jobCaps.medico },
+    { rol: 'ingeniero', count: getObrasTargetJobs(pop, initialLevers.nivelObras) },
     { rol: 'estudiante', count: Math.round(12 * scale) },
     { rol: 'jubilado', count: Math.round(10 * scale) },
     { rol: 'desempleado', count: Math.max(1, Math.round(2 * scale)) },
@@ -217,7 +287,14 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
 
   const currentTotal = baseDistribution.reduce((acc, item) => acc + item.count, 0);
   if (currentTotal !== pop) {
-    baseDistribution[0].count = Math.max(5, baseDistribution[0].count + (pop - currentTotal));
+    // Keep private farmer/worker roles capped by existing buildings, adjust unallocated slack into desempleado/estudiante
+    const delta = pop - currentTotal;
+    const desIdx = baseDistribution.findIndex((b) => b.rol === 'desempleado');
+    if (desIdx >= 0 && baseDistribution[desIdx].count + delta >= 0) {
+      baseDistribution[desIdx].count += delta;
+    } else {
+      baseDistribution[0].count = Math.max(5, baseDistribution[0].count + delta);
+    }
   }
 
   const npcs: Npc[] = [];
@@ -225,19 +302,18 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
 
   for (const entry of baseDistribution) {
     const def = ROLE_CATALOG[entry.rol];
-    const allowedZones = preset.zonaPorRol[entry.rol] || ['centro'];
+    const allowedZones: ZoneId[] =
+      config.nivelMundo === 'M0' ? ['centro'] : preset.zonaPorRol[entry.rol] || ['centro'];
     for (let i = 0; i < entry.count; i++) {
       const id = `npc_${String(idx + 1).padStart(3, '0')}`;
       const baseName = SPANISH_NAMES[idx % SPANISH_NAMES.length];
       const nombre = idx >= SPANISH_NAMES.length ? `${baseName} ${Math.floor(idx / SPANISH_NAMES.length) + 1}` : baseName;
-      const zona: ZoneId = allowedZones[i % allowedZones.length];
+      const zona: ZoneId = config.nivelMundo === 'M0' ? 'centro' : allowedZones[i % allowedZones.length];
 
-      // ESTADOS §2: students strictly < 18 when world spawns
       let edad = randInt(rng, 22, 58);
       if (entry.rol === 'estudiante') edad = randInt(rng, 8, 17);
       if (entry.rol === 'jubilado') edad = randInt(rng, 65, 84);
 
-      // ESTADOS §1: fixed education level in v1; minors receive graduation level at spawn
       const educNivel =
         entry.rol === 'estudiante' ? randInt(rng, 0, 3) : Math.max(def.educMin, randInt(rng, def.educMin, 3));
       const pos = getDistrictPosition(entry.rol, rng);
@@ -255,7 +331,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       const lealtadInicial = clamp(Math.round(randRange(rng, 42, 66)), 25, 82);
       const saludInicial = entry.rol === 'jubilado' ? randInt(rng, 68, 86) : randInt(rng, 82, 98);
 
-      // ESTADOS §4: initial pantry starts at the NPC's target so everything aligns cleanly at startup
       const objetivoDespensa = clamp(
         ECON_CONSTANTS.objetivoBaseDias *
           (1 +
@@ -384,7 +459,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     }
   }
 
-  // Assign journalists to media outlets (ESTADOS §6)
   const journalistIds = npcs.filter((n) => n.rol === 'periodista').map((n) => n.id);
   const mediaCount = clamp(config.cantidadMedios, 1, 3);
   const fondosInicialesPorMedio = Number((initialLevers.prensa / mediaCount).toFixed(1));
@@ -416,26 +490,25 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   });
 
   const serviceRoleCounts: Record<ServicePublicRoleId, number> = {
-    policia: npcs.filter((n) => n.rol === SERVICE_LEVER_TO_ROLE.seguridad).length,
-    medico: npcs.filter((n) => n.rol === SERVICE_LEVER_TO_ROLE.salud).length,
-    ingeniero: npcs.filter((n) => n.rol === SERVICE_LEVER_TO_ROLE.obras).length,
+    policia: npcs.filter((n) => n.rol === 'policia').length,
+    medico: npcs.filter((n) => n.rol === 'medico').length,
+    ingeniero: npcs.filter((n) => n.rol === 'ingeniero').length,
   };
 
-  const coberturas = SERVICE_PUBLIC_ROLES.reduce(
-    (acc, r) => {
-      const targetCov = preset.objetivoCobertura?.[r] ?? ECON_CONSTANTS.objetivoCobertura[r];
-      acc[r] = clamp(serviceRoleCounts[r] / Math.max(1, pop * targetCov), 0, 1);
-      return acc;
-    },
-    {} as Record<ServicePublicRoleId, number>
-  );
+  const coberturas: Record<ServicePublicRoleId, number> = {
+    policia: clamp(serviceRoleCounts.policia / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.policia), 0, 1),
+    medico: clamp(serviceRoleCounts.medico / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.medico), 0, 1),
+    ingeniero: clamp(serviceRoleCounts.ingeniero / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.ingeniero), 0, 1),
+  };
 
   const stockInicial = Math.round(preset.stockAlimentoInicial * scale);
   const empresarioNpc = npcs.find((n) => n.rol === 'empresario') || null;
   const comerciantesNpcs = npcs.filter((n) => n.rol === 'comerciante');
 
   const initialPhenomena: ClimatePhenomenon[] =
-    config.escenarioId === 'zombies'
+    config.nivelMundo === 'M0'
+      ? []
+      : config.escenarioId === 'zombies'
       ? [
           {
             id: 'fen_zombie_init',
@@ -531,11 +604,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     Math.max(foodWageEstPeriodo / Math.max(0.1, foodParteSueldos), estFoodSalesPeriodo).toFixed(1)
   );
 
-  const estOpPeriodo =
-    (SERVICE_LEVEL_TABLE.seguridad[initialLevers.servicios.seguridad].operacionPeriodo +
-      SERVICE_LEVEL_TABLE.salud[initialLevers.servicios.salud].operacionPeriodo +
-      SERVICE_LEVEL_TABLE.obras[initialLevers.servicios.obras].operacionPeriodo) *
-    scale;
+  const opBreakdown = computeMaintenanceBreakdown(parcelas, initialLevers.nivelObras, pop, pop);
+  const estOpPeriodo = opBreakdown.operacionTotal;
   const estLivingDia = npcs.reduce((acc, n) => {
     if (n.edad < 18) return acc;
     const baseNet = Math.max(0, n.economia.ultimoIngresoNeto - ECON_CONSTANTS.precioBaseAlimento);
@@ -599,7 +669,10 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         garantiaImpaga: 0,
         comidaMenores: 0,
         ayudaSocial: 0,
+        mantenimiento: 0,
+        operacionObras: 0,
         operacion: 0,
+        obras: 0,
         prensa: 0,
         saldo: 0,
         emision: 0,
@@ -624,7 +697,10 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         garantiaAlimentaria: 0,
         garantiaImpaga: 0,
         comidaMenores: 0,
+        mantenimiento: 0,
+        operacionObras: 0,
         operacion: 0,
+        obras: 0,
         operacionPorArea: {
           seguridad: 0,
           salud: 0,
@@ -661,6 +737,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         ventasAcum: 0,
         parteSueldos: foodParteSueldos,
         factor: 1,
+        periodosFactorAlto: 0,
+        periodosFactorBajo: 0,
         ultimoTramo: 'normal',
         despidosPendientes: 0,
         refPorEmpleado: {},
@@ -674,6 +752,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         ventasAcum: 0,
         parteSueldos: comParteSueldos,
         factor: 1,
+        periodosFactorAlto: 0,
+        periodosFactorBajo: 0,
         ultimoTramo: 'normal',
         despidosPendientes: 0,
         refPorEmpleado: {},
@@ -708,7 +788,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
     clima: {
       fenomenos: initialPhenomena,
-      proximoEventoDia: config.escenarioId === 'zombies' ? 28 : 22,
+      proximoEventoDia: config.nivelMundo === 'M0' ? 999999 : config.escenarioId === 'zombies' ? 28 : 22,
     },
     medios,
     noticias: [
@@ -806,6 +886,14 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       poblacion: pop,
       satisfaccionMedia: satInicial,
     },
+    parcelas,
+    hitosCumplidos: [],
+    hitosRacha: {},
+    demandasActivas: [],
+    bloqueosPalanca: [],
+    medidasVigentes: [],
+    cooldownActorDemanda: {},
+    parcelasRecienHabilitadasDia: 0,
     bitacora: [
       {
         id: 'log_init',

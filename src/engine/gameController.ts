@@ -17,8 +17,11 @@ import {
   ClimatePhenomenon,
   CommunityDerived,
   GameState,
+  GovernorComplexityLevel,
   GovernorLevers,
   PhenomenonType,
+  SimEvent,
+  WorldComplexityLevel,
   WorldConfig,
   ZoneId,
 } from '../types/game';
@@ -29,10 +32,11 @@ import {
   computeTotalWorldMoney,
   deriveCommunityStats,
   emitSimEvent,
+  MAX_BITACORA_ENTRIES,
   stepSimulation,
   TICKS_PER_DAY,
 } from './simulation';
-import { createInitialGameState } from './worldGenerator';
+import { createInitialGameState, isTestConfig, resolveComplexityConfig } from './worldGenerator';
 
 export interface SaveSlotMeta {
   dia: number;
@@ -63,13 +67,33 @@ interface StoredSavePayload {
   state: GameState;
 }
 
+function isValidSavedGameState(raw: unknown): raw is GameState {
+  if (!raw || typeof raw !== 'object') return false;
+  const s = raw as Record<string, unknown>;
+  if (!s.reloj || typeof s.reloj !== 'object') return false;
+  if (!s.config || typeof s.config !== 'object') return false;
+  if (!s.gobierno || typeof s.gobierno !== 'object') return false;
+  const gov = s.gobierno as Record<string, unknown>;
+  if (!gov.finanzas || typeof gov.finanzas !== 'object') return false;
+  if (!gov.indicadores || typeof gov.indicadores !== 'object') return false;
+  if (!s.alimento || typeof s.alimento !== 'object') return false;
+  if (!s.clima || typeof s.clima !== 'object') return false;
+  if (!Array.isArray(s.npcs) || s.npcs.length === 0) return false;
+  if (!Array.isArray(s.medios) || !Array.isArray(s.noticias)) return false;
+  const sampleNpc = s.npcs[0] as Record<string, unknown> | undefined;
+  if (!sampleNpc || !sampleNpc.variables || !sampleNpc.economia || !sampleNpc.hospital || !sampleNpc.mapa) {
+    return false;
+  }
+  return true;
+}
+
 function readSaveMeta(key: string): SaveSlotMeta | null {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return null;
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredSavePayload>;
-    if (!parsed?.meta || typeof parsed.meta.dia !== 'number' || !parsed?.state?.reloj) {
+    if (!parsed?.meta || typeof parsed.meta.dia !== 'number' || !isValidSavedGameState(parsed.state)) {
       return null;
     }
     return parsed.meta;
@@ -101,7 +125,7 @@ function readSavedState(key: string): GameState | null {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredSavePayload>;
-    if (!parsed?.state || !parsed.state.reloj || !Array.isArray(parsed.state.npcs)) {
+    if (!isValidSavedGameState(parsed?.state)) {
       return null;
     }
     return parsed.state;
@@ -166,6 +190,8 @@ export class GameController {
   private listeners = new Set<() => void>();
   private snapshot: GameControllerSnapshot;
   private destroyed = false;
+  private sessionEpoch = 0;
+  private aiAbortController: AbortController | null = null;
 
   constructor(initialConfig: WorldConfig = DEFAULT_WORLD_CONFIG) {
     this.state = createInitialGameState(initialConfig);
@@ -236,16 +262,38 @@ export class GameController {
 
   destroy(): void {
     this.destroyed = true;
+    this.resetAiLifecycle();
     this.stopTimer();
     this.listeners.clear();
   }
 
+  private resetAiLifecycle(): void {
+    this.sessionEpoch += 1;
+    if (this.aiAbortController) {
+      this.aiAbortController.abort();
+      this.aiAbortController = null;
+    }
+    this.inFlightConditions.clear();
+    this.aiInFlight = false;
+    this.aiBusy = false;
+    resetAiSessionError();
+  }
+
+  private ensureAiSignal(): AbortSignal | undefined {
+    if (typeof AbortController === 'undefined') return undefined;
+    if (!this.aiAbortController) {
+      this.aiAbortController = new AbortController();
+    }
+    return this.aiAbortController.signal;
+  }
+
   private checkAiHealth(): void {
     if (typeof fetch !== 'function') return;
-    fetch('/api/health')
+    const epoch = this.sessionEpoch;
+    fetch('/api/health', { signal: this.ensureAiSignal() })
       .then((r) => r.json())
       .then((data) => {
-        if (this.destroyed) return;
+        if (this.destroyed || epoch !== this.sessionEpoch) return;
         const available = Boolean(data.aiAvailable);
         if (available !== this.aiAvailable) {
           this.aiAvailable = available;
@@ -253,7 +301,7 @@ export class GameController {
         }
       })
       .catch(() => {
-        if (this.destroyed) return;
+        if (this.destroyed || epoch !== this.sessionEpoch) return;
         if (this.aiAvailable) {
           this.aiAvailable = false;
           this.commit();
@@ -283,6 +331,7 @@ export class GameController {
     }
     const prevGov = this.state.gobierno;
     const prevDay = this.state.reloj.dia;
+    const prevPeriodo = this.state.reloj.periodo;
     const prevCondCount = this.state.ventanasCondicion.length;
 
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -293,7 +342,7 @@ export class GameController {
     this.state = next;
     this.syncDerivedAndGovCheck(next, prevGov);
 
-    if (next.reloj.dia !== prevDay && next.reloj.dia % 7 === 0) {
+    if (next.reloj.periodo !== prevPeriodo) {
       const saved = writeSave(AUTO_SAVE_KEY, next);
       if (saved) this.autoSaveMeta = saved;
     }
@@ -331,7 +380,7 @@ export class GameController {
   }
 
   setSpeed(speed: number): void {
-    const maxSpeed = this.devMode ? 10 : 2;
+    const maxSpeed = this.devMode ? 8 : 2;
     this.speed = Math.min(maxSpeed, Math.max(1, speed));
     if (this.paused) {
       this.paused = false;
@@ -359,6 +408,19 @@ export class GameController {
     });
   }
 
+  setDevComplexity(nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel): void {
+    if (!this.devMode) return;
+    const resolved = resolveComplexityConfig({
+      ...this.state.config,
+      nivelMundo,
+      nivelGobernador,
+    });
+    this.startNewGame({
+      ...this.state.config,
+      ...resolved,
+    });
+  }
+
   saveManual(): boolean {
     const meta = writeSave(MANUAL_SAVE_KEY, this.state);
     if (!meta) return false;
@@ -370,36 +432,46 @@ export class GameController {
   loadManual(): boolean {
     const loaded = readSavedState(MANUAL_SAVE_KEY);
     if (!loaded) return false;
-    this.applyLoadedState(loaded);
-    return true;
+    try {
+      this.applyLoadedState(loaded);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   loadAutoSave(): boolean {
     const loaded = readSavedState(AUTO_SAVE_KEY);
     if (!loaded) return false;
-    this.applyLoadedState(loaded);
-    return true;
+    try {
+      this.applyLoadedState(loaded);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private applyLoadedState(loaded: GameState): void {
     this.lastPressDay = loaded.reloj.dia;
     this.actionOffersDay = loaded.reloj.dia;
     this.actionOffersCount = 0;
-    this.inFlightConditions.clear();
-    this.aiInFlight = false;
-    this.aiBusy = false;
     this.paused = false;
-    resetAiSessionError();
+    this.resetAiLifecycle();
 
     // Migrate v1/v2 saves cleanly to v3 schema (ESTADOS §13)
     const preset = SCENARIO_PRESETS[loaded.config.escenarioId] || SCENARIO_PRESETS.elecciones;
+    loaded.config.escenarioId = preset.id;
     loaded.versionFormato = SAVE_FORMAT_VERSION;
-    if (typeof loaded.esConfigDePrueba !== 'boolean') {
-      loaded.esConfigDePrueba = false;
-    }
     const legacyEcon = loaded.config.economiaModulo as string;
     if (legacyEcon === 'simple' || legacyEcon === 'individual') {
       loaded.config.economiaModulo = 'base';
+    }
+    const resolvedComplexity = resolveComplexityConfig(loaded.config);
+    loaded.config.nivelMundo = resolvedComplexity.nivelMundo;
+    loaded.config.nivelGobernador = resolvedComplexity.nivelGobernador;
+    loaded.config.economiaModulo = resolvedComplexity.economiaModulo;
+    if (typeof loaded.esConfigDePrueba !== 'boolean') {
+      loaded.esConfigDePrueba = isTestConfig(loaded.config);
     }
     if ('disturbiosActivos' in (loaded.config as unknown as Record<string, unknown>)) {
       delete (loaded.config as unknown as Record<string, unknown>).disturbiosActivos;
@@ -442,6 +514,9 @@ export class GameController {
       medico: loaded.gobierno.coberturas?.medico ?? 1,
       ingeniero: loaded.gobierno.coberturas?.ingeniero ?? 1,
     };
+    if (!loaded.gobierno.integridad) {
+      loaded.gobierno.integridad = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
+    }
 
     const legacyFin = loaded.gobierno.finanzas as unknown as Record<string, unknown>;
     loaded.gobierno.finanzas = {
@@ -490,14 +565,49 @@ export class GameController {
       exportaciones: Number(legacyAcum.exportaciones ?? legacyAcum.ventasAlimento ?? 0),
     };
 
-    const legacyOut = loaded.ultimaSalidaEconomica as unknown as Record<string, unknown>;
-    if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
+    const legacyOut = (loaded.ultimaSalidaEconomica ?? {}) as unknown as Record<string, unknown>;
+    if (!loaded.ultimaSalidaEconomica) {
+      loaded.ultimaSalidaEconomica = {
+        accesoComida: {},
+        poderAdquisitivo: {},
+        saldoDiarioEstimado: 0,
+        precioAlimento: loaded.alimento.precio,
+        inflacion: loaded.gobierno.inflacion ?? 0,
+      };
+    } else if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
       loaded.ultimaSalidaEconomica.saldoDiarioEstimado = Number(legacyOut.disponibleDiarioEstimado ?? 0);
       delete legacyOut.disponibleDiarioEstimado;
     }
 
     if (!loaded.ultimaOrdenZona) {
       loaded.ultimaOrdenZona = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
+    }
+    if (!loaded.ultimaDefensaZona) {
+      loaded.ultimaDefensaZona = { centro: 55, norte: 55, este: 55, sur: 55, oeste: 55 };
+    }
+    if (!loaded.ultimaIntegridadZona) {
+      loaded.ultimaIntegridadZona = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
+    }
+    if (!loaded.golpesPorZonaHistorial) {
+      loaded.golpesPorZonaHistorial = { centro: [], norte: [], este: [], sur: [], oeste: [] };
+    }
+    if (!Array.isArray(loaded.fenomenosIniciadosIds)) {
+      loaded.fenomenosIniciadosIds = [];
+    }
+    if (!Array.isArray(loaded.avisosEmitidos)) {
+      loaded.avisosEmitidos = [];
+    }
+    if (!Array.isArray(loaded.ventanasCondicion)) {
+      loaded.ventanasCondicion = [];
+    }
+    if (!Array.isArray(loaded.bitacora)) {
+      loaded.bitacora = [];
+    }
+    if (!Array.isArray(loaded.historial)) {
+      loaded.historial = [];
+    }
+    if (!loaded.resultado) {
+      loaded.resultado = { estado: 'jugando', victoriaCumplida: false };
     }
     loaded.cooldownsCondicion = {
       impago: loaded.cooldownsCondicion?.impago ?? 0,
@@ -625,9 +735,64 @@ export class GameController {
     if (!Array.isArray(loaded.clasificadorRegistro)) {
       loaded.clasificadorRegistro = [];
     }
+    if (!Array.isArray(loaded.eventos)) {
+      loaded.eventos = [];
+    } else {
+      type LegacyPalancaEvent = {
+        id: string;
+        dia: number;
+        tipo: 'palanca';
+        zona: ZoneId;
+        palanca: string;
+        valorAnterior: number | string;
+        valorNuevo: number | string;
+        causa?: string;
+      };
+      loaded.eventos = (loaded.eventos as Array<SimEvent | LegacyPalancaEvent>).map((ev) =>
+        ev.tipo === 'palanca'
+          ? {
+              id: ev.id,
+              dia: ev.dia,
+              tipo: 'control' as const,
+              zona: ev.zona,
+              control: ev.palanca,
+              palanca: ev.palanca,
+              valorAnterior: ev.valorAnterior,
+              valorNuevo: ev.valorNuevo,
+              causa: ev.causa,
+            }
+          : ev
+      );
+    }
+
+    const tempDerived = deriveCommunityStats(loaded);
+    if (!loaded.metricasBaseObjetivo) {
+      loaded.metricasBaseObjetivo = {
+        victoriaInicial:
+          preset.victoria.metrica === 'apoyoPct'
+            ? tempDerived.apoyoPct
+            : preset.victoria.metrica === 'poblacionPct'
+            ? tempDerived.poblacionPct
+            : tempDerived.poblacion,
+        derrotaInicial:
+          preset.derrota.metrica === 'hambreCriticaPct'
+            ? tempDerived.hambreCriticaPct
+            : preset.derrota.metrica === 'poblacionPct'
+            ? tempDerived.poblacionPct
+            : tempDerived.poblacion,
+      };
+    }
+    if (!loaded.metricasPeriodoAnterior) {
+      loaded.metricasPeriodoAnterior = {
+        apoyoPct: tempDerived.apoyoPct,
+        hambreCriticaPct: tempDerived.hambreCriticaPct,
+        poblacion: tempDerived.poblacion,
+        satisfaccionMedia: tempDerived.satisfaccionMedia,
+      };
+    }
 
     this.state = loaded;
-    this.derived = deriveCommunityStats(loaded);
+    this.derived = tempDerived;
     this.lastDerivedKey = this.computeDerivedKey(loaded);
     this.syncTimer();
     this.commit();
@@ -635,6 +800,7 @@ export class GameController {
 
   forceClimatePhenomenon(tipo: PhenomenonType, zona: ZoneId = 'este'): void {
     if (this.state.resultado.estado !== 'jugando') return;
+    if (this.state.config.nivelMundo === 'M0') return;
     const next = structuredClone(this.state);
     const dia = next.reloj.dia;
     const names: Record<PhenomenonType, string> = {
@@ -677,7 +843,7 @@ export class GameController {
       titulo: `${phenomenon.nombre} (Dev)`,
       detalle: `Fenómeno activado en zona ${zona} durante ${phenomenon.duracionDias} días.`,
     });
-    if (next.bitacora.length > 100) next.bitacora.length = 100;
+    if (next.bitacora.length > MAX_BITACORA_ENTRIES) next.bitacora.length = MAX_BITACORA_ENTRIES;
 
     this.state = next;
     this.derived = deriveCommunityStats(next);
@@ -689,11 +855,8 @@ export class GameController {
     this.lastPressDay = 1;
     this.actionOffersDay = 1;
     this.actionOffersCount = 0;
-    this.inFlightConditions.clear();
-    this.aiInFlight = false;
-    this.aiBusy = false;
     this.paused = false;
-    resetAiSessionError();
+    this.resetAiLifecycle();
 
     const fresh = createInitialGameState(newConfig);
     this.state = fresh;
@@ -704,27 +867,71 @@ export class GameController {
   }
 
   updateLevers(updater: (prev: GovernorLevers) => GovernorLevers): void {
-    const next = structuredClone(this.state);
-    next.gobierno.palancasObjetivo = updater(next.gobierno.palancasObjetivo);
-    this.state = next;
-    this.derived = deriveCommunityStats(next);
-    this.lastDerivedKey = this.computeDerivedKey(next);
+    const govLevel =
+      this.state.config.nivelGobernador ??
+      (this.state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+    if (govLevel === 'G0') return;
+    const prev = this.state.gobierno.palancasObjetivo;
+    const prevClone: GovernorLevers = {
+      ...prev,
+      servicios: { ...prev.servicios },
+    };
+    const updated = updater(prevClone);
+
+    let nextObjetivo: GovernorLevers;
+    if (govLevel === 'G1') {
+      nextObjetivo = {
+        ...prev,
+        impuesto: updated.impuesto,
+        ayudaSocial: updated.ayudaSocial,
+        garantiaAlimentaria: updated.garantiaAlimentaria,
+        servicios: {
+          ...prev.servicios,
+          seguridad: updated.servicios.seguridad,
+          salud: updated.servicios.salud,
+        },
+      };
+    } else if (govLevel === 'G2' || this.state.config.economiaModulo !== 'fiscal') {
+      nextObjetivo = {
+        ...updated,
+        servicios: { ...updated.servicios },
+        topeEmision: prev.topeEmision,
+      };
+    } else {
+      nextObjetivo = {
+        ...updated,
+        servicios: { ...updated.servicios },
+      };
+    }
+
+    // palancasObjetivo only governs future day transitions; derived metrics depend solely on palancasVigentes
+    this.state = {
+      ...this.state,
+      gobierno: {
+        ...this.state.gobierno,
+        palancasObjetivo: nextObjetivo,
+      },
+    };
     this.commit();
   }
 
-  private applyAiMutation(applyFn: (s: GameState) => void): void {
+  private applyAiMutation(applyFn: (s: GameState) => boolean | void): void {
     if (this.destroyed) return;
     const prevGov = this.state.gobierno;
     const next = structuredClone(this.state);
-    applyFn(next);
+    if (applyFn(next) === false) return;
     this.state = next;
     this.syncDerivedAndGovCheck(next, prevGov);
     this.commit();
   }
 
   private scheduleAiJobs(): void {
+    if (this.destroyed) return;
     const current = this.state;
     if (current.resultado.estado !== 'jugando') return;
+
+    const jobEpoch = this.sessionEpoch;
+    const signal = this.ensureAiSignal();
 
     const pendingWin = current.ventanasCondicion.find(
       (w) => w.estado === 'pendiente' && !this.inFlightConditions.has(w.id)
@@ -733,19 +940,19 @@ export class GameController {
       this.inFlightConditions.add(pendingWin.id);
       this.aiBusy = true;
       this.commit();
-      dispatchConditionJob(current)
+      dispatchConditionJob(current, { signal })
         .then((res) => {
+          if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           if (res) {
             this.applyAiMutation(res.apply);
           }
         })
         .finally(() => {
+          if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           this.inFlightConditions.delete(pendingWin.id);
-          if (!this.destroyed) {
-            this.aiBusy = false;
-            this.commit();
-            this.scheduleAiJobs();
-          }
+          this.aiBusy = false;
+          this.commit();
+          this.scheduleAiJobs();
         });
       return;
     }
@@ -763,19 +970,19 @@ export class GameController {
       this.aiInFlight = true;
       this.aiBusy = true;
       this.commit();
-      dispatchPressJob(current)
+      dispatchPressJob(current, { signal })
         .then((res) => {
+          if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           if (res) {
             this.applyAiMutation(res.apply);
           }
         })
         .finally(() => {
+          if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           this.aiInFlight = false;
-          if (!this.destroyed) {
-            this.aiBusy = false;
-            this.commit();
-            this.scheduleAiJobs();
-          }
+          this.aiBusy = false;
+          this.commit();
+          this.scheduleAiJobs();
         });
       return;
     }
@@ -785,8 +992,9 @@ export class GameController {
       this.aiInFlight = true;
       this.aiBusy = true;
       this.commit();
-      dispatchSpontaneousActionJob(current)
+      dispatchSpontaneousActionJob(current, { signal })
         .then((res) => {
+          if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           if (res) {
             this.applyAiMutation(res.apply);
           } else {
@@ -794,31 +1002,33 @@ export class GameController {
           }
         })
         .finally(() => {
+          if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           this.aiInFlight = false;
-          if (!this.destroyed) {
-            this.aiBusy = false;
-            this.commit();
-            if (this.actionOffersCount < DIRECTOR_CONSTANTS.ofertasPorDia) {
-              this.scheduleAiJobs();
-            }
+          this.aiBusy = false;
+          this.commit();
+          if (this.actionOffersCount < DIRECTOR_CONSTANTS.ofertasPorDia) {
+            this.scheduleAiJobs();
           }
         });
     }
   }
 
   async triggerPressManual(): Promise<void> {
-    if (this.aiInFlight || this.state.resultado.estado !== 'jugando') return;
+    if (this.destroyed || this.aiInFlight || this.state.resultado.estado !== 'jugando') return;
+    const jobEpoch = this.sessionEpoch;
+    const signal = this.ensureAiSignal();
     this.aiInFlight = true;
     this.aiBusy = true;
     this.commit();
     try {
-      const res = await dispatchPressJob(this.state, { allowManualFallback: true });
+      const res = await dispatchPressJob(this.state, { allowManualFallback: true, signal });
+      if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
       if (res) {
         this.applyAiMutation(res.apply);
       }
     } finally {
-      this.aiInFlight = false;
-      if (!this.destroyed) {
+      if (!this.destroyed && jobEpoch === this.sessionEpoch) {
+        this.aiInFlight = false;
         this.aiBusy = false;
         this.commit();
       }

@@ -26,7 +26,6 @@ export default function App() {
         paused={session.paused}
         selectedNpcId={session.selectedNpc?.id ?? null}
         filter={session.mapFilter}
-        roleFilter="todos"
         lens={session.mapLens}
         followSelected={session.followSelected}
         cameraTarget={session.cameraTarget}
@@ -54,6 +53,7 @@ export default function App() {
         onStepDay={session.stepDay}
         onToggleDevMode={() => session.setDevMode(!session.devMode)}
         onSetDevPopulation={session.setDevPopulation}
+        onSetDevComplexity={session.setDevComplexity}
         onForceClimate={session.forceClimatePhenomenon}
         onToggleWindow={session.toggleWindow}
         onOpenObjetivo={() => session.openCiudadTab('bitacora')}

@@ -81,6 +81,7 @@ interface NumericSliderProps {
   valueLabel?: string;
   vigenteLabel?: string;
   costNote?: string;
+  disabled?: boolean;
   onChange: (val: number) => void;
 }
 
@@ -97,6 +98,7 @@ const NumericSlider: React.FC<NumericSliderProps> = ({
   valueLabel,
   vigenteLabel,
   costNote,
+  disabled = false,
   onChange,
 }) => {
   const pending = Math.abs(objetivo - vigente) >= 0.01;
@@ -128,12 +130,14 @@ const NumericSlider: React.FC<NumericSliderProps> = ({
 
       <input
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
         value={objetivo}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full cursor-pointer accent-teal-500"
+        className="w-full cursor-pointer accent-teal-500 disabled:opacity-45 disabled:cursor-not-allowed"
       />
 
       {costNote && (
@@ -152,6 +156,10 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   onUpdateLevers,
 }) => {
   const mod = state.config.economiaModulo;
+  const govLevel = state.config.nivelGobernador ?? (mod === 'fiscal' ? 'G3' : 'G2');
+  const isG0 = govLevel === 'G0';
+  const isG1 = govLevel === 'G1';
+  const showTopeEmision = mod === 'fiscal' && govLevel === 'G3';
   const obj = state.gobierno.palancasObjetivo;
   const vig = state.gobierno.palancasVigentes;
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
@@ -170,19 +178,26 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   const dailyTradeCapacity = activeComerciantes * ECON_CONSTANTS.intercambioPorComerciante;
 
   const hasPendingChanges =
-    Math.abs(obj.impuesto - vig.impuesto) >= 0.01 ||
-    Math.abs(obj.salarioPublico - vig.salarioPublico) >= 0.01 ||
-    Math.abs(obj.ayudaSocial - vig.ayudaSocial) >= 0.01 ||
-    Math.abs(obj.garantiaAlimentaria - vig.garantiaAlimentaria) >= 0.01 ||
-    Math.abs(obj.prensa - vig.prensa) >= 0.01 ||
-    (mod === 'fiscal' && Math.abs(obj.topeEmision - vig.topeEmision) >= 0.01) ||
-    obj.precioMaximo !== vig.precioMaximo ||
-    obj.comercioExterior !== vig.comercioExterior ||
-    obj.servicios.seguridad !== vig.servicios.seguridad ||
-    obj.servicios.salud !== vig.servicios.salud ||
-    obj.servicios.obras !== vig.servicios.obras;
+    !isG0 &&
+    (Math.abs(obj.impuesto - vig.impuesto) >= 0.01 ||
+      Math.abs(obj.ayudaSocial - vig.ayudaSocial) >= 0.01 ||
+      Math.abs(obj.garantiaAlimentaria - vig.garantiaAlimentaria) >= 0.01 ||
+      obj.servicios.seguridad !== vig.servicios.seguridad ||
+      obj.servicios.salud !== vig.servicios.salud ||
+      (!isG1 &&
+        (Math.abs(obj.salarioPublico - vig.salarioPublico) >= 0.01 ||
+          Math.abs(obj.prensa - vig.prensa) >= 0.01 ||
+          obj.precioMaximo !== vig.precioMaximo ||
+          obj.comercioExterior !== vig.comercioExterior ||
+          obj.servicios.obras !== vig.servicios.obras)) ||
+      (showTopeEmision && Math.abs(obj.topeEmision - vig.topeEmision) >= 0.01));
+
+  const visibleServiceCards = isG1
+    ? SERVICE_CARDS.filter((c) => c.lever === 'seguridad' || c.lever === 'salud')
+    : SERVICE_CARDS;
 
   const resetPending = () => {
+    if (isG0) return;
     onUpdateLevers(() => structuredClone(vig));
   };
 
@@ -213,6 +228,13 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
         className="w-[540px] max-w-[calc(100vw-24px)]"
       >
         <div className="p-3.5 max-h-[calc(100vh-115px)] overflow-y-auto space-y-4">
+          {(isG0 || isG1) && (
+            <div className="bg-amber-950/50 border border-amber-600/50 rounded-md px-2.5 py-1.5 text-[11px] text-amber-200">
+              {isG0
+                ? 'Nivel G0: Gobernador automático — controles en solo lectura.'
+                : 'Nivel G1: Controles reducidos activos (impuesto, seguridad, salud, ayuda social y garantía alimentaria).'}
+            </div>
+          )}
           {/* Top Period Budget Projection Strip */}
           <div className="bg-slate-800/60 border border-slate-700/80 rounded-md p-2.5 space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
@@ -278,23 +300,27 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               min={LEVER_BOUNDS.impuesto.min}
               max={LEVER_BOUNDS.impuesto.max}
               step={LEVER_BOUNDS.impuesto.step}
+              disabled={isG0}
               costNote={`Recaudación est.: +$${budget.ingresosEst.toFixed(0)}/período`}
               onChange={(val) => onUpdateLevers((p) => ({ ...p, impuesto: val }))}
             />
 
-            <NumericSlider
-              label="Salario público"
-              hint={`(${publicEmployeesNow} activos → obj. ${budget.totalPublicJobs})`}
-              vigente={vig.salarioPublico}
-              objetivo={obj.salarioPublico}
-              min={LEVER_BOUNDS.salarioPublico.min}
-              max={LEVER_BOUNDS.salarioPublico.max}
-              step={LEVER_BOUNDS.salarioPublico.step}
-              valueLabel={`${obj.salarioPublico}% ($${dailyWagePerEmp.toFixed(2)}/d)`}
-              vigenteLabel={`${vig.salarioPublico}%`}
-              costNote={`Nómina proyectada: $${budget.nominaEst.toFixed(0)}/período`}
-              onChange={(val) => onUpdateLevers((p) => ({ ...p, salarioPublico: val }))}
-            />
+            {!isG1 && (
+              <NumericSlider
+                label="Salario público"
+                hint={`(${publicEmployeesNow} activos → obj. ${budget.totalPublicJobs})`}
+                vigente={vig.salarioPublico}
+                objetivo={obj.salarioPublico}
+                min={LEVER_BOUNDS.salarioPublico.min}
+                max={LEVER_BOUNDS.salarioPublico.max}
+                step={LEVER_BOUNDS.salarioPublico.step}
+                disabled={isG0}
+                valueLabel={`${obj.salarioPublico}% ($${dailyWagePerEmp.toFixed(2)}/d)`}
+                vigenteLabel={`${vig.salarioPublico}%`}
+                costNote={`Nómina proyectada: $${budget.nominaEst.toFixed(0)}/período`}
+                onChange={(val) => onUpdateLevers((p) => ({ ...p, salarioPublico: val }))}
+              />
+            )}
 
             <NumericSlider
               label="Ayuda social"
@@ -306,29 +332,33 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               step={LEVER_BOUNDS.ayudaSocial.step}
               unit=" $/d"
               accent="amber"
+              disabled={isG0}
               valueLabel={`$${obj.ayudaSocial.toFixed(1)}/d`}
               vigenteLabel={`$${vig.ayudaSocial.toFixed(1)}/d`}
               costNote={`Costo est.: $${budget.ayudaSocialEst.toFixed(0)}/período`}
               onChange={(val) => onUpdateLevers((p) => ({ ...p, ayudaSocial: val }))}
             />
 
-            <NumericSlider
-              label="Prensa"
-              hint={`(reparto parejo entre ${state.medios.length} medio/s)`}
-              vigente={vig.prensa}
-              objetivo={obj.prensa}
-              min={LEVER_BOUNDS.prensa.min}
-              max={LEVER_BOUNDS.prensa.max}
-              step={LEVER_BOUNDS.prensa.step}
-              unit=" $/per"
-              accent="sky"
-              valueLabel={`$${obj.prensa.toFixed(0)}/per`}
-              vigenteLabel={`$${vig.prensa.toFixed(0)}/per`}
-              costNote={`$${(obj.prensa / Math.max(1, state.medios.length)).toFixed(1)}/per por medio`}
-              onChange={(val) => onUpdateLevers((p) => ({ ...p, prensa: val }))}
-            />
+            {!isG1 && (
+              <NumericSlider
+                label="Prensa"
+                hint={`(reparto parejo entre ${state.medios.length} medio/s)`}
+                vigente={vig.prensa}
+                objetivo={obj.prensa}
+                min={LEVER_BOUNDS.prensa.min}
+                max={LEVER_BOUNDS.prensa.max}
+                step={LEVER_BOUNDS.prensa.step}
+                unit=" $/per"
+                accent="sky"
+                disabled={isG0}
+                valueLabel={`$${obj.prensa.toFixed(0)}/per`}
+                vigenteLabel={`$${vig.prensa.toFixed(0)}/per`}
+                costNote={`$${(obj.prensa / Math.max(1, state.medios.length)).toFixed(1)}/per por medio`}
+                onChange={(val) => onUpdateLevers((p) => ({ ...p, prensa: val }))}
+              />
+            )}
 
-            {mod === 'fiscal' && (
+            {showTopeEmision && (
               <NumericSlider
                 label="Tope emisión monetaria"
                 hint="(cubre déficit, eleva inflación)"
@@ -338,6 +368,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                 max={LEVER_BOUNDS.topeEmision.max}
                 step={LEVER_BOUNDS.topeEmision.step}
                 accent="amber"
+                disabled={isG0}
                 costNote={`Hasta $${((budget.ingresosEst * obj.topeEmision) / 100).toFixed(0)}/per · Inflación actual ${state.gobierno.inflacion.toFixed(1)}%`}
                 onChange={(val) => onUpdateLevers((p) => ({ ...p, topeEmision: val }))}
               />
@@ -357,7 +388,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
             </div>
 
             <div className="space-y-2.5">
-              {SERVICE_CARDS.map(({ lever, title, effect, Icon }) => {
+              {visibleServiceCards.map(({ lever, title, effect, Icon }) => {
                 const area = SERVICE_LEVER_TO_AREA[lever];
                 const role = SERVICE_LEVER_TO_ROLE[lever];
                 const indVal = Math.round(state.gobierno.indicadores[area]);
@@ -415,6 +446,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                           <button
                             key={lvl}
                             type="button"
+                            disabled={isG0}
                             onClick={() =>
                               onUpdateLevers((p) => ({
                                 ...p,
@@ -422,7 +454,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                               }))
                             }
                             title={`${row.label}: ${row.puestosPct}% puestos · $${row.operacionPeriodo}/per`}
-                            className={`py-1 px-1 rounded border text-center transition-colors ${
+                            className={`py-1 px-1 rounded border text-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                               selected
                                 ? 'bg-teal-700 border-teal-400 text-white'
                                 : 'bg-slate-900/70 hover:bg-slate-800 border-slate-700 text-slate-300'
@@ -471,96 +503,103 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               min={LEVER_BOUNDS.garantiaAlimentaria.min}
               max={LEVER_BOUNDS.garantiaAlimentaria.max}
               step={LEVER_BOUNDS.garantiaAlimentaria.step}
+              disabled={isG0}
               costNote={`Gasto obligatorio est.: ~$${budget.garantiaEst.toFixed(0)}/período`}
               onChange={(val) => onUpdateLevers((p) => ({ ...p, garantiaAlimentaria: val }))}
             />
 
-            <div className="space-y-1.5 bg-slate-800/40 border border-slate-800 rounded-md p-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-white">Precio máximo</span>
-                <span className="font-mono text-[11px] text-amber-300 tabular-nums">
-                  {obj.precioMaximo !== vig.precioMaximo ? `hoy ${vig.precioMaximo} → ` : ''}
-                  {obj.precioMaximo}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-1.5">
-                {priceCapOptions.map((opt) => {
-                  const selected = obj.precioMaximo === opt.mode;
-                  return (
-                    <button
-                      key={opt.mode}
-                      type="button"
-                      onClick={() => onUpdateLevers((p) => ({ ...p, precioMaximo: opt.mode }))}
-                      className={`py-1.5 px-2 rounded border text-left transition-colors ${
-                        selected
-                          ? 'bg-amber-700/80 border-amber-400 text-white'
-                          : 'bg-slate-900/70 hover:bg-slate-800 border-slate-700 text-slate-200'
-                      }`}
-                    >
-                      <div className="text-[11px] font-semibold">{opt.label}</div>
-                      <div className="text-[10px] font-mono text-slate-300">{opt.capLabel}</div>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[10px] text-slate-400">
-                No cuesta presupuesto; si queda bajo el costo salarial, la productora recorta sueldos o despide.
-              </p>
-            </div>
-
-            <div className="space-y-1.5 bg-slate-800/40 border border-slate-800 rounded-md p-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <div>
-                  <span className="font-semibold text-white">Comercio exterior</span>
-                  <span className="text-[10px] text-slate-400 ml-1.5">
-                    ({activeComerciantes} com. · cap. {dailyTradeCapacity} u/d)
-                  </span>
+            {!isG1 && (
+              <>
+                <div className="space-y-1.5 bg-slate-800/40 border border-slate-800 rounded-md p-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-white">Precio máximo</span>
+                    <span className="font-mono text-[11px] text-amber-300 tabular-nums">
+                      {obj.precioMaximo !== vig.precioMaximo ? `hoy ${vig.precioMaximo} → ` : ''}
+                      {obj.precioMaximo}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {priceCapOptions.map((opt) => {
+                      const selected = obj.precioMaximo === opt.mode;
+                      return (
+                        <button
+                          key={opt.mode}
+                          type="button"
+                          disabled={isG0}
+                          onClick={() => onUpdateLevers((p) => ({ ...p, precioMaximo: opt.mode }))}
+                          className={`py-1.5 px-2 rounded border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            selected
+                              ? 'bg-amber-700/80 border-amber-400 text-white'
+                              : 'bg-slate-900/70 hover:bg-slate-800 border-slate-700 text-slate-200'
+                          }`}
+                        >
+                          <div className="text-[11px] font-semibold">{opt.label}</div>
+                          <div className="text-[10px] font-mono text-slate-300">{opt.capLabel}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    No cuesta presupuesto; si queda bajo el costo salarial, la productora recorta sueldos o despide.
+                  </p>
                 </div>
-                <span className="font-mono text-[11px] text-teal-300 tabular-nums">
-                  {obj.comercioExterior !== vig.comercioExterior
-                    ? `hoy ${vig.comercioExterior}% → `
-                    : ''}
-                  {obj.comercioExterior > 0 ? `+${obj.comercioExterior}%` : `${obj.comercioExterior}%`}
-                </span>
-              </div>
 
-              <div className="grid grid-cols-5 gap-1">
-                {FOREIGN_TRADE_STEPS.map((st) => {
-                  const selected = obj.comercioExterior === st.value;
-                  return (
-                    <button
-                      key={st.value}
-                      type="button"
-                      onClick={() =>
-                        onUpdateLevers((p) => ({ ...p, comercioExterior: st.value }))
-                      }
-                      className={`py-1.5 px-1 rounded border text-center transition-colors ${
-                        selected
-                          ? st.value > 0
-                            ? 'bg-amber-700/80 border-amber-400 text-white'
-                            : st.value < 0
-                            ? 'bg-emerald-700/80 border-emerald-400 text-white'
-                            : 'bg-teal-700 border-teal-400 text-white'
-                          : 'bg-slate-900/70 hover:bg-slate-800 border-slate-700 text-slate-200'
-                      }`}
-                    >
-                      <div className="text-[10px] font-semibold truncate">{st.shortLabel}</div>
-                      <div className="text-[9px] font-mono text-slate-300">
-                        {st.value > 0 ? `+${st.value}%` : `${st.value}%`}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                <div className="space-y-1.5 bg-slate-800/40 border border-slate-800 rounded-md p-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-semibold text-white">Comercio exterior</span>
+                      <span className="text-[10px] text-slate-400 ml-1.5">
+                        ({activeComerciantes} com. · cap. {dailyTradeCapacity} u/d)
+                      </span>
+                    </div>
+                    <span className="font-mono text-[11px] text-teal-300 tabular-nums">
+                      {obj.comercioExterior !== vig.comercioExterior
+                        ? `hoy ${vig.comercioExterior}% → `
+                        : ''}
+                      {obj.comercioExterior > 0 ? `+${obj.comercioExterior}%` : `${obj.comercioExterior}%`}
+                    </span>
+                  </div>
 
-              <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                {obj.comercioExterior > 0
-                  ? `Importar cuesta ~$${budget.importCostDiaEst.toFixed(0)}/d de la reserva estatal`
-                  : obj.comercioExterior < 0
-                  ? `Exportar vende excedente sobre ${ECON_CONSTANTS.stockMinExportarDias}d de stock directo a la Productora`
-                  : 'Comercio exterior cerrado (0 u/d)'}
-              </div>
-            </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {FOREIGN_TRADE_STEPS.map((st) => {
+                      const selected = obj.comercioExterior === st.value;
+                      return (
+                        <button
+                          key={st.value}
+                          type="button"
+                          disabled={isG0}
+                          onClick={() =>
+                            onUpdateLevers((p) => ({ ...p, comercioExterior: st.value }))
+                          }
+                          className={`py-1.5 px-1 rounded border text-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            selected
+                              ? st.value > 0
+                                ? 'bg-amber-700/80 border-amber-400 text-white'
+                                : st.value < 0
+                                ? 'bg-emerald-700/80 border-emerald-400 text-white'
+                                : 'bg-teal-700 border-teal-400 text-white'
+                              : 'bg-slate-900/70 hover:bg-slate-800 border-slate-700 text-slate-200'
+                          }`}
+                        >
+                          <div className="text-[10px] font-semibold truncate">{st.shortLabel}</div>
+                          <div className="text-[9px] font-mono text-slate-300">
+                            {st.value > 0 ? `+${st.value}%` : `${st.value}%`}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="text-[10px] text-slate-400 font-mono tabular-nums">
+                    {obj.comercioExterior > 0
+                      ? `Importar cuesta ~$${budget.importCostDiaEst.toFixed(0)}/d de la reserva estatal`
+                      : obj.comercioExterior < 0
+                      ? `Exportar vende excedente sobre ${ECON_CONSTANTS.stockMinExportarDias}d de stock directo a la Productora`
+                      : 'Comercio exterior cerrado (0 u/d)'}
+                  </div>
+                </div>
+              </>
+            )}
           </section>
         </div>
       </RctWindow>

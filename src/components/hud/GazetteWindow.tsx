@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GitBranch, Newspaper, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { GitBranch, Newspaper, SlidersHorizontal } from 'lucide-react';
 import { GameState } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
@@ -81,12 +81,6 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
                       {article.medioNombre} · {article.autorNombre} · D{article.dia}
                     </span>
                     <span className="font-mono flex items-center gap-1.5">
-                      {article.textoOrigen === 'generativo' && (
-                        <span className="flex items-center gap-0.5 text-teal-800 font-sans font-semibold">
-                          <Sparkles className="w-3 h-3" />
-                          Gen.
-                        </span>
-                      )}
                       <span>{article.tono}</span>
                       {article.zonaOrigen && (
                         <span className="text-rose-800 font-sans font-semibold uppercase">

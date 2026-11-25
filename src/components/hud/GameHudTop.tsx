@@ -15,8 +15,16 @@ import {
   Wrench,
 } from 'lucide-react';
 import { ECON_CONSTANTS, SCENARIO_PRESETS } from '../../data/catalogs';
+import { sumPeriodExpenses } from '../../engine/policies';
 import { getActivePhenomena } from '../../engine/simulation';
-import { CommunityDerived, GameState, PhenomenonType, ZoneId } from '../../types/game';
+import {
+  CommunityDerived,
+  GameState,
+  GovernorComplexityLevel,
+  PhenomenonType,
+  WorldComplexityLevel,
+  ZoneId,
+} from '../../types/game';
 import { AiStatus, WindowId } from '../../types/ui';
 
 interface GameHudTopProps {
@@ -35,6 +43,7 @@ interface GameHudTopProps {
   onStepDay: () => void;
   onToggleDevMode: () => void;
   onSetDevPopulation: (pop: number) => void;
+  onSetDevComplexity: (nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel) => void;
   onForceClimate: (tipo: PhenomenonType, zona: ZoneId) => void;
   onToggleWindow: (win: WindowId) => void;
   onOpenObjetivo: () => void;
@@ -83,6 +92,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   onStepDay,
   onToggleDevMode,
   onSetDevPopulation,
+  onSetDevComplexity,
   onForceClimate,
   onToggleWindow,
   onOpenObjetivo,
@@ -148,6 +158,13 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       : preset.derrota.metrica === 'poblacionPct'
       ? derived.poblacionPct
       : derived.poblacion;
+  const defPrev =
+    preset.derrota.metrica === 'hambreCriticaPct'
+      ? state.metricasPeriodoAnterior.hambreCriticaPct
+      : preset.derrota.metrica === 'poblacionPct'
+      ? Number(((state.metricasPeriodoAnterior.poblacion / basePop) * 100).toFixed(1))
+      : state.metricasPeriodoAnterior.poblacion;
+  const defTrend = formatTrend(defCurrent, defPrev, preset.derrota.op === '<');
   const defInit = state.metricasBaseObjetivo?.derrotaInicial ?? defCurrent;
   const defLimit = preset.derrota.umbral;
   const defProgress =
@@ -158,16 +175,13 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
 
   const estDiario = state.ultimaSalidaEconomica.saldoDiarioEstimado;
   const fin = state.gobierno.finanzas;
-  const lastGastos =
-    fin.nomina +
-    fin.pensiones +
-    fin.comidaMenores +
-    fin.garantiaAlimentaria +
-    fin.ayudaSocial +
-    fin.operacion +
-    fin.prensa;
+  const lastGastos = sumPeriodExpenses(fin);
   const activeFen = getActivePhenomena(state)[0];
-  const normalSpeeds = devMode ? [1, 2, 10] : [1, 2];
+  const normalSpeeds = devMode ? [1, 2, 4, 8] : [1, 2];
+  const worldLevel: WorldComplexityLevel =
+    state.config.nivelMundo ?? (state.config.economiaModulo === 'fiscal' ? 'M2' : 'M1');
+  const govLevel: GovernorComplexityLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
 
   const aiLabel =
     aiStatus === 'activa' ? 'IA activa' : aiStatus === 'lenta' ? 'IA lenta' : 'IA plantillas';
@@ -235,11 +249,22 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               ) : (
                 <span className="text-slate-300">{daysLeft}d</span>
               )}
-              {defeatDanger && (
-                <span className="text-rose-400 font-sans font-semibold ml-0.5">
-                  · Riesgo {defIsPct ? `${defCurrent}%` : defCurrent}
+              <span className="text-slate-600 hidden sm:inline">·</span>
+              <span
+                className={`hidden sm:inline ${
+                  defeatDanger ? 'text-rose-400 font-semibold' : 'text-slate-300'
+                }`}
+              >
+                <span className="font-sans text-slate-400 mr-1">
+                  {preset.derrota.metrica === 'hambreCriticaPct' ? 'Hamb' : 'Pob'}
                 </span>
-              )}
+                {defIsPct ? `${defCurrent}%` : defCurrent}
+                <span className="text-slate-500">
+                  /{defLimit}
+                  {defIsPct ? '%' : ''}
+                </span>{' '}
+                <span className={defTrend.tone}>{defTrend.arrow}</span>
+              </span>
             </button>
           </div>
 
@@ -361,18 +386,20 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               <span className="text-white font-semibold">{derived.poblacion}</span>
             </div>
 
-            <div className="hidden xl:block">
-              <span className="font-sans text-slate-400 mr-1">Infl.</span>
-              <span
-                className={
-                  state.gobierno.inflacion > 25
-                    ? 'text-amber-400 font-semibold'
-                    : 'text-white font-semibold'
-                }
-              >
-                {state.gobierno.inflacion.toFixed(0)}%
-              </span>
-            </div>
+            {state.config.economiaModulo === 'fiscal' && (
+              <div className="hidden xl:block">
+                <span className="font-sans text-slate-400 mr-1">Infl.</span>
+                <span
+                  className={
+                    state.gobierno.inflacion > 25
+                      ? 'text-amber-400 font-semibold'
+                      : 'text-white font-semibold'
+                  }
+                >
+                  {state.gobierno.inflacion.toFixed(0)}%
+                </span>
+              </div>
+            )}
 
             {activeFen && (
               <button
@@ -467,11 +494,36 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               </button>
             </div>
             <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">Nivel:</span>
+              <select
+                aria-label="Nivel de mundo dev"
+                value={worldLevel}
+                onChange={(e) => onSetDevComplexity(e.target.value as WorldComplexityLevel, govLevel)}
+                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 font-mono"
+              >
+                <option value="M0">M0</option>
+                <option value="M1">M1</option>
+                <option value="M2">M2</option>
+              </select>
+              <select
+                aria-label="Nivel de gobernador dev"
+                value={govLevel}
+                onChange={(e) => onSetDevComplexity(worldLevel, e.target.value as GovernorComplexityLevel)}
+                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 font-mono"
+              >
+                <option value="G0">G0</option>
+                <option value="G1">G1</option>
+                <option value="G2">G2</option>
+                <option value="G3">G3</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
               <span className="text-slate-400">Forzar evento:</span>
               <select
                 value={devFenom}
+                disabled={worldLevel === 'M0'}
                 onChange={(e) => setDevFenom(e.target.value as PhenomenonType)}
-                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100"
+                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 disabled:opacity-40"
               >
                 <option value="sequia">Sequía</option>
                 <option value="plaga">Plaga agrícola</option>
@@ -480,8 +532,9 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               </select>
               <select
                 value={devZona}
+                disabled={worldLevel === 'M0'}
                 onChange={(e) => setDevZona(e.target.value as ZoneId)}
-                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100"
+                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 disabled:opacity-40"
               >
                 <option value="centro">centro</option>
                 <option value="norte">norte</option>
@@ -491,8 +544,9 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               </select>
               <button
                 type="button"
+                disabled={worldLevel === 'M0'}
                 onClick={() => onForceClimate(devFenom, devZona)}
-                className="px-2 py-0.5 font-semibold bg-amber-700 hover:bg-amber-600 text-white rounded"
+                className="px-2 py-0.5 font-semibold bg-amber-700 hover:bg-amber-600 text-white rounded disabled:opacity-40"
               >
                 Lanzar
               </button>

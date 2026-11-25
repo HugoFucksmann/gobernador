@@ -8,7 +8,7 @@ import {
   User,
   Users,
 } from 'lucide-react';
-import { ROLE_CATALOG, SCENARIO_PRESETS } from '../../data/catalogs';
+import { ROLE_CATALOG } from '../../data/catalogs';
 import { getNpcDistrictName } from '../../engine/npcInsights';
 import {
   getEffectiveTrait,
@@ -16,6 +16,7 @@ import {
   getModifierDelta,
   getNpcProductivity,
   getStage,
+  getWorldZones,
 } from '../../engine/simulation';
 import {
   ActionEffectId,
@@ -219,7 +220,7 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
   const stage = getStage(selectedNpc.edad);
   const prod = Math.round(getNpcProductivity(selectedNpc, state) * 100);
   const districtName = getNpcDistrictName(selectedNpc);
-  const zonesCount = Object.keys(SCENARIO_PRESETS[state.config.escenarioId].zonas).length;
+  const zonesCount = getWorldZones(state).length;
   const effZone = getEffectiveZone(selectedNpc, zonesCount);
 
   return (

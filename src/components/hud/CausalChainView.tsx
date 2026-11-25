@@ -1,16 +1,9 @@
 import React from 'react';
 import { ArrowDown, Compass, GitBranch, User, X } from 'lucide-react';
+import { ZONE_TO_DISTRICT } from '../../data/catalogs';
 import { buildCausalChain } from '../../engine/simulation';
-import { CausalStep, DistrictId, GameState, ZoneId } from '../../types/game';
+import { CausalStep, DistrictId, GameState } from '../../types/game';
 import { RctWindow } from './RctWindow';
-
-const ZONE_TO_DISTRICT: Record<ZoneId, DistrictId | 'all'> = {
-  centro: 'civico',
-  norte: 'campos',
-  este: 'residencial',
-  sur: 'taller',
-  oeste: 'campos',
-};
 
 interface CausalChainListProps {
   state: GameState;
@@ -20,7 +13,7 @@ interface CausalChainListProps {
   onJumpDistrict?: (district: DistrictId | 'all') => void;
 }
 
-export const CausalChainList: React.FC<CausalChainListProps> = ({
+const CausalChainList: React.FC<CausalChainListProps> = ({
   state,
   startRef,
   fallbackText,

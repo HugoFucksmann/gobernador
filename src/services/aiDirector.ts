@@ -13,6 +13,7 @@ import {
   getActivePhenomena,
   getAnnouncedPhenomena,
   hasOutOfPostEffect,
+  MAX_BITACORA_ENTRIES,
   pickActionText,
   pickChaosCandidateNpc,
   planDailyPressPublications,
@@ -31,9 +32,9 @@ import {
 } from '../types/game';
 import { AiStatus } from '../types/ui';
 
-export interface AiDirectorResult {
+interface AiDirectorResult {
   type: 'press' | 'action' | 'condition';
-  apply: (state: GameState) => void;
+  apply: (state: GameState) => boolean | void;
   source: 'ia' | 'plantilla';
   status: AiStatus;
 }
@@ -131,9 +132,19 @@ function pickWeightedCandidate(
   return candidatas[candidatas.length - 1];
 }
 
-async function fetchWithTimeout(url: string, body: unknown, timeoutMs: number): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+  externalSignal?: AbortSignal
+): Promise<Response> {
+  if (externalSignal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
   try {
     return await fetch(url, {
       method: 'POST',
@@ -143,6 +154,7 @@ async function fetchWithTimeout(url: string, body: unknown, timeoutMs: number): 
     });
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -150,11 +162,28 @@ function normalizeNumberToken(raw: string): string {
   return raw.replace(',', '.');
 }
 
+function collectProperTokens(src: string | undefined, target: Set<string>): void {
+  if (!src) return;
+  const tokens = src.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}/g) || [];
+  for (const tok of tokens) {
+    target.add(tok);
+    target.add(tok.charAt(0).toUpperCase() + tok.slice(1).toLowerCase());
+  }
+}
+
+function buildBaseProperWords(state: GameState): Set<string> {
+  const words = new Set<string>(COMMON_CAPITALIZED_WORDS);
+  for (const z of ZONE_IDS) collectProperTokens(z, words);
+  for (const m of state.medios) collectProperTokens(m.nombre, words);
+  for (const n of state.npcs) collectProperTokens(n.nombre, words);
+  return words;
+}
+
 function validateGeneratedArticle(
   titulo: string,
   texto: string,
   plan: PlannedPressPublication,
-  state: GameState
+  baseProperWords: Set<string>
 ): boolean {
   const cleanTitle = titulo.trim();
   const cleanText = texto.trim();
@@ -188,24 +217,12 @@ function validateGeneratedArticle(
     }
   }
 
-  const allowedProperWords = new Set<string>(COMMON_CAPITALIZED_WORDS);
-  const addTokens = (src?: string) => {
-    if (!src) return;
-    const tokens = src.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}/g) || [];
-    for (const tok of tokens) {
-      allowedProperWords.add(tok);
-      allowedProperWords.add(tok.charAt(0).toUpperCase() + tok.slice(1).toLowerCase());
-    }
-  };
-
-  for (const z of ZONE_IDS) addTokens(z);
-  for (const m of state.medios) addTokens(m.nombre);
-  for (const n of state.npcs) addTokens(n.nombre);
-  addTokens(plan.medio.nombre);
-  addTokens(plan.autor.nombre);
-  addTokens(plan.templateTitulo);
-  addTokens(plan.templateTexto);
-  addTokens(JSON.stringify(plan.fact.datos));
+  const allowedProperWords = new Set<string>(baseProperWords);
+  collectProperTokens(plan.medio.nombre, allowedProperWords);
+  collectProperTokens(plan.autor.nombre, allowedProperWords);
+  collectProperTokens(plan.templateTitulo, allowedProperWords);
+  collectProperTokens(plan.templateTexto, allowedProperWords);
+  collectProperTokens(JSON.stringify(plan.fact.datos), allowedProperWords);
 
   const checkTextProperNouns = (str: string): boolean => {
     const regex = /(^|[.!?¡¿]\s+|:\s+|[«"']\s*)?([A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,})/g;
@@ -227,13 +244,13 @@ function validateGeneratedArticle(
 function buildArticleFromPlan(
   plan: PlannedPressPublication,
   dia: number,
-  rng: { rngState: number; idSeq: number },
+  articleId: string,
   tituloOverride?: string,
   textoOverride?: string,
   textoOrigen: 'plantilla' | 'generativo' = 'plantilla'
 ): NewsArticle {
   return {
-    id: nextSeqId(rng, `n_${dia}`),
+    id: articleId,
     dia,
     medioId: plan.medio.id,
     medioNombre: plan.medio.nombre,
@@ -361,7 +378,7 @@ function pushClassifierRecord(state: GameState, record: ClassifierRecord): void 
 
 export async function dispatchPressJob(
   state: GameState,
-  options?: { allowManualFallback?: boolean }
+  options?: { allowManualFallback?: boolean; signal?: AbortSignal }
 ): Promise<AiDirectorResult | null> {
   if (state.medios.length === 0) return null;
   const rng = { rngState: state.rngState, idSeq: state.idSeq };
@@ -391,9 +408,13 @@ export async function dispatchPressJob(
   const planned = planDailyPressPublications(planningState, rng);
   if (planned.length === 0) return null;
 
+  const articleIds = planned.map(() => nextSeqId(rng, `n_${state.reloj.dia}`));
+
   if (!state.config.usarIaGemini || aiDisabledForSession) {
     lastAiCallSource = 'plantilla';
-    const articles = planned.map((plan) => buildArticleFromPlan(plan, state.reloj.dia, rng));
+    const articles = planned.map((plan, idx) =>
+      buildArticleFromPlan(plan, state.reloj.dia, articleIds[idx])
+    );
     return {
       type: 'press',
       source: 'plantilla',
@@ -409,66 +430,98 @@ export async function dispatchPressJob(
     };
   }
 
-  const startedAt = Date.now();
+  const baseProperWords = buildBaseProperWords(state);
+
+  const results = await Promise.all(
+    planned.map(async (plan, idx): Promise<{ article: NewsArticle; generative: boolean; status: AiStatus } | null> => {
+      const articleId = articleIds[idx];
+      if (options?.signal?.aborted) return null;
+      if (aiDisabledForSession) {
+        return {
+          article: buildArticleFromPlan(plan, state.reloj.dia, articleId),
+          generative: false,
+          status: 'plantilla',
+        };
+      }
+      const reqStartedAt = Date.now();
+      try {
+        const res = await fetchWithTimeout(
+          '/api/ai/press',
+          {
+            tema: plan.fact.tema,
+            tono: plan.tono,
+            medio: {
+              nombre: plan.medio.nombre,
+              afinidad_gobierno: Math.round(plan.medio.lineaEditorial.afinidadGobierno),
+              sensacionalismo: Math.round(plan.medio.lineaEditorial.sensacionalismo),
+              credibilidad: Math.round(plan.medio.credibilidad),
+            },
+            autor: plan.autor.nombre,
+            datos: plan.fact.datos,
+            plantilla: {
+              titulo: plan.templateTitulo,
+              texto: plan.templateTexto,
+            },
+            max_largo: {
+              titulo: PRESS_MAX_TITULO,
+              texto: PRESS_MAX_TEXTO,
+            },
+          },
+          DIRECTOR_CONSTANTS.plazoGenerativoMs,
+          options?.signal
+        );
+
+        if (options?.signal?.aborted) return null;
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ error: '' }));
+          if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
+          return {
+            article: buildArticleFromPlan(plan, state.reloj.dia, articleId),
+            generative: false,
+            status: recordAiCallOutcome('plantilla', reqStartedAt),
+          };
+        }
+
+        const data = await res.json();
+        const titulo = typeof data.titulo === 'string' ? data.titulo.trim() : '';
+        const texto = typeof data.texto === 'string' ? data.texto.trim() : '';
+        if (!validateGeneratedArticle(titulo, texto, plan, baseProperWords)) {
+          return {
+            article: buildArticleFromPlan(plan, state.reloj.dia, articleId),
+            generative: false,
+            status: recordAiCallOutcome('plantilla', reqStartedAt),
+          };
+        }
+
+        return {
+          article: buildArticleFromPlan(plan, state.reloj.dia, articleId, titulo, texto, 'generativo'),
+          generative: true,
+          status: recordAiCallOutcome('ia', reqStartedAt),
+        };
+      } catch {
+        if (options?.signal?.aborted) return null;
+        return {
+          article: buildArticleFromPlan(plan, state.reloj.dia, articleId),
+          generative: false,
+          status: recordAiCallOutcome('plantilla', reqStartedAt),
+        };
+      }
+    })
+  );
+
+  if (options?.signal?.aborted || results.some((r) => r === null)) {
+    return null;
+  }
+
   let anyGenerative = false;
   let lastStatus: AiStatus = 'plantilla';
   const articles: NewsArticle[] = [];
-
-  for (const plan of planned) {
-    if (aiDisabledForSession) {
-      articles.push(buildArticleFromPlan(plan, state.reloj.dia, rng));
-      continue;
-    }
-    try {
-      const res = await fetchWithTimeout(
-        '/api/ai/press',
-        {
-          tema: plan.fact.tema,
-          tono: plan.tono,
-          medio: {
-            nombre: plan.medio.nombre,
-            afinidad_gobierno: Math.round(plan.medio.lineaEditorial.afinidadGobierno),
-            sensacionalismo: Math.round(plan.medio.lineaEditorial.sensacionalismo),
-            credibilidad: Math.round(plan.medio.credibilidad),
-          },
-          autor: plan.autor.nombre,
-          datos: plan.fact.datos,
-          plantilla: {
-            titulo: plan.templateTitulo,
-            texto: plan.templateTexto,
-          },
-          max_largo: {
-            titulo: PRESS_MAX_TITULO,
-            texto: PRESS_MAX_TEXTO,
-          },
-        },
-        DIRECTOR_CONSTANTS.plazoGenerativoMs
-      );
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: '' }));
-        if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
-        lastStatus = recordAiCallOutcome('plantilla', startedAt);
-        articles.push(buildArticleFromPlan(plan, state.reloj.dia, rng));
-        continue;
-      }
-
-      const data = await res.json();
-      const titulo = typeof data.titulo === 'string' ? data.titulo.trim() : '';
-      const texto = typeof data.texto === 'string' ? data.texto.trim() : '';
-      if (!validateGeneratedArticle(titulo, texto, plan, state)) {
-        lastStatus = recordAiCallOutcome('plantilla', startedAt);
-        articles.push(buildArticleFromPlan(plan, state.reloj.dia, rng));
-        continue;
-      }
-
-      anyGenerative = true;
-      lastStatus = recordAiCallOutcome('ia', startedAt);
-      articles.push(buildArticleFromPlan(plan, state.reloj.dia, rng, titulo, texto, 'generativo'));
-    } catch {
-      lastStatus = recordAiCallOutcome('plantilla', startedAt);
-      articles.push(buildArticleFromPlan(plan, state.reloj.dia, rng));
-    }
+  for (const item of results) {
+    if (!item) continue;
+    articles.push(item.article);
+    if (item.generative) anyGenerative = true;
+    lastStatus = item.status;
   }
 
   return {
@@ -486,15 +539,22 @@ export async function dispatchPressJob(
   };
 }
 
-export async function dispatchSpontaneousActionJob(state: GameState): Promise<AiDirectorResult | null> {
+export async function dispatchSpontaneousActionJob(
+  state: GameState,
+  options?: { signal?: AbortSignal }
+): Promise<AiDirectorResult | null> {
+  if (options?.signal?.aborted) return null;
   const gate = canTriggerSpontaneousChaos(state);
   if (!gate.allowed) return null;
 
   const rng = { rngState: state.rngState, idSeq: state.idSeq };
-  const npc = pickChaosCandidateNpc(Object.assign({}, state, { rngState: rng.rngState }));
+  const probeState = Object.assign({}, state, { rngState: rng.rngState });
+  const npc = pickChaosCandidateNpc(probeState);
+  rng.rngState = probeState.rngState;
   if (!npc) return null;
 
-  const candidatas = selectCandidateActions(npc, Object.assign({}, state, { rngState: rng.rngState }));
+  const candidatas = selectCandidateActions(npc, probeState);
+  rng.rngState = probeState.rngState;
   if (candidatas.length === 0) return null;
 
   const dispatchedDay = state.reloj.dia;
@@ -505,12 +565,14 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
     fuente: 'clasificador' | 'motor',
     latenciaMs?: number,
     rechazada?: boolean
-  ) => {
-    if (s.reloj.dia - dispatchedDay > 5) return;
+  ): boolean => {
+    if (s.reloj.dia - dispatchedDay > 5) return false;
     const target = s.npcs.find((n) => n.id === npc.id);
-    if (!target || !target.vivo || target.hospital.internado || target.accionIa) return;
-    if (!canTriggerSpontaneousChaos(s).allowed) return;
-    if (chosen.tipo === 'espontanea' && hasOutOfPostEffect(chosen) && !canRoleLeavePost(s, target.rol)) return;
+    if (!target || !target.vivo || target.hospital.internado || target.accionIa) return false;
+    if (!canTriggerSpontaneousChaos(s).allowed) return false;
+    if (chosen.tipo === 'espontanea' && hasOutOfPostEffect(chosen) && !canRoleLeavePost(s, target.rol)) {
+      return false;
+    }
     const roleName = ROLE_CATALOG[target.rol].nombre.toLowerCase();
     const texto = pickActionText(chosen, target.nombre, s, roleName, target.zona);
     applyActionToNpc(s, target, chosen, texto, fuente);
@@ -529,10 +591,12 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
       dia: s.reloj.dia,
       categoria: 'caos',
       origen: `accion:${chosen.id}/${fuente}`,
+      simEventId: (target as Npc).accionIa?.focoEventId,
       titulo: `${target.nombre}: ${chosen.nombre}`,
       detalle: texto,
     });
-    if (s.bitacora.length > 160) s.bitacora.length = 160;
+    if (s.bitacora.length > MAX_BITACORA_ENTRIES) s.bitacora.length = MAX_BITACORA_ENTRIES;
+    return true;
   };
 
   if (!state.config.usarIaGemini || aiDisabledForSession) {
@@ -544,12 +608,12 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
       status: 'plantilla',
       apply: (s) => {
         s.rngState = rng.rngState;
-        applySelectedAction(s, chosen, 'motor');
+        return applySelectedAction(s, chosen, 'motor');
       },
     };
   }
 
-  // Shuffle candidates & map to neutral IDs c1..cn (DIRECTOR_PRENSA §5)
+  // Shuffle candidates & map to neutral IDs c1..cn (CAOS_PRENSA §9 / MOTOR §4)
   const shuffled = shuffleArray(candidatas, rng);
   const neutralCandidates: NeutralCandidate[] = shuffled.map((action, idx) => ({
     id: `c${idx + 1}`,
@@ -575,8 +639,11 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
           descripcion: c.descripcion,
         })),
       },
-      DIRECTOR_CONSTANTS.plazoClasificadorMs
+      DIRECTOR_CONSTANTS.plazoClasificadorMs,
+      options?.signal
     );
+
+    if (options?.signal?.aborted) return null;
 
     const latencyMs = Math.max(0, Date.now() - startedAt);
     if (!res.ok) {
@@ -590,7 +657,7 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
         status,
         apply: (s) => {
           s.rngState = rng.rngState;
-          applySelectedAction(s, chosen, 'motor', latencyMs, false);
+          return applySelectedAction(s, chosen, 'motor', latencyMs, false);
         },
       };
     }
@@ -606,7 +673,7 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
         status,
         apply: (s) => {
           s.rngState = rng.rngState;
-          applySelectedAction(s, chosen, 'motor', latencyMs, true);
+          return applySelectedAction(s, chosen, 'motor', latencyMs, true);
         },
       };
     }
@@ -620,10 +687,11 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
       status,
       apply: (s) => {
         s.rngState = rng.rngState;
-        applySelectedAction(s, chosen, 'clasificador', latencyMs, false);
+        return applySelectedAction(s, chosen, 'clasificador', latencyMs, false);
       },
     };
   } catch {
+    if (options?.signal?.aborted) return null;
     const latencyMs = Math.max(0, Date.now() - startedAt);
     const status = recordAiCallOutcome('plantilla', startedAt);
     const chosen = pickWeightedCandidate(candidatas, npc, rng);
@@ -633,22 +701,30 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
       status,
       apply: (s) => {
         s.rngState = rng.rngState;
-        applySelectedAction(s, chosen, 'motor', latencyMs, false);
+        return applySelectedAction(s, chosen, 'motor', latencyMs, false);
       },
     };
   }
 }
 
-export async function dispatchConditionJob(state: GameState): Promise<AiDirectorResult | null> {
+export async function dispatchConditionJob(
+  state: GameState,
+  options?: { signal?: AbortSignal }
+): Promise<AiDirectorResult | null> {
+  if (options?.signal?.aborted) return null;
   const pending = state.ventanasCondicion.find((w) => w.estado === 'pendiente');
   if (!pending) return null;
 
   const rng = { rngState: state.rngState };
-  const affectedNpcs = state.npcs.filter((n) => pending.npcIds.includes(n.id));
-  const muestra = affectedNpcs
-    .slice(0, 4)
-    .map((n) => `${n.nombre} (${n.rol})`)
-    .join(', ');
+  const affectedIdSet = new Set(pending.npcIds);
+  const sampleParts: string[] = [];
+  for (const n of state.npcs) {
+    if (affectedIdSet.has(n.id)) {
+      sampleParts.push(`${n.nombre} (${n.rol})`);
+      if (sampleParts.length >= 4) break;
+    }
+  }
+  const muestra = sampleParts.join(', ');
   const candidatas =
     pending.candidatas.length > 0
       ? pending.candidatas
@@ -711,8 +787,11 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
           descripcion: c.descripcion,
         })),
       },
-      DIRECTOR_CONSTANTS.plazoClasificadorMs
+      DIRECTOR_CONSTANTS.plazoClasificadorMs,
+      options?.signal
     );
+
+    if (options?.signal?.aborted) return null;
 
     const latencyMs = Math.max(0, Date.now() - startedAt);
     if (!res.ok) {
@@ -762,6 +841,7 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
       },
     };
   } catch {
+    if (options?.signal?.aborted) return null;
     const latencyMs = Math.max(0, Date.now() - startedAt);
     const status = recordAiCallOutcome('plantilla', startedAt);
     const chosen = pickWeightedCandidate(candidatas, null, rng);
@@ -777,5 +857,3 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
     };
   }
 }
-
-export { scoreActionAffinity };

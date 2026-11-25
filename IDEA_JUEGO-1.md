@@ -6,17 +6,19 @@
 
 ## 1. Pitch
 
-Una simulación de comunidad donde cada habitante es un NPC con personalidad propia. El jugador es el **gobernador**: gestiona las condiciones de la comunidad, no a las personas. Un **director de caos** hace que los NPCs hagan cosas diversas, raras y divertidas, y la **prensa** cuenta lo que pasa. **El juego funciona completo sin IA**; opcionalmente, una IA local mejora las decisiones del caos y el texto de las noticias.
+Una simulación de comunidad donde cada habitante es un NPC con personalidad propia. El jugador es el **gobernador** de una ciudad chica que tiene que crecer: construye en el mapa, ajusta unas pocas palancas, negocia con empresarios y medios, y se prepara para lo que viene. Gestiona condiciones, no a las personas. Un **director de caos** hace que los NPCs hagan cosas diversas, raras y divertidas, y la **prensa** cuenta lo que pasa. **El juego funciona completo sin IA**; opcionalmente, una IA local mejora las decisiones del caos y el texto de las noticias.
 
 ## 2. Corazón
 
 La tensión entre **el orden que intenta imponer el gobernador** y **el caos creativo de la comunidad**. No se trata de optimizar una colonia, sino de gobernar gente impredecible.
 
+**El loop:** la ciudad arranca chica y con servicios insuficientes → el jugador construye y ajusta → la economía y la comunidad responden → empresarios y medios presionan, el clima avisa y el caos sorprende → si las cosas van bien, se cumplen hitos y la ciudad se expande. Todo se ve y se toca en el mapa.
+
 ## 3. Pilares
 
 1. **Simulación mecánica y barata.** Cada NPC tiene estado propio; la comunidad se deriva de ellos.
 2. **Caos mecánico, IA opcional.** Las acciones salen de una tabla cerrada con efectos acotados. La IA elige y escribe; las reglas y la magnitud las controla el juego.
-3. **Gobernador que fija condiciones.** Nunca manda a un NPC ni escribe una noticia.
+3. **Gobernador que construye y fija condiciones.** Construye, ajusta, negocia y planifica; nunca manda a un NPC ni escribe una noticia.
 4. **Sucesos del mundo.** Sequías, plagas, pandemias y zombis desajustan lo que al empezar encaja.
 5. **Economía viva.** Los NPCs trabajan, ganan, compran su comida y gastan; las empresas pagan según venden; el estado recauda y redistribuye.
 6. **Prensa.** Es la forma de enterarse de lo que pasa y una fuerza más con la que lidiar.
@@ -26,11 +28,11 @@ La tensión entre **el orden que intenta imponer el gobernador** y **el caos cre
 ## 4. Arquitectura en capas
 
 ```
-GOBERNADOR (palancas, objetivo, qué ve)
-        │ mueve controles · lee indicadores y eventos
+GOBERNADOR (construir, palancas, demandas, hitos, objetivo)
+        │ controles y órdenes · lee indicadores y eventos
      CONTROLES (contrato)
         │
-MUNDO (NPCs, economía, clima, salud, caos, prensa)
+MUNDO (NPCs, ciudad, economía, clima, salud, caos, prensa)
 ```
 
 - El mundo corre solo, con los controles en los valores del preset (piloto automático).
@@ -43,7 +45,7 @@ Dos para empezar: **elecciones** (primero) y **apocalipsis zombie**. Cada uno es
 
 ## 6. Plataforma
 
-Steam, motor del prototipo en TypeScript con UI de depuración, UI final en Godot con 3D low-poly y cámara libre. El contrato entre UI y motor es independiente del lenguaje, así que dónde viva el motor final no cambia la UI. A x1, elecciones dura unas 2 horas reales y zombies, una.
+Steam, prototipo en TypeScript con un mapa 2D simple, UI final en Godot con 3D low-poly y cámara libre. El contrato entre UI y motor es independiente del lenguaje, así que dónde viva el motor final no cambia la UI. A x1, elecciones dura unas 2 horas reales y zombies, una.
 
 ## 7. Ideas a futuro
 
@@ -51,7 +53,7 @@ Niveles en HOJA_DE_RUTA. Notas que solo viven acá:
 
 - **Leyes** que los NPCs puedan desobedecer, junto con la división de poderes.
 - **Comunicado oficial** del gobernador a la comunidad (sin medio estatal).
-- **Decisiones puntuales:** cuarentena, toque de queda, obra pública.
+- **Decisiones puntuales:** cuarentena, toque de queda.
 - **Servicios privados** que den peso real a la desigualdad.
 - **Subsidios a servicios** y a la producción de alimento.
 - **Que la IA proponga a quién ofrecer acciones.**
@@ -62,12 +64,14 @@ Niveles en HOJA_DE_RUTA. Notas que solo viven acá:
 | Capa | Documento | Qué tiene |
 |---|---|---|
 | Visión | IDEA_JUEGO.md | Este documento |
-| Mundo | MUNDO.md | NPCs, roles, zonas, clima, salud, servicios, seguridad, causas |
+| Mundo | MUNDO.md | NPCs, roles, zonas, clima, salud, servicios, seguridad, causas, parcelas y edificios |
 | Mundo | ECONOMIA.md | Circuito del dinero y la comida |
 | Mundo | CAOS_PRENSA.md | Director de caos, acciones, medios, noticias, IA opcional |
 | Mundo | ACCIONES.md | Tabla inicial de acciones |
-| Contrato | CONTROLES.md | Controles, indicadores y eventos |
-| Gobernador | GOBERNADOR.md | Palancas, qué ve, objetivo y derrota |
+| Mundo | EDIFICIOS.md | Catálogo de edificios y obras |
+| Contrato | CONTROLES.md | Controles, órdenes, medidas, indicadores y eventos |
+| Gobernador | GOBERNADOR.md | Construir, palancas, hitos, qué ve, objetivo y derrota |
+| Gobernador | ACTORES.md | Empresarios, medios y sus demandas |
 | Ambas | ESCENARIOS.md | Presets y panel de configuración |
 | Técnico | MOTOR.md | Tiempo, orden de cálculo, guardado, infraestructura de IA |
 | Técnico | UI.md | Interfaz final en Godot |

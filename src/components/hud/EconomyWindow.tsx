@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, TrendingUp } from 'lucide-react';
 import { PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
+import { sumPeriodExpenses } from '../../engine/policies';
 import { CommunityDerived, GameState, HistoryPoint } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
@@ -76,14 +77,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
   const acum = state.gobierno.acumuladoPeriodo;
   const estDiario = state.ultimaSalidaEconomica.saldoDiarioEstimado;
   const foodBalance = state.alimento.produccionDiaria - state.alimento.consumoDiario;
-  const lastExpenses =
-    fin.nomina +
-    fin.pensiones +
-    fin.comidaMenores +
-    fin.garantiaAlimentaria +
-    fin.ayudaSocial +
-    fin.operacion +
-    fin.prensa;
+  const lastExpenses = sumPeriodExpenses(fin);
   const curIngresos = acum.impuestos;
   const curGastos =
     acum.nominaDevengada +
@@ -94,12 +88,16 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
     acum.operacion +
     acum.prensa;
 
-  const foodOwner = state.empresas.alimento.dueno
-    ? state.npcs.find((n) => n.id === state.empresas.alimento.dueno && n.vivo)?.nombre || 'Sin dueño'
-    : 'Vacante';
-  const liveSociosCount = state.empresas.comercio.socios.filter((id) =>
-    state.npcs.some((n) => n.id === id && n.vivo)
-  ).length;
+  const foodOwnerId = state.empresas.alimento.dueno;
+  const socioIds = new Set(state.empresas.comercio.socios);
+  let foodOwnerName = foodOwnerId ? 'Sin dueño' : 'Vacante';
+  let liveSociosCount = 0;
+  for (const n of state.npcs) {
+    if (!n.vivo) continue;
+    if (foodOwnerId && n.id === foodOwnerId) foodOwnerName = n.nombre;
+    if (socioIds.has(n.id)) liveSociosCount++;
+  }
+  const foodOwner = foodOwnerName;
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const popScale = Math.max(0.6, derived.poblacion / 100);
   const foodEmployees = derived.roles.agricultor + derived.roles.tecnico;
@@ -215,9 +213,11 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                   </div>
                 ))}
 
-                {(fin.emision > 0 || fin.importaciones > 0 || fin.exportaciones > 0) && (
+                {((state.config.economiaModulo === 'fiscal' && fin.emision > 0) ||
+                  fin.importaciones > 0 ||
+                  fin.exportaciones > 0) && (
                   <div className="pt-1 border-t border-slate-800/70 space-y-0.5 text-[10px] font-mono tabular-nums text-slate-400">
-                    {fin.emision > 0 && (
+                    {state.config.economiaModulo === 'fiscal' && fin.emision > 0 && (
                       <div className="flex justify-between text-amber-300">
                         <span>Emisión monetaria aplicada</span>
                         <span>+${fin.emision.toFixed(1)}</span>
@@ -364,7 +364,9 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
               <SparklineCard data={state.historial} getVal={(p) => p.hambreCritica} title="Hambre crítica" unit="%" color="#ef4444" />
               <SparklineCard data={state.historial} getVal={(p) => p.satisfaccion} title="Satisfacción media" unit="%" color="#38bdf8" />
               <SparklineCard data={state.historial} getVal={(p) => p.poblacion} title="Población viva" color="#a78bfa" />
-              <SparklineCard data={state.historial} getVal={(p) => p.inflacion} title="Inflación" unit="%" color="#f59e0b" />
+              {state.config.economiaModulo === 'fiscal' && (
+                <SparklineCard data={state.historial} getVal={(p) => p.inflacion} title="Inflación" unit="%" color="#f59e0b" />
+              )}
             </div>
           )}
         </div>

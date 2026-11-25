@@ -1,16 +1,20 @@
 import {
+  BUILDING_CATALOG,
   ECON_CONSTANTS,
+  OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
-  SERVICE_LEVEL_TABLE,
 } from '../data/catalogs';
 import {
+  BuildingInstance,
   CommunityDerived,
+  FiscalLedger,
   GameState,
   GovernorLevers,
+  Parcela,
+  ServiceAreaId,
   ServiceLevel,
-  ServiceLeverId,
   ServicePublicRoleId,
   WorldConfig,
 } from '../types/game';
@@ -18,6 +22,8 @@ import {
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   escenarioId: 'elecciones',
   economiaModulo: SCENARIO_PRESETS.elecciones.economiaDefault,
+  nivelMundo: SCENARIO_PRESETS.elecciones.economiaDefault === 'fiscal' ? 'M2' : 'M1',
+  nivelGobernador: SCENARIO_PRESETS.elecciones.economiaDefault === 'fiscal' ? 'G3' : 'G2',
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,
   caos: { ...SCENARIO_PRESETS.elecciones.caosDefault },
@@ -32,6 +38,8 @@ export interface PeriodBudgetEstimate {
   garantiaEst: number;
   comidaMenoresEst: number;
   ayudaSocialEst: number;
+  mantenimientoEst: number;
+  operacionObrasEst: number;
   operacionEst: number;
   prensaEst: number;
   gastosEst: number;
@@ -42,17 +50,138 @@ export interface PeriodBudgetEstimate {
   daysToSettlement: number;
 }
 
+export function sumPeriodExpenses(fin: FiscalLedger): number {
+  return (
+    fin.nomina +
+    fin.pensiones +
+    fin.comidaMenores +
+    fin.garantiaAlimentaria +
+    fin.ayudaSocial +
+    fin.operacion +
+    fin.prensa
+  );
+}
+
 export function daysToSettlement(state: GameState): number {
   return Math.max(1, PERIOD_DAYS - state.reloj.diasEnPeriodo);
 }
 
-export function getServiceTargetJobs(
-  population: number,
-  lever: ServiceLeverId,
-  level: ServiceLevel
-): number {
+export function getDevPopScale(poblacionInicial: number): number {
+  return Math.max(0.5, poblacionInicial / 100);
+}
+
+export function getObrasTargetJobs(population: number, level: ServiceLevel): number {
   if (level === 0) return 0;
-  return Math.round((Math.max(0, population) * SERVICE_LEVEL_TABLE[lever][level].puestosPct) / 100);
+  return Math.max(1, Math.round((Math.max(0, population) * OBRAS_LEVEL_TABLE[level].puestosPct) / 100));
+}
+
+export function getActiveBuildings(parcelas: Parcela[]): BuildingInstance[] {
+  const list: BuildingInstance[] = [];
+  for (const p of parcelas) {
+    if (p.edificio && p.edificio.estado === 'ocupada' && p.edificio.activo) {
+      list.push(p.edificio);
+    }
+  }
+  return list;
+}
+
+export function getBuildingJobCaps(
+  parcelas: Parcela[],
+  population: number,
+  nivelObras: ServiceLevel,
+  poblacionInicial: number,
+  cuposFijosBase?: { estatal: number; docente: number }
+): {
+  policia: number;
+  medico: number;
+  ingeniero: number;
+  estatal: number;
+  docente: number;
+  agricultor: number;
+  obrero: number;
+  comerciante: number;
+} {
+  const devScale = getDevPopScale(poblacionInicial);
+  let policia = 0;
+  let medico = 0;
+  let estatal = 0;
+  let docente = 0;
+  let agricultor = 0;
+  let obrero = 0;
+  let comerciante = 0;
+  let hasEscuela = false;
+  let hasOficina = false;
+
+  for (const b of getActiveBuildings(parcelas)) {
+    const def = BUILDING_CATALOG[b.tipo];
+    if (b.tipo === 'comisaria' && def.puestosRol) {
+      policia += Math.round(def.puestosRol * devScale);
+    } else if (b.tipo === 'hospital' && def.puestosRol) {
+      medico += Math.round(def.puestosRol * devScale);
+    } else if (b.tipo === 'oficina_publica' && def.puestosRol) {
+      hasOficina = true;
+      estatal += Math.round(def.puestosRol * devScale);
+    } else if (b.tipo === 'escuela' && def.puestosRol) {
+      hasEscuela = true;
+      docente += Math.round(def.puestosRol * devScale);
+    } else if (b.tipo === 'campo' && def.puestosAgricultor) {
+      agricultor += Math.round(def.puestosAgricultor * devScale);
+    } else if (b.tipo === 'local_comercio') {
+      if (def.puestosObrero) obrero += Math.round(def.puestosObrero * devScale);
+      if (def.puestosComerciante) comerciante += Math.round(def.puestosComerciante * devScale);
+    }
+  }
+
+  return {
+    policia,
+    medico,
+    ingeniero: getObrasTargetJobs(population, nivelObras),
+    estatal: hasOficina ? cuposFijosBase?.estatal ?? estatal : 0,
+    docente: hasEscuela ? cuposFijosBase?.docente ?? docente : 0,
+    agricultor,
+    obrero,
+    comerciante,
+  };
+}
+
+export function computeMaintenanceBreakdown(
+  parcelas: Parcela[],
+  nivelObras: ServiceLevel,
+  vivosCount: number,
+  poblacionInicial: number
+): {
+  mantenimientoPorArea: Record<ServiceAreaId, number>;
+  mantenimientoTotal: number;
+  operacionObras: number;
+  operacionTotal: number;
+} {
+  const devScale = getDevPopScale(poblacionInicial);
+  const mantenimientoPorArea: Record<ServiceAreaId, number> = {
+    seguridad: 0,
+    salud: 0,
+    infraestructura: 0,
+  };
+
+  for (const b of getActiveBuildings(parcelas)) {
+    const def = BUILDING_CATALOG[b.tipo];
+    if (def.mantenimientoPeriodo > 0 && def.areaServicio) {
+      mantenimientoPorArea[def.areaServicio] += def.mantenimientoPeriodo * devScale;
+    }
+  }
+
+  const mantenimientoTotal =
+    mantenimientoPorArea.seguridad +
+    mantenimientoPorArea.salud +
+    mantenimientoPorArea.infraestructura;
+  const operacionObras = (OBRAS_LEVEL_TABLE[nivelObras].operacionPeriodo * Math.max(1, vivosCount)) / 100;
+  mantenimientoPorArea.infraestructura += operacionObras;
+
+  return {
+    mantenimientoPorArea,
+    mantenimientoTotal: Number(mantenimientoTotal.toFixed(2)),
+    operacionObras: Number(operacionObras.toFixed(2)),
+    operacionTotal: Number((mantenimientoTotal + operacionObras).toFixed(2)),
+  };
 }
 
 export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): PeriodBudgetEstimate {
@@ -96,24 +225,41 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     }
   }
 
+  const buildingCaps = getBuildingJobCaps(
+    state.parcelas,
+    pop,
+    levers.nivelObras,
+    state.config.poblacionInicial,
+    state.gobierno.cuposFijos
+  );
+
   const targetJobs: Record<ServicePublicRoleId, number> = {
-    policia: getServiceTargetJobs(pop, 'seguridad', levers.servicios.seguridad),
-    medico: getServiceTargetJobs(pop, 'salud', levers.servicios.salud),
-    ingeniero: getServiceTargetJobs(pop, 'obras', levers.servicios.obras),
+    policia: buildingCaps.policia,
+    medico: buildingCaps.medico,
+    ingeniero: buildingCaps.ingeniero,
   };
 
-  const fixedJobs = state.gobierno.cuposFijos.estatal + state.gobierno.cuposFijos.docente;
-  const totalPublicJobs = targetJobs.policia + targetJobs.medico + targetJobs.ingeniero + fixedJobs;
+  const totalPublicJobs =
+    targetJobs.policia +
+    targetJobs.medico +
+    targetJobs.ingeniero +
+    buildingCaps.estatal +
+    buildingCaps.docente;
 
   const salarioDia = ECON_CONSTANTS.salarioBasePublico * (levers.salarioPublico / 100);
   const nominaEst = totalPublicJobs * salarioDia * PERIOD_DAYS;
   const pensionesEst = jubilados * ECON_CONSTANTS.pensionBase * PERIOD_DAYS;
   const ayudaSocialEst = (desempleados + jubilados) * levers.ayudaSocial * PERIOD_DAYS;
 
-  const opSeg = (SERVICE_LEVEL_TABLE.seguridad[levers.servicios.seguridad].operacionPeriodo * pop) / 100;
-  const opSal = (SERVICE_LEVEL_TABLE.salud[levers.servicios.salud].operacionPeriodo * pop) / 100;
-  const opObr = (SERVICE_LEVEL_TABLE.obras[levers.servicios.obras].operacionPeriodo * pop) / 100;
-  const operacionEst = opSeg + opSal + opObr;
+  const opBreakdown = computeMaintenanceBreakdown(
+    state.parcelas,
+    levers.nivelObras,
+    pop,
+    state.config.poblacionInicial
+  );
+  const mantenimientoEst = opBreakdown.mantenimientoTotal;
+  const operacionObrasEst = opBreakdown.operacionObras;
+  const operacionEst = opBreakdown.operacionTotal;
 
   const comidaMenoresEst =
     acum.dias > 0
@@ -177,6 +323,8 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     garantiaEst: Number(garantiaEst.toFixed(1)),
     comidaMenoresEst: Number(comidaMenoresEst.toFixed(1)),
     ayudaSocialEst: Number(ayudaSocialEst.toFixed(1)),
+    mantenimientoEst: Number(mantenimientoEst.toFixed(1)),
+    operacionObrasEst: Number(operacionObrasEst.toFixed(1)),
     operacionEst: Number(operacionEst.toFixed(1)),
     prensaEst: Number(prensaEst.toFixed(1)),
     gastosEst: Number(gastosEst.toFixed(1)),
@@ -193,6 +341,7 @@ export function hasActiveCrisisAlert(state: GameState, derived: CommunityDerived
     state.gobierno.finanzas.impago ||
     derived.descontentosPct > 30 ||
     derived.hambreCriticaPct > 20 ||
-    derived.hospitalOcupacionPct > 100
+    derived.hospitalOcupacionPct > 100 ||
+    state.demandasActivas.length > 0
   );
 }

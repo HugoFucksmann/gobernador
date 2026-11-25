@@ -1,6 +1,6 @@
 # UI final (v1.0)
 
-> Estructura de la interfaz final en Godot (nivel 2, HOJA_DE_RUTA). La UI de depuración del prototipo no se define acá. Lo que se puede leer y mover: CONTROLES.md. Qué ve el jugador: GOBERNADOR §4. Detalles visuales (colores, tooltips, estilo) se definen después.
+> Estructura de la interfaz final en Godot (nivel 2, HOJA_DE_RUTA). El prototipo usa un mapa 2D simple con la misma lógica de interacción (HOJA_DE_RUTA §2). Lo que se puede leer y mover: CONTROLES.md. Qué ve el jugador: GOBERNADOR §5. Detalles visuales (colores, tooltips, estilo) se definen después.
 
 ---
 
@@ -11,6 +11,7 @@
 - El rendimiento es la prioridad y se adapta a la PC del usuario.
 - Cubre todo lo del motor hasta el nivel 2. El contrato con el motor (sección 9) no cambia entre niveles.
 - La UI nunca frena la simulación ni contiene lógica de juego. Muestra hechos y noticias, nunca "la IA hizo X".
+- **El mapa es la interfaz principal:** la simulación se entiende de un vistazo y casi todo se hace con un clic en el mapa. Las ventanas son para el detalle.
 
 ## 2. Pantallas
 
@@ -28,9 +29,9 @@ De atrás hacia adelante:
    - Barra superior: reserva, ingresos, gastos, saldo, inflación, días de stock, avisos de clima con su zona, objetivo con su progreso, reloj, pausa y velocidad, y el estado de la IA si está activa (activa, lenta o sin respuesta).
    - Barra inferior: accesos a ventanas y selector de capas del mapa.
    - Zona de alertas.
-3. **Panel lateral:** noticias o ficha del NPC; cada una se puede desprender como ventana.
+3. **Panel lateral:** noticias, demandas abiertas (con su plazo y los botones aceptar o rechazar) o la ficha de lo seleccionado; cada una se puede desprender como ventana.
 4. **Ventanas flotantes** **[propuesta: gestor central que recuerda posición y permite varias abiertas]**:
-   - **Palancas:** finanzas (impuesto, salario público, ayuda social, prensa), servicios (seguridad, salud, obras) y alimento (garantía, precio máximo, comercio exterior). Cada una muestra valor, opciones, efectos y costo antes de confirmar, y los días hasta el próximo día de pago. Se pueden operar en pausa.
+   - **Palancas:** finanzas (impuesto, salario público, ayuda social, prensa), obras (nivel de obras) y alimento (garantía, precio máximo, comercio exterior). Cada una muestra valor, opciones, efectos y costo antes de confirmar, y los días hasta el próximo día de pago. Se pueden operar en pausa.
    - **Economía:** empresas (factor, ganancia, empleados, vacantes), precio y despensas.
    - **Finanzas del estado.**
    - **Comunidad:** resúmenes por zona y por grupo.
@@ -42,13 +43,20 @@ De atrás hacia adelante:
 ## 4. Interacción con el mundo
 
 - Cámara con límites: entre "ver una persona" y "ver todo el mundo", sin pasar el terreno ni el borde, con inclinación acotada (valores en CALIBRACION).
-- Un clic en un NPC o una zona abre su ficha o resumen. Lista filtrable de NPCs para llegar a uno sin buscarlo.
-- Capas de lectura: variables del NPC, roles, acciones activas, defensa, orden, integridad y amenaza por zona, y ocupación del hospital (un solo valor, está en el `centro`). **[propuesta]** Una a la vez, apagadas por defecto.
+- **Clic en una parcela libre:** menú de construcción con los edificios disponibles, su costo, días de obra y mantenimiento. La obra se ve avanzar en el mapa.
+- **Clic en un edificio:** su estado (activo, en obra, sin personal, lleno), personal y capacidad, y demoler.
+- **Clic en un NPC o una zona:** su ficha o resumen. Lista filtrable de NPCs para llegar a uno sin buscarlo.
+- **Rutina visible:** los NPCs van de casa al trabajo, a comprar y de vuelta, según su rol y la hora (CONTROLES §4). Quien está en una acción, internado o fuera de su puesto se ve distinto.
+- **Íconos de estado** sobre los edificios: hospital lleno, comisaría sin personal, empresa recortando, comida agotada, obra en curso.
+- **Parcelas bloqueadas** se ven con su hito pendiente.
+- Capas de lectura: variables del NPC, roles, acciones activas, defensa, orden, integridad y amenaza por zona, y ocupación de cada hospital. **[propuesta]** Una a la vez, apagadas por defecto.
 - A distancia, resúmenes y capas se agrupan por zona.
 
 ## 5. Información
 
 - **Alertas:** hechos del motor, exactos, agrupados con aceleración. Llevan al hecho y a su causa. Nunca pausan.
+- **Demandas:** llegan como tarjeta con el actor, lo que pide, lo que amenaza y el plazo. Si vence, se toma como rechazo.
+- **Hitos:** al cumplirse, las parcelas nuevas se iluminan en el mapa.
 - **Noticias:** la versión de la prensa, con sesgo, que puede llegar después del hecho. Muestran medio, autor, tema, tono y alcance; plantilla o texto generado se ven igual.
 - **"¿Por qué pasó esto?":** desde una alerta, noticia o NPC, una línea de hasta 5 pasos clicables armada por el motor. Si empezó en una decisión del jugador, termina en el cambio de palanca.
 - **Eventos colectivos:** el motor decide quiénes, cuándo y a qué zona; la vista solo anima el movimiento. Los contagiados se animan como un grupo que se suma.
@@ -78,7 +86,7 @@ Lo que anda bien o mal se siente, no solo se lee, por tres canales: datos exacto
 
 ## 9. Frontera con el motor
 
-- La UI **lee** el estado (indicadores, eventos, historial: CONTROLES §3 y §4) y **envía comandos**: palancas, NPC en foco (en la v1 solo abre su ficha), pausa y velocidad, partida nueva (preset, configuración, semilla), guardar y cargar, opciones de IA y depuración.
+- La UI **lee** el estado (indicadores, eventos, historial: CONTROLES §4 y §5) y **envía comandos**: palancas, órdenes de obra, respuestas a demandas, NPC en foco (en la v1 solo abre su ficha), pausa y velocidad, partida nueva (preset, configuración, semilla), guardar y cargar, opciones de IA y depuración.
 - El contrato es independiente del lenguaje: cambiar dónde vive el motor no cambia la UI.
 - Mundo 3D, ventanas y HUD leen la misma fuente.
 - **[propuesta]** Mientras el motor viva solo en TypeScript, Godot se desarrolla reproduciendo partidas grabadas (estado diario y eventos), incluida la prueba de 1.000 NPCs.
@@ -87,7 +95,7 @@ Lo que anda bien o mal se siente, no solo se lee, por tres canales: datos exacto
 
 - **Opciones:** calidad gráfica, controles de cámara, volumen e IA opcional (activar y elegir modelos; viene apagada).
 - **Guardado:** uno manual y un autoguardado por partida, cargados desde el menú (MOTOR §3).
-- **Modo desarrollador** (aparte, oculto en el juego normal): FPS y tiempos de simulación, velocidad muy alta, forzar fenómenos, cambiar la cantidad de NPCs y elegir el nivel de mundo y de gobernador (MUNDO §12, GOBERNADOR §6).
+- **Modo desarrollador** (aparte, oculto en el juego normal): FPS y tiempos de simulación, velocidad muy alta, forzar fenómenos, cambiar la cantidad de NPCs y elegir el nivel de mundo y de gobernador (MUNDO §12, GOBERNADOR §7).
 
 ## 11. Fuera de esta UI y para después
 

@@ -114,6 +114,7 @@ Uno a tres medios privados (uno = monopolio). Sin dueño NPC.
 - **Fondos del estado:** el control de prensa ÷ cantidad de medios (reparto parejo). Suben el alcance (rendimientos decrecientes, no se acumula) y la dependencia.
 - **Dependencia** = fondos del estado ÷ (ingresos propios + fondos). Con más dependencia, la afinidad con el gobierno sube sola. Sobre `umbral_dependencia_pct` la credibilidad cae; bajo él, se recupera de a poco.
 - **Consumo:** cada NPC elige qué medios lee según personalidad y lealtad, con tope en el alcance. Da burbujas sin relaciones entre NPCs.
+- **Campaña** (medida de actor, ACTORES.md): por unos días, el medio publica con un tono fijo sobre un tema, aunque no sea el que le tocaría.
 
 ## 8. Noticias
 
@@ -131,6 +132,8 @@ Uno a tres medios privados (uno = monopolio). Sin dueño NPC.
 | `conflicto` | Inicio de huelga, protesta o saqueo | Alta | Mala |
 | `empresas` | `empresa_despido`, `empresa_recorte`, `empresa_aumento` | Media | Mala o buena |
 | `gobierno` | `control` (cambio en vigencia) | Media | Según el control (CONTROLES §2) |
+| `obras` | `obra_fin` (edificio inaugurado), local o campo privado nuevo | Media | Buena |
+| `presiones` | `demanda_rechazada` y la medida que sigue | Alta | Mala |
 | `vecinos` | Acción espontánea con 3 o más participantes, o una rareza | Baja | Neutra |
 | `objetivo` | `victoria`, `objetivo_perdido` | Obligatoria | Buena o mala |
 

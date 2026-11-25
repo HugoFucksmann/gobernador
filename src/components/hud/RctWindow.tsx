@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
-export type RctWindowTone = 'teal' | 'amber' | 'blue' | 'rose' | 'slate';
+type RctWindowTone = 'teal' | 'amber' | 'blue' | 'rose' | 'slate';
 
 const TONE_CLASSES: Record<RctWindowTone, string> = {
   teal: 'bg-slate-800/95 border-teal-500/30 text-white',
@@ -70,13 +70,21 @@ export const RctWindow: React.FC<RctWindowProps> = ({
     if (!dragState.current.active) return;
     const dx = e.clientX - dragState.current.startX;
     const dy = e.clientY - dragState.current.startY;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 720;
+    const minX = -Math.max(240, vw - 360);
+    const maxX = Math.max(240, vw - 220);
+    const maxY = Math.max(180, vh - 140);
     setOffset({
-      x: Math.max(-520, Math.min(820, dragState.current.origX + dx)),
-      y: Math.max(-40, Math.min(420, dragState.current.origY + dy)),
+      x: Math.max(minX, Math.min(maxX, dragState.current.origX + dx)),
+      y: Math.max(-40, Math.min(maxY, dragState.current.origY + dy)),
     });
   };
 
-  const onPointerUpTitle = () => {
+  const onPointerUpTitle = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragState.current.active && e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     dragState.current.active = false;
   };
 
@@ -93,6 +101,7 @@ export const RctWindow: React.FC<RctWindowProps> = ({
         onPointerDown={onPointerDownTitle}
         onPointerMove={onPointerMoveTitle}
         onPointerUp={onPointerUpTitle}
+        onPointerCancel={onPointerUpTitle}
         className={`flex items-center justify-between gap-3 px-3.5 py-2 border-b cursor-grab active:cursor-grabbing select-none ${TONE_CLASSES[tone]}`}
       >
         <div className="flex items-center gap-2 min-w-0">

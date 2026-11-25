@@ -1,7 +1,7 @@
-import { DISTRICTS, ROLE_CATALOG, SCENARIO_PRESETS } from '../data/catalogs';
+import { DISTRICTS, ROLE_CATALOG } from '../data/catalogs';
 import { CommunityDerived, GameState, Npc, ZoneId } from '../types/game';
 import { MapLens } from '../types/ui';
-import { getEffectiveZone } from './simulation';
+import { getEffectiveZone, getWorldZones } from './simulation';
 
 function hashIndex(id: string, len: number): number {
   let h = 0;
@@ -73,12 +73,15 @@ export function evaluateZoneMetricColor(
   return value > 100 ? '#ef4444' : value >= 75 ? '#f59e0b' : '#0ea5e9';
 }
 
+const NEUTRAL_VILLAGER_PALETTE = ['#e2e8f0', '#cbd5e1', '#d6d3d1', '#bae6fd', '#fde68a'];
+
 export function evaluateNpcLensColor(
   npc: Npc,
   lens: MapLens,
   state?: GameState,
   derived?: CommunityDerived
 ): string {
+  if (lens === 'ninguna') return NEUTRAL_VILLAGER_PALETTE[hashIndex(npc.id, NEUTRAL_VILLAGER_PALETTE.length)];
   if (lens === 'roles') return ROLE_CATALOG[npc.rol].color;
   if (lens === 'acciones') {
     if (!npc.accionIa) return '#cbd5e1';
@@ -106,9 +109,7 @@ export function evaluateNpcLensColor(
     return '#94a3b8';
   }
 
-  const zonesCount = state
-    ? Object.keys(SCENARIO_PRESETS[state.config.escenarioId].zonas).length
-    : 5;
+  const zonesCount = state ? getWorldZones(state).length : 5;
   const zone: ZoneId = getEffectiveZone(npc, zonesCount);
 
   if (lens === 'defensa') {

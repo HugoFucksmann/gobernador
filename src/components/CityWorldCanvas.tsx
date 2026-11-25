@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ACTION_TABLE, DISTRICTS, ROLE_CATALOG, SCENARIO_PRESETS } from '../data/catalogs';
+import { ACTION_TABLE, DISTRICT_BY_ID, DISTRICTS, ROLE_CATALOG } from '../data/catalogs';
 import {
   evaluateNpcBubbleText,
   evaluateNpcLensColor,
   evaluateZoneMetricColor,
 } from '../engine/npcInsights';
-import { TICKS_PER_DAY } from '../engine/simulation';
-import { CommunityDerived, DistrictId, GameState, Npc, RoleId, ZoneId } from '../types/game';
+import { getWorldZones, TICKS_PER_DAY } from '../engine/simulation';
+import { CommunityDerived, GameState, Npc, ZoneId } from '../types/game';
 import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
 
 export type { CameraTarget, MapFilter, MapLens, WindowId };
@@ -17,7 +17,6 @@ interface CityWorldCanvasProps {
   paused: boolean;
   selectedNpcId: string | null;
   filter: MapFilter;
-  roleFilter: RoleId | 'todos';
   lens: MapLens;
   followSelected: boolean;
   cameraTarget: CameraTarget | null;
@@ -70,6 +69,8 @@ interface RenderNpcState {
   y: number;
   walkPhase: number;
   facingX: number;
+  skin: string;
+  hair: string;
 }
 
 interface SmokeParticle {
@@ -189,6 +190,8 @@ const LANDMARKS: LandmarkDef[] = [
     height: 32,
   },
 ];
+
+const SORTED_LANDMARKS = [...LANDMARKS].sort((a, b) => b.wx + b.wy - (a.wx + a.wy));
 
 const SKIN_TONES = ['#f5d0b5', '#e8b896', '#d49a73', '#b87a56', '#f2c6a7'];
 const HAIR_TONES = ['#27272a', '#451a03', '#713f12', '#1e293b', '#57534e', '#92400e'];
@@ -671,11 +674,158 @@ function buildLampGlowSprite(): HTMLCanvasElement {
   return c;
 }
 
-interface DrawableItem {
-  depth: number;
-  ix: number;
-  iy: number;
-  draw: (ctx: CanvasRenderingContext2D) => void;
+type DrawableItem =
+  | {
+      kind: 'fn';
+      depth: number;
+      draw: (ctx: CanvasRenderingContext2D) => void;
+    }
+  | {
+      kind: 'npc';
+      depth: number;
+      ix: number;
+      iy: number;
+      npc: Npc;
+      rp: RenderNpcState;
+    };
+
+function drawIsoNpc(
+  c: CanvasRenderingContext2D,
+  ix: number,
+  iy: number,
+  npc: Npc,
+  rp: RenderNpcState,
+  st: GameState,
+  curLens: MapLens,
+  curDerived: CommunityDerived,
+  selectedId: string | null,
+  isPaused: boolean,
+  active: boolean,
+  nowSec: number
+) {
+  const isMoving =
+    !isPaused &&
+    (Math.hypot(npc.mapa.x - rp.x, npc.mapa.y - rp.y) > 0.35 ||
+      Math.hypot(npc.mapa.destino.x - npc.mapa.x, npc.mapa.destino.y - npc.mapa.y) > 2);
+  const isSelected = npc.id === selectedId;
+  const color = evaluateNpcLensColor(npc, curLens, st, curDerived);
+  const bob = isMoving ? Math.abs(Math.sin(rp.walkPhase)) * 2.2 : 0;
+  const stride = isMoving ? Math.sin(rp.walkPhase) * 2.6 : 0;
+  const sc = isSelected ? 1.32 : 1.05;
+
+  c.save();
+  c.translate(ix, iy);
+  c.scale(sc, sc);
+  c.globalAlpha = active ? 1 : 0.16;
+
+  // Shadow
+  c.fillStyle = 'rgba(15, 23, 42, 0.28)';
+  c.beginPath();
+  c.ellipse(0, 1.5, 5.5, 2.8, 0, 0, Math.PI * 2);
+  c.fill();
+
+  if (npc.accionIa) {
+    c.beginPath();
+    c.ellipse(0, 0, 10 + Math.sin(nowSec * 4) * 1.2, 5.5, 0, 0, Math.PI * 2);
+    c.strokeStyle = npc.accionIa.tipo === 'condicion' ? '#ef4444' : '#f59e0b';
+    c.lineWidth = 1.8;
+    c.stroke();
+  }
+
+  if (isSelected) {
+    c.beginPath();
+    c.ellipse(0, 0, 13, 7, 0, 0, Math.PI * 2);
+    c.strokeStyle = '#14b8a6';
+    c.lineWidth = 2.4;
+    c.stroke();
+  }
+
+  // Legs
+  c.fillStyle = '#0f172a';
+  c.fillRect(-3 + stride * 0.45, -3.5, 2.2, 4);
+  c.fillRect(1 - stride * 0.45, -3.5, 2.2, 4);
+
+  // Torso
+  c.fillStyle = color;
+  c.strokeStyle = '#ffffff';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.roundRect(-4.5, -10.5 - bob, 9, 8, 2.5);
+  c.fill();
+  c.stroke();
+
+  // Head
+  c.fillStyle = rp.skin;
+  c.beginPath();
+  c.arc(0, -13.5 - bob, 3.4, 0, Math.PI * 2);
+  c.fill();
+
+  // Role Hat / Hair
+  if (npc.rol === 'agricultor') {
+    c.fillStyle = '#eab308';
+    c.beginPath();
+    c.ellipse(0, -15.8 - bob, 5.2, 2, 0, 0, Math.PI * 2);
+    c.fill();
+  } else if (npc.rol === 'policia') {
+    c.fillStyle = '#1e3a8a';
+    c.fillRect(-3.5, -17 - bob, 7, 2.5);
+  } else if (npc.rol === 'ingeniero') {
+    c.fillStyle = '#facc15';
+    c.beginPath();
+    c.arc(0, -14.8 - bob, 3.6, Math.PI, 0);
+    c.fill();
+  } else if (npc.rol === 'empresario') {
+    c.fillStyle = '#0f172a';
+    c.fillRect(-5, -16.3 - bob, 10, 1.5);
+    c.fillRect(-3.2, -19.2 - bob, 6.4, 3);
+    c.fillStyle = '#f59e0b';
+    c.fillRect(-3.2, -17 - bob, 6.4, 0.9);
+  } else {
+    c.fillStyle = npc.rol === 'jubilado' ? '#e2e8f0' : rp.hair;
+    c.beginPath();
+    c.arc(0, -14.5 - bob, 3.2, Math.PI, 0);
+    c.fill();
+  }
+
+  if (npc.variables.hambre > 80 && active) {
+    c.fillStyle = '#dc2626';
+    c.beginPath();
+    c.arc(6.5, -15 - bob, 2.5, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = '#ffffff';
+    c.lineWidth = 0.8;
+    c.stroke();
+  }
+
+  if (npc.accionIa && active) {
+    const badgeText =
+      npc.accionIa.id === 'protesta' || npc.accionIa.id === 'huelga'
+        ? '!'
+        : npc.accionIa.id === 'saqueo'
+        ? '×'
+        : npc.accionIa.id === 'organizar_fiesta'
+        ? '♪'
+        : npc.accionIa.id === 'compartir_comida'
+        ? '♥'
+        : npc.accionIa.id === 'cuidar_vecinos'
+        ? '+'
+        : npc.accionIa.id === 'reparar_barricada'
+        ? '⚒'
+        : npc.accionIa.id === 'organizar_asamblea'
+        ? '⚑'
+        : '•';
+    c.fillStyle = npc.accionIa.tipo === 'condicion' ? '#dc2626' : '#d97706';
+    c.beginPath();
+    c.roundRect(-6, -28 - bob, 12, 10, 3);
+    c.fill();
+    c.fillStyle = '#ffffff';
+    c.font = '700 8px "Plus Jakarta Sans", sans-serif';
+    c.textAlign = 'center';
+    c.fillText(badgeText, 0, -20.5 - bob);
+    c.textAlign = 'start';
+  }
+
+  c.restore();
 }
 
 export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
@@ -684,7 +834,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   paused,
   selectedNpcId,
   filter,
-  roleFilter,
   lens,
   followSelected,
   cameraTarget,
@@ -710,8 +859,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   selectedIdRef.current = selectedNpcId;
   const filterRef = useRef(filter);
   filterRef.current = filter;
-  const roleFilterRef = useRef(roleFilter);
-  roleFilterRef.current = roleFilter;
   const lensRef = useRef(lens);
   lensRef.current = lens;
   const followRef = useRef(followSelected);
@@ -791,11 +938,16 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     const up = (e: KeyboardEvent) => {
       keysHeldRef.current.delete(e.key.toLowerCase());
     };
+    const clearKeys = () => {
+      keysHeldRef.current.clear();
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
+    window.addEventListener('blur', clearKeys);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', clearKeys);
     };
   }, [onCancelFollow]);
 
@@ -808,7 +960,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       camRef.current.targetY = center.iy;
       camRef.current.targetZoom = 0.56;
     } else {
-      const d = DISTRICTS.find((x) => x.id === cameraTarget.district);
+      const d = DISTRICT_BY_ID[cameraTarget.district];
       if (d) {
         const p = worldToIso(d.x + d.w / 2, d.y + d.h / 2);
         camRef.current.targetX = p.ix;
@@ -867,12 +1019,14 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     let lastTime = performance.now();
     let lastMinimapTime = 0;
 
+    let prevSeed = stateRef.current.semilla;
+    let prevTick = stateRef.current.reloj.tick;
+
     // Reusable queue array to minimize GC churn
     const renderQueue: DrawableItem[] = [];
 
     const matchesFilter = (npc: Npc): boolean => {
       if (!npc.vivo) return false;
-      if (roleFilterRef.current !== 'todos' && npc.rol !== roleFilterRef.current) return false;
       if (filterRef.current === 'acciones') return Boolean(npc.accionIa);
       if (filterRef.current === 'descontentos') return npc.variables.satisfaccion < 30;
       if (filterRef.current === 'hambre') return npc.variables.hambre > 80;
@@ -953,12 +1107,34 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           const st = stateRef.current;
           const posMap = renderPositionsRef.current;
 
-          // 1. Interpolate NPC positions smoothly
+          if (st.semilla !== prevSeed || st.reloj.tick < prevTick) {
+            posMap.clear();
+            smokeRef.current.length = 0;
+            bubblesRef.current.length = 0;
+            seenContagionEventIdsRef.current.clear();
+            nextBubbleAtRef.current = 0;
+          }
+          prevSeed = st.semilla;
+          prevTick = st.reloj.tick;
+
+          // 1. Interpolate NPC positions smoothly & prune dead NPCs
+          let aliveCount = 0;
           for (const npc of st.npcs) {
-            if (!npc.vivo) continue;
+            if (!npc.vivo) {
+              posMap.delete(npc.id);
+              continue;
+            }
+            aliveCount++;
             let r = posMap.get(npc.id);
             if (!r) {
-              r = { x: npc.mapa.x, y: npc.mapa.y, walkPhase: Math.random() * 6, facingX: 1 };
+              r = {
+                x: npc.mapa.x,
+                y: npc.mapa.y,
+                walkPhase: Math.random() * 6,
+                facingX: 1,
+                skin: SKIN_TONES[hashIndex(npc.id, SKIN_TONES.length)],
+                hair: HAIR_TONES[hashIndex(npc.id + 'h', HAIR_TONES.length)],
+              };
               posMap.set(npc.id, r);
             }
             const dx = npc.mapa.x - r.x;
@@ -973,6 +1149,15 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             } else {
               r.x = npc.mapa.x;
               r.y = npc.mapa.y;
+            }
+          }
+          if (posMap.size > aliveCount) {
+            const liveIds = new Set<string>();
+            for (const npc of st.npcs) {
+              if (npc.vivo) liveIds.add(npc.id);
+            }
+            for (const id of posMap.keys()) {
+              if (!liveIds.has(id)) posMap.delete(id);
             }
           }
 
@@ -1088,7 +1273,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           );
           const hasDrought = activeFens.some((f) => f.tipo === 'sequia');
           const hasPlague = activeFens.some((f) => f.tipo === 'plaga');
-          const hasPandemic = activeFens.some((f) => f.tipo === 'pandemia');
           const hasZombie = activeFens.some((f) => f.tipo === 'plaga_zombie');
 
           const dayPhase = (st.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY;
@@ -1162,7 +1346,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               este: { wx: 676, wy: 24, ww: 300, wh: 532 },
               oeste: { wx: -16, wy: 24, ww: 40, wh: 532 },
             };
-            const zoneKeys = Object.keys(SCENARIO_PRESETS[st.config.escenarioId].zonas) as ZoneId[];
+            const zoneKeys = getWorldZones(st);
             ctx.save();
             for (const zk of zoneKeys) {
               const zr = zoneRects[zk];
@@ -1220,7 +1404,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           const pushItem = (wx: number, wy: number, draw: (c: CanvasRenderingContext2D) => void) => {
             const p = worldToIso(wx, wy);
             if (p.ix < minIx || p.ix > maxIx || p.iy < minIy || p.iy > maxIy) return;
-            renderQueue.push({ depth: wx + wy, ix: p.ix, iy: p.iy, draw });
+            renderQueue.push({ kind: 'fn', depth: wx + wy, draw });
           };
 
           // Barn & Silo (Campos)
@@ -1462,148 +1646,49 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             });
           }
 
-          // Isometric RCT Peeps (NPCs)
+          // Isometric RCT Peeps (NPCs) - zero closure allocations per frame
           const curLens = lensRef.current;
           const curDerived = derivedRef.current;
           for (const npc of st.npcs) {
             if (!npc.vivo) continue;
-            const rp = posMap.get(npc.id) || { x: npc.mapa.x, y: npc.mapa.y, walkPhase: 0, facingX: 1 };
-            pushItem(rp.x, rp.y, (c) => {
-              const p = worldToIso(rp.x, rp.y);
-              const isMoving =
-                !pausedRef.current &&
-                (Math.hypot(npc.mapa.x - rp.x, npc.mapa.y - rp.y) > 0.35 ||
-                  Math.hypot(npc.mapa.destino.x - npc.mapa.x, npc.mapa.destino.y - npc.mapa.y) > 2);
-              const active = matchesFilter(npc);
-              const isSelected = npc.id === selectedIdRef.current;
-              const color = evaluateNpcLensColor(npc, curLens, st, curDerived);
-              const bob = isMoving ? Math.abs(Math.sin(rp.walkPhase)) * 2.2 : 0;
-              const stride = isMoving ? Math.sin(rp.walkPhase) * 2.6 : 0;
-              const sc = isSelected ? 1.32 : 1.05;
-
-              c.save();
-              c.translate(p.ix, p.iy);
-              c.scale(sc, sc);
-              c.globalAlpha = active ? 1 : 0.16;
-
-              // Shadow
-              c.fillStyle = 'rgba(15, 23, 42, 0.28)';
-              c.beginPath();
-              c.ellipse(0, 1.5, 5.5, 2.8, 0, 0, Math.PI * 2);
-              c.fill();
-
-              if (npc.accionIa) {
-                c.beginPath();
-                c.ellipse(0, 0, 10 + Math.sin(nowSec * 4) * 1.2, 5.5, 0, 0, Math.PI * 2);
-                c.strokeStyle = npc.accionIa.tipo === 'condicion' ? '#ef4444' : '#f59e0b';
-                c.lineWidth = 1.8;
-                c.stroke();
-              }
-
-              if (isSelected) {
-                c.beginPath();
-                c.ellipse(0, 0, 13, 7, 0, 0, Math.PI * 2);
-                c.strokeStyle = '#14b8a6';
-                c.lineWidth = 2.4;
-                c.stroke();
-              }
-
-              // Legs
-              c.fillStyle = '#0f172a';
-              c.fillRect(-3 + stride * 0.45, -3.5, 2.2, 4);
-              c.fillRect(1 - stride * 0.45, -3.5, 2.2, 4);
-
-              // Torso
-              c.fillStyle = color;
-              c.strokeStyle = '#ffffff';
-              c.lineWidth = 1;
-              c.beginPath();
-              c.roundRect(-4.5, -10.5 - bob, 9, 8, 2.5);
-              c.fill();
-              c.stroke();
-
-              // Head
-              const skin = SKIN_TONES[hashIndex(npc.id, SKIN_TONES.length)];
-              const hair =
-                npc.rol === 'jubilado' ? '#e2e8f0' : HAIR_TONES[hashIndex(npc.id + 'h', HAIR_TONES.length)];
-              c.fillStyle = skin;
-              c.beginPath();
-              c.arc(0, -13.5 - bob, 3.4, 0, Math.PI * 2);
-              c.fill();
-
-              // Role Hat / Hair
-              if (npc.rol === 'agricultor') {
-                c.fillStyle = '#eab308';
-                c.beginPath();
-                c.ellipse(0, -15.8 - bob, 5.2, 2, 0, 0, Math.PI * 2);
-                c.fill();
-              } else if (npc.rol === 'policia') {
-                c.fillStyle = '#1e3a8a';
-                c.fillRect(-3.5, -17 - bob, 7, 2.5);
-              } else if (npc.rol === 'ingeniero') {
-                c.fillStyle = '#facc15';
-                c.beginPath();
-                c.arc(0, -14.8 - bob, 3.6, Math.PI, 0);
-                c.fill();
-              } else if (npc.rol === 'empresario') {
-                c.fillStyle = '#0f172a';
-                c.fillRect(-5, -16.3 - bob, 10, 1.5);
-                c.fillRect(-3.2, -19.2 - bob, 6.4, 3);
-                c.fillStyle = '#f59e0b';
-                c.fillRect(-3.2, -17 - bob, 6.4, 0.9);
-              } else {
-                c.fillStyle = hair;
-                c.beginPath();
-                c.arc(0, -14.5 - bob, 3.2, Math.PI, 0);
-                c.fill();
-              }
-
-              if (npc.variables.hambre > 80 && active) {
-                c.fillStyle = '#dc2626';
-                c.beginPath();
-                c.arc(6.5, -15 - bob, 2.5, 0, Math.PI * 2);
-                c.fill();
-                c.strokeStyle = '#ffffff';
-                c.lineWidth = 0.8;
-                c.stroke();
-              }
-
-              if (npc.accionIa && active) {
-                const badgeText =
-                  npc.accionIa.id === 'protesta' || npc.accionIa.id === 'huelga'
-                    ? '!'
-                    : npc.accionIa.id === 'saqueo'
-                    ? '×'
-                    : npc.accionIa.id === 'organizar_fiesta'
-                    ? '♪'
-                    : npc.accionIa.id === 'compartir_comida'
-                    ? '♥'
-                    : npc.accionIa.id === 'cuidar_vecinos'
-                    ? '+'
-                    : npc.accionIa.id === 'reparar_barricada'
-                    ? '⚒'
-                    : npc.accionIa.id === 'organizar_asamblea'
-                    ? '⚑'
-                    : '•';
-                c.fillStyle = npc.accionIa.tipo === 'condicion' ? '#dc2626' : '#d97706';
-                c.beginPath();
-                c.roundRect(-6, -28 - bob, 12, 10, 3);
-                c.fill();
-                c.fillStyle = '#ffffff';
-                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText(badgeText, 0, -20.5 - bob);
-                c.textAlign = 'start';
-              }
-
-              c.restore();
+            const rp = posMap.get(npc.id);
+            if (!rp) continue;
+            const p = worldToIso(rp.x, rp.y);
+            if (p.ix < minIx || p.ix > maxIx || p.iy < minIy || p.iy > maxIy) continue;
+            renderQueue.push({
+              kind: 'npc',
+              depth: rp.x + rp.y,
+              ix: p.ix,
+              iy: p.iy,
+              npc,
+              rp,
             });
           }
 
           // Execute Painter's Sort (back to front)
           renderQueue.sort((a, b) => a.depth - b.depth);
+          const curSelectedId = selectedIdRef.current;
+          const isSimPaused = pausedRef.current;
           for (let i = 0; i < renderQueue.length; i++) {
-            renderQueue[i].draw(ctx);
+            const item = renderQueue[i];
+            if (item.kind === 'npc') {
+              drawIsoNpc(
+                ctx,
+                item.ix,
+                item.iy,
+                item.npc,
+                item.rp,
+                st,
+                curLens,
+                curDerived,
+                curSelectedId,
+                isSimPaused,
+                matchesFilter(item.npc),
+                nowSec
+              );
+            } else {
+              item.draw(ctx);
+            }
           }
 
           // Factory Smoke (above roofs)
@@ -1740,14 +1825,36 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     };
 
     animId = window.requestAnimationFrame(frame);
-    return () => window.cancelAnimationFrame(animId);
+    return () => {
+      window.cancelAnimationFrame(animId);
+      keysHeldRef.current.clear();
+      renderPositionsRef.current.clear();
+      smokeRef.current.length = 0;
+      bubblesRef.current.length = 0;
+      seenContagionEventIdsRef.current.clear();
+      if (terrainCacheRef.current) {
+        terrainCacheRef.current.canvas.width = 0;
+        terrainCacheRef.current.canvas.height = 0;
+        terrainCacheRef.current = null;
+      }
+      if (minimapBgRef.current) {
+        minimapBgRef.current.width = 0;
+        minimapBgRef.current.height = 0;
+        minimapBgRef.current = null;
+      }
+      if (lampSpriteRef.current) {
+        lampSpriteRef.current.width = 0;
+        lampSpriteRef.current.height = 0;
+        lampSpriteRef.current = null;
+      }
+    };
   }, []);
 
   const findNearestNpc = (ix: number, iy: number): Npc | null => {
     let best: Npc | null = null;
     let bestDist = 20 / camRef.current.zoom;
     const posMap = renderPositionsRef.current;
-    for (const npc of state.npcs) {
+    for (const npc of stateRef.current.npcs) {
       if (!npc.vivo) continue;
       const rp = posMap.get(npc.id);
       const p = worldToIso(rp ? rp.x : npc.mapa.x, rp ? rp.y : npc.mapa.y);
@@ -1762,8 +1869,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
   const findLandmarkAt = (ix: number, iy: number): LandmarkDef | null => {
     // Check front-most landmarks first (descending wx + wy)
-    const sorted = [...LANDMARKS].sort((a, b) => b.wx + b.wy - (a.wx + a.wy));
-    for (const lm of sorted) {
+    for (const lm of SORTED_LANDMARKS) {
       // Check both ground footprint and elevated roof plane
       for (const zOff of [lm.height * 0.5, 0]) {
         const wCoords = isoToWorld(ix, iy + zOff);

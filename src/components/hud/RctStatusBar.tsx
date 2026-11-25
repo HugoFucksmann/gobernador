@@ -27,6 +27,7 @@ interface RctStatusBarProps {
 }
 
 function getLensLegend(lens: MapLens): Array<{ color: string; label: string }> {
+  if (lens === 'ninguna') return [];
   if (lens === 'roles') {
     return [
       { color: ROLE_CATALOG.agricultor.color, label: 'Agro' },
@@ -106,18 +107,22 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
     (f) => state.reloj.dia >= f.inicioDia && state.reloj.dia < f.inicioDia + f.duracionDias
   );
   const legendItems = getLensLegend(mapLens);
+  const availableDistricts =
+    state.config.nivelMundo === 'M0' ? DISTRICTS.filter((d) => d.id === 'civico') : DISTRICTS;
 
   return (
     <>
       {/* Compact floating map color legend */}
-      <div className="pointer-events-none fixed bottom-9 left-3 z-20 hidden sm:flex items-center gap-2.5 bg-slate-900/85 backdrop-blur-sm border border-slate-700/70 rounded px-2.5 py-1 text-[10px] text-slate-300 shadow">
-        {legendItems.map((item) => (
-          <span key={item.label} className="flex items-center gap-1 whitespace-nowrap">
-            <span className="w-2 h-2 rounded-xs shrink-0" style={{ backgroundColor: item.color }} />
-            <span>{item.label}</span>
-          </span>
-        ))}
-      </div>
+      {legendItems.length > 0 && (
+        <div className="pointer-events-none fixed bottom-9 left-3 z-20 hidden sm:flex items-center gap-2.5 bg-slate-900/85 backdrop-blur-sm border border-slate-700/70 rounded px-2.5 py-1 text-[10px] text-slate-300 shadow">
+          {legendItems.map((item) => (
+            <span key={item.label} className="flex items-center gap-1 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-xs shrink-0" style={{ backgroundColor: item.color }} />
+              <span>{item.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       <footer className="pointer-events-auto fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur-md border-t border-slate-700/80 px-3 py-1 flex items-center justify-between gap-3 text-[11px] text-slate-200">
         {/* Left: Camera, District Jump, Lens, Filter & Hover Ticker */}
@@ -164,7 +169,7 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
               Ir a zona…
             </option>
             <option value="all">Todo el valle</option>
-            {DISTRICTS.map((d) => (
+            {availableDistricts.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.nombre}
               </option>
@@ -179,6 +184,9 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
               onChange={(e) => onChangeLens(e.target.value as MapLens)}
               className="bg-transparent text-[11px] text-slate-200 focus:outline-none cursor-pointer"
             >
+              <option value="ninguna" className="bg-slate-900">
+                Sin capa
+              </option>
               <option value="roles" className="bg-slate-900">
                 Profesiones
               </option>
