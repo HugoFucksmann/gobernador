@@ -26,6 +26,7 @@ import {
 import { getNpcDistrictName } from '../../engine/npcInsights';
 import { getBuildingJobCaps, sumPeriodExpenses } from '../../engine/policies';
 import {
+  computeHospitalFacilities,
   getEffectiveTrait,
   getEffectiveZone,
   getModifierDelta,
@@ -177,6 +178,53 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
 
   const hasPanelOpen = Boolean(selectedNpc || selectedParcela || selectedLandmark || sideBuildOpen);
 
+  const renderDemandsList = (compact = false) => (
+    <div className={`space-y-3 ${compact ? 'max-h-[168px]' : 'max-h-[320px]'} overflow-y-auto pr-1`}>
+      {state.demandasActivas.map((dem) => (
+        <div
+          key={dem.id}
+          className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-zinc-800"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <UiTooltip text={`${dem.razon} · Si rechazas o vence: ${dem.amenaza}`} placement="left">
+              <span className="font-semibold text-xs sm:text-sm text-white truncate cursor-help">
+                {dem.actorNombre}
+              </span>
+            </UiTooltip>
+            <span className="font-mono text-xs font-semibold text-amber-300 shrink-0 tabular-nums">
+              {dem.diasRestantes}d
+            </span>
+          </div>
+
+          <div className="text-xs sm:text-sm text-zinc-200 leading-snug">{dem.pedido.etiqueta}</div>
+
+          <div className="grid grid-cols-2 gap-2 pt-0.5">
+            <UiTooltip text={`Aceptar compromiso (${dem.diasCompromiso}d)`} placement="top">
+              <button
+                type="button"
+                disabled={isG0}
+                onClick={() => onRespondDemand(dem.id, true)}
+                className="w-full py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+              >
+                Aceptar
+              </button>
+            </UiTooltip>
+            <UiTooltip text={`Rechazar: ${dem.amenaza}`} placement="top">
+              <button
+                type="button"
+                disabled={isG0}
+                onClick={() => onRespondDemand(dem.id, false)}
+                className="w-full py-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+              >
+                Rechazar
+              </button>
+            </UiTooltip>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
   // When no inspector is open, surface only urgent active actor demands cleanly in the same corner
   if (!hasPanelOpen) {
     if (state.demandasActivas.length === 0) return null;
@@ -189,51 +237,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
             Demandas ({state.demandasActivas.length})
           </span>
         </div>
-
-        <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
-          {state.demandasActivas.map((dem) => (
-            <div
-              key={dem.id}
-              className="space-y-2 pt-3 first:pt-0 border-t first:border-t-0 border-zinc-800"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <UiTooltip text={`${dem.razon} · Si rechazas o vence: ${dem.amenaza}`} placement="left">
-                  <span className="font-semibold text-sm text-white truncate cursor-help">
-                    {dem.actorNombre}
-                  </span>
-                </UiTooltip>
-                <span className="font-mono text-xs font-semibold text-amber-300 shrink-0 tabular-nums">
-                  {dem.diasRestantes}d
-                </span>
-              </div>
-
-              <div className="text-sm text-zinc-200 leading-snug">{dem.pedido.etiqueta}</div>
-
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <UiTooltip text={`Aceptar compromiso (${dem.diasCompromiso}d)`} placement="top">
-                  <button
-                    type="button"
-                    disabled={isG0}
-                    onClick={() => onRespondDemand(dem.id, true)}
-                    className="w-full py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
-                  >
-                    Aceptar
-                  </button>
-                </UiTooltip>
-                <UiTooltip text={`Rechazar: ${dem.amenaza}`} placement="top">
-                  <button
-                    type="button"
-                    disabled={isG0}
-                    onClick={() => onRespondDemand(dem.id, false)}
-                    className="w-full py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 transition-colors"
-                  >
-                    Rechazar
-                  </button>
-                </UiTooltip>
-              </div>
-            </div>
-          ))}
-        </div>
+        {renderDemandsList(false)}
       </aside>
     );
   }
@@ -296,6 +300,17 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Pinned Urgent Demands when another panel is open */}
+      {state.demandasActivas.length > 0 && (
+        <div className="px-5 py-3 bg-amber-950/35 border-b border-amber-500/40 shrink-0 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>Demandas activas ({state.demandasActivas.length})</span>
+          </div>
+          {renderDemandsList(true)}
+        </div>
+      )}
 
       {/* Unified Scrollable Body */}
       <div className="p-5 overflow-y-auto space-y-4 text-sm">
@@ -636,62 +651,177 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 </div>
               )}
 
-              {(selectedParcela.estado === 'en_obra' || selectedParcela.estado === 'ocupada') && b && bDef && (
-                <div className="space-y-4">
-                  <div className="bg-zinc-800/65 rounded-xl p-4 space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-bold text-white truncate">{bDef.nombre}</span>
-                        <HintIcon text={bDef.descripcion} placement="left" />
-                      </div>
-                      <span className="text-xs text-zinc-400 shrink-0">
-                        {b.dueno === 'estado' ? 'Público' : b.dueno === 'alimento' ? 'Alimento' : 'Comercio'}
-                      </span>
-                    </div>
+              {(selectedParcela.estado === 'en_obra' || selectedParcela.estado === 'ocupada') && b && bDef && (() => {
+                let statusLabel = 'Operativo';
+                let statusTone = 'text-emerald-400';
+                let staffLine: string | null = null;
+                let bedsLine: string | null = null;
 
-                    {b.estado === 'en_obra' ? (
-                      <div className="flex items-center gap-2 text-sm text-amber-300 font-semibold">
-                        <Hammer className="w-4 h-4 shrink-0" />
-                        <span>
-                          En obra · {b.diasObraRestantes}/{b.diasObraTotal}d
+                if (b.estado === 'ocupada') {
+                  const caps = getBuildingJobCaps(
+                    state.parcelas,
+                    derived.poblacion,
+                    state.gobierno.palancasVigentes.nivelObras,
+                    state.config.poblacionInicial,
+                    state.gobierno.cuposFijos
+                  );
+                  const activeWorkers = state.npcs.filter(
+                    (n) => n.vivo && !n.hospital.internado && !n.accionIa?.fueraDePuesto
+                  );
+                  const activeByRole = (role: keyof typeof derived.roles) =>
+                    activeWorkers.filter((n) => n.rol === role).length;
+                  const sameTypeActive = state.parcelas
+                    .filter((p) => p.edificio?.estado === 'ocupada' && p.edificio.activo && p.edificio.tipo === b.tipo)
+                    .sort((a, p2) => a.orden - p2.orden);
+                  const bCount = Math.max(1, sameTypeActive.length);
+                  const bIdx = Math.max(0, sameTypeActive.findIndex((p) => p.id === selectedParcela.id));
+                  const shareOf = (total: number) =>
+                    Math.floor(total / bCount) + (bIdx < total % bCount ? 1 : 0);
+
+                  if (b.tipo === 'hospital' || b.tipo === 'hospital_campana') {
+                    const medicosActivos = activeByRole('medico');
+                    const { facilities } = computeHospitalFacilities(state, medicosActivos);
+                    const fac = facilities.find((f) => f.edificioId === b.id);
+                    const bedsTotal = fac?.beds ?? 0;
+                    const bedsUsed = fac?.occupied ?? 0;
+                    bedsLine = `Camas: ${bedsUsed}/${bedsTotal}${
+                      derived.esperandoCama > 0 ? ` · ${derived.esperandoCama} en espera` : ''
+                    }`;
+
+                    if (b.tipo === 'hospital') {
+                      const docsHere = shareOf(medicosActivos);
+                      const slotsHere = shareOf(caps.medico);
+                      staffLine = `Médicos activos: ${docsHere}/${slotsHere}`;
+                      if (docsHere === 0) {
+                        statusLabel = 'Sin personal';
+                        statusTone = 'text-rose-400';
+                      } else if (bedsTotal > 0 && bedsUsed >= bedsTotal) {
+                        statusLabel = 'Hospital lleno';
+                        statusTone = 'text-amber-300';
+                      }
+                    } else if (bedsTotal > 0 && bedsUsed >= bedsTotal) {
+                      statusLabel = 'Hospital lleno';
+                      statusTone = 'text-amber-300';
+                    }
+                  } else if (b.tipo === 'comisaria') {
+                    const active = shareOf(activeByRole('policia'));
+                    const cap = shareOf(caps.policia);
+                    staffLine = `Policías activos: ${active}/${cap}`;
+                    if (active === 0) {
+                      statusLabel = 'Sin personal';
+                      statusTone = 'text-rose-400';
+                    }
+                  } else if (b.tipo === 'escuela') {
+                    const active = shareOf(activeByRole('docente'));
+                    const cap = shareOf(caps.docente);
+                    staffLine = `Docentes activos: ${active}/${cap}`;
+                    if (active === 0) {
+                      statusLabel = 'Sin personal';
+                      statusTone = 'text-rose-400';
+                    }
+                  } else if (b.tipo === 'oficina_publica') {
+                    const active = shareOf(activeByRole('estatal'));
+                    const cap = shareOf(caps.estatal);
+                    staffLine = `Estatales activos: ${active}/${cap}`;
+                    if (active === 0) {
+                      statusLabel = 'Sin personal';
+                      statusTone = 'text-rose-400';
+                    }
+                  } else if (b.tipo === 'campo') {
+                    const active = shareOf(activeByRole('agricultor'));
+                    const cap = shareOf(caps.agricultor);
+                    staffLine = `Agricultores activos: ${active}/${cap}`;
+                    if (active === 0) {
+                      statusLabel = 'Sin personal';
+                      statusTone = 'text-rose-400';
+                    } else if (state.alimento.stock <= 0.1) {
+                      statusLabel = 'Sin comida';
+                      statusTone = 'text-rose-400';
+                    } else if (state.empresas.alimento.factor < 0.99) {
+                      statusLabel = `Recortando (${Math.round(state.empresas.alimento.factor * 100)}%)`;
+                      statusTone = 'text-amber-300';
+                    }
+                  } else if (b.tipo === 'local_comercio') {
+                    const active = shareOf(activeByRole('obrero') + activeByRole('comerciante'));
+                    const cap = shareOf(caps.obrero + caps.comerciante);
+                    staffLine = `Personal activo: ${active}/${cap}`;
+                    if (active === 0) {
+                      statusLabel = 'Sin personal';
+                      statusTone = 'text-rose-400';
+                    } else if (state.alimento.stock <= 0.1) {
+                      statusLabel = 'Sin comida';
+                      statusTone = 'text-rose-400';
+                    } else if (state.empresas.comercio.factor < 0.99) {
+                      statusLabel = `Recortando (${Math.round(state.empresas.comercio.factor * 100)}%)`;
+                      statusTone = 'text-amber-300';
+                    }
+                  }
+                }
+
+                return (
+                  <div className="space-y-4">
+                    <div className="bg-zinc-800/65 rounded-xl p-4 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-bold text-white truncate">{bDef.nombre}</span>
+                          <HintIcon text={bDef.descripcion} placement="left" />
+                        </div>
+                        <span className="text-xs text-zinc-400 shrink-0">
+                          {b.dueno === 'estado' ? 'Público' : b.dueno === 'alimento' ? 'Alimento' : 'Comercio'}
                         </span>
                       </div>
-                    ) : (
-                      <div className="text-sm text-emerald-400 font-semibold">
-                        Operativo
-                        {b.diasRestantesCampana !== undefined && (
-                          <span className="text-amber-300 ml-2 font-mono">
-                            · {b.diasRestantesCampana}d
-                          </span>
-                        )}
-                      </div>
-                    )}
 
-                    {bDef.mantenimientoPeriodo > 0 && (
-                      <div className="font-mono text-xs text-zinc-400 tabular-nums">
-                        Mantenimiento: ${bDef.mantenimientoPeriodo}/per
-                      </div>
+                      {b.estado === 'en_obra' ? (
+                        <div className="flex items-center gap-2 text-sm text-amber-300 font-semibold">
+                          <Hammer className="w-4 h-4 shrink-0" />
+                          <span>
+                            En obra · {b.diasObraRestantes}/{b.diasObraTotal}d
+                          </span>
+                        </div>
+                      ) : (
+                        <div className={`text-sm font-semibold ${statusTone}`}>
+                          {statusLabel}
+                          {b.diasRestantesCampana !== undefined && (
+                            <span className="text-amber-300 ml-2 font-mono">
+                              · {b.diasRestantesCampana}d restantes
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {bedsLine && (
+                        <div className="font-mono text-xs text-zinc-200 tabular-nums">{bedsLine}</div>
+                      )}
+                      {staffLine && (
+                        <div className="font-mono text-xs text-zinc-300 tabular-nums">{staffLine}</div>
+                      )}
+
+                      {bDef.mantenimientoPeriodo > 0 && (
+                        <div className="font-mono text-xs text-zinc-400 tabular-nums">
+                          Mantenimiento: ${bDef.mantenimientoPeriodo}/per
+                        </div>
+                      )}
+                    </div>
+
+                    {b.dueno === 'estado' && !isG0 && (
+                      <UiTooltip text="Demoler edificio sin reembolso" placement="top">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setParcelError(null);
+                            const res = onDemolishParcela(selectedParcela.id);
+                            if (!res.ok) setParcelError(res.error ?? 'No se pudo demoler.');
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 text-sm font-semibold bg-rose-600/85 hover:bg-rose-500 text-white rounded-xl transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Demoler
+                        </button>
+                      </UiTooltip>
                     )}
                   </div>
-
-                  {b.dueno === 'estado' && !isG0 && (
-                    <UiTooltip text="Demoler edificio sin reembolso" placement="top">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setParcelError(null);
-                          const res = onDemolishParcela(selectedParcela.id);
-                          if (!res.ok) setParcelError(res.error ?? 'No se pudo demoler.');
-                        }}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 text-sm font-semibold bg-rose-600/85 hover:bg-rose-500 text-white rounded-xl transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Demoler
-                      </button>
-                    </UiTooltip>
-                  )}
-                </div>
-              )}
+                );
+              })()}
             </div>
           );
         })()}
@@ -743,8 +873,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
               </div>
 
               {state.demandasActivas.length > 0 && (
-                <div className="rounded-xl bg-amber-950/40 border border-amber-500/40 p-3 text-xs text-amber-200">
-                  {state.demandasActivas.length} demanda(s) esperando respuesta en Ciudad.
+                <div className="rounded-xl bg-amber-950/35 border border-amber-500/40 p-3 text-xs text-amber-200">
+                  {state.demandasActivas.length} demanda(s) abiertas arriba para responder.
                 </div>
               )}
 

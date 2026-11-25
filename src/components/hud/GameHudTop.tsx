@@ -120,6 +120,22 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       : Math.max(0, (defInit - defCurrent) / Math.max(1, defInit - defLimit));
   const defeatDanger = defProgress >= ECON_CONSTANTS.umbralAlertaDerrota;
 
+  const vicPrev =
+    preset.victoria.metrica === 'apoyoPct'
+      ? state.metricasPeriodoAnterior.apoyoPct
+      : preset.victoria.metrica === 'poblacionPct'
+      ? Number(((state.metricasPeriodoAnterior.poblacion / basePop) * 100).toFixed(1))
+      : state.metricasPeriodoAnterior.poblacion;
+  const vicDelta = Number((vicCurrent - vicPrev).toFixed(1));
+  const vicTrendSymbol = vicDelta > 0.4 ? '↑' : vicDelta < -0.4 ? '↓' : '→';
+  const vicTrendColor =
+    vicDelta > 0.4 ? 'text-emerald-400' : vicDelta < -0.4 ? 'text-rose-400' : 'text-zinc-400';
+  const goalStateLabel = victoryCumplida
+    ? 'Cumplido'
+    : objetivoPerdido
+    ? 'Perdido'
+    : `Pendiente · ${daysLeft}d`;
+
   const estDiario = state.ultimaSalidaEconomica.saldoDiarioEstimado;
   const fin = state.gobierno.finanzas;
   const lastGastos = sumPeriodExpenses(fin);
@@ -132,7 +148,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
     state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
 
   const aiLabel =
-    aiStatus === 'activa' ? 'IA activa' : aiStatus === 'lenta' ? 'IA lenta' : 'IA plantillas';
+    aiStatus === 'activa' ? 'IA activa' : aiStatus === 'lenta' ? 'IA lenta' : 'IA sin respuesta';
   const aiTone =
     aiStatus === 'activa'
       ? 'text-emerald-400'
@@ -222,12 +238,16 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
           <div className="h-5 w-px bg-zinc-700/70" aria-hidden="true" />
 
           <UiTooltip
-            text={`${preset.victoria.descripcion} · Riesgo derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
+            text={`${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
           >
             <button
               type="button"
               onClick={onOpenObjetivo}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-zinc-800/90 transition-colors text-sm font-mono tabular-nums whitespace-nowrap"
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors text-sm font-mono tabular-nums whitespace-nowrap ${
+                objetivoPerdido || defeatDanger
+                  ? 'border-rose-500/50 bg-rose-950/35 hover:bg-rose-950/55'
+                  : 'border-transparent hover:bg-zinc-800/90'
+              }`}
             >
               {victoryCumplida || (!objetivoPerdido && objectiveHealthy && !defeatDanger) ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -240,7 +260,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               )}
               <span
                 className={
-                  objetivoPerdido
+                  objetivoPerdido || defeatDanger
                     ? 'text-rose-400 font-bold'
                     : objectiveHealthy || victoryCumplida
                     ? 'text-emerald-400 font-bold'
@@ -249,13 +269,29 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               >
                 {vicIsPct ? `${vicCurrent}%` : vicCurrent}
               </span>
+              <span
+                className={`text-xs font-bold ${vicTrendColor}`}
+                aria-label={`Tendencia ${vicTrendSymbol}`}
+              >
+                {vicTrendSymbol}
+              </span>
               <span className="text-zinc-500 text-xs">
                 /{preset.victoria.umbral}
                 {vicIsPct ? '%' : ''}
               </span>
               <span className="text-zinc-600">·</span>
-              <span className="text-zinc-300 text-xs">
-                {victoryCumplida ? 'OK' : objetivoPerdido ? 'Fin' : `${daysLeft}d`}
+              <span
+                className={`text-xs font-sans font-semibold ${
+                  victoryCumplida
+                    ? 'text-emerald-300'
+                    : objetivoPerdido
+                    ? 'text-rose-300'
+                    : defeatDanger
+                    ? 'text-rose-300'
+                    : 'text-zinc-300'
+                }`}
+              >
+                {goalStateLabel}
               </span>
             </button>
           </UiTooltip>
@@ -357,8 +393,8 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                   : `Estado: ${aiLabel}`
               }
             >
-              <span className={`hidden lg:inline font-sans text-xs font-semibold ${aiTone}`}>
-                {aiBusy ? 'IA…' : 'IA'}
+              <span className={`font-sans text-xs font-semibold whitespace-nowrap ${aiTone}`}>
+                {aiBusy ? 'IA…' : aiLabel}
               </span>
             </UiTooltip>
           )}

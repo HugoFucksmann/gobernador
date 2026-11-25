@@ -77,16 +77,14 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
             <div className="bg-[#f6f4ef] text-zinc-900 rounded-xl divide-y divide-zinc-300 max-h-[430px] overflow-y-auto">
               {state.noticias.slice(0, 14).map((article) => (
                 <article key={article.id} className="p-4 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2 text-xs text-zinc-600">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
                     <span className="font-semibold text-zinc-900">
                       {article.medioNombre} · D{article.dia}
                     </span>
-                    <UiTooltip text={`Autor: ${article.autorNombre} · Tono: ${article.tono}`}>
-                      <span className="font-mono text-zinc-600 cursor-help">
-                        {article.tono}
-                        {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
-                      </span>
-                    </UiTooltip>
+                    <span className="font-mono text-zinc-600 tabular-nums">
+                      {article.autorNombre} · {article.tema} · {article.tono} · {Math.round(article.alcance)}%
+                      {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
+                    </span>
                   </div>
                   <h3 className="font-display text-base font-bold text-zinc-900 leading-snug">
                     {article.titulo}

@@ -49,7 +49,7 @@ const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
   comerciante: ['centro', 'este', 'sur'],
   empresario: ['centro', 'este', 'sur'],
   periodista: ['centro', 'norte', 'oeste'],
-  policia: ['centro', 'norte', 'este', 'sur', 'oeste'],
+  policia: ['centro'],
   estatal: ['centro'],
   medico: ['centro'],
   ingeniero: ['centro'],
@@ -1312,7 +1312,7 @@ const HITOS_ELECCIONES: HitoDef[] = [
   {
     id: 'hito_prosperidad',
     nombre: 'Impulso Popular',
-    descripcion: 'Mantener 55% de apoyo electoral y hambre crítica <= 10% (2 períodos).',
+    descripcion: 'Mantener al menos 55% de apoyo electoral durante 2 períodos seguidos.',
     condicion: {
       metrica: 'apoyoPct',
       op: '>=',
@@ -1514,6 +1514,7 @@ export const PRESS_CONSTANTS = {
   maxEfectoNoticiasDia: 14,
   hambreSubaUmbralPct: 12,
   precioCambioFuertePct: 18,
+  noticiasMuevenSatisfaccion: false as boolean,
 } as const;
 
 export const LEVER_VALENCIA: Record<string, { alSubir: PressValence; alBajar: PressValence }> = {

@@ -11,8 +11,13 @@ import {
   evaluateNpcLensColor,
   evaluateZoneMetricColor,
 } from '../engine/npcInsights';
-import { getWorldZones, TICKS_PER_DAY } from '../engine/simulation';
-import { CommunityDerived, GameState, Npc, Parcela, ZoneId } from '../types/game';
+import {
+  computeHospitalFacilities,
+  getWorldZones,
+  HospitalFacilityInfo,
+  TICKS_PER_DAY,
+} from '../engine/simulation';
+import { CommunityDerived, GameState, Npc, Parcela, RoleId, ZoneId } from '../types/game';
 import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
 
 export type { CameraTarget, MapFilter, MapLens, WindowId };
@@ -667,8 +672,12 @@ function drawIsoNpc(
   active: boolean,
   nowSec: number
 ) {
+  const inHospital = Boolean(npc.hospital.internado);
+  const waitingBed = Boolean(npc.hospital.esperandoCama);
+  const offDuty = Boolean(npc.accionIa?.fueraDePuesto);
   const isMoving =
     !isPaused &&
+    !inHospital &&
     (Math.hypot(npc.mapa.x - rp.x, npc.mapa.y - rp.y) > 0.35 ||
       Math.hypot(npc.mapa.destino.x - npc.mapa.x, npc.mapa.destino.y - npc.mapa.y) > 2);
   const isSelected = npc.id === selectedId;
@@ -680,7 +689,7 @@ function drawIsoNpc(
   c.save();
   c.translate(ix, iy);
   c.scale(sc, sc);
-  c.globalAlpha = active ? 1 : 0.16;
+  c.globalAlpha = active ? (inHospital ? 0.88 : 1) : 0.16;
 
   // Shadow
   c.fillStyle = 'rgba(15, 23, 42, 0.28)';
@@ -688,12 +697,27 @@ function drawIsoNpc(
   c.ellipse(0, 1.5, 5.5, 2.8, 0, 0, Math.PI * 2);
   c.fill();
 
-  if (npc.accionIa) {
+  if (inHospital) {
+    c.beginPath();
+    c.ellipse(0, 0, 10.5, 5.8, 0, 0, Math.PI * 2);
+    c.strokeStyle = '#38bdf8';
+    c.lineWidth = 1.8;
+    c.stroke();
+  } else if (waitingBed) {
+    c.beginPath();
+    c.ellipse(0, 0, 11 + Math.sin(nowSec * 6) * 1.4, 6, 0, 0, Math.PI * 2);
+    c.strokeStyle = '#fb7185';
+    c.lineWidth = 2;
+    c.stroke();
+  } else if (npc.accionIa) {
+    c.save();
     c.beginPath();
     c.ellipse(0, 0, 10 + Math.sin(nowSec * 4) * 1.2, 5.5, 0, 0, Math.PI * 2);
+    if (offDuty) c.setLineDash([3, 2.5]);
     c.strokeStyle = npc.accionIa.tipo === 'condicion' ? '#ef4444' : '#f59e0b';
     c.lineWidth = 1.8;
     c.stroke();
+    c.restore();
   }
 
   if (isSelected) {
@@ -710,8 +734,8 @@ function drawIsoNpc(
   c.fillRect(1 - stride * 0.45, -3.5, 2.2, 4);
 
   // Torso
-  c.fillStyle = color;
-  c.strokeStyle = '#ffffff';
+  c.fillStyle = inHospital ? '#e0f2fe' : color;
+  c.strokeStyle = waitingBed ? '#fda4af' : '#ffffff';
   c.lineWidth = 1;
   c.beginPath();
   c.roundRect(-4.5, -10.5 - bob, 9, 8, 2.5);
@@ -761,7 +785,15 @@ function drawIsoNpc(
     c.stroke();
   }
 
-  if (npc.accionIa && active) {
+  if ((inHospital || waitingBed) && active) {
+    c.fillStyle = waitingBed ? '#be123c' : '#0284c7';
+    c.beginPath();
+    c.roundRect(-6, -28 - bob, 12, 10, 3);
+    c.fill();
+    c.fillStyle = '#ffffff';
+    c.fillRect(-1, -26 - bob, 2, 6);
+    c.fillRect(-3, -24 - bob, 6, 2);
+  } else if (npc.accionIa && active) {
     const badgeText =
       npc.accionIa.id === 'protesta' || npc.accionIa.id === 'huelga'
         ? '!'
@@ -780,12 +812,12 @@ function drawIsoNpc(
         : '•';
     c.fillStyle = npc.accionIa.tipo === 'condicion' ? '#dc2626' : '#d97706';
     c.beginPath();
-    c.roundRect(-6, -28 - bob, 12, 10, 3);
+    c.roundRect(offDuty ? -9 : -6, -28 - bob, offDuty ? 18 : 12, 10, 3);
     c.fill();
     c.fillStyle = '#ffffff';
-    c.font = '700 8px "Plus Jakarta Sans", sans-serif';
+    c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
     c.textAlign = 'center';
-    c.fillText(badgeText, 0, -20.5 - bob);
+    c.fillText(offDuty ? `${badgeText}⏸` : badgeText, 0, -20.5 - bob);
     c.textAlign = 'start';
   }
 
@@ -1429,6 +1461,26 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           });
 
           // Dynamic Buildings & Construction Plots from state.parcelas
+          const activeRoleCounts: Partial<Record<RoleId, number>> = {};
+          for (const n of st.npcs) {
+            if (n.vivo && !n.hospital.internado && !n.accionIa?.fueraDePuesto) {
+              activeRoleCounts[n.rol] = (activeRoleCounts[n.rol] ?? 0) + 1;
+            }
+          }
+          const medicosActivosFrame = activeRoleCounts.medico ?? 0;
+          const hospInfoFrame = computeHospitalFacilities(st, medicosActivosFrame);
+          const hospFacilityById = new Map<string, HospitalFacilityInfo>();
+          for (const f of hospInfoFrame.facilities) {
+            hospFacilityById.set(f.edificioId, f);
+          }
+          const hospParcelaOrder = st.parcelas
+            .filter(
+              (p) =>
+                p.edificio?.estado === 'ocupada' && p.edificio.activo && p.edificio.tipo === 'hospital'
+            )
+            .sort((a, b) => a.orden - b.orden);
+          const sinComidaFrame = st.alimento.stock <= 0.1;
+
           for (const parcel of st.parcelas) {
             const cx = parcel.wx + parcel.ww * 0.5;
             const cy = parcel.wy + parcel.wh * 0.5;
@@ -1569,6 +1621,83 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
                 c.fillText('RIEGO', center.ix, center.iy - 18);
+                c.textAlign = 'start';
+              }
+
+              const fac = hospFacilityById.get(bld.id);
+              let statusTag: { text: string; bg: string; fg: string } | null = null;
+              if (bld.tipo === 'hospital') {
+                const hIdx = hospParcelaOrder.findIndex((p) => p.id === parcel.id);
+                const hLen = Math.max(1, hospParcelaOrder.length);
+                const docsHere =
+                  Math.floor(medicosActivosFrame / hLen) +
+                  (hIdx >= 0 && hIdx < medicosActivosFrame % hLen ? 1 : 0);
+                if (docsHere === 0) {
+                  statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
+                } else if (fac && fac.beds > 0 && fac.occupied >= fac.beds) {
+                  statusTag = { text: 'LLENO', bg: '#b45309', fg: '#fef3c7' };
+                }
+              } else if (bld.tipo === 'hospital_campana') {
+                if (fac && fac.beds > 0 && fac.occupied >= fac.beds) {
+                  statusTag = { text: 'LLENO', bg: '#b45309', fg: '#fef3c7' };
+                }
+              } else if (bld.tipo === 'comisaria' && (activeRoleCounts.policia ?? 0) === 0) {
+                statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
+              } else if (bld.tipo === 'escuela' && (activeRoleCounts.docente ?? 0) === 0) {
+                statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
+              } else if (bld.tipo === 'oficina_publica' && (activeRoleCounts.estatal ?? 0) === 0) {
+                statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
+              } else if (bld.tipo === 'campo') {
+                if ((activeRoleCounts.agricultor ?? 0) === 0) {
+                  statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
+                } else if (sinComidaFrame) {
+                  statusTag = { text: 'SIN COMIDA', bg: '#991b1b', fg: '#fee2e2' };
+                } else if (st.empresas.alimento.factor < 0.99) {
+                  statusTag = { text: 'RECORTANDO', bg: '#b45309', fg: '#fef3c7' };
+                }
+              } else if (bld.tipo === 'local_comercio') {
+                if ((activeRoleCounts.obrero ?? 0) + (activeRoleCounts.comerciante ?? 0) === 0) {
+                  statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
+                } else if (sinComidaFrame) {
+                  statusTag = { text: 'SIN COMIDA', bg: '#991b1b', fg: '#fee2e2' };
+                } else if (st.empresas.comercio.factor < 0.99) {
+                  statusTag = { text: 'RECORTANDO', bg: '#b45309', fg: '#fef3c7' };
+                }
+              }
+
+              if (statusTag) {
+                const tagW = statusTag.text.length * 5.2 + 12;
+                const tagY = center.iy - 46;
+                c.fillStyle = statusTag.bg;
+                c.beginPath();
+                c.roundRect(center.ix - tagW / 2, tagY, tagW, 14, 4);
+                c.fill();
+                c.fillStyle = statusTag.fg;
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText(statusTag.text, center.ix, tagY + 9.5);
+                c.textAlign = 'start';
+              }
+
+              if (
+                activeLens === 'hospital' &&
+                fac &&
+                (bld.tipo === 'hospital' || bld.tipo === 'hospital_campana')
+              ) {
+                const occPct = fac.beds > 0 ? (fac.occupied / fac.beds) * 100 : 120;
+                const barCol = evaluateZoneMetricColor('hospital', occPct);
+                const badgeY = center.iy - (statusTag ? 64 : 48);
+                c.fillStyle = 'rgba(15, 23, 42, 0.9)';
+                c.beginPath();
+                c.roundRect(center.ix - 34, badgeY, 68, 16, 4);
+                c.fill();
+                c.strokeStyle = barCol;
+                c.lineWidth = 1.2;
+                c.stroke();
+                c.fillStyle = '#f8fafc';
+                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText(`${fac.occupied}/${fac.beds} camas`, center.ix, badgeY + 10.5);
                 c.textAlign = 'start';
               }
             });

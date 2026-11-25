@@ -328,6 +328,9 @@ function makeInitState(
   const s = createInitialGameState(cfg);
   if (opts.disableRandomWeather || nivelMundo === 'M0') {
     s.clima.proximoEventoDia = 999999;
+    if (opts.disableRandomWeather && scenarioId === 'elecciones') {
+      s.clima.fenomenos = [];
+    }
   }
   return s;
 }
@@ -1233,6 +1236,11 @@ function verifyNewSystems() {
   assert(m0.clima.fenomenos.length === 0, 'M0 must not spawn climate phenomena');
   assert(m0.demandasActivas.length === 0, 'G0 must not trigger actor demands');
   assert(m0.npcs.every((n) => !n.accionIa), 'M0 must not trigger chaos actions');
+  assert(!m0.gobierno.finanzas.impago, 'M0+G0 30d must finish with zero impagos');
+  assert(
+    m0.eventos.filter((e) => e.tipo === 'empresa_recorte' || e.tipo === 'empresa_despido').length === 0,
+    'M0+G0 30d must finish with zero enterprise cuts/layoffs'
+  );
 
   // 2. G1 vs G2 building gating + build/demolish lifecycle + hospital patient relocation
   const g1 = makeInitState(7, 'elecciones', { nivelMundo: 'M0', nivelGobernador: 'G1' });
@@ -1362,6 +1370,56 @@ function verifyNewSystems() {
   } else {
     failures.push('Expected demand before testing rejection measure');
   }
+
+  // 6. Minor food payment priority strictly before adult garantiaAlimentaria
+  const minorPriorityState = makeInitState(31, 'elecciones', {
+    nivelMundo: 'M0',
+    nivelGobernador: 'G0',
+  });
+  minorPriorityState.reloj.diasEnPeriodo = 0; // avoid payday settlement interfering on day 2
+  const firstAdult = minorPriorityState.npcs.find((n) => n.vivo && n.edad >= 18 && n.edad < 65);
+  const lastMinor = [...minorPriorityState.npcs].reverse().find((n) => n.vivo && n.edad < 18);
+  if (firstAdult && lastMinor) {
+    for (const n of minorPriorityState.npcs) {
+      if (n.id !== lastMinor.id) n.economia.despensa = 10;
+    }
+    firstAdult.economia.dinero = 0;
+    firstAdult.economia.despensa = 1.0;
+    lastMinor.economia.despensa = 1.0;
+    minorPriorityState.gobierno.palancasVigentes.garantiaAlimentaria = 100;
+    minorPriorityState.gobierno.reserva = minorPriorityState.alimento.precio * 2.5;
+    stepHeadlessDay(minorPriorityState);
+    assert(
+      minorPriorityState.gobierno.acumuladoPeriodo.comidaMenores > 0,
+      'Minor food should be funded before adult garantiaAlimentaria even when adult appears first'
+    );
+  }
+
+  // 7. M2 fiscal module: emission -> inflation rise -> nominal devaluation & exact money audit
+  const m2State = makeInitState(41, 'elecciones', {
+    nivelMundo: 'M2',
+    nivelGobernador: 'G3',
+    disableRandomWeather: true,
+  });
+  m2State.gobierno.reserva = 50;
+  m2State.gobierno.palancasObjetivo.ayudaSocial = 6;
+  m2State.gobierno.palancasVigentes.ayudaSocial = 6;
+  m2State.gobierno.palancasObjetivo.topeEmision = 30;
+  m2State.gobierno.palancasVigentes.topeEmision = 30;
+  let maxInflObserved = m2State.gobierno.inflacion;
+  for (let d = 1; d < 22; d++) {
+    const prevM = computeTotalWorldMoney(m2State);
+    stepHeadlessDay(m2State);
+    const curM = computeTotalWorldMoney(m2State);
+    assert(
+      Math.abs(curM - (prevM + m2State.auditEntradasDia - m2State.auditSalidasDia)) <= 0.1,
+      `M2+G3 money mismatch at day ${m2State.reloj.dia}`
+    );
+    if (m2State.gobierno.inflacion > maxInflObserved) {
+      maxInflObserved = m2State.gobierno.inflacion;
+    }
+  }
+  assert(maxInflObserved > 0, 'M2 fiscal emission under deficit should raise inflation');
 
   return { passed: failures.length === 0, failures };
 }

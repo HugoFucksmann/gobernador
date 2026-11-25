@@ -300,10 +300,22 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const npcs: Npc[] = [];
   let idx = 0;
 
+  const activeComisariaZones = Array.from(
+    new Set(
+      parcelas
+        .filter((p) => p.estado === 'ocupada' && p.edificio?.activo && p.edificio.tipo === 'comisaria')
+        .map((p) => p.zona)
+    )
+  );
+
   for (const entry of baseDistribution) {
     const def = ROLE_CATALOG[entry.rol];
     const allowedZones: ZoneId[] =
-      config.nivelMundo === 'M0' ? ['centro'] : preset.zonaPorRol[entry.rol] || ['centro'];
+      config.nivelMundo === 'M0'
+        ? ['centro']
+        : entry.rol === 'policia' && activeComisariaZones.length > 0
+        ? activeComisariaZones
+        : preset.zonaPorRol[entry.rol] || ['centro'];
     for (let i = 0; i < entry.count; i++) {
       const id = `npc_${String(idx + 1).padStart(3, '0')}`;
       const baseName = SPANISH_NAMES[idx % SPANISH_NAMES.length];
@@ -391,19 +403,28 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         ECON_CONSTANTS.colchonDias *
         ECON_CONSTANTS.precioBaseAlimento *
         ECON_CONSTANTS.consumoPorNpc;
+      const netAboveFood = Math.max(0, estNetoInicial - ECON_CONSTANTS.precioBaseAlimento);
+      const steadyAvgDinero =
+        colchon + ((1 - propensionGasto) * netAboveFood) / Math.max(0.005, ECON_CONSTANTS.kRiqueza);
       const initialDinero =
         entry.rol === 'estudiante'
           ? 0
           : entry.rol === 'desempleado'
-          ? Math.round(colchon * (1.1 + drawRand(rng) * 0.25) + ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS)
+          ? Math.round(ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS + initialLevers.ayudaSocial * PERIOD_DAYS)
+          : entry.rol === 'jubilado'
+          ? Math.round(colchon * (0.95 + drawRand(rng) * 0.15) + netAboveFood * PERIOD_DAYS)
           : Math.round(
-              colchon * (1.1 + drawRand(rng) * 0.35) +
-                ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS +
-                Math.max(0, estNetoInicial - ECON_CONSTANTS.precioBaseAlimento) * 4.5
+              clamp(
+                steadyAvgDinero + estNetoInicial * (PERIOD_DAYS * 0.25) + drawRand(rng) * 3,
+                colchon * 0.9 + ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS,
+                colchon * 3.5 + estNetoInicial * PERIOD_DAYS
+              )
             );
+      const pantryLow = Math.max(1.5, ECON_CONSTANTS.umbralRecompraDias - 0.85);
+      const pantryHigh = Math.max(pantryLow + 0.4, Math.min(objetivoDespensa, ECON_CONSTANTS.umbralRecompraDias + 0.15));
       const initialDespensa = Number(
         clamp(
-          Math.min(objetivoDespensa, ECON_CONSTANTS.umbralRecompraDias - 0.85),
+          pantryLow + drawRand(rng) * (pantryHigh - pantryLow),
           1.5,
           ECON_CONSTANTS.despensaMaxDias
         ).toFixed(2)
@@ -542,7 +563,17 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
             avisoDias: 10,
           },
         ]
-      : [];
+      : [
+          {
+            id: 'seq_elecciones_verano',
+            tipo: 'sequia',
+            nombre: 'Sequía Estival Anunciada',
+            intensidad: 65,
+            inicioDia: 165,
+            duracionDias: 45,
+            avisoDias: 10,
+          },
+        ];
 
   const satInicial = Number(
     (npcs.reduce((acc, n) => acc + n.variables.satisfaccion, 0) / Math.max(1, npcs.length)).toFixed(1)
@@ -575,9 +606,18 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const estInitialProd = (w: Npc): number => {
     const lab = w.personalidad.laboriosidad / 100;
     const sal = w.variables.salud / 100;
-    const sat = w.variables.satisfaccion / 100;
+    const sat = Math.max(w.variables.satisfaccion, 67) / 100;
     const infraFactor = 0.85 + 0.3 * (56 / 100);
-    return clamp((0.35 + 0.65 * lab) * (0.45 + 0.55 * sal) * (0.55 + 0.45 * sat) * infraFactor, 0, 1.35);
+    const taxRate = initialLevers.impuesto;
+    const fiscalFactor =
+      taxRate <= ECON_CONSTANTS.fiscalUmbral
+        ? 1
+        : Math.max(0.5, 1 - ECON_CONSTANTS.fiscalPendiente * (taxRate - ECON_CONSTANTS.fiscalUmbral));
+    return clamp(
+      (0.35 + 0.65 * lab) * (0.45 + 0.55 * sal) * (0.55 + 0.45 * sat) * infraFactor * fiscalFactor,
+      0,
+      1.35
+    );
   };
 
   const foodWorkers = npcs.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico');
@@ -596,7 +636,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     (1 - ECON_CONSTANTS.margenComercialPct / 100) *
     PERIOD_DAYS;
   const foodParteSueldos = clamp(
-    Number(((foodWageEstPeriodo * 1.12) / Math.max(1, estFoodSalesPeriodo)).toFixed(4)),
+    Number((foodWageEstPeriodo / Math.max(1, estFoodSalesPeriodo)).toFixed(4)),
     0.25,
     0.92
   );
@@ -608,8 +648,13 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const estOpPeriodo = opBreakdown.operacionTotal;
   const estLivingDia = npcs.reduce((acc, n) => {
     if (n.edad < 18) return acc;
-    const baseNet = Math.max(0, n.economia.ultimoIngresoNeto - ECON_CONSTANTS.precioBaseAlimento);
-    return acc + n.economia.propensionGasto * baseNet;
+    let effNet = n.economia.ultimoIngresoNeto;
+    if (n.rol === 'empresario') {
+      const estGrossDia = Math.max(0, foodRevEstPeriodo - foodWageEstPeriodo) / PERIOD_DAYS;
+      effNet = estGrossDia * (1 - initialLevers.impuesto / 100);
+    }
+    const baseNet = Math.max(0, effNet - ECON_CONSTANTS.precioBaseAlimento);
+    return acc + (1.03 + (n.economia.propensionGasto - ECON_CONSTANTS.propensionGastoBase) * 0.25) * baseNet;
   }, 0);
   const estComSalesPeriodo =
     pop *
@@ -630,7 +675,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     ).toFixed(1)
   );
   const comParteSueldos = clamp(
-    Number(((comWageEstPeriodo * 0.94) / Math.max(1, estComSalesPeriodo)).toFixed(4)),
+    Number((comWageEstPeriodo / Math.max(1, estComSalesPeriodo)).toFixed(4)),
     0.2,
     0.9
   );
@@ -770,20 +815,20 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       precio: ECON_CONSTANTS.precioBaseAlimento,
       precioMercado: ECON_CONSTANTS.precioBaseAlimento,
       precioBase: ECON_CONSTANTS.precioBaseAlimento,
-      produccionDiaria: Number(
-        (
-          baseDistribution[0].count *
-          ECON_CONSTANTS.produccionBaseAgricultor *
-          0.72 *
-          (1 +
-            (Math.min(
-              baseDistribution[2].count * 0.72,
-              baseDistribution[0].count * ECON_CONSTANTS.tecnicosPorAgricultor
-            ) /
-              Math.max(1, baseDistribution[0].count)) *
-              ECON_CONSTANTS.kTecnificacion)
-        ).toFixed(1)
-      ),
+      produccionDiaria: (() => {
+        const agWorkers = npcs.filter((n) => n.rol === 'agricultor');
+        const tecWorkers = npcs.filter((n) => n.rol === 'tecnico');
+        const baseProd = agWorkers.reduce(
+          (acc, w) => acc + ECON_CONSTANTS.produccionBaseAgricultor * estInitialProd(w),
+          0
+        );
+        const effTecs = Math.min(
+          tecWorkers.reduce((acc, w) => acc + estInitialProd(w), 0),
+          agWorkers.length * ECON_CONSTANTS.tecnicosPorAgricultor
+        );
+        const techMult = agWorkers.length > 0 ? 1 + (effTecs / agWorkers.length) * ECON_CONSTANTS.kTecnificacion : 1;
+        return Number((baseProd * techMult).toFixed(1));
+      })(),
       consumoDiario: pop * ECON_CONSTANTS.consumoPorNpc,
     },
     clima: {

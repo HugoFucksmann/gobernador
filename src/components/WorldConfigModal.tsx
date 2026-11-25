@@ -455,7 +455,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
             {testMode ? (
               <span className="flex items-center gap-1.5 text-amber-300 font-medium">
                 <AlertCircle className="w-4 h-4" />
-                Configuración personalizada
+                Configuración de prueba
               </span>
             ) : (
               <span className="text-zinc-400">Preset estándar</span>

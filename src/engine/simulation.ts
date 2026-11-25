@@ -193,8 +193,8 @@ function shortestZonePath(
 export function emitSimEvent(state: GameState, event: SimEvent): void {
   state.eventosDiaActual.push(event);
   state.eventos.unshift(event);
-  if (state.eventos.length > 300) {
-    state.eventos.length = 300;
+  if (state.eventos.length > 2500) {
+    state.eventos.length = 2500;
   }
 }
 
@@ -432,7 +432,7 @@ function updateZoneIntegrity(state: GameState, zonesCount: number): void {
   }
 }
 
-interface HospitalFacilityInfo {
+export interface HospitalFacilityInfo {
   edificioId: string;
   parcela: Parcela;
   zona: ZoneId;
@@ -448,7 +448,7 @@ function getParcelCanvasCenter(p: Parcela): { x: number; y: number } {
   };
 }
 
-function computeHospitalFacilities(
+export function computeHospitalFacilities(
   state: GameState,
   medicosActivos: number
 ): { facilities: HospitalFacilityInfo[]; totalBeds: number; fullCount: number } {
@@ -663,6 +663,14 @@ export function getNpcProductivity(npc: Npc, state: GameState): number {
     state.gobierno.finanzas.alcanzaNomina
       ? 0.65
       : 1;
+  let climaFactor = 1;
+  if (state.config.nivelMundo !== 'M0') {
+    const activeFens = getActivePhenomena(state);
+    if (activeFens.length > 0) {
+      const maxInt = Math.max(...activeFens.map((f) => f.intensidad));
+      climaFactor = 1 - Math.min(0.08, (maxInt / 100) * 0.08);
+    }
+  }
 
   const raw =
     (0.35 + 0.65 * lab) *
@@ -670,7 +678,8 @@ export function getNpcProductivity(npc: Npc, state: GameState): number {
     (0.55 + 0.45 * sat) *
     infraFactor *
     fiscalFactor *
-    impagoPenalty +
+    impagoPenalty *
+    climaFactor +
     modProd;
 
   return clamp(raw, 0, 1.35);
@@ -2762,13 +2771,23 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
       if (remainingBudget <= 0) continue;
 
       const cappedMag = Math.min(Math.abs(rawDelta), remainingBudget);
+      const satDelta = Math.max(1, Math.round(cappedMag * 0.5));
       const afecta: Partial<Record<NpcVariable, number>> =
         enrichedArticle.tono === 'alarmista'
-          ? { miedo: cappedMag }
+          ? {
+              miedo: cappedMag,
+              ...(PRESS_CONSTANTS.noticiasMuevenSatisfaccion ? { satisfaccion: -satDelta } : {}),
+            }
           : enrichedArticle.tono === 'critico'
-          ? { lealtad: -cappedMag }
+          ? {
+              lealtad: -cappedMag,
+              ...(PRESS_CONSTANTS.noticiasMuevenSatisfaccion ? { satisfaccion: -satDelta } : {}),
+            }
           : enrichedArticle.tono === 'favorable'
-          ? { lealtad: cappedMag }
+          ? {
+              lealtad: cappedMag,
+              ...(PRESS_CONSTANTS.noticiasMuevenSatisfaccion ? { satisfaccion: satDelta } : {}),
+            }
           : {};
 
       if (Object.keys(afecta).length > 0) {
@@ -2797,6 +2816,7 @@ function enrichedZoneOrDefault(z: ZoneId | undefined, fallback: ZoneId): ZoneId 
 
 function stepNpcPositions(state: GameState, dtTicks: number): void {
   const baseSpeed = ((5.6 * 10) / TICKS_PER_DAY) * dtTicks;
+  const dayPhase = (state.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY;
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
     const isUrgent = Boolean(
@@ -2831,6 +2851,24 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
             y: market.y + 66 + drawRand(state) * (market.h - 94),
           };
           if (!npc.accionIa) npc.mapa.accion = 'buscando alimento';
+        } else if (!npc.accionIa && !npc.hospital.internado && dayPhase >= 0.78 && npc.rol !== 'policia') {
+          const home = DISTRICT_BY_ID.residencial;
+          npc.mapa.destino = {
+            x: home.x + 36 + drawRand(state) * (home.w - 72),
+            y: home.y + 240 + drawRand(state) * (home.h - 270),
+          };
+          npc.mapa.accion = 'volviendo a casa';
+        } else if (!npc.accionIa && !npc.hospital.internado && dayPhase < 0.5 && npc.rol !== 'policia' && npc.rol !== 'periodista' && drawRand(state) < 0.75) {
+          const workPos = getDistrictPosition(npc.rol, state);
+          npc.mapa.destino = { x: workPos.x, y: workPos.y };
+          npc.mapa.accion =
+            npc.rol === 'estudiante'
+              ? 'estudiando en la escuela'
+              : npc.rol === 'jubilado'
+              ? 'descansando en el parque'
+              : npc.rol === 'desempleado'
+              ? 'buscando trabajo'
+              : 'en su puesto de trabajo';
         } else {
           const nextSpot = getCityErrandPosition(npc.rol, npc.zona, state);
           npc.mapa.destino = { x: nextSpot.x, y: nextSpot.y };
@@ -3209,7 +3247,8 @@ function handleRolesAndAging(state: GameState): void {
           n.rol !== 'desempleado' &&
           n.rol !== 'empresario'
       );
-      const minKeep = (r: RoleId) => (r === 'agricultor' ? 18 : r === 'empresario' ? 1 : 2);
+      const minAgroKeep = Math.min(26, Math.max(18, Math.ceil(vivosCount * 0.26)));
+      const minKeep = (r: RoleId) => (r === 'agricultor' ? minAgroKeep : r === 'empresario' ? 1 : 2);
 
       for (const targetRole of vacantTarget) {
         const cap =
@@ -3229,8 +3268,10 @@ function handleRolesAndAging(state: GameState): void {
           );
           if (eligible.length === 0) break;
           eligible.sort((a, b) => {
-            const traitA = def.afinidad ? getEffectiveTrait(a, def.afinidad) : 50;
-            const traitB = def.afinidad ? getEffectiveTrait(b, def.afinidad) : 50;
+            const agroPenA = a.rol === 'agricultor' ? 20 : 0;
+            const agroPenB = b.rol === 'agricultor' ? 20 : 0;
+            const traitA = (def.afinidad ? getEffectiveTrait(a, def.afinidad) : 50) - agroPenA;
+            const traitB = (def.afinidad ? getEffectiveTrait(b, def.afinidad) : 50) - agroPenB;
             return traitB - traitA;
           });
           const chosenNpc = eligible[0];
@@ -3591,24 +3632,43 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   let paidFoodMoney = 0;
   const garantiaPct = pal.garantiaAlimentaria / 100;
 
+  // Pass 1: Pay minors' food strictly from reserva first (ECONOMIA §5 & §6)
   for (const npc of vivos) {
+    if (getStage(npc.edad) !== 'menor') continue;
     const desired = desiredMap.get(npc.id) || 0;
     if (desired <= 0) continue;
     const allocated = desired * stockShareRatio;
     const cost = allocated * precioAlimento;
-    const stage = getStage(npc.edad);
+
+    const paidMinor = Math.min(Math.max(0, state.gobierno.reserva), cost);
+    state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidMinor);
+    const unpaidMinor = Math.max(0, cost - paidMinor);
+    comidaMenoresDia += paidMinor;
+    garantiaImpagaDia += unpaidMinor;
+    const paidUnits = cost > 0 ? allocated * clamp(paidMinor / cost, 0, 1) : allocated;
+    paidFoodMoney += paidMinor;
+
+    if (paidUnits > 0) {
+      const actualStockUsed = Math.min(state.alimento.stock, paidUnits);
+      state.alimento.stock = Math.max(0, state.alimento.stock - actualStockUsed);
+      npc.economia.despensa = clamp(
+        Number((npc.economia.despensa + actualStockUsed).toFixed(2)),
+        0,
+        ECON_CONSTANTS.despensaMaxDias
+      );
+    }
+  }
+
+  // Pass 2: Adults & retirees pay self or with garantiaAlimentaria
+  for (const npc of vivos) {
+    if (getStage(npc.edad) === 'menor') continue;
+    const desired = desiredMap.get(npc.id) || 0;
+    if (desired <= 0) continue;
+    const allocated = desired * stockShareRatio;
+    const cost = allocated * precioAlimento;
     let paidUnits = 0;
 
-    if (stage === 'menor') {
-      // Minors food is paid daily from reserva first; cannot spend negative reserva
-      const paidMinor = Math.min(Math.max(0, state.gobierno.reserva), cost);
-      state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidMinor);
-      const unpaidMinor = Math.max(0, cost - paidMinor);
-      comidaMenoresDia += paidMinor;
-      garantiaImpagaDia += unpaidMinor;
-      paidUnits = cost > 0 ? allocated * clamp(paidMinor / cost, 0, 1) : allocated;
-      paidFoodMoney += paidMinor;
-    } else if (npc.economia.dinero >= cost) {
+    if (npc.economia.dinero >= cost) {
       npc.economia.dinero -= cost;
       paidUnits = allocated;
       paidFoodMoney += cost;
@@ -4120,13 +4180,18 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   const ocupacionPct = Number((((currentInternados + waitingBeds) / camas) * 100).toFixed(1));
   if (ocupacionPct > 100 && state.hospitalSaturadoDia !== state.reloj.dia) {
     state.hospitalSaturadoDia = state.reloj.dia;
+    const satCausa =
+      state.ultimoEventoClimaId ||
+      (attackPhenomena[0] ? `clima:${attackPhenomena[0].tipo}` : undefined) ||
+      (hungerDamageCount > 0 ? 'hambre:critica' : undefined) ||
+      state.ultimaCausaPalanca;
     emitSimEvent(state, {
       id: nextSeqId(state, `ev_${state.reloj.dia}`),
       dia: state.reloj.dia,
       tipo: 'hospital_saturado',
       zona: 'centro',
       ocupacionPct,
-      causa: state.ultimoEventoClimaId || state.ultimaCausaPalanca,
+      causa: satCausa,
     });
   }
 
@@ -4393,7 +4458,7 @@ function settleEnterpriseAtPayday(
         const [minI, maxI] = def.ingreso!;
         const candPeriodRef =
           (minI + cand.economia.ingresoPos * (maxI - minI)) *
-          Math.max(0.4, getNpcProductivity(cand, state)) *
+          Math.max(0.75, getNpcProductivity(cand, state)) *
           PERIOD_DAYS;
         if (fondoSueldos >= sumRef + extraRefReserved + candPeriodRef) {
           cand.rol = r;
@@ -4605,6 +4670,29 @@ function runPaydaySettlement(state: GameState): void {
   let taxesCollected = 0;
   taxesCollected += settleEnterpriseAtPayday(state, state.empresas.alimento, true, vivos, vivosById);
   taxesCollected += settleEnterpriseAtPayday(state, state.empresas.comercio, false, vivos, vivosById);
+
+  // Fiscal M2: inflation erodes real value of nominal reserva & dinero each period (ECONOMIA §9)
+  if (mod === 'fiscal' && state.gobierno.inflacion > 0.1) {
+    const devalRate = clamp((state.gobierno.inflacion / 100) * 0.08, 0, 0.06);
+    let erodedTotal = 0;
+    const govLoss = Number((Math.max(0, state.gobierno.reserva) * devalRate).toFixed(2));
+    if (govLoss > 0) {
+      state.gobierno.reserva = Math.max(0, state.gobierno.reserva - govLoss);
+      erodedTotal += govLoss;
+    }
+    for (const n of state.npcs) {
+      if (n.economia.dinero > 0) {
+        const npcLoss = Number((n.economia.dinero * devalRate).toFixed(2));
+        if (npcLoss > 0) {
+          n.economia.dinero = Math.max(0, n.economia.dinero - npcLoss);
+          erodedTotal += npcLoss;
+        }
+      }
+    }
+    if (erodedTotal > 0) {
+      state.auditSalidasDia += erodedTotal;
+    }
+  }
 
   // Step 2: State Payday Payouts in strict priority order (ECONOMIA §6)
   // Compute living obligations
@@ -5183,7 +5271,7 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
   };
 
   const defeatVal = getMetric(preset.derrota.metrica);
-  if (checkCond(defeatVal, preset.derrota.op, preset.derrota.umbral)) {
+  if (derived.poblacion === 0 || checkCond(defeatVal, preset.derrota.op, preset.derrota.umbral)) {
     const endCause =
       state.eventosDiaActual.find((e) => e.tipo === 'muerte' || e.tipo === 'golpe' || e.tipo === 'impago')?.id ||
       state.ultimoEventoClimaId ||
@@ -5858,6 +5946,8 @@ function collectDailyPressFacts(state: GameState, preDerived?: CommunityDerived)
       'coleccionar_piedras',
       'hablar_con_gallinas',
       'sermon_apocaliptico',
+      'ver_nubes',
+      'cantar_en_plaza',
     ].includes(accionId);
     if (info.count >= 3 || isOdd) {
       facts.push({
