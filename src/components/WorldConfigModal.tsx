@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
-import { X, AlertCircle } from 'lucide-react';
+import { X, AlertCircle, Save, FolderOpen } from 'lucide-react';
 import { DEFAULT_CHAOS_LIMITS, SCENARIO_PRESETS } from '../data/catalogs';
+import { SaveSlotMeta } from '../engine/gameController';
 import { isTestConfig } from '../engine/worldGenerator';
 import { EconomyModule, WorldConfig } from '../types/game';
 
 interface WorldConfigModalProps {
   initialConfig: WorldConfig;
   aiAvailable: boolean;
+  currentDay: number;
+  manualSaveMeta: SaveSlotMeta | null;
+  autoSaveMeta: SaveSlotMeta | null;
+  onSaveManual: () => boolean;
+  onLoadManual: () => boolean;
+  onLoadAutoSave: () => boolean;
   onStartNewGame: (config: WorldConfig) => void;
   onClose: () => void;
 }
@@ -14,10 +21,17 @@ interface WorldConfigModalProps {
 export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
   initialConfig,
   aiAvailable,
+  currentDay,
+  manualSaveMeta,
+  autoSaveMeta,
+  onSaveManual,
+  onLoadManual,
+  onLoadAutoSave,
   onStartNewGame,
   onClose,
 }) => {
   const [config, setConfig] = useState<WorldConfig>(structuredClone(initialConfig));
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const testMode = isTestConfig(config);
 
@@ -57,6 +71,58 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Save & Load Local Slots */}
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs space-y-0.5">
+            <div className="font-semibold text-slate-800">Partida actual (Día {currentDay}) y ranuras locales</div>
+            <div className="text-[11px] text-slate-500">
+              Guardado manual en navegador y autoguardado automático cada cierre fiscal (7 días).
+            </div>
+            {saveFeedback && (
+              <div className="text-[11px] font-medium text-teal-700">{saveFeedback}</div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                const ok = onSaveManual();
+                setSaveFeedback(ok ? `Partida guardada en día ${currentDay}.` : 'No se pudo guardar localmente.');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 font-semibold text-white bg-slate-800 hover:bg-slate-900 rounded-md"
+            >
+              <Save className="w-3.5 h-3.5" />
+              Guardar manual
+            </button>
+            <button
+              type="button"
+              disabled={!manualSaveMeta}
+              onClick={() => {
+                if (!onLoadManual()) setSaveFeedback('Sin partida manual válida.');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 font-medium text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-40"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-teal-700" />
+              {manualSaveMeta
+                ? `Cargar manual (D${manualSaveMeta.dia} · ${manualSaveMeta.savedAt})`
+                : 'Sin guardado manual'}
+            </button>
+            <button
+              type="button"
+              disabled={!autoSaveMeta}
+              onClick={() => {
+                if (!onLoadAutoSave()) setSaveFeedback('Sin autoguardado válido.');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 font-medium text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 rounded-md disabled:opacity-40"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+              {autoSaveMeta
+                ? `Autoguardado (D${autoSaveMeta.dia} · ${autoSaveMeta.savedAt})`
+                : 'Sin autoguardado'}
+            </button>
+          </div>
         </div>
 
         {/* Scenario Cards */}
@@ -172,16 +238,16 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                 <input
                   type="checkbox"
                   checked={config.usarIaGemini}
-                  disabled={!aiAvailable}
+                  disabled={!aiAvailable && !config.usarIaGemini}
                   onChange={(e) => setConfig({ ...config, usarIaGemini: e.target.checked })}
                   className="mt-0.5 rounded border-slate-300 text-teal-700"
                 />
                 <span>
-                  <strong className="text-slate-800 block">Activar Director de IA (Gemini asíncrono)</strong>
+                  <strong className="text-slate-800 block">Activar IA opcional (clasificador y prensa)</strong>
                   <span className="text-slate-500">
                     {aiAvailable
-                      ? 'Redacta columnas de prensa, pensamientos y elige acciones sin bloquear la simulación.'
-                      : 'La ciudad generará prensa y decisiones de forma local automáticamente.'}
+                      ? 'Usa el clasificador de acciones y redacción generativa de prensa sin bloquear la simulación.'
+                      : 'Sin clave de servidor: el motor mecánico y las plantillas resuelven todo automáticamente.'}
                   </span>
                 </span>
               </label>
@@ -191,7 +257,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
           {/* Chaos Limits */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-slate-800">Límites del caos de la IA</h3>
+              <h3 className="text-xs font-semibold text-slate-800">Límites del caos</h3>
               <button
                 type="button"
                 onClick={() => setConfig({ ...config, caos: { ...DEFAULT_CHAOS_LIMITS } })}
@@ -256,6 +322,26 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                   setConfig({
                     ...config,
                     caos: { ...config.caos, maxPctRolFueraDePuesto: Number(e.target.value) },
+                  })
+                }
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between text-xs mb-0.5">
+                <span className="text-slate-600">Duración máxima de acciones</span>
+                <span className="font-mono font-semibold tabular-nums">{config.caos.duracionMaxDias} días</span>
+              </div>
+              <input
+                type="range"
+                min={3}
+                max={20}
+                value={config.caos.duracionMaxDias}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    caos: { ...config.caos, duracionMaxDias: Number(e.target.value) },
                   })
                 }
                 className="w-full"

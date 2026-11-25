@@ -1,4 +1,9 @@
-import { SCENARIO_PRESETS } from '../data/catalogs';
+import {
+  ECON_CONSTANTS,
+  FISCAL_PERIOD_DAYS,
+  LEVER_MAX_CHANGE_PCT,
+  SCENARIO_PRESETS,
+} from '../data/catalogs';
 import {
   CommunityDerived,
   GameState,
@@ -18,13 +23,22 @@ export interface BudgetAllocationSummary {
   remainingToReservePct: number;
 }
 
+export interface LeverMarginInfo {
+  minAllowedInPeriod: number;
+  maxAllowedInPeriod: number;
+  remainingDown: number;
+  remainingUp: number;
+  daysToSettlement: number;
+  pendingChange: boolean;
+}
+
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   escenarioId: 'elecciones',
   economiaModulo: SCENARIO_PRESETS.elecciones.economiaDefault,
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,
   caos: { ...SCENARIO_PRESETS.elecciones.caosDefault },
-  usarIaGemini: true,
+  usarIaGemini: false,
 };
 
 export function getBudgetAllocationSummary(levers: GovernorLevers): BudgetAllocationSummary {
@@ -92,17 +106,44 @@ export function detectActiveFiscalStance(levers: GovernorLevers): FiscalStance |
   return null;
 }
 
+export function getPublicCapMax(population: number): number {
+  return Math.max(1, Math.round((Math.max(1, population) * ECON_CONSTANTS.cupoMaxPctPoblacion) / 100));
+}
+
 export function adjustPublicCapInLevers(
   prev: GovernorLevers,
   role: PublicRoleId,
-  delta: number
+  delta: number,
+  population = 100
 ): GovernorLevers {
+  const maxCupo = getPublicCapMax(population);
   return {
     ...prev,
     cupos: {
       ...prev.cupos,
-      [role]: clamp(prev.cupos[role] + delta, 0, 25),
+      [role]: clamp(prev.cupos[role] + delta, 0, maxCupo),
     },
+  };
+}
+
+export function getLeverMarginInfo(
+  inicioPeriodoVal: number,
+  vigenteVal: number,
+  objetivoVal: number,
+  min: number,
+  max: number,
+  diasEnPeriodoFiscal: number
+): LeverMarginInfo {
+  const maxDelta = ((max - min) * LEVER_MAX_CHANGE_PCT) / 100;
+  const minAllowedInPeriod = Number(Math.max(min, inicioPeriodoVal - maxDelta).toFixed(2));
+  const maxAllowedInPeriod = Number(Math.min(max, inicioPeriodoVal + maxDelta).toFixed(2));
+  return {
+    minAllowedInPeriod,
+    maxAllowedInPeriod,
+    remainingDown: Number(Math.max(0, vigenteVal - minAllowedInPeriod).toFixed(2)),
+    remainingUp: Number(Math.max(0, maxAllowedInPeriod - vigenteVal).toFixed(2)),
+    daysToSettlement: Math.max(1, FISCAL_PERIOD_DAYS - diasEnPeriodoFiscal),
+    pendingChange: Math.abs(objetivoVal - vigenteVal) >= 0.01,
   };
 }
 
@@ -157,6 +198,7 @@ export function hasActiveCrisisAlert(state: GameState, derived: CommunityDerived
   return (
     state.gobierno.finanzas.impago ||
     derived.descontentosPct > 30 ||
-    derived.hambreCriticaPct > 20
+    derived.hambreCriticaPct > 20 ||
+    derived.hospitalOcupacionPct > 100
   );
 }

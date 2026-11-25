@@ -1,14 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DISTRICTS, ROLE_CATALOG } from '../data/catalogs';
-import { evaluateNpcBubbleText, evaluateNpcLensColor } from '../engine/npcInsights';
+import { ACTION_TABLE, DISTRICTS, ROLE_CATALOG, SCENARIO_PRESETS } from '../data/catalogs';
+import {
+  evaluateNpcBubbleText,
+  evaluateNpcLensColor,
+  evaluateZoneMetricColor,
+} from '../engine/npcInsights';
 import { TICKS_PER_DAY } from '../engine/simulation';
-import { DistrictId, GameState, Npc, RoleId } from '../types/game';
-import { CameraTarget, DockSection, MapFilter, MapLens } from '../types/ui';
+import { CommunityDerived, DistrictId, GameState, Npc, RoleId, ZoneId } from '../types/game';
+import { CameraTarget, CityTab, DockSection, MapFilter, MapLens } from '../types/ui';
 
 export type { CameraTarget, DockSection, MapFilter, MapLens };
 
 interface CityWorldCanvasProps {
   state: GameState;
+  derived: CommunityDerived;
   paused: boolean;
   selectedNpcId: string | null;
   filter: MapFilter;
@@ -18,7 +23,7 @@ interface CityWorldCanvasProps {
   cameraTarget: CameraTarget | null;
   zoomRequest: { delta: number; seq: number } | null;
   onSelectNpc: (npcId: string) => void;
-  onOpenSection: (section: DockSection) => void;
+  onOpenSection: (section: DockSection, tabHint?: CityTab) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
 }
@@ -97,6 +102,7 @@ interface LandmarkDef {
   label: string;
   hint: string;
   section: DockSection;
+  tabHint?: CityTab;
   wx: number;
   wy: number;
   ww: number;
@@ -108,8 +114,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'palacio',
     label: 'Palacio de Gobierno',
-    hint: 'Impuestos, salarios y tesorería',
-    section: 'tesoreria',
+    hint: 'Impuestos, salarios y presupuesto',
+    section: 'gobierno',
     wx: 500,
     wy: 365,
     ww: 132,
@@ -119,8 +125,9 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'prensa',
     label: 'Redacción de Prensa',
-    hint: 'Diarios, columnas y regulación',
-    section: 'prensa',
+    hint: 'Gaceta del Valle y medios',
+    section: 'ciudad',
+    tabHint: 'gaceta',
     wx: 540,
     wy: 196,
     ww: 62,
@@ -130,7 +137,7 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'mercado',
     label: 'Plaza y Mercado',
-    hint: 'Raciones, precios y comercio',
+    hint: 'Raciones, stock e intercambio',
     section: 'alimento',
     wx: 408,
     wy: 74,
@@ -153,7 +160,7 @@ const LANDMARKS: LandmarkDef[] = [
     id: 'clinica',
     label: 'Clínica y Comisaría',
     hint: 'Salud, seguridad y cupos públicos',
-    section: 'servicios',
+    section: 'gobierno',
     wx: 380,
     wy: 366,
     ww: 108,
@@ -164,7 +171,7 @@ const LANDMARKS: LandmarkDef[] = [
     id: 'escuela',
     label: 'Escuela del Valle',
     hint: 'Educación, docentes y subsidios',
-    section: 'servicios',
+    section: 'gobierno',
     wx: 714,
     wy: 78,
     ww: 156,
@@ -175,7 +182,7 @@ const LANDMARKS: LandmarkDef[] = [
     id: 'taller',
     label: 'Talleres Industriales',
     hint: 'Obras públicas, técnicos y subsidios',
-    section: 'servicios',
+    section: 'gobierno',
     wx: 42,
     wy: 358,
     ww: 280,
@@ -674,6 +681,7 @@ interface DrawableItem {
 
 export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   state,
+  derived,
   paused,
   selectedNpcId,
   filter,
@@ -695,6 +703,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
   const stateRef = useRef(state);
   stateRef.current = state;
+  const derivedRef = useRef(derived);
+  derivedRef.current = derived;
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
   const selectedIdRef = useRef(selectedNpcId);
@@ -735,6 +745,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   const renderPositionsRef = useRef<Map<string, RenderNpcState>>(new Map());
   const smokeRef = useRef<SmokeParticle[]>([]);
   const bubblesRef = useRef<WorldSpeechBubble[]>([]);
+  const seenContagionEventIdsRef = useRef<Set<string>>(new Set());
   const nextBubbleAtRef = useRef<number>(0);
   const vehiclesRef = useRef<AmbientVehicle[]>([
     { axis: 'v', pos: 110, lane: 349, speed: 28, color: '#d97706' },
@@ -882,6 +893,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
       // NPCs
       const curLens = lensRef.current;
+      const curDerived = derivedRef.current;
       for (const npc of st.npcs) {
         if (!npc.vivo) continue;
         const rp = posMap.get(npc.id);
@@ -890,7 +902,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         const iso = worldToIso(wx, wy);
         const mx = MINIMAP_W / 2 + iso.ix * 0.068;
         const my = MINIMAP_H / 2 + iso.iy * 0.068;
-        mctx.fillStyle = npc.id === selectedIdRef.current ? '#ffffff' : evaluateNpcLensColor(npc, curLens);
+        mctx.fillStyle =
+          npc.id === selectedIdRef.current
+            ? '#ffffff'
+            : evaluateNpcLensColor(npc, curLens, st, curDerived);
         mctx.fillRect(mx - 1, my - 1, 2.5, 2.5);
       }
 
@@ -1008,6 +1023,35 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               });
             }
 
+            for (const ev of st.eventosDiaActual) {
+              if (
+                ev.tipo === 'accion_inicio' &&
+                ev.origen?.endsWith('/contagio') &&
+                !seenContagionEventIdsRef.current.has(ev.id)
+              ) {
+                if (seenContagionEventIdsRef.current.size > 120) {
+                  seenContagionEventIdsRef.current.clear();
+                }
+                seenContagionEventIdsRef.current.add(ev.id);
+                const actionDef = ACTION_TABLE.find((a) => a.id === ev.accion);
+                const actionLabel = actionDef?.nombre ?? ev.accion;
+                const joinText = `Se suma: ${actionLabel}`;
+                ctx.font = '600 10px "Plus Jakarta Sans", sans-serif';
+                const bw = Math.min(185, ctx.measureText(joinText).width + 14);
+                const batch = ev.npcIds.slice(0, 5).map((npcId) => ({
+                  npcId,
+                  text: joinText,
+                  width: bw,
+                  expiresAt: nowSec + 3.6,
+                }));
+                const batchIds = new Set(batch.map((b) => b.npcId));
+                bubblesRef.current = [
+                  ...bubblesRef.current.filter((b) => b.expiresAt > nowSec && !batchIds.has(b.npcId)).slice(-3),
+                  ...batch,
+                ];
+              }
+            }
+
             if (nowSec > nextBubbleAtRef.current) {
               nextBubbleAtRef.current = nowSec + 2.8 + Math.random() * 2;
               const vivos = st.npcs.filter((n) => n.vivo);
@@ -1021,7 +1065,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 ctx.font = '600 10px "Plus Jakarta Sans", sans-serif';
                 const bw = Math.min(170, ctx.measureText(text).width + 14);
                 bubblesRef.current = [
-                  ...bubblesRef.current.filter((b) => b.expiresAt > nowSec && b.npcId !== chosen.id).slice(-2),
+                  ...bubblesRef.current.filter((b) => b.expiresAt > nowSec && b.npcId !== chosen.id).slice(-5),
                   { npcId: chosen.id, text, width: bw, expiresAt: nowSec + 3.4 },
                 ];
               }
@@ -1101,6 +1145,60 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               srcW,
               srcH
             );
+          }
+
+          // Zone Lens Overlay (defensa / orden / integridad / amenaza)
+          const activeLens = lensRef.current;
+          if (
+            activeLens === 'defensa' ||
+            activeLens === 'orden' ||
+            activeLens === 'integridad' ||
+            activeLens === 'amenaza'
+          ) {
+            const curDerived = derivedRef.current;
+            const zoneRects: Record<ZoneId, { wx: number; wy: number; ww: number; wh: number }> = {
+              centro: { wx: 366, wy: 24, ww: 288, wh: 532 },
+              norte: { wx: 24, wy: 24, ww: 320, wh: 260 },
+              sur: { wx: 24, wy: 306, ww: 320, wh: 250 },
+              este: { wx: 676, wy: 24, ww: 300, wh: 532 },
+              oeste: { wx: -16, wy: 24, ww: 40, wh: 532 },
+            };
+            const zoneKeys = Object.keys(SCENARIO_PRESETS[st.config.escenarioId].zonas) as ZoneId[];
+            ctx.save();
+            for (const zk of zoneKeys) {
+              const zr = zoneRects[zk];
+              if (!zr) continue;
+              const val =
+                activeLens === 'defensa'
+                  ? curDerived.defensa[zk] ?? 0
+                  : activeLens === 'orden'
+                  ? curDerived.orden?.[zk] ?? 0
+                  : activeLens === 'integridad'
+                  ? st.gobierno.integridad?.[zk] ?? 100
+                  : curDerived.amenazaPercibida[zk] ?? 0;
+              const strokeCol = evaluateZoneMetricColor(activeLens, val);
+              isoQuadPath(ctx, zr.wx, zr.wy, zr.ww, zr.wh);
+              ctx.globalAlpha = 0.18;
+              ctx.fillStyle = strokeCol;
+              ctx.fill();
+              ctx.globalAlpha = 0.72;
+              ctx.strokeStyle = strokeCol;
+              ctx.lineWidth = 2.4;
+              ctx.stroke();
+
+              const lblPos = worldToIso(zr.wx + zr.ww * 0.5, zr.wy + zr.wh * 0.5);
+              ctx.globalAlpha = 0.92;
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+              ctx.beginPath();
+              ctx.roundRect(lblPos.ix - 48, lblPos.iy - 11, 96, 20, 4);
+              ctx.fill();
+              ctx.fillStyle = '#f8fafc';
+              ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(`${zk.toUpperCase()} ${Math.round(val)}%`, lblPos.ix, lblPos.iy + 2.5);
+              ctx.textAlign = 'start';
+            }
+            ctx.restore();
           }
 
           // Interactive Landmark Hover Footprint Highlight
@@ -1367,6 +1465,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
           // Isometric RCT Peeps (NPCs)
           const curLens = lensRef.current;
+          const curDerived = derivedRef.current;
           for (const npc of st.npcs) {
             if (!npc.vivo) continue;
             const rp = posMap.get(npc.id) || { x: npc.mapa.x, y: npc.mapa.y, walkPhase: 0, facingX: 1 };
@@ -1378,7 +1477,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                   Math.hypot(npc.mapa.destino.x - npc.mapa.x, npc.mapa.destino.y - npc.mapa.y) > 2);
               const active = matchesFilter(npc);
               const isSelected = npc.id === selectedIdRef.current;
-              const color = evaluateNpcLensColor(npc, curLens);
+              const color = evaluateNpcLensColor(npc, curLens, st, curDerived);
               const bob = isMoving ? Math.abs(Math.sin(rp.walkPhase)) * 2.2 : 0;
               const stride = isMoving ? Math.sin(rp.walkPhase) * 2.6 : 0;
               const sc = isSelected ? 1.32 : 1.05;
@@ -1573,8 +1672,16 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ctx.restore();
           }
 
-          // Climate / Zombie edge aura
+          // Climate / Zombie edge aura & origin indicator
           if (hasZombie) {
+            const zombieFen = activeFens.find((f) => f.tipo === 'plaga_zombie');
+            const origPos: Record<ZoneId, { wx: number; wy: number }> = {
+              centro: { wx: 510, wy: 290 },
+              norte: { wx: 184, wy: 80 },
+              este: { wx: 920, wy: 290 },
+              sur: { wx: 184, wy: 510 },
+              oeste: { wx: 45, wy: 290 },
+            };
             for (let z = 0; z < 10; z++) {
               const angle = nowSec * 0.2 + z * ((Math.PI * 2) / 10);
               const zwx = 500 + Math.cos(angle) * 530 + Math.sin(nowSec * 2 + z) * 14;
@@ -1584,6 +1691,19 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ctx.beginPath();
               ctx.arc(p.ix, p.iy - 5, 5.5, 0, Math.PI * 2);
               ctx.fill();
+            }
+            if (zombieFen?.origen) {
+              const op = origPos[zombieFen.origen] || origPos.este;
+              const ip = worldToIso(op.wx, op.wy);
+              ctx.fillStyle = 'rgba(190, 18, 60, 0.9)';
+              ctx.beginPath();
+              ctx.roundRect(ip.ix - 54, ip.iy - 14, 108, 22, 4);
+              ctx.fill();
+              ctx.fillStyle = '#ffffff';
+              ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(`ORIGEN: ${zombieFen.origen.toUpperCase()}`, ip.ix, ip.iy + 0.5);
+              ctx.textAlign = 'start';
             }
           }
 
@@ -1752,7 +1872,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
     const lm = findLandmarkAt(coords.ix, coords.iy);
     if (lm) {
-      onOpenSection(lm.section);
+      onOpenSection(lm.section, lm.tabHint);
     }
   };
 

@@ -2,22 +2,55 @@ import { ACTION_TABLE } from '../data/catalogs';
 import {
   applyActionToNpc,
   applyPressArticleEffects,
+  canRoleLeavePost,
   canTriggerSpontaneousChaos,
   deriveCommunityStats,
+  hasOutOfPostEffect,
+  pickActionText,
   pickChaosCandidateNpc,
   pickPressTopicAndTone,
   resolveConditionWindowWithFallback,
+  scoreActionAffinity,
   selectCandidateActions,
 } from '../engine/simulation';
-import { GameState, NewsArticle, Npc } from '../types/game';
+import { ActionDefinition, GameState, NewsArticle, Npc } from '../types/game';
+import { AiStatus } from '../types/ui';
 
 export interface AiDirectorResult {
-  type: 'press' | 'action' | 'condition' | 'thought';
+  type: 'press' | 'action' | 'condition';
   apply: (state: GameState) => void;
   source: 'ia' | 'plantilla';
+  status: AiStatus;
+}
+
+interface ClassifierProbItem {
+  id?: string;
+  prob?: number;
 }
 
 let aiDisabledForSession = false;
+let lastAiLatencyMs = 0;
+let lastAiCallSource: 'ia' | 'plantilla' | null = null;
+
+export function getAiRuntimeStatus(usarIaGemini: boolean, serverAvailable: boolean): AiStatus {
+  if (!usarIaGemini || !serverAvailable || aiDisabledForSession) return 'plantilla';
+  if (lastAiCallSource === 'plantilla') return 'plantilla';
+  if (lastAiLatencyMs > 4500) return 'lenta';
+  return 'activa';
+}
+
+export function resetAiSessionError(): void {
+  aiDisabledForSession = false;
+  lastAiCallSource = null;
+  lastAiLatencyMs = 0;
+}
+
+function recordAiCallOutcome(source: 'ia' | 'plantilla', startedAt: number): AiStatus {
+  lastAiLatencyMs = Math.max(0, Date.now() - startedAt);
+  lastAiCallSource = source;
+  if (source === 'plantilla') return 'plantilla';
+  return lastAiLatencyMs > 4500 ? 'lenta' : 'activa';
+}
 
 function shouldDisableAi(status: number, errMessage?: string): boolean {
   if (status === 402 || status === 403 || status === 429 || status === 503) return true;
@@ -32,6 +65,67 @@ function shouldDisableAi(status: number, errMessage?: string): boolean {
   );
 }
 
+function shuffleArray<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function pickWeightedCandidate(
+  candidatas: ActionDefinition[],
+  npc: Npc | null,
+  probabilidades?: ClassifierProbItem[]
+): ActionDefinition {
+  if (candidatas.length === 1) return candidatas[0];
+
+  const probMap = new Map<string, number>();
+  if (Array.isArray(probabilidades)) {
+    for (const item of probabilidades) {
+      if (item && typeof item.id === 'string' && typeof item.prob === 'number' && Number.isFinite(item.prob)) {
+        probMap.set(item.id, Math.max(0, item.prob));
+      }
+    }
+  }
+
+  const useClassifierProbs = probMap.size > 0;
+  const weights = candidatas.map((c) => {
+    if (useClassifierProbs) {
+      return probMap.get(c.id) ?? 0;
+    }
+    return npc ? scoreActionAffinity(npc, c) : 50;
+  });
+
+  const total = weights.reduce((acc, w) => acc + w, 0);
+  if (total <= 0) {
+    return candidatas[Math.floor(Math.random() * candidatas.length)];
+  }
+
+  let r = Math.random() * total;
+  for (let i = 0; i < candidatas.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidatas[i];
+  }
+  return candidatas[candidatas.length - 1];
+}
+
+async function fetchWithTimeout(url: string, body: unknown, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function buildTemplatePress(
   state: GameState,
   medioId: string,
@@ -40,19 +134,110 @@ function buildTemplatePress(
 ): NewsArticle {
   const medio = state.medios.find((m) => m.id === medioId) || state.medios[0];
   const autor = state.npcs.find((n) => n.id === periodistaId) || state.npcs[0];
-  const titlesByTopic: Record<string, string[]> = {
-    impago: ['Cuentas en rojo: salarios públicos sin liquidar', 'Tensión en el Centro Cívico por impago estatal'],
-    hambre: ['Alarma por escasez en las mesas del valle', 'Crece la preocupación por el stock de alimentos'],
-    sequia: ['La sequía golpea los campos y encarece el grano', 'Productores en alerta ante la falta de lluvias'],
-    plaga: ['Plaga agrícola amenaza la cosecha semanal', 'El campo exige respuestas frente al avance de la plaga'],
-    pandemia: ['Aumentan las consultas por el brote sanitario', 'El sistema de salud bajo presión por contagios'],
-    plaga_zombie: ['Crece la tensión en el perímetro ante el brote', 'Vecinos piden mayor presencia policial en las calles'],
-    malestar_social: ['Crece el malestar vecinal frente al despacho', 'Sectores locales reclaman cambios en el rumbo económico'],
-    inflacion: ['Los precios suben y erosionan el bolsillo diario', 'La emisión monetaria reaviva la escalada de precios'],
-    gestion_y_clima_social: ['Clima de estabilidad acompaña la gestión local', 'Mayoría vecinal respalda el rumbo actual del municipio'],
+
+  const titlesByKey: Record<string, string[]> = {
+    'impago:alarmista': [
+      'Cuentas en rojo: salarios públicos sin liquidar',
+      'Tensión en el Centro Cívico por impago estatal',
+      'Faltan fondos en tesorería y peligran los haberes públicos',
+    ],
+    'hambre:alarmista': [
+      'Alarma por escasez en las mesas del valle',
+      'Crece la preocupación por el stock de alimentos',
+      'El hambre crítica golpea a los barrios y exige respuestas',
+    ],
+    'sequia:alarmista': [
+      'La sequía golpea los campos y encarece el grano',
+      'Productores en alerta ante la falta de lluvias',
+      'Suelos resecos amenazan la cosecha de las próximas semanas',
+    ],
+    'sequia:critico': [
+      'Persiste el déficit hídrico sobre la producción agrícola',
+      'El campo acusa el impacto sostenido de la sequía',
+    ],
+    'plaga:alarmista': [
+      'Plaga agrícola amenaza la cosecha semanal',
+      'El campo exige respuestas frente al avance de la plaga',
+      'Cultivos comprometidos por un brote severo en el valle',
+    ],
+    'plaga:critico': [
+      'La plaga rural sigue presionando el precio de los víveres',
+      'Preocupación en los lotes por la caída de rendimientos',
+    ],
+    'pandemia:alarmista': [
+      'Aumentan las consultas por el brote sanitario',
+      'El sistema de salud bajo presión por contagios',
+      'Alerta sanitaria: crecen los ingresos en la clínica local',
+    ],
+    'pandemia:critico': [
+      'La clínica sigue exigida por los casos en curso',
+      'Vecinos reclaman refuerzos médicos ante el cuadro sanitario',
+    ],
+    'plaga_zombie:alarmista': [
+      'Crece la tensión en el perímetro ante el brote',
+      'Vecinos piden mayor presencia policial en las calles',
+      'Alerta en los límites del valle por avance de la amenaza',
+    ],
+    'plaga_zombie:critico': [
+      'Se mantiene la vigilancia sobre el perímetro afectado',
+      'La comunidad sigue atenta a la defensa de los accesos',
+    ],
+    'malestar_social:critico': [
+      'Crece el malestar vecinal frente al despacho',
+      'Sectores locales reclaman cambios en el rumbo económico',
+      'El descontento social gana la calle en distintos barrios',
+    ],
+    'inflacion:critico': [
+      'Los precios suben y erosionan el bolsillo diario',
+      'La emisión monetaria reaviva la escalada de precios',
+      'Inquietud en el mercado por la pérdida de poder de compra',
+    ],
+    'gestion_y_clima_social:favorable': [
+      'Clima de estabilidad acompaña la gestión local',
+      'Mayoría vecinal respalda el rumbo actual del municipio',
+      'Balance positivo en los barrios tras el último cierre',
+    ],
+    'vida_comunitaria:informativo': [
+      'Movimiento inusual anima la jornada en el valle',
+      'Vecinos protagonizan la nota de color de la semana',
+      'Crónica barrial: postales y gestos de la comunidad',
+    ],
   };
-  const pool = titlesByTopic[topic.tema] || ['Crónica de la jornada en la comunidad', 'Pulso diario de la economía y los barrios'];
-  const titulo = pool[Math.floor(Math.random() * pool.length)];
+
+  const compositeKey = `${topic.tema}:${topic.tono}`;
+  const fallbackTitles = [
+    'Crónica de la jornada en la comunidad',
+    'Pulso diario de la economía y los barrios',
+    'Resumen de actualidad desde el centro cívico',
+  ];
+  const titlePool = titlesByKey[compositeKey] || titlesByKey[`${topic.tema}:alarmista`] || fallbackTitles;
+  const titulo = titlePool[Math.floor(Math.random() * titlePool.length)];
+
+  const bodyVariantsByTone: Record<string, string[]> = {
+    alarmista: [
+      `${topic.detalle} En la redacción de ${medio.nombre}, ${autor.nombre} advierte que la situación exige medidas urgentes.`,
+      `${topic.detalle} Voces consultadas por ${autor.nombre} señalan preocupación creciente si no se corrige el rumbo en los próximos días.`,
+      `${topic.detalle} Según reporta ${medio.nombre}, los vecinos siguen minuto a minuto las decisiones del palacio.`,
+    ],
+    critico: [
+      `${topic.detalle} Para ${autor.nombre} en ${medio.nombre}, el margen de maniobra del despacho se achica.`,
+      `${topic.detalle} En su análisis de hoy, ${medio.nombre} remarca el desgaste acumulado en los distintos sectores.`,
+      `${topic.detalle} Desde las columnas de ${medio.nombre} piden mayor claridad sobre el próximo cierre fiscal.`,
+    ],
+    favorable: [
+      `${topic.detalle} Desde ${medio.nombre}, ${autor.nombre} destaca que la calma actual favorece la actividad diaria.`,
+      `${topic.detalle} Los reportes recogidos por ${autor.nombre} reflejan confianza moderada entre productores y familias.`,
+    ],
+    informativo: [
+      `${topic.detalle} Crónica firmada por ${autor.nombre} para la edición de hoy de ${medio.nombre}.`,
+      `${topic.detalle} Así lo consigna el relevamiento cotidiano de ${medio.nombre} por las zonas del valle.`,
+      `${topic.detalle} Un pantallazo de la jornada local en la pluma de ${autor.nombre}.`,
+    ],
+  };
+
+  const bodyPool = bodyVariantsByTone[topic.tono] || bodyVariantsByTone.informativo;
+  const texto = bodyPool[Math.floor(Math.random() * bodyPool.length)];
+
   return {
     id: `n_${state.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
     dia: state.reloj.dia,
@@ -65,86 +250,14 @@ function buildTemplatePress(
     alcance: medio.alcancePct,
     credibilidad: medio.credibilidad,
     titulo,
-    texto: `${topic.detalle} Desde la redacción de ${medio.nombre}, ${autor.nombre} señala que el desenlace dependerá de las próximas decisiones fiscales.`,
+    texto,
     origen: topic.origen,
-    fuente: 'plantilla',
+    textoOrigen: 'plantilla',
     zonaOrigen: topic.zonaOrigen,
     fenomenoId: topic.fenomenoId,
     esAviso: topic.esAviso,
     vigenteHastaDia: topic.vigenteHastaDia,
   };
-}
-
-export function buildTemplateThought(npc: Npc, state: GameState): string {
-  if (npc.accionIa) {
-    return `Hoy no pienso volver a la rutina: ${npc.accionIa.texto.toLowerCase()}.`;
-  }
-  if (npc.variables.hambre > 70) {
-    return `Lo único que me importa ahora es conseguir algo para comer; los precios están imposibles.`;
-  }
-  if (npc.variables.miedo > 65) {
-    return `No se puede vivir tranquilo con tanta incertidumbre en las calles.`;
-  }
-  if (state.gobierno.finanzas.impago && npc.rol !== 'agricultor') {
-    return `Si el estado no cumple con los pagos, toda la comunidad lo termina pagando.`;
-  }
-  if (npc.variables.satisfaccion >= 70) {
-    return `El día viene tranquilo en el barrio; mientras haya trabajo y comida, vamos bien.`;
-  }
-  return `Sigo cumpliendo con mi tarea, aunque miro de reojo lo que decide el gobernador.`;
-}
-
-export async function requestNpcThought(
-  npc: Npc,
-  state: GameState
-): Promise<{ texto: string; fuente: 'ia' | 'plantilla' }> {
-  if (!state.config.usarIaGemini || aiDisabledForSession) {
-    return { texto: buildTemplateThought(npc, state), fuente: 'plantilla' };
-  }
-
-  const derived = deriveCommunityStats(state);
-  try {
-    const res = await fetch('/api/ai/thought', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        npc: {
-          nombre: npc.nombre,
-          edad: npc.edad,
-          rol: npc.rol,
-          personalidad: npc.personalidad,
-          variables: npc.variables,
-          dinero: npc.economia.dinero,
-          accionActual: npc.accionIa?.texto || npc.mapa.accion,
-          modificadores: npc.modificadores.slice(0, 3).map((m) => m.texto),
-        },
-        contexto: {
-          dia: state.reloj.dia,
-          resumen: `Población ${derived.poblacion}, satisfacción media ${derived.satisfaccionMedia}%, hambre crítica ${derived.hambreCriticaPct}%, inflación ${state.gobierno.inflacion}%.`,
-        },
-      }),
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: '' }));
-      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
-      return {
-        texto: buildTemplateThought(npc, state),
-        fuente: 'plantilla',
-      };
-    }
-
-    const data = await res.json();
-    if (data.pensamiento) {
-      return { texto: data.pensamiento, fuente: 'ia' };
-    }
-    return { texto: buildTemplateThought(npc, state), fuente: 'plantilla' };
-  } catch {
-    return {
-      texto: buildTemplateThought(npc, state),
-      fuente: 'plantilla',
-    };
-  }
 }
 
 export async function dispatchPressJob(state: GameState): Promise<AiDirectorResult | null> {
@@ -158,19 +271,21 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
   const derived = deriveCommunityStats(state);
 
   if (!state.config.usarIaGemini || aiDisabledForSession) {
+    lastAiCallSource = 'plantilla';
     const article = buildTemplatePress(state, medio.id, periodista.id, topic);
     return {
       type: 'press',
       source: 'plantilla',
+      status: 'plantilla',
       apply: (s) => applyPressArticleEffects(s, article),
     };
   }
 
+  const startedAt = Date.now();
   try {
-    const res = await fetch('/api/ai/press', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await fetchWithTimeout(
+      '/api/ai/press',
+      {
         medio: {
           nombre: medio.nombre,
           afinidad_gobierno: Math.round(medio.lineaEditorial.afinidadGobierno),
@@ -198,21 +313,37 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
           inflacion: state.gobierno.inflacion,
           fenomenos: state.clima.fenomenos.map((f) => `${f.nombre} (${Math.round(f.intensidad)}%)`).join(', '),
         },
-      }),
-    });
+      },
+      15000
+    );
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({ error: '' }));
       if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
+      const status = recordAiCallOutcome('plantilla', startedAt);
       const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
       return {
         type: 'press',
         source: 'plantilla',
+        status,
         apply: (s) => applyPressArticleEffects(s, fallback),
       };
     }
 
     const data = await res.json();
+    const validGen = typeof data.titulo === 'string' && data.titulo.trim() && typeof data.texto === 'string' && data.texto.trim();
+    if (!validGen) {
+      const status = recordAiCallOutcome('plantilla', startedAt);
+      const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
+      return {
+        type: 'press',
+        source: 'plantilla',
+        status,
+        apply: (s) => applyPressArticleEffects(s, fallback),
+      };
+    }
+
+    const status = recordAiCallOutcome('ia', startedAt);
     const article: NewsArticle = {
       id: `n_${state.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
       dia: state.reloj.dia,
@@ -224,10 +355,10 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
       tono: topic.tono,
       alcance: medio.alcancePct,
       credibilidad: medio.credibilidad,
-      titulo: data.titulo || 'Edición del día',
-      texto: data.texto || topic.detalle,
+      titulo: data.titulo.trim(),
+      texto: data.texto.trim(),
       origen: topic.origen,
-      fuente: 'ia',
+      textoOrigen: 'generativo',
       zonaOrigen: topic.zonaOrigen,
       fenomenoId: topic.fenomenoId,
       esAviso: topic.esAviso,
@@ -236,13 +367,16 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
     return {
       type: 'press',
       source: 'ia',
+      status,
       apply: (s) => applyPressArticleEffects(s, article),
     };
   } catch {
+    const status = recordAiCallOutcome('plantilla', startedAt);
     const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
     return {
       type: 'press',
       source: 'plantilla',
+      status,
       apply: (s) => applyPressArticleEffects(s, fallback),
     };
   }
@@ -255,46 +389,54 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
   const npc = pickChaosCandidateNpc(state);
   if (!npc) return null;
 
-  const candidatas = selectCandidateActions(npc);
+  const candidatas = selectCandidateActions(npc, state);
   if (candidatas.length === 0) return null;
 
+  const dispatchedDay = state.reloj.dia;
   const derived = deriveCommunityStats(state);
-  const pickRandomFallback = () => {
-    const chosen = candidatas[Math.floor(Math.random() * Math.min(3, candidatas.length))];
-    return {
-      chosen,
-      texto: chosen.textoBase.replace('{nombre}', npc.nombre),
-    };
+
+  const applySelectedAction = (
+    s: GameState,
+    chosen: ActionDefinition,
+    fuente: 'clasificador' | 'motor'
+  ) => {
+    if (s.reloj.dia - dispatchedDay > 5) return;
+    const target = s.npcs.find((n) => n.id === npc.id);
+    if (!target || !target.vivo || target.hospital.internado || target.accionIa) return;
+    if (!canTriggerSpontaneousChaos(s).allowed) return;
+    if (chosen.tipo === 'espontanea' && hasOutOfPostEffect(chosen) && !canRoleLeavePost(s, target.rol)) return;
+    const texto = pickActionText(chosen, target.nombre);
+    applyActionToNpc(s, target, chosen, texto, fuente);
+    s.caosTracker.accionesEnVentana += 1;
+    s.bitacora.unshift({
+      id: `log_act_${s.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
+      dia: s.reloj.dia,
+      categoria: 'caos',
+      origen: `accion:${chosen.id}/${fuente}`,
+      titulo: `${target.nombre}: ${chosen.nombre}`,
+      detalle: texto,
+    });
+    if (s.bitacora.length > 160) s.bitacora.length = 160;
   };
 
   if (!state.config.usarIaGemini || aiDisabledForSession) {
-    const { chosen, texto } = pickRandomFallback();
+    lastAiCallSource = 'plantilla';
+    const chosen = pickWeightedCandidate(candidatas, npc);
     return {
       type: 'action',
       source: 'plantilla',
-      apply: (s) => {
-        const target = s.npcs.find((n) => n.id === npc.id);
-        if (!target || !target.vivo || target.accionIa) return;
-        if (!canTriggerSpontaneousChaos(s).allowed) return;
-        applyActionToNpc(s, target, chosen, texto, 'respaldo');
-        s.caosTracker.accionesEnVentana += 1;
-        s.bitacora.unshift({
-          id: `log_act_${s.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
-          dia: s.reloj.dia,
-          categoria: 'ia',
-          origen: `accion:${chosen.id}/respaldo`,
-          titulo: `${target.nombre}: ${chosen.nombre}`,
-          detalle: texto,
-        });
-      },
+      status: 'plantilla',
+      apply: (s) => applySelectedAction(s, chosen, 'motor'),
     };
   }
 
+  // Shuffle candidates before sending to classifier (ESTADOS §9)
+  const shuffled = shuffleArray(candidatas);
+  const startedAt = Date.now();
   try {
-    const res = await fetch('/api/ai/action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await fetchWithTimeout(
+      '/api/ai/action',
+      {
         npc: {
           nombre: npc.nombre,
           edad: npc.edad,
@@ -302,7 +444,7 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
           personalidad: npc.personalidad,
           variables: npc.variables,
         },
-        candidatas: candidatas.map((c) => ({
+        candidatas: shuffled.map((c) => ({
           id: c.id,
           nombre: c.nombre,
           descripcion: c.descripcion,
@@ -313,61 +455,41 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
             state.clima.fenomenos.map((f) => f.nombre).join(', ') || 'ninguno'
           }`,
         },
-      }),
-    });
+      },
+      15000
+    );
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({ error: '' }));
       if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
-      const { chosen, texto } = pickRandomFallback();
+      const status = recordAiCallOutcome('plantilla', startedAt);
+      const chosen = pickWeightedCandidate(candidatas, npc);
       return {
         type: 'action',
         source: 'plantilla',
-        apply: (s) => {
-          const target = s.npcs.find((n) => n.id === npc.id);
-          if (!target || !target.vivo || target.accionIa) return;
-          if (!canTriggerSpontaneousChaos(s).allowed) return;
-          applyActionToNpc(s, target, chosen, texto, 'respaldo');
-          s.caosTracker.accionesEnVentana += 1;
-        },
+        status,
+        apply: (s) => applySelectedAction(s, chosen, 'motor'),
       };
     }
 
     const data = await res.json();
-    const chosen = candidatas.find((c) => c.id === data.accionId) || candidatas[0];
-    const texto = data.texto || chosen.textoBase.replace('{nombre}', npc.nombre);
+    const status = recordAiCallOutcome('ia', startedAt);
+    const chosen = pickWeightedCandidate(candidatas, npc, data.probabilidades);
 
     return {
       type: 'action',
       source: 'ia',
-      apply: (s) => {
-        const target = s.npcs.find((n) => n.id === npc.id);
-        if (!target || !target.vivo || target.accionIa) return;
-        if (!canTriggerSpontaneousChaos(s).allowed) return;
-        applyActionToNpc(s, target, chosen, texto, 'ia');
-        s.caosTracker.accionesEnVentana += 1;
-        s.bitacora.unshift({
-          id: `log_act_${s.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
-          dia: s.reloj.dia,
-          categoria: 'ia',
-          origen: `accion:${chosen.id}/ia`,
-          titulo: `${target.nombre}: ${chosen.nombre}`,
-          detalle: texto,
-        });
-      },
+      status,
+      apply: (s) => applySelectedAction(s, chosen, 'clasificador'),
     };
   } catch {
-    const { chosen, texto } = pickRandomFallback();
+    const status = recordAiCallOutcome('plantilla', startedAt);
+    const chosen = pickWeightedCandidate(candidatas, npc);
     return {
       type: 'action',
       source: 'plantilla',
-      apply: (s) => {
-        const target = s.npcs.find((n) => n.id === npc.id);
-        if (!target || !target.vivo || target.accionIa) return;
-        if (!canTriggerSpontaneousChaos(s).allowed) return;
-        applyActionToNpc(s, target, chosen, texto, 'respaldo');
-        s.caosTracker.accionesEnVentana += 1;
-      },
+      status,
+      apply: (s) => applySelectedAction(s, chosen, 'motor'),
     };
   }
 }
@@ -383,22 +505,28 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
     .join(', ');
 
   if (!state.config.usarIaGemini || aiDisabledForSession) {
-    const chosen = pending.candidatas[0] || ACTION_TABLE.find((a) => a.tipo === 'condicion')!;
+    lastAiCallSource = 'plantilla';
+    const chosen = pickWeightedCandidate(
+      pending.candidatas.length > 0 ? pending.candidatas : [ACTION_TABLE.find((a) => a.tipo === 'condicion')!],
+      null
+    );
     return {
       type: 'condition',
       source: 'plantilla',
-      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, chosen.id, undefined, 'respaldo'),
+      status: 'plantilla',
+      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor'),
     };
   }
 
+  const shuffled = shuffleArray(pending.candidatas);
   const derived = deriveCommunityStats(state);
+  const startedAt = Date.now();
   try {
-    const res = await fetch('/api/ai/condition', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await fetchWithTimeout(
+      '/api/ai/condition',
+      {
         disparador: pending.disparador,
-        candidatas: pending.candidatas.map((c) => ({
+        candidatas: shuffled.map((c) => ({
           id: c.id,
           nombre: c.nombre,
           descripcion: c.descripcion,
@@ -411,31 +539,38 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
           dia: state.reloj.dia,
           resumen: `Satisfacción media ${derived.satisfaccionMedia}%, hambre crítica ${derived.hambreCriticaPct}%, impago: ${state.gobierno.finanzas.impago}.`,
         },
-      }),
-    });
+      },
+      30000
+    );
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({ error: '' }));
       if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
+      const status = recordAiCallOutcome('plantilla', startedAt);
       return {
         type: 'condition',
         source: 'plantilla',
-        apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, undefined, 'respaldo'),
+        status,
+        apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, 'motor'),
       };
     }
 
     const data = await res.json();
+    const status = recordAiCallOutcome('ia', startedAt);
+    const chosen = pickWeightedCandidate(pending.candidatas, null, data.probabilidades);
     return {
       type: 'condition',
       source: 'ia',
-      apply: (s) =>
-        resolveConditionWindowWithFallback(s, pending.id, data.accionId, data.texto, 'ia'),
+      status,
+      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'clasificador'),
     };
   } catch {
+    const status = recordAiCallOutcome('plantilla', startedAt);
     return {
       type: 'condition',
       source: 'plantilla',
-      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, undefined, 'respaldo'),
+      status,
+      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, 'motor'),
     };
   }
 }

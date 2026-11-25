@@ -4,11 +4,19 @@ import { X } from 'lucide-react';
 export type RctWindowTone = 'teal' | 'amber' | 'blue' | 'rose' | 'slate';
 
 const TONE_CLASSES: Record<RctWindowTone, string> = {
-  teal: 'bg-teal-800 border-teal-600/50 text-white',
-  amber: 'bg-amber-800 border-amber-500/50 text-white',
-  blue: 'bg-sky-800 border-sky-500/50 text-white',
-  rose: 'bg-rose-900 border-rose-500/50 text-white',
-  slate: 'bg-slate-700 border-slate-500/50 text-white',
+  teal: 'bg-slate-800/95 border-teal-500/30 text-white',
+  amber: 'bg-slate-800/95 border-amber-500/30 text-white',
+  blue: 'bg-slate-800/95 border-sky-500/30 text-white',
+  rose: 'bg-slate-800/95 border-rose-500/35 text-white',
+  slate: 'bg-slate-800/95 border-slate-600/40 text-white',
+};
+
+const ICON_TONE_CLASSES: Record<RctWindowTone, string> = {
+  teal: 'text-teal-400',
+  amber: 'text-amber-400',
+  blue: 'text-sky-400',
+  rose: 'text-rose-400',
+  slate: 'text-slate-300',
 };
 
 interface RctWindowProps {
@@ -56,8 +64,8 @@ export const RctWindow: React.FC<RctWindowProps> = ({
     const dx = e.clientX - dragState.current.startX;
     const dy = e.clientY - dragState.current.startY;
     setOffset({
-      x: Math.max(-500, Math.min(500, dragState.current.origX + dx)),
-      y: Math.max(-220, Math.min(340, dragState.current.origY + dy)),
+      x: Math.max(-420, Math.min(420, dragState.current.origX + dx)),
+      y: Math.max(-40, Math.min(320, dragState.current.origY + dy)),
     });
   };
 
@@ -68,21 +76,20 @@ export const RctWindow: React.FC<RctWindowProps> = ({
   return (
     <section
       style={{ transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` }}
-      className={`pointer-events-auto bg-slate-800/95 backdrop-blur-sm border-t border-l border-slate-500/50 border-b-2 border-r-2 border-slate-950 rounded shadow-2xl overflow-hidden text-slate-100 ${className}`}
+      className={`pointer-events-auto bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg shadow-2xl overflow-hidden text-slate-100 ${className}`}
     >
-      {/* Classic RCT Draggable Title Bar */}
       <div
         onPointerDown={onPointerDownTitle}
         onPointerMove={onPointerMoveTitle}
         onPointerUp={onPointerUpTitle}
-        className={`flex items-center justify-between gap-3 px-2.5 py-1.5 border-b border-slate-950 cursor-grab active:cursor-grabbing select-none ${TONE_CLASSES[tone]}`}
+        className={`flex items-center justify-between gap-3 px-3.5 py-2 border-b cursor-grab active:cursor-grabbing select-none ${TONE_CLASSES[tone]}`}
       >
         <div className="flex items-center gap-2 min-w-0">
-          {icon && <span className="shrink-0 opacity-90">{icon}</span>}
+          {icon && <span className={`shrink-0 ${ICON_TONE_CLASSES[tone]}`}>{icon}</span>}
           <div className="min-w-0">
-            <h2 className="text-xs font-bold leading-tight truncate">{title}</h2>
+            <h2 className="text-xs font-bold leading-tight truncate text-white">{title}</h2>
             {subtitle && (
-              <p className="text-[10px] text-white/80 font-mono tabular-nums truncate">
+              <p className="text-[11px] text-slate-400 font-mono tabular-nums truncate">
                 {subtitle}
               </p>
             )}
@@ -92,13 +99,12 @@ export const RctWindow: React.FC<RctWindowProps> = ({
           type="button"
           onClick={onClose}
           title="Cerrar ventana"
-          className="w-5 h-5 flex items-center justify-center rounded-sm bg-slate-900/50 hover:bg-rose-700 border border-white/25 text-white shrink-0 transition-colors"
+          className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700/80 shrink-0 transition-colors"
         >
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* Window Content */}
       <div className="bg-slate-900/95">{children}</div>
     </section>
   );

@@ -7,6 +7,7 @@ import {
   applyPressArticleEffects,
   canTriggerSpontaneousChaos,
   deriveCommunityStats,
+  pickActionText,
   pickChaosCandidateNpc,
   pickPressTopicAndTone,
   resolveConditionWindowWithFallback,
@@ -144,7 +145,7 @@ function runRandomDirectorDay(state: GameState): void {
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente') {
       const chosen = win.candidatas[Math.floor(Math.random() * win.candidatas.length)];
-      resolveConditionWindowWithFallback(state, win.id, chosen?.id, undefined, 'respaldo');
+      resolveConditionWindowWithFallback(state, win.id, chosen?.id, 'motor');
     }
   }
   if (state.reloj.dia % 4 === 0 && state.medios.length > 0) {
@@ -166,7 +167,7 @@ function runRandomDirectorDay(state: GameState): void {
         titulo: `Nota ${topic.tema}`,
         texto: topic.detalle,
         origen: topic.origen,
-        fuente: 'plantilla',
+        textoOrigen: 'plantilla',
       });
     }
   }
@@ -175,10 +176,10 @@ function runRandomDirectorDay(state: GameState): void {
     if (gate.allowed) {
       const npc = pickChaosCandidateNpc(state);
       if (npc) {
-        const candidatas = selectCandidateActions(npc);
+        const candidatas = selectCandidateActions(npc, state);
         if (candidatas.length > 0) {
           const chosen = candidatas[Math.floor(Math.random() * candidatas.length)];
-          applyActionToNpc(state, npc, chosen, chosen.textoBase.replace('{nombre}', npc.nombre), 'respaldo');
+          applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre), 'motor');
           state.caosTracker.accionesEnVentana += 1;
         }
       }
@@ -274,6 +275,7 @@ function makeInitState(useOriginal: boolean): GameState {
     s.gobierno.palancasObjetivo.finanzas = structuredClone(PRESET.initialLevers.finanzas);
   }
   s.gobierno.palancasVigentes = structuredClone(s.gobierno.palancasObjetivo);
+  s.gobierno.palancasInicioPeriodo = structuredClone(s.gobierno.palancasObjetivo);
   return s;
 }
 
@@ -357,7 +359,7 @@ function runBatch(label: string, opts: BatchOpts) {
         }
         if (d === 7) {
           const fin = s.gobierno.finanzas;
-          const oblig = fin.nomina + fin.pensiones + fin.garantiaAlimentaria + fin.comprasAlimento;
+          const oblig = fin.nomina + fin.pensiones + fin.garantiaAlimentaria;
           ing7.push(fin.ingresos);
           oblig7.push(oblig);
           disp7.push(fin.disponible);
@@ -386,11 +388,11 @@ function runBatch(label: string, opts: BatchOpts) {
           const over = dsCheck.roles.obrero - obrCap;
           if (over > maxObreroOverCap) maxObreroOverCap = over;
         }
-        if (s.resultado.estado !== 'jugando') break;
+        if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
       }
 
       const de = deriveCommunityStats(s);
-      if (s.resultado.estado === 'victoria') wins++;
+      if (s.resultado.victoriaCumplida || s.resultado.estado === 'victoria') wins++;
       if (hadImp) seedsWithImpago++;
       satEnd.push(de.satisfaccionMedia);
       deltaSat.push(de.satisfaccionMedia - d0.satisfaccionMedia);
@@ -463,7 +465,7 @@ function runSeriesSeed1(label: string, opts: { chaos: boolean; drought?: PresetF
       s = stepSimulation(s, TICKS_PER_DAY);
       if (opts.chaos) runRandomDirectorDay(s);
       if (checkpoints.has(s.reloj.dia)) pushRow();
-      if (s.resultado.estado !== 'jugando') {
+      if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) {
         if (!checkpoints.has(s.reloj.dia)) pushRow();
         break;
       }

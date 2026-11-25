@@ -4,6 +4,7 @@ import {
   applyPressArticleEffects,
   canTriggerSpontaneousChaos,
   deriveCommunityStats,
+  pickActionText,
   pickChaosCandidateNpc,
   pickPressTopicAndTone,
   resolveConditionWindowWithFallback,
@@ -33,7 +34,7 @@ function runRandomDirectorDay(state: GameState, publishPress = true): void {
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente') {
       const chosen = win.candidatas[Math.floor(Math.random() * win.candidatas.length)];
-      resolveConditionWindowWithFallback(state, win.id, chosen?.id, undefined, 'respaldo');
+      resolveConditionWindowWithFallback(state, win.id, chosen?.id, 'motor');
     }
   }
   if (publishPress && state.reloj.dia % 3 === 0 && state.medios.length > 0) {
@@ -56,7 +57,7 @@ function runRandomDirectorDay(state: GameState, publishPress = true): void {
         titulo: `Nota ${topic.tema}`,
         texto: topic.detalle,
         origen: topic.origen,
-        fuente: 'plantilla',
+        textoOrigen: 'plantilla',
         zonaOrigen: topic.zonaOrigen,
         fenomenoId: topic.fenomenoId,
         esAviso: topic.esAviso,
@@ -69,10 +70,10 @@ function runRandomDirectorDay(state: GameState, publishPress = true): void {
     if (gate.allowed) {
       const npc = pickChaosCandidateNpc(state);
       if (npc) {
-        const candidatas = selectCandidateActions(npc);
+        const candidatas = selectCandidateActions(npc, state);
         if (candidatas.length > 0) {
           const chosen = candidatas[Math.floor(Math.random() * candidatas.length)];
-          applyActionToNpc(state, npc, chosen, chosen.textoBase.replace('{nombre}', npc.nombre), 'respaldo');
+          applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre), 'motor');
           state.caosTracker.accionesEnVentana += 1;
         }
       }
@@ -142,6 +143,7 @@ function makeState(tax = 23): GameState {
   s.clima.fenomenos[2].duracionDias = 21;
   s.gobierno.palancasObjetivo.recaudacion.impuestoUnico = tax;
   s.gobierno.palancasVigentes.recaudacion.impuestoUnico = tax;
+  s.gobierno.palancasInicioPeriodo.recaudacion.impuestoUnico = tax;
   return s;
 }
 
@@ -190,9 +192,9 @@ for (const mob of [0, 0.2, 0.4, 0.6]) {
               if ((st.defensa[ev.zona] ?? 0) < 35) undefHits++;
             }
           }
-          if (s.resultado.estado !== 'jugando') break;
+          if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
         }
-        if (s.resultado.estado === 'victoria') wins++;
+        if (s.resultado.victoriaCumplida || s.resultado.estado === 'victoria') wins++;
       });
     }
     console.log({
@@ -228,7 +230,7 @@ for (let seed = 1; seed <= 30; seed++) {
         for (const ev of s.eventosDiaActual) dayMap[ev.tipo] = (dayMap[ev.tipo] || 0) + 1;
         for (const t of eventTypes) dailyCounts[t].push(dayMap[t] || 0);
       }
-      if (s.resultado.estado !== 'jugando') break;
+      if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
     }
   });
 }

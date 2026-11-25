@@ -1,24 +1,23 @@
 import React, { useState } from 'react';
 import {
-  Brain,
-  Coins,
+  Activity,
   Crosshair,
   HeartPulse,
-  MessageSquareQuote,
-  RefreshCw,
-  Sliders,
+  IdCard,
   User,
   Users,
 } from 'lucide-react';
-import { ROLE_CATALOG } from '../../data/catalogs';
+import { ROLE_CATALOG, SCENARIO_PRESETS } from '../../data/catalogs';
 import { getNpcDistrictName } from '../../engine/npcInsights';
 import {
   getEffectiveTrait,
+  getEffectiveZone,
   getModifierDelta,
   getNpcProductivity,
   getStage,
 } from '../../engine/simulation';
 import {
+  ActionEffectId,
   CommunityDerived,
   GameState,
   Npc,
@@ -26,19 +25,27 @@ import {
 } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
+const EFFECT_LABELS: Record<ActionEffectId, string> = {
+  fuera_de_puesto: 'Fuera de puesto',
+  anima: 'Ánimo',
+  agita: 'Agita zona',
+  acapara: 'Acapara',
+  moviliza: 'Moviliza',
+  decorativa: 'Decorativa',
+};
+
 interface CitizenCardProps {
   state: GameState;
   derived: CommunityDerived;
   selectedNpc: Npc | null;
   followSelected: boolean;
-  thoughtLoading: boolean;
   onToggleFollow: () => void;
   onClearSelection: () => void;
-  onRefreshThought: (npcId: string) => void;
   onOpenCommunityDrawer: () => void;
+  onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
-type CitizenTab = 'estado' | 'mente' | 'rasgos' | 'economia';
+type CitizenTab = 'estado' | 'actividad' | 'ficha';
 
 const TRAIT_LABELS: Record<PersonalityTrait, string> = {
   valentia: 'Valentía',
@@ -60,7 +67,7 @@ const CitizenAvatar: React.FC<{ npc: Npc }> = ({ npc }) => {
   return (
     <svg
       viewBox="0 0 48 48"
-      className="w-12 h-12 rounded bg-slate-800 border border-slate-600 shrink-0"
+      className="w-11 h-11 rounded bg-slate-800 border border-slate-700 shrink-0"
       aria-hidden="true"
     >
       <path d="M10 46 C10 34, 38 34, 38 46 Z" fill={def.color} />
@@ -100,33 +107,32 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
   derived,
   selectedNpc,
   followSelected,
-  thoughtLoading,
   onToggleFollow,
   onClearSelection,
-  onRefreshThought,
   onOpenCommunityDrawer,
+  onInspectCausal,
 }) => {
   const [tab, setTab] = useState<CitizenTab>('estado');
 
   if (!selectedNpc) {
     return (
-      <div className="pointer-events-auto fixed top-12 right-3 z-20 bg-slate-800/92 backdrop-blur-sm border-t border-l border-slate-500/50 border-b-2 border-r-2 border-slate-950 rounded px-3 py-2 shadow-xl text-xs w-[225px]">
-        <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-700">
+      <div className="pointer-events-auto fixed top-14 right-3 z-20 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-2 shadow-xl text-xs w-[210px]">
+        <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-800">
           <span className="font-semibold text-slate-100 flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5 text-teal-400" />
-            Comunidad ({derived.poblacion})
+            Ciudad ({derived.poblacion})
           </span>
           <button
             type="button"
             onClick={onOpenCommunityDrawer}
             className="text-[11px] text-teal-300 hover:text-white font-medium"
           >
-            Roles
+            Vecinos
           </button>
         </div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono tabular-nums text-[11px]">
           <div className="flex justify-between">
-            <span className="font-sans text-slate-400">Sat.</span>
+            <span className="font-sans text-slate-400">Ánimo</span>
             <span className="font-semibold text-white">{derived.satisfaccionMedia}%</span>
           </div>
           <div className="flex justify-between">
@@ -156,16 +162,18 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
   const stage = getStage(selectedNpc.edad);
   const prod = Math.round(getNpcProductivity(selectedNpc, state) * 100);
   const districtName = getNpcDistrictName(selectedNpc);
+  const zonesCount = Object.keys(SCENARIO_PRESETS[state.config.escenarioId].zonas).length;
+  const effZone = getEffectiveZone(selectedNpc, zonesCount);
 
   return (
-    <div className="pointer-events-none fixed top-12 right-3 z-20">
+    <div className="pointer-events-none fixed top-14 right-3 z-20">
       <RctWindow
         title={selectedNpc.nombre}
         subtitle={`${def.nombre} · ${selectedNpc.edad} años (${stage})`}
         tone="teal"
         icon={<User className="w-3.5 h-3.5" />}
         onClose={onClearSelection}
-        className="w-[310px]"
+        className="w-[296px]"
       >
         <div className="p-3 space-y-2.5">
           {/* Portrait + Location + Camera Lock */}
@@ -173,18 +181,25 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             <CitizenAvatar npc={selectedNpc} />
             <div className="min-w-0 flex-1 space-y-1">
               <div className="text-[11px] text-teal-300 truncate capitalize font-medium">
-                {districtName}
+                {districtName} · Zona {effZone}
               </div>
               <div className="text-[11px] text-slate-300 truncate capitalize">
                 {selectedNpc.accionIa ? selectedNpc.accionIa.nombre : selectedNpc.mapa.accion}
               </div>
+              {(selectedNpc.hospital.internado || selectedNpc.hospital.esperandoCama) && (
+                <div className="text-[10px] font-semibold text-sky-300">
+                  {selectedNpc.hospital.internado
+                    ? `Internado en clínica (${selectedNpc.hospital.diasInternado}d)`
+                    : 'Esperando cama en hospital'}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={onToggleFollow}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-semibold border transition-colors ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold border transition-colors ${
                   followSelected
                     ? 'bg-teal-700 border-teal-400 text-white'
-                    : 'bg-slate-800 border-slate-600 text-slate-200 hover:bg-slate-700'
+                    : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
                 }`}
               >
                 <Crosshair className="w-3 h-3" />
@@ -193,14 +208,13 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             </div>
           </div>
 
-          {/* RCT Sub-Window Tabs */}
-          <div className="grid grid-cols-4 gap-1 bg-slate-950/70 p-1 rounded-sm border border-slate-800">
+          {/* 3 Clean Tabs */}
+          <div className="grid grid-cols-3 gap-1 bg-slate-800/70 p-1 rounded border border-slate-700/80">
             {(
               [
                 { id: 'estado', label: 'Estado', icon: HeartPulse },
-                { id: 'mente', label: 'Mente', icon: Brain },
-                { id: 'rasgos', label: 'Rasgos', icon: Sliders },
-                { id: 'economia', label: 'Dinero', icon: Coins },
+                { id: 'actividad', label: 'Actividad', icon: Activity },
+                { id: 'ficha', label: 'Ficha', icon: IdCard },
               ] as Array<{ id: CitizenTab; label: string; icon: React.ComponentType<{ className?: string }> }>
             ).map((t) => {
               const Icon = t.icon;
@@ -210,11 +224,11 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
                   key={t.id}
                   type="button"
                   onClick={() => setTab(t.id)}
-                  className={`flex flex-col items-center py-1 rounded-sm text-[10px] font-medium transition-colors ${
-                    active ? 'bg-teal-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  className={`flex items-center justify-center gap-1.5 py-1 rounded-sm text-[11px] font-semibold transition-colors ${
+                    active ? 'bg-teal-700 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700/60'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5 mb-0.5" />
+                  <Icon className="w-3.5 h-3.5" />
                   {t.label}
                 </button>
               );
@@ -230,7 +244,7 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
                   { key: 'hambre', label: 'Hambre', val: selectedNpc.variables.hambre, invert: true },
                   { key: 'miedo', label: 'Miedo', val: selectedNpc.variables.miedo, invert: true },
                   { key: 'satisfaccion', label: 'Satisfacción', val: selectedNpc.variables.satisfaccion, invert: false },
-                  { key: 'lealtad', label: 'Apoyo / Lealtad', val: selectedNpc.variables.lealtad, invert: false },
+                  { key: 'lealtad', label: 'Apoyo electoral', val: selectedNpc.variables.lealtad, invert: false },
                 ] as const
               ).map((item) => {
                 const v = Math.round(item.val);
@@ -251,109 +265,155 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             </div>
           )}
 
-          {/* Tab 2: Mente */}
-          {tab === 'mente' && (
+          {/* Tab 2: Actividad y modificadores */}
+          {tab === 'actividad' && (
             <div className="space-y-2.5 text-xs">
-              <div className="bg-slate-950/60 border border-slate-800 rounded p-2.5">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-300">
-                    <MessageSquareQuote className="w-3.5 h-3.5 text-teal-400" />
-                    Pensamiento
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onRefreshThought(selectedNpc.id)}
-                    disabled={thoughtLoading}
-                    className="flex items-center gap-1 text-[11px] text-teal-400 hover:text-teal-300 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${thoughtLoading ? 'animate-spin' : ''}`} />
-                    Actualizar
-                  </button>
-                </div>
-                <p className="text-slate-200 italic leading-relaxed">
-                  {thoughtLoading && !selectedNpc.pensamientoCache
-                    ? 'Escuchando al habitante...'
-                    : `“${selectedNpc.pensamientoCache?.texto || 'Pensando en la jornada...'}”`}
-                </p>
-              </div>
-
-              {selectedNpc.accionIa && (
-                <div className="border border-amber-500/40 bg-amber-950/40 rounded p-2 text-xs">
-                  <div className="font-semibold text-amber-300">
-                    {selectedNpc.accionIa.nombre} ({selectedNpc.accionIa.diasRestantes}d)
+              {selectedNpc.accionIa ? (
+                <div className="border border-amber-500/40 bg-amber-950/35 rounded p-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-semibold text-amber-300 flex items-center gap-1.5 flex-wrap">
+                      <span>
+                        {selectedNpc.accionIa.nombre} ({selectedNpc.accionIa.diasRestantes}d)
+                      </span>
+                      {selectedNpc.accionIa.origen.endsWith('/contagio') && (
+                        <span className="px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide rounded-sm bg-amber-900/70 text-amber-200 border border-amber-500/40">
+                          Por contagio
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onInspectCausal(
+                          `${selectedNpc.nombre}: ${selectedNpc.accionIa!.nombre}`,
+                          selectedNpc.accionIa!.causa || selectedNpc.accionIa!.origen,
+                          selectedNpc.accionIa!.texto
+                        )
+                      }
+                      className="text-[10px] font-semibold text-amber-300 hover:text-white underline shrink-0"
+                    >
+                      ¿Por qué?
+                    </button>
                   </div>
                   <p className="text-amber-100/90 text-[11px] mt-0.5">{selectedNpc.accionIa.texto}</p>
+                  {selectedNpc.accionIa.efectos && selectedNpc.accionIa.efectos.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {selectedNpc.accionIa.efectos.map((ef, idx) => (
+                        <span
+                          key={`${ef.id}-${idx}`}
+                          className="px-1.5 py-0.5 text-[10px] rounded-sm bg-slate-900/80 text-slate-300 border border-slate-700/80"
+                        >
+                          {EFFECT_LABELS[ef.id]}
+                          {ef.intensidad ? ` (${ef.intensidad})` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-800/45 rounded p-2">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-0.5">
+                    Actividad actual
+                  </div>
+                  <p className="text-slate-200 text-[11px] capitalize">
+                    {selectedNpc.hospital.internado
+                      ? `Internado en clínica (${selectedNpc.hospital.diasInternado}d)`
+                      : selectedNpc.hospital.esperandoCama
+                      ? 'Esperando cama disponible en hospital'
+                      : `${selectedNpc.mapa.accion} (${def.nombre} · zona ${effZone})`}
+                  </p>
                 </div>
               )}
 
-              {selectedNpc.modificadores.length > 0 && (
-                <div className="space-y-1 max-h-[120px] overflow-y-auto">
+              {selectedNpc.modificadores.length > 0 ? (
+                <div className="space-y-1 max-h-[155px] overflow-y-auto divide-y divide-slate-800/70">
                   {selectedNpc.modificadores.map((mod) => (
-                    <div key={mod.id} className="bg-slate-950/50 rounded p-1.5 border border-slate-800 text-[11px]">
-                      <div className="text-slate-200">{mod.texto}</div>
+                    <div key={mod.id} className="pt-1.5 first:pt-0 text-[11px]">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-200">{mod.texto}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onInspectCausal(
+                              `Modificador de ${selectedNpc.nombre}`,
+                              mod.causa || mod.origen,
+                              mod.texto
+                            )
+                          }
+                          className="text-[10px] text-teal-400 hover:text-white underline shrink-0"
+                        >
+                          ¿Por qué?
+                        </button>
+                      </div>
                       <div className="font-mono text-[10px] text-slate-500">
                         {mod.origen} · {mod.diasRestantes}d
                       </div>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Tab 3: Rasgos */}
-          {tab === 'rasgos' && (
-            <div className="space-y-1.5 text-[11px]">
-              {(Object.keys(TRAIT_LABELS) as PersonalityTrait[]).map((trait) => {
-                const base = selectedNpc.personalidad[trait];
-                const eff = Math.round(getEffectiveTrait(selectedNpc, trait));
-                const delta = Math.round(getModifierDelta(selectedNpc, trait));
-                return (
-                  <div key={trait} className="flex items-center justify-between py-0.5 border-b border-slate-800/60">
-                    <span className="text-slate-300">{TRAIT_LABELS[trait]}</span>
-                    <span className="font-mono tabular-nums text-white font-semibold">
-                      {base}
-                      {delta !== 0 && (
-                        <span className={delta > 0 ? 'text-amber-400 ml-1' : 'text-teal-400 ml-1'}>
-                          ({delta > 0 ? '+' : ''}
-                          {delta} → {eff})
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-              <div className="flex items-center justify-between pt-1 text-slate-400">
-                <span>Nivel educativo</span>
-                <span className="font-mono text-white font-semibold">Nivel {selectedNpc.educacion.nivel}/3</span>
-              </div>
-            </div>
-          )}
-
-          {/* Tab 4: Economía */}
-          {tab === 'economia' && (
-            <div className="space-y-2 text-xs font-mono tabular-nums">
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="font-sans text-slate-400">Productividad</span>
-                <span className="font-semibold text-white">{prod}%</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="font-sans text-slate-400">Último ingreso neto</span>
-                <span className="font-semibold text-emerald-400">
-                  ${selectedNpc.economia.ultimoIngresoNeto.toFixed(1)}/d
-                </span>
-              </div>
-              {state.config.economiaModulo !== 'simple' && (
-                <div className="flex justify-between py-1 border-b border-slate-800">
-                  <span className="font-sans text-slate-400">Ahorros personales</span>
-                  <span className="font-semibold text-white">${selectedNpc.economia.dinero.toFixed(1)}</span>
+              ) : (
+                <div className="text-[11px] text-slate-400 italic px-1">
+                  Sin modificadores activos hoy.
                 </div>
               )}
-              <div className="flex justify-between py-1">
-                <span className="font-sans text-slate-400">Acceso a alimento</span>
-                <span className="font-semibold text-teal-300">
-                  {Math.round((state.ultimaSalidaEconomica.accesoComida[selectedNpc.id] ?? 1) * 100)}%
-                </span>
+            </div>
+          )}
+
+          {/* Tab 3: Ficha (Economía + Rasgos unificados) */}
+          {tab === 'ficha' && (
+            <div className="space-y-3 text-[11px]">
+              <div className="space-y-1 font-mono tabular-nums pb-2 border-b border-slate-800">
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Productividad</span>
+                  <span className="font-semibold text-white">{prod}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Ingreso neto diario</span>
+                  <span className="font-semibold text-emerald-400">
+                    ${selectedNpc.economia.ultimoIngresoNeto.toFixed(1)}/d
+                  </span>
+                </div>
+                {state.config.economiaModulo !== 'simple' && (
+                  <div className="flex justify-between">
+                    <span className="font-sans text-slate-400">Ahorros</span>
+                    <span className="font-semibold text-white">${selectedNpc.economia.dinero.toFixed(1)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Acceso a alimento</span>
+                  <span className="font-semibold text-teal-300">
+                    {Math.round((state.ultimaSalidaEconomica.accesoComida[selectedNpc.id] ?? 1) * 100)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Nivel educativo</span>
+                  <span className="font-semibold text-white">Nivel {selectedNpc.educacion.nivel}/3</span>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">
+                  Rasgos personales
+                </div>
+                {(Object.keys(TRAIT_LABELS) as PersonalityTrait[]).map((trait) => {
+                  const base = selectedNpc.personalidad[trait];
+                  const eff = Math.round(getEffectiveTrait(selectedNpc, trait));
+                  const delta = Math.round(getModifierDelta(selectedNpc, trait));
+                  return (
+                    <div key={trait} className="flex items-center justify-between py-0.5">
+                      <span className="text-slate-300">{TRAIT_LABELS[trait]}</span>
+                      <span className="font-mono tabular-nums text-white font-semibold">
+                        {base}
+                        {delta !== 0 && (
+                          <span className={delta > 0 ? 'text-amber-400 ml-1' : 'text-teal-400 ml-1'}>
+                            ({delta > 0 ? '+' : ''}
+                            {delta} → {eff})
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

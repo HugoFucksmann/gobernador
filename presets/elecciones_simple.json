@@ -7,7 +7,7 @@
   "duracionDias": 365,
   "ECON_CONSTANTS": {
     "salarioBasePublico": 9,
-    "pensionBase": 6,
+    "pensionBase": 8,
     "empleadosPorComerciante": 4,
     "precioBaseAlimento": 1.0,
     "consumoPorNpc": 1.0,

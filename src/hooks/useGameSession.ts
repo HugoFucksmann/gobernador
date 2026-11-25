@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { GameController } from '../engine/gameController';
 import { hasActiveCrisisAlert } from '../engine/policies';
-import { DistrictId, GovernorLevers, RoleId, WorldConfig } from '../types/game';
-import { CameraTarget, DockSection, MapFilter, MapLens } from '../types/ui';
+import { DistrictId, GovernorLevers, PhenomenonType, RoleId, WorldConfig, ZoneId } from '../types/game';
+import { CameraTarget, CityTab, DockSection, MapFilter, MapLens } from '../types/ui';
+
+export interface CausalInspectTarget {
+  title: string;
+  ref?: string;
+  fallbackText?: string;
+}
 
 export function useGameSession() {
   const controllerRef = useRef<GameController | null>(null);
@@ -15,6 +21,7 @@ export function useGameSession() {
 
   // Pure UI / viewport state
   const [activeSection, setActiveSection] = useState<DockSection | null>(null);
+  const [ciudadTabRequest, setCiudadTabRequest] = useState<{ tab: CityTab; seq: number } | null>(null);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
   const [mapFilter, setMapFilter] = useState<MapFilter>('todos');
@@ -23,6 +30,8 @@ export function useGameSession() {
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; seq: number } | null>(null);
   const [hoverInfo, setHoverInfo] = useState<string | null>(null);
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
+  const [milestoneBannerDismissed, setMilestoneBannerDismissed] = useState<boolean>(false);
+  const [causalInspect, setCausalInspect] = useState<CausalInspectTarget | null>(null);
 
   // Start controller simulation + AI health check on mount
   useEffect(() => {
@@ -36,7 +45,9 @@ export function useGameSession() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (showConfigModal) {
+        if (causalInspect) {
+          setCausalInspect(null);
+        } else if (showConfigModal) {
           setShowConfigModal(false);
         } else if (activeSection) {
           setActiveSection(null);
@@ -56,7 +67,7 @@ export function useGameSession() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeSection, selectedNpcId, showConfigModal, controller]);
+  }, [activeSection, selectedNpcId, showConfigModal, causalInspect, controller]);
 
   const selectedNpc = useMemo(
     () => snapshot.state.npcs.find((n) => n.id === selectedNpcId && n.vivo) || null,
@@ -69,13 +80,9 @@ export function useGameSession() {
   );
 
   // Actions bridging UI events -> Headless Controller
-  const selectNpc = useCallback(
-    (npcId: string) => {
-      setSelectedNpcId(npcId);
-      void controller.fetchThoughtForNpc(npcId, true);
-    },
-    [controller]
-  );
+  const selectNpc = useCallback((npcId: string) => {
+    setSelectedNpcId(npcId);
+  }, []);
 
   const clearSelectedNpc = useCallback(() => {
     setSelectedNpcId(null);
@@ -93,16 +100,41 @@ export function useGameSession() {
     [controller, selectNpc]
   );
 
-  const refreshNpcThought = useCallback(
-    (npcId: string) => {
-      void controller.fetchThoughtForNpc(npcId, false);
-    },
-    [controller]
-  );
-
   const togglePause = useCallback(() => controller.togglePause(), [controller]);
   const setSpeed = useCallback((spd: number) => controller.setSpeed(spd), [controller]);
   const stepDay = useCallback(() => controller.stepDay(), [controller]);
+  const setDevMode = useCallback((enabled: boolean) => controller.setDevMode(enabled), [controller]);
+
+  const forceClimatePhenomenon = useCallback(
+    (tipo: PhenomenonType, zona?: ZoneId) => controller.forceClimatePhenomenon(tipo, zona),
+    [controller]
+  );
+
+  const saveManual = useCallback(() => controller.saveManual(), [controller]);
+
+  const loadManual = useCallback(() => {
+    const ok = controller.loadManual();
+    if (ok) {
+      setSelectedNpcId(null);
+      setFollowSelected(false);
+      setShowConfigModal(false);
+      setMilestoneBannerDismissed(true);
+      setCausalInspect(null);
+    }
+    return ok;
+  }, [controller]);
+
+  const loadAutoSave = useCallback(() => {
+    const ok = controller.loadAutoSave();
+    if (ok) {
+      setSelectedNpcId(null);
+      setFollowSelected(false);
+      setShowConfigModal(false);
+      setMilestoneBannerDismissed(true);
+      setCausalInspect(null);
+    }
+    return ok;
+  }, [controller]);
 
   const updateLevers = useCallback(
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
@@ -128,6 +160,8 @@ export function useGameSession() {
       setFollowSelected(false);
       setShowConfigModal(false);
       setActiveSection(null);
+      setMilestoneBannerDismissed(false);
+      setCausalInspect(null);
       controller.startNewGame(newConfig);
     },
     [controller]
@@ -137,6 +171,25 @@ export function useGameSession() {
     setFollowSelected(false);
     setCameraTarget({ district, seq: Date.now() + Math.random() });
   }, []);
+
+  const openCiudadTab = useCallback((tab: CityTab) => {
+    setActiveSection('ciudad');
+    setCiudadTabRequest({ tab, seq: Date.now() + Math.random() });
+  }, []);
+
+  const openAlertsDrawer = useCallback(() => {
+    openCiudadTab('alertas');
+  }, [openCiudadTab]);
+
+  const openLandmarkSection = useCallback(
+    (sec: DockSection, tabHint?: CityTab) => {
+      setActiveSection(sec);
+      if (sec === 'ciudad' && tabHint) {
+        setCiudadTabRequest({ tab: tabHint, seq: Date.now() + Math.random() });
+      }
+    },
+    []
+  );
 
   const requestZoom = useCallback((delta: number) => {
     setZoomRequest({ delta, seq: Date.now() + Math.random() });
@@ -148,6 +201,18 @@ export function useGameSession() {
     setActiveSection((prev) => (prev === sec ? null : sec));
   }, []);
 
+  const openCausalInspect = useCallback((target: CausalInspectTarget) => {
+    setCausalInspect(target);
+  }, []);
+
+  const closeCausalInspect = useCallback(() => {
+    setCausalInspect(null);
+  }, []);
+
+  const dismissMilestoneBanner = useCallback(() => {
+    setMilestoneBannerDismissed(true);
+  }, []);
+
   return {
     // Domain snapshot
     ...snapshot,
@@ -156,6 +221,7 @@ export function useGameSession() {
 
     // UI/Camera state
     activeSection,
+    ciudadTabRequest,
     followSelected,
     mapFilter,
     mapLens,
@@ -163,25 +229,37 @@ export function useGameSession() {
     zoomRequest,
     hoverInfo,
     showConfigModal,
+    milestoneBannerDismissed,
+    causalInspect,
 
     // UI setters
     setActiveSection,
     toggleSection,
+    openAlertsDrawer,
+    openCiudadTab,
+    openLandmarkSection,
     setFollowSelected,
     cancelFollow,
     setMapFilter,
     setMapLens,
     setHoverInfo,
     setShowConfigModal,
+    dismissMilestoneBanner,
+    openCausalInspect,
+    closeCausalInspect,
 
     // Commands
     selectNpc,
     clearSelectedNpc,
     selectRoleSample,
-    refreshNpcThought,
     togglePause,
     setSpeed,
     stepDay,
+    setDevMode,
+    forceClimatePhenomenon,
+    saveManual,
+    loadManual,
+    loadAutoSave,
     updateLevers,
     updateMediaIntervention,
     triggerPressManual,
@@ -190,3 +268,4 @@ export function useGameSession() {
     requestZoom,
   };
 }
+

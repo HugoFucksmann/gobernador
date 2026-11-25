@@ -1,6 +1,7 @@
-import { DISTRICTS, ROLE_CATALOG } from '../data/catalogs';
-import { Npc } from '../types/game';
+import { DISTRICTS, ROLE_CATALOG, SCENARIO_PRESETS } from '../data/catalogs';
+import { CommunityDerived, GameState, Npc, ZoneId } from '../types/game';
 import { MapLens } from '../types/ui';
+import { getEffectiveZone } from './simulation';
 
 function hashIndex(id: string, len: number): number {
   let h = 0;
@@ -22,6 +23,8 @@ export function getNpcDistrictName(npc: Npc): string {
 }
 
 export function evaluateNpcBubbleText(npc: Npc): string {
+  if (npc.hospital.internado) return 'En recuperación médica';
+  if (npc.hospital.esperandoCama) return 'Esperando cama disponible';
   if (npc.accionIa) {
     if (npc.accionIa.id === 'huelga') return '¡Exigimos nuestros pagos!';
     if (npc.accionIa.id === 'protesta') return '¡Queremos respuestas!';
@@ -46,7 +49,29 @@ export function evaluateNpcBubbleText(npc: Npc): string {
   return 'Día movido en el pueblo';
 }
 
-export function evaluateNpcLensColor(npc: Npc, lens: MapLens): string {
+export function evaluateZoneMetricColor(
+  lens: 'defensa' | 'orden' | 'integridad' | 'amenaza' | 'hospital',
+  value: number
+): string {
+  if (lens === 'defensa' || lens === 'orden') {
+    return value >= 60 ? '#10b981' : value >= 35 ? '#f59e0b' : '#ef4444';
+  }
+  if (lens === 'integridad') {
+    return value >= 80 ? '#10b981' : value >= 50 ? '#f59e0b' : '#ef4444';
+  }
+  if (lens === 'amenaza') {
+    return value >= 50 ? '#ef4444' : value >= 20 ? '#f59e0b' : '#10b981';
+  }
+  // hospital occupancy %
+  return value > 100 ? '#ef4444' : value >= 75 ? '#f59e0b' : '#0ea5e9';
+}
+
+export function evaluateNpcLensColor(
+  npc: Npc,
+  lens: MapLens,
+  state?: GameState,
+  derived?: CommunityDerived
+): string {
   if (lens === 'roles') return ROLE_CATALOG[npc.rol].color;
   if (lens === 'satisfaccion') {
     const v = npc.variables.satisfaccion;
@@ -56,6 +81,43 @@ export function evaluateNpcLensColor(npc: Npc, lens: MapLens): string {
     const v = npc.variables.hambre;
     return v > 75 ? '#ef4444' : v > 45 ? '#f59e0b' : '#14b8a6';
   }
-  const v = npc.variables.lealtad;
-  return v >= 55 ? '#0ea5e9' : v >= 35 ? '#f59e0b' : '#e11d48';
+  if (lens === 'lealtad') {
+    const v = npc.variables.lealtad;
+    return v >= 55 ? '#0ea5e9' : v >= 35 ? '#f59e0b' : '#e11d48';
+  }
+  if (lens === 'hospital') {
+    if (npc.hospital.esperandoCama) return '#ef4444';
+    if (npc.hospital.internado) return '#0ea5e9';
+    if (npc.rol === 'medico') return '#10b981';
+    if (npc.variables.salud < 65) return '#f59e0b';
+    return '#94a3b8';
+  }
+
+  const zonesCount = state
+    ? Object.keys(SCENARIO_PRESETS[state.config.escenarioId].zonas).length
+    : 5;
+  const zone: ZoneId = getEffectiveZone(npc, zonesCount);
+
+  if (lens === 'defensa') {
+    if (npc.rol === 'policia') return '#1d4ed8';
+    const val = derived?.defensa[zone] ?? 50;
+    return evaluateZoneMetricColor('defensa', val);
+  }
+  if (lens === 'orden') {
+    if (npc.rol === 'policia') return '#0ea5e9';
+    const val = derived?.orden[zone] ?? 50;
+    return evaluateZoneMetricColor('orden', val);
+  }
+  if (lens === 'integridad') {
+    if (npc.rol === 'ingeniero' || npc.rol === 'obrero') return '#0284c7';
+    const val = state?.gobierno.integridad?.[zone] ?? 100;
+    return evaluateZoneMetricColor('integridad', val);
+  }
+  if (lens === 'amenaza') {
+    const val = derived?.amenazaPercibida[zone] ?? 0;
+    return evaluateZoneMetricColor('amenaza', val);
+  }
+
+  return ROLE_CATALOG[npc.rol].color;
 }
+

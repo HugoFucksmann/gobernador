@@ -2,6 +2,7 @@ import React from 'react';
 import {
   CloudRain,
   Eye,
+  Filter,
   Maximize2,
   Newspaper,
   Skull,
@@ -11,13 +12,15 @@ import {
 } from 'lucide-react';
 import { DISTRICTS, FISCAL_PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
 import { DistrictId, GameState } from '../../types/game';
-import { MapLens } from '../../types/ui';
+import { MapFilter, MapLens } from '../../types/ui';
 
 interface RctStatusBarProps {
   state: GameState;
   hoverInfo: string | null;
   mapLens: MapLens;
+  mapFilter: MapFilter;
   onChangeLens: (lens: MapLens) => void;
+  onChangeFilter: (filter: MapFilter) => void;
   onJumpDistrict: (d: DistrictId | 'all') => void;
   onZoom: (delta: number) => void;
   onOpenPress: () => void;
@@ -27,7 +30,9 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
   state,
   hoverInfo,
   mapLens,
+  mapFilter,
   onChangeLens,
+  onChangeFilter,
   onJumpDistrict,
   onZoom,
   onOpenPress,
@@ -40,15 +45,15 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
   );
 
   return (
-    <footer className="pointer-events-auto fixed bottom-0 inset-x-0 z-30 bg-slate-800/95 backdrop-blur-sm border-t border-slate-600/60 px-2.5 py-1 flex items-center justify-between gap-3 text-[11px] text-slate-200">
-      {/* Left: Camera & Lens Quick Controls + Hover Ticker */}
+    <footer className="pointer-events-auto fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur-md border-t border-slate-700/80 px-3 py-1 flex items-center justify-between gap-3 text-[11px] text-slate-200">
+      {/* Left: Camera, District Jump, Lens, Filter & Hover Ticker */}
       <div className="flex items-center gap-2 min-w-0">
-        <div className="flex items-center gap-0.5 bg-slate-900/90 border border-slate-700 rounded-sm p-0.5 shrink-0">
+        <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-700 rounded p-0.5 shrink-0">
           <button
             type="button"
             onClick={() => onZoom(0.28)}
             title="Acercar cámara"
-            className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded-sm"
+            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded-sm"
           >
             <ZoomIn className="w-3 h-3" />
           </button>
@@ -56,7 +61,7 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
             type="button"
             onClick={() => onZoom(-0.28)}
             title="Alejar cámara"
-            className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded-sm"
+            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded-sm"
           >
             <ZoomOut className="w-3 h-3" />
           </button>
@@ -64,7 +69,7 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
             type="button"
             onClick={() => onZoom(0)}
             title="Centrar cámara"
-            className="p-1 text-slate-300 hover:text-white hover:bg-slate-800 rounded-sm"
+            className="p-1 text-slate-300 hover:text-white hover:bg-slate-700 rounded-sm"
           >
             <Maximize2 className="w-3 h-3" />
           </button>
@@ -79,10 +84,10 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
               e.target.value = '';
             }
           }}
-          className="bg-slate-900 border border-slate-700 rounded-sm px-1.5 py-0.5 text-[11px] text-slate-200 focus:outline-none cursor-pointer shrink-0"
+          className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-200 focus:outline-none cursor-pointer shrink-0"
         >
           <option value="" disabled>
-            Ir a zona...
+            Ir a zona…
           </option>
           <option value="all">Todo el valle</option>
           {DISTRICTS.map((d) => (
@@ -92,7 +97,7 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
           ))}
         </select>
 
-        <div className="hidden sm:flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-sm px-1.5 py-0.5 shrink-0">
+        <div className="hidden sm:flex items-center gap-1 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 shrink-0">
           <Eye className="w-3 h-3 text-teal-400" />
           <select
             aria-label="Lente visual"
@@ -110,27 +115,65 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
               Hambre
             </option>
             <option value="lealtad" className="bg-slate-900">
-              Apoyo
+              Apoyo electoral
+            </option>
+            <option value="defensa" className="bg-slate-900">
+              Defensa zona
+            </option>
+            <option value="orden" className="bg-slate-900">
+              Orden zona
+            </option>
+            <option value="integridad" className="bg-slate-900">
+              Integridad zona
+            </option>
+            <option value="amenaza" className="bg-slate-900">
+              Amenaza zona
+            </option>
+            <option value="hospital" className="bg-slate-900">
+              Hospital y salud
             </option>
           </select>
         </div>
 
-        <span className="hidden lg:inline truncate text-slate-300">
-          {hoverInfo || 'Arrastrá o usá WASD para recorrer el valle · Rueda para zoom · Clic en edificios o vecinos'}
+        <div className="hidden md:flex items-center gap-1 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 shrink-0">
+          <Filter className="w-3 h-3 text-slate-400" />
+          <select
+            aria-label="Filtrar vecinos"
+            value={mapFilter}
+            onChange={(e) => onChangeFilter(e.target.value as MapFilter)}
+            className="bg-transparent text-[11px] text-slate-200 focus:outline-none cursor-pointer"
+          >
+            <option value="todos" className="bg-slate-900">
+              Todos
+            </option>
+            <option value="acciones" className="bg-slate-900">
+              En acción
+            </option>
+            <option value="descontentos" className="bg-slate-900">
+              Descontentos
+            </option>
+            <option value="hambre" className="bg-slate-900">
+              Hambre crítica
+            </option>
+          </select>
+        </div>
+
+        <span className="hidden xl:inline truncate text-slate-400">
+          {hoverInfo || 'Arrastrá o usá WASD para mover · Rueda para zoom · Clic en edificios o vecinos'}
         </span>
       </div>
 
-      {/* Right: Newspaper Ticker + Date & Weather */}
-      <div className="flex items-center gap-3 shrink-0">
+      {/* Right: Newspaper Ticker + Weather + Day */}
+      <div className="flex items-center gap-2.5 shrink-0">
         {latestHeadline && (
           <button
             type="button"
             onClick={onOpenPress}
-            title="Leer en Gaceta"
-            className="hidden md:flex items-center gap-1.5 max-w-[340px] px-2 py-0.5 rounded-sm bg-slate-900/90 hover:bg-slate-700 border border-slate-700 text-left transition-colors"
+            title="Abrir Gaceta"
+            className="hidden md:flex items-center gap-1.5 max-w-[300px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition-colors"
           >
             <Newspaper className="w-3 h-3 text-amber-400 shrink-0" />
-            <span className="truncate text-slate-100 font-medium">
+            <span className="truncate text-slate-200 font-medium">
               {latestHeadline.medioNombre}: {latestHeadline.titulo}
             </span>
           </button>
@@ -144,7 +187,10 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
               ) : (
                 <CloudRain className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               )}
-              <span className="text-rose-300 font-medium">{activeFen.nombre}</span>
+              <span className="text-rose-300 font-medium">
+                {activeFen.nombre}
+                {activeFen.origen ? ` (${activeFen.origen})` : ''}
+              </span>
             </>
           ) : (
             <>
@@ -157,7 +203,7 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
           )}
         </div>
 
-        <div className="font-mono tabular-nums text-white font-semibold bg-slate-900 border border-slate-700 rounded-sm px-2 py-0.5">
+        <div className="font-mono tabular-nums text-white font-semibold bg-slate-800 border border-slate-700 rounded px-2 py-0.5">
           Día {state.reloj.dia}/{plazo} · {state.reloj.diasEnPeriodoFiscal}/{FISCAL_PERIOD_DAYS}d
         </div>
       </div>

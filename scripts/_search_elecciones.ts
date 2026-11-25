@@ -5,6 +5,7 @@ import {
   applyPressArticleEffects,
   canTriggerSpontaneousChaos,
   deriveCommunityStats,
+  pickActionText,
   pickChaosCandidateNpc,
   pickPressTopicAndTone,
   resolveConditionWindowWithFallback,
@@ -34,7 +35,7 @@ function runRandomDirectorDay(state: GameState): void {
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente') {
       const chosen = win.candidatas[Math.floor(Math.random() * win.candidatas.length)];
-      resolveConditionWindowWithFallback(state, win.id, chosen?.id, undefined, 'respaldo');
+      resolveConditionWindowWithFallback(state, win.id, chosen?.id, 'motor');
     }
   }
   if (state.reloj.dia % 4 === 0 && state.medios.length > 0) {
@@ -57,7 +58,7 @@ function runRandomDirectorDay(state: GameState): void {
         titulo: `Nota ${topic.tema}`,
         texto: topic.detalle,
         origen: topic.origen,
-        fuente: 'plantilla',
+        textoOrigen: 'plantilla',
         zonaOrigen: topic.zonaOrigen,
         fenomenoId: topic.fenomenoId,
         esAviso: topic.esAviso,
@@ -70,10 +71,10 @@ function runRandomDirectorDay(state: GameState): void {
     if (gate.allowed) {
       const npc = pickChaosCandidateNpc(state);
       if (npc) {
-        const candidatas = selectCandidateActions(npc);
+        const candidatas = selectCandidateActions(npc, state);
         if (candidatas.length > 0) {
           const chosen = candidatas[Math.floor(Math.random() * candidatas.length)];
-          applyActionToNpc(state, npc, chosen, chosen.textoBase.replace('{nombre}', npc.nombre), 'respaldo');
+          applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre), 'motor');
           state.caosTracker.accionesEnVentana += 1;
         }
       }
