@@ -17,6 +17,9 @@ export type RoleId =
   | 'jubilado';
 
 export type PublicRoleId = 'policia' | 'estatal' | 'docente' | 'medico' | 'ingeniero';
+export type ServicePublicRoleId = 'policia' | 'medico' | 'ingeniero';
+export type FixedPublicRoleId = 'estatal' | 'docente';
+
 export type PrivateRoleId =
   | 'agricultor'
   | 'obrero'
@@ -25,8 +28,11 @@ export type PrivateRoleId =
   | 'tecnico'
   | 'periodista';
 export type RoleGroupId = 'agro' | 'industria' | 'comercio' | 'publico' | 'sin_ingreso';
-export type TaxableGroupId = 'agro' | 'industria' | 'comercio' | 'publico';
-export type ServiceAreaId = 'salud' | 'seguridad' | 'infraestructura' | 'educacion';
+export type ServiceAreaId = 'seguridad' | 'salud' | 'infraestructura';
+export type ServiceLeverId = 'seguridad' | 'salud' | 'obras';
+export type ServiceLevel = 0 | 1 | 2 | 3 | 4 | 5;
+export type PriceCapMode = 'libre' | 'moderado' | 'estricto';
+export type ForeignTradeStep = -100 | -50 | 0 | 50 | 100;
 
 export type PersonalityTrait = 'valentia' | 'laboriosidad' | 'codicia' | 'rebeldia' | 'resiliencia';
 export type NpcVariable = 'salud' | 'hambre' | 'miedo' | 'satisfaccion' | 'lealtad';
@@ -108,10 +114,8 @@ export type ActionEffectId =
   | 'comparte'
   | 'difunde'
   | 'repara'
-  | 'resguarda'
   | 'cuida'
-  | 'toma'
-  | 'vandaliza';
+  | 'toma';
 
 export type EffectIntensity = 'baja' | 'media' | 'alta';
 export type RumorTheme = 'miedo' | 'descontento' | 'esperanza';
@@ -153,8 +157,7 @@ export interface Npc {
   edad: number;
   cumpleanosDia: number; // 1..365 seeded birthday
   educacion: {
-    nivel: number; // 0..3
-    progreso: number; // 0..100
+    nivel: number; // 0..3 fixed at worldgen (v1)
   };
   personalidad: Record<PersonalityTrait, number>;
   variables: Record<NpcVariable, number>;
@@ -189,13 +192,11 @@ export interface ActionDefinition {
   nombre: string;
   descripcion: string;
   tipo: 'espontanea' | 'condicion';
-  opcional?: boolean;
   textos: string[];
   disparador?: {
-    impago?: boolean;
+    impagoNomina?: boolean;
     descontentosPctMayorA?: number;
     hambreCriticaPctMayorA?: number;
-    protestaEnCursoYOrdenMenorA?: number;
   };
   requisitos: {
     etapa?: 'menor' | 'adulto' | 'jubilado';
@@ -209,7 +210,6 @@ export interface ActionDefinition {
   contexto?: {
     fenomeno?: PhenomenonType;
     fenomenoAnunciadoOActivo?: PhenomenonType;
-    fenomenoOOrdenMenorA?: { fenomeno: PhenomenonType; ordenMenorA: number };
     zonaIntegridadMenorA?: number;
     vecinoDespensaBaja?: boolean;
     vecinoSaludBaja?: boolean;
@@ -240,6 +240,7 @@ export interface MediaOutlet {
     afinidadGobierno: number; // 0..100
     sensacionalismo: number; // 0..100
   };
+  afinidadBase: number; // 0..100
   credibilidad: number; // 0..100
   alcancePct: number; // 0..100
   columnistas: string[]; // npc ids
@@ -247,10 +248,6 @@ export interface MediaOutlet {
     ingresosPropios: number;
     fondosEstado: number;
     dependenciaPct: number;
-  };
-  intervencion: {
-    financiamiento: number; // share 0..100 summing to 100 across active outlets
-    regulacion: number; // 0..100
   };
 }
 
@@ -279,34 +276,24 @@ export interface NewsArticle {
 }
 
 export interface GovernorLevers {
-  recaudacion: {
-    impuestoGrupo: Record<TaxableGroupId, number>; // 0..60
-  };
-  gasto: {
-    salarioPublico: number; // 50..150 (%)
-    presupuesto: Record<ServiceAreaId, number>; // % of disponible
-    prensa: number; // % of disponible
-    subsidios: Record<RoleGroupId, number>; // % of disponible
-  };
-  alimento: {
-    precioMaximo: number; // 50..250 (% of precioBase; >=250 = sin tope)
-    garantiaAlimentaria: number; // 0..100
-    intercambio: number; // -100..100
-  };
-  finanzas: {
-    topeEmision: number; // 0..30 (fiscal)
-  };
-  cupos: Record<PublicRoleId, number>;
+  impuesto: number; // 0..60 (%) flat tax on all income
+  salarioPublico: number; // 50..150 (%)
+  servicios: Record<ServiceLeverId, ServiceLevel>; // 0..5
+  ayudaSocial: number; // 0..10 ($/day for desempleado & jubilado)
+  garantiaAlimentaria: number; // 0..100 (%)
+  precioMaximo: PriceCapMode; // 'libre' | 'moderado' | 'estricto'
+  comercioExterior: ForeignTradeStep; // -100 | -50 | 0 | 50 | 100
+  prensa: number; // 0..100 ($/period split evenly across outlets)
+  topeEmision: number; // 0..30 (% of period income, fiscal only)
 }
 
-export type EnterpriseResponseType = 'absorber' | 'recortar_sueldos' | 'despedir' | 'subir_margen';
+export type EnterpriseResponseType = 'recortar_sueldos' | 'despedir';
 
 export interface EnterpriseActiveResponse {
   tipo: EnterpriseResponseType;
   diasRestantes: number;
   duracionTotal: number;
-  factorSueldo?: number; // e.g. 0.72 during recortar_sueldos
-  margenExtraPct?: number; // e.g. 8 during subir_margen
+  factorSueldo: number; // e.g. 0.6..1.0
   origen: string;
   causa?: string;
 }
@@ -327,8 +314,8 @@ export interface FoodEnterpriseState {
 }
 
 export interface CommercialEnterpriseState {
-  id: string;
-  dueno: string | null;
+  id: 'comercio';
+  socios: string[]; // living comerciantes
   ingresosAcum: number;
   sueldosAcum: number;
   diasPeriodo: number;
@@ -340,20 +327,21 @@ export interface CommercialEnterpriseState {
 
 export interface FiscalLedger {
   ingresos: number;
-  impuestos: number;
-  ventasAlimento: number;
   nomina: number;
   pensiones: number;
   garantiaAlimentaria: number;
-  comprasAlimento: number;
-  disponible: number;
-  presupuestoAsignado: number;
-  subsidiosAsignados: number;
-  prensaAsignada: number;
-  aReserva: number;
-  deficit: number;
+  ayudaSocial: number;
+  operacion: number;
+  prensa: number;
+  saldo: number;
   emision: number;
+  importaciones: number; // paid directly from reserva
+  exportaciones: number; // paid directly to food enterprise
   impago: boolean;
+  alcanzaNomina: boolean;
+  prorrateoDiscrecional: number;
+  prorrateoNomina: number;
+  prorrateoPensionGarantia: number;
 }
 
 export interface GovernmentState {
@@ -363,26 +351,28 @@ export interface GovernmentState {
   acumuladoPeriodo: {
     dias: number;
     impuestos: number;
-    ventasAlimento: number;
     nomina: number;
     pensiones: number;
     garantiaAlimentaria: number;
-    comprasAlimento: number;
+    ayudaSocial: number;
+    operacion: number;
+    operacionPorArea: Record<ServiceAreaId, number>;
+    prensa: number;
+    importaciones: number;
+    exportaciones: number;
   };
   indicadores: Record<ServiceAreaId, number>;
   integridad: Record<ZoneId, number>;
-  coberturas: Record<PublicRoleId | 'comercio', number>;
+  coberturas: Record<ServicePublicRoleId, number>;
+  cuposFijos: Record<FixedPublicRoleId, number>;
   palancasVigentes: GovernorLevers;
   palancasObjetivo: GovernorLevers;
-  palancasInicioPeriodo: GovernorLevers;
-  prensaObjetivo: Record<string, { financiamiento: number; regulacion: number }>;
-  prensaInicioPeriodo: Record<string, { financiamiento: number; regulacion: number }>;
 }
 
 export interface EconomyOutput {
   accesoComida: Record<string, number>; // 0..1
   poderAdquisitivo: Record<string, number>; // 0..100
-  disponibleDiarioEstimado: number;
+  saldoDiarioEstimado: number;
   precioAlimento: number;
   inflacion: number;
 }
@@ -397,6 +387,7 @@ export interface ChaosLimits {
 
 export interface CommunityDerived {
   poblacion: number;
+  poblacionPct: number;
   vivos: number;
   bajas: number;
   satisfaccionMedia: number;
@@ -417,7 +408,7 @@ export interface CommunityDerived {
 }
 
 export interface ObjectiveCondition {
-  metrica: 'apoyoPct' | 'hambreCriticaPct' | 'poblacion';
+  metrica: 'apoyoPct' | 'hambreCriticaPct' | 'poblacion' | 'poblacionPct';
   op: '>=' | '>' | '<' | '<=';
   umbral: number;
   plazoDia?: number;
@@ -436,8 +427,10 @@ export interface ScenarioPreset {
   reservaInicial: number;
   stockAlimentoInicial: number;
   topesPrivados: Record<PrivateRoleId, number>;
-  cuposIniciales: Record<PublicRoleId, number>;
-  objetivoCobertura?: Partial<Record<PublicRoleId | 'comercio', number>>;
+  cuposFijos: Record<FixedPublicRoleId, number>;
+  serviciosIniciales: Record<ServiceLeverId, ServiceLevel>;
+  initialLevers: GovernorLevers;
+  objetivoCobertura?: Partial<Record<ServicePublicRoleId, number>>;
   zonas: Record<ZoneId, { vecinas: ZoneId[] }>;
   zonaPorRol: Record<RoleId, ZoneId[]>;
   victoria: ObjectiveCondition;
@@ -451,14 +444,13 @@ export interface WorldConfig {
   cantidadMedios: number; // 1..3
   poblacionInicial: number;
   caos: ChaosLimits;
-  disturbiosActivos: boolean;
   semilla: number;
   usarIaGemini: boolean;
 }
 
 export interface PendingConditionWindow {
   id: string;
-  disparador: 'impago' | 'descontento' | 'hambre' | 'disturbios';
+  disparador: 'impago' | 'descontento' | 'hambre';
   diaInicio: number;
   diaLimite: number;
   intensidadCantidad: number;
@@ -618,6 +610,14 @@ export type SimEvent =
       tipo: 'impago';
       zona: ZoneId;
       faltante: number;
+      alcanzaNomina: boolean;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'impago_fin';
+      zona: ZoneId;
       causa?: string;
     }
   | {
@@ -657,14 +657,23 @@ export type SimEvent =
       tipo: 'palanca';
       zona: ZoneId;
       palanca: string;
-      valorAnterior: number;
-      valorNuevo: number;
+      valorAnterior: number | string;
+      valorNuevo: number | string;
       causa?: string;
     }
   | {
       id: string;
       dia: number;
       tipo: 'victoria';
+      zona: ZoneId;
+      metrica: string;
+      valor: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'objetivo_perdido';
       zona: ZoneId;
       metrica: string;
       valor: number;
@@ -710,7 +719,7 @@ export interface GameState {
   gobierno: GovernmentState;
   empresas: {
     alimento: FoodEnterpriseState;
-    comerciales: CommercialEnterpriseState[];
+    comercio: CommercialEnterpriseState;
   };
   alimento: {
     stock: number;
@@ -741,7 +750,6 @@ export interface GameState {
     impago: number;
     descontento: number;
     hambre: number;
-    disturbios: number;
   };
   eventos: SimEvent[];
   eventosDiaActual: SimEvent[];

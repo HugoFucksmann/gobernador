@@ -4,6 +4,7 @@ import {
   Crosshair,
   HeartPulse,
   IdCard,
+  Newspaper,
   User,
   Users,
 } from 'lucide-react';
@@ -37,10 +38,8 @@ const EFFECT_LABELS: Record<ActionEffectId, string> = {
   comparte: 'Comparte',
   difunde: 'Difunde rumor',
   repara: 'Repara zona',
-  resguarda: 'Resguarda zona',
   cuida: 'Cuida vecinos',
   toma: 'Toma alimento',
-  vandaliza: 'Vandaliza',
 };
 
 interface CitizenCardProps {
@@ -51,6 +50,7 @@ interface CitizenCardProps {
   onToggleFollow: () => void;
   onClearSelection: () => void;
   onOpenCommunityDrawer: () => void;
+  onOpenGazette: () => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
@@ -125,50 +125,92 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
   onToggleFollow,
   onClearSelection,
   onOpenCommunityDrawer,
+  onOpenGazette,
   onInspectCausal,
 }) => {
   const [tab, setTab] = useState<CitizenTab>('estado');
+  const [sideMode, setSideMode] = useState<'pulso' | 'noticias'>('pulso');
 
   if (!selectedNpc) {
     return (
-      <div className="pointer-events-auto fixed top-14 right-3 z-20 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-2 shadow-xl text-xs w-[210px]">
-        <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-800">
-          <span className="font-semibold text-slate-100 flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5 text-teal-400" />
-            Ciudad ({derived.poblacion})
-          </span>
+      <div className="pointer-events-auto fixed top-14 right-3 z-20 bg-slate-900/92 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-2 shadow-xl text-xs w-[240px]">
+        <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-slate-800">
+          <div className="flex items-center gap-1 bg-slate-800/80 p-0.5 rounded border border-slate-700/80 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setSideMode('pulso')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-sm font-semibold ${
+                sideMode === 'pulso' ? 'bg-teal-700 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Users className="w-3 h-3" />
+              Pulso
+            </button>
+            <button
+              type="button"
+              onClick={() => setSideMode('noticias')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-sm font-semibold ${
+                sideMode === 'noticias' ? 'bg-teal-700 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Newspaper className="w-3 h-3" />
+              Noticias
+            </button>
+          </div>
           <button
             type="button"
-            onClick={onOpenCommunityDrawer}
+            onClick={sideMode === 'pulso' ? onOpenCommunityDrawer : onOpenGazette}
             className="text-[11px] text-teal-300 hover:text-white font-medium"
           >
-            Vecinos
+            {sideMode === 'pulso' ? 'Vecinos' : 'Gaceta'}
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono tabular-nums text-[11px]">
-          <div className="flex justify-between">
-            <span className="font-sans text-slate-400">Ánimo</span>
-            <span className="font-semibold text-white">{derived.satisfaccionMedia}%</span>
+
+        {sideMode === 'pulso' ? (
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono tabular-nums text-[11px]">
+            <div className="flex justify-between">
+              <span className="font-sans text-slate-400">Ánimo</span>
+              <span className="font-semibold text-white">{derived.satisfaccionMedia}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-sans text-slate-400">Apoyo</span>
+              <span className={derived.apoyoPct >= 50 ? 'font-semibold text-emerald-400' : 'font-semibold text-amber-400'}>
+                {derived.apoyoPct}%
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-sans text-slate-400">Malestar</span>
+              <span className={derived.descontentosPct > 30 ? 'font-semibold text-rose-400' : 'font-semibold text-slate-200'}>
+                {derived.descontentosPct}%
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="font-sans text-slate-400">Hambre</span>
+              <span className={derived.hambreCriticaPct > 20 ? 'font-semibold text-rose-400' : 'font-semibold text-slate-200'}>
+                {derived.hambreCriticaPct}%
+              </span>
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span className="font-sans text-slate-400">Apoyo</span>
-            <span className={derived.apoyoPct >= 50 ? 'font-semibold text-emerald-400' : 'font-semibold text-amber-400'}>
-              {derived.apoyoPct}%
-            </span>
+        ) : (
+          <div className="space-y-1.5 max-h-[190px] overflow-y-auto divide-y divide-slate-800/80">
+            {state.noticias.slice(0, 4).map((n) => (
+              <div key={n.id} className="pt-1.5 first:pt-0">
+                <button
+                  type="button"
+                  onClick={() => onInspectCausal(`${n.medioNombre}: ${n.titulo}`, n.causa || `noticia:${n.id}`, n.texto)}
+                  className="text-left hover:text-teal-300 transition-colors"
+                >
+                  <div className="text-[10px] text-slate-400">
+                    {n.medioNombre} · D{n.dia}
+                  </div>
+                  <div className="text-[11px] font-medium text-slate-100 leading-snug line-clamp-2">
+                    {n.titulo}
+                  </div>
+                </button>
+              </div>
+            ))}
           </div>
-          <div className="flex justify-between">
-            <span className="font-sans text-slate-400">Malestar</span>
-            <span className={derived.descontentosPct > 30 ? 'font-semibold text-rose-400' : 'font-semibold text-slate-200'}>
-              {derived.descontentosPct}%
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-sans text-slate-400">Hambre</span>
-            <span className={derived.hambreCriticaPct > 20 ? 'font-semibold text-rose-400' : 'font-semibold text-slate-200'}>
-              {derived.hambreCriticaPct}%
-            </span>
-          </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -191,7 +233,6 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
         className="w-[296px]"
       >
         <div className="p-3 space-y-2.5">
-          {/* Portrait + Location + Camera Lock */}
           <div className="flex items-center gap-2.5">
             <CitizenAvatar npc={selectedNpc} />
             <div className="min-w-0 flex-1 space-y-1">
@@ -223,7 +264,6 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             </div>
           </div>
 
-          {/* 3 Clean Tabs */}
           <div className="grid grid-cols-3 gap-1 bg-slate-800/70 p-1 rounded border border-slate-700/80">
             {(
               [
@@ -250,7 +290,6 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             })}
           </div>
 
-          {/* Tab 1: Estado */}
           {tab === 'estado' && (
             <div className="space-y-2">
               {(
@@ -280,7 +319,6 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             </div>
           )}
 
-          {/* Tab 2: Actividad y modificadores */}
           {tab === 'actividad' && (
             <div className="space-y-2.5 text-xs">
               {selectedNpc.accionIa ? (
@@ -374,7 +412,6 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
             </div>
           )}
 
-          {/* Tab 3: Ficha (Economía + Rasgos unificados) */}
           {tab === 'ficha' && (
             <div className="space-y-3 text-[11px]">
               <div className="space-y-1 font-mono tabular-nums pb-2 border-b border-slate-800">

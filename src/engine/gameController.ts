@@ -9,12 +9,12 @@ import {
   ACTION_TABLE,
   ECON_CONSTANTS,
   SAVE_FORMAT_VERSION,
+  SCENARIO_PRESETS,
 } from '../data/catalogs';
 import {
   ActionEffectSpec,
   ClimatePhenomenon,
   CommunityDerived,
-  CommercialEnterpriseState,
   GameState,
   GovernorLevers,
   PhenomenonType,
@@ -22,10 +22,7 @@ import {
   ZoneId,
 } from '../types/game';
 import { AiStatus } from '../types/ui';
-import {
-  DEFAULT_WORLD_CONFIG,
-  rebalanceMediaIntervention,
-} from './policies';
+import { DEFAULT_WORLD_CONFIG } from './policies';
 import { nextSeqId, normalizeSeed } from './rng';
 import {
   deriveCommunityStats,
@@ -111,31 +108,38 @@ function readSavedState(key: string): GameState | null {
   }
 }
 
-function migrateLegacyLevers(levers: GovernorLevers): void {
-  const legacyRec = levers.recaudacion as unknown as {
-    impuestoUnico?: number;
-    impuestoGrupo: GovernorLevers['recaudacion']['impuestoGrupo'];
-  };
-  if (typeof legacyRec.impuestoUnico === 'number') {
-    const fallbackTax = legacyRec.impuestoUnico;
-    legacyRec.impuestoGrupo = {
-      agro: legacyRec.impuestoGrupo?.agro ?? fallbackTax,
-      industria: legacyRec.impuestoGrupo?.industria ?? fallbackTax,
-      comercio: legacyRec.impuestoGrupo?.comercio ?? fallbackTax,
-      publico: legacyRec.impuestoGrupo?.publico ?? fallbackTax,
-    };
-    delete legacyRec.impuestoUnico;
+function migrateLegacyLevers(rawLevers: unknown, scenarioId: 'elecciones' | 'zombies'): GovernorLevers {
+  const fallback = structuredClone(SCENARIO_PRESETS[scenarioId].initialLevers);
+  if (!rawLevers || typeof rawLevers !== 'object') return fallback;
+  const obj = rawLevers as Record<string, unknown>;
+  if (typeof obj.impuesto === 'number' && typeof obj.salarioPublico === 'number' && obj.servicios && typeof obj.ayudaSocial === 'number') {
+    return rawLevers as GovernorLevers;
   }
-  const legacyAlim = levers.alimento as unknown as {
-    racion?: number;
-    precioMaximo?: number;
-  };
-  if (typeof legacyAlim.precioMaximo !== 'number') {
-    legacyAlim.precioMaximo = ECON_CONSTANTS.precioMaximoSinTope;
+  const legacyRec = obj.recaudacion as { impuestoGrupo?: Record<string, number> } | undefined;
+  const legacyGasto = obj.gasto as { salarioPublico?: number } | undefined;
+  const legacyAlim = obj.alimento as { garantiaAlimentaria?: number; intercambio?: number } | undefined;
+  const legacyFin = obj.finanzas as { topeEmision?: number } | undefined;
+
+  if (legacyRec?.impuestoGrupo) {
+    const vals = Object.values(legacyRec.impuestoGrupo).filter((v) => typeof v === 'number');
+    if (vals.length > 0) {
+      fallback.impuesto = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+    }
   }
-  if ('racion' in legacyAlim) {
-    delete legacyAlim.racion;
+  if (typeof legacyGasto?.salarioPublico === 'number') {
+    fallback.salarioPublico = legacyGasto.salarioPublico;
   }
+  if (typeof legacyAlim?.garantiaAlimentaria === 'number') {
+    fallback.garantiaAlimentaria = legacyAlim.garantiaAlimentaria;
+  }
+  if (typeof legacyAlim?.intercambio === 'number') {
+    const x = legacyAlim.intercambio;
+    fallback.comercioExterior = x <= -75 ? -100 : x <= -25 ? -50 : x >= 75 ? 100 : x >= 25 ? 50 : 0;
+  }
+  if (typeof legacyFin?.topeEmision === 'number') {
+    fallback.topeEmision = legacyFin.topeEmision;
+  }
+  return fallback;
 }
 
 export class GameController {
@@ -170,7 +174,8 @@ export class GameController {
   }
 
   private computeDerivedKey(s: GameState): string {
-    return `${s.reloj.dia}|${s.noticias.length}|${s.bitacora.length}|${s.resultado.estado}|${s.resultado.victoriaCumplida ? 1 : 0}|${s.gobierno.finanzas.disponible}`;
+    const objetivoPerdido = s.eventos.some((e) => e.tipo === 'objetivo_perdido') ? 1 : 0;
+    return `${s.reloj.dia}|${s.noticias.length}|${s.bitacora.length}|${s.resultado.estado}|${s.resultado.victoriaCumplida ? 1 : 0}|${objetivoPerdido}|${s.gobierno.finanzas.saldo}`;
   }
 
   private buildSnapshot(): GameControllerSnapshot {
@@ -342,6 +347,15 @@ export class GameController {
     this.commit();
   }
 
+  setDevPopulation(poblacionInicial: number): void {
+    if (!this.devMode) return;
+    const clampedPop = Math.min(1000, Math.max(20, Math.round(poblacionInicial)));
+    this.startNewGame({
+      ...this.state.config,
+      poblacionInicial: clampedPop,
+    });
+  }
+
   saveManual(): boolean {
     const meta = writeSave(MANUAL_SAVE_KEY, this.state);
     if (!meta) return false;
@@ -373,14 +387,15 @@ export class GameController {
     this.paused = false;
     resetAiSessionError();
 
-    // Migrate pre-v1 saves cleanly (ESTADOS §13)
+    // Migrate v1 saves cleanly to v2 schema (ESTADOS §13)
+    const preset = SCENARIO_PRESETS[loaded.config.escenarioId] || SCENARIO_PRESETS.elecciones;
     loaded.versionFormato = SAVE_FORMAT_VERSION;
     const legacyEcon = loaded.config.economiaModulo as string;
     if (legacyEcon === 'simple' || legacyEcon === 'individual') {
       loaded.config.economiaModulo = 'base';
     }
-    if (typeof loaded.config.disturbiosActivos !== 'boolean') {
-      loaded.config.disturbiosActivos = false;
+    if ('disturbiosActivos' in (loaded.config as unknown as Record<string, unknown>)) {
+      delete (loaded.config as unknown as Record<string, unknown>).disturbiosActivos;
     }
     loaded.semilla = normalizeSeed(loaded.semilla ?? loaded.config.semilla ?? 1);
     loaded.config.semilla = loaded.semilla;
@@ -389,18 +404,93 @@ export class GameController {
       loaded.idSeq = 0;
     }
 
-    migrateLegacyLevers(loaded.gobierno.palancasVigentes);
-    migrateLegacyLevers(loaded.gobierno.palancasObjetivo);
-    migrateLegacyLevers(loaded.gobierno.palancasInicioPeriodo);
+    loaded.gobierno.palancasVigentes = migrateLegacyLevers(loaded.gobierno.palancasVigentes, preset.id);
+    loaded.gobierno.palancasObjetivo = migrateLegacyLevers(loaded.gobierno.palancasObjetivo, preset.id);
+    if ('palancasInicioPeriodo' in (loaded.gobierno as unknown as Record<string, unknown>)) {
+      delete (loaded.gobierno as unknown as Record<string, unknown>).palancasInicioPeriodo;
+    }
+    if ('prensaObjetivo' in (loaded.gobierno as unknown as Record<string, unknown>)) {
+      delete (loaded.gobierno as unknown as Record<string, unknown>).prensaObjetivo;
+    }
+    if ('prensaInicioPeriodo' in (loaded.gobierno as unknown as Record<string, unknown>)) {
+      delete (loaded.gobierno as unknown as Record<string, unknown>).prensaInicioPeriodo;
+    }
+    if (!loaded.gobierno.cuposFijos) {
+      loaded.gobierno.cuposFijos = { ...preset.cuposFijos };
+    }
+    if ('educacion' in (loaded.gobierno.indicadores as unknown as Record<string, unknown>)) {
+      delete (loaded.gobierno.indicadores as unknown as Record<string, unknown>).educacion;
+    }
+    loaded.gobierno.coberturas = {
+      policia: loaded.gobierno.coberturas?.policia ?? 1,
+      medico: loaded.gobierno.coberturas?.medico ?? 1,
+      ingeniero: loaded.gobierno.coberturas?.ingeniero ?? 1,
+    };
+
+    const legacyFin = loaded.gobierno.finanzas as unknown as Record<string, unknown>;
+    loaded.gobierno.finanzas = {
+      ingresos: Number(legacyFin.ingresos ?? 0),
+      nomina: Number(legacyFin.nomina ?? 0),
+      pensiones: Number(legacyFin.pensiones ?? 0),
+      garantiaAlimentaria: Number(legacyFin.garantiaAlimentaria ?? 0),
+      ayudaSocial: Number(legacyFin.ayudaSocial ?? 0),
+      operacion: Number(legacyFin.operacion ?? legacyFin.presupuestoAsignado ?? 0),
+      prensa: Number(legacyFin.prensa ?? legacyFin.prensaAsignada ?? 0),
+      saldo: Number(legacyFin.saldo ?? legacyFin.disponible ?? 0),
+      emision: Number(legacyFin.emision ?? 0),
+      importaciones: Number(legacyFin.importaciones ?? legacyFin.comprasAlimento ?? 0),
+      exportaciones: Number(legacyFin.exportaciones ?? legacyFin.ventasAlimento ?? 0),
+      impago: Boolean(legacyFin.impago),
+      alcanzaNomina: Boolean(legacyFin.alcanzaNomina ?? legacyFin.impago),
+      prorrateoDiscrecional: Number(legacyFin.prorrateoDiscrecional ?? 1),
+      prorrateoNomina: Number(legacyFin.prorrateoNomina ?? (legacyFin.impago ? 0 : 1)),
+      prorrateoPensionGarantia: Number(legacyFin.prorrateoPensionGarantia ?? 1),
+    };
+
+    const legacyAcum = loaded.gobierno.acumuladoPeriodo as unknown as Record<string, unknown>;
+    loaded.gobierno.acumuladoPeriodo = {
+      dias: Number(legacyAcum?.dias ?? 0),
+      impuestos: Number(legacyAcum?.impuestos ?? 0),
+      nomina: Number(legacyAcum?.nomina ?? 0),
+      pensiones: Number(legacyAcum?.pensiones ?? 0),
+      garantiaAlimentaria: Number(legacyAcum?.garantiaAlimentaria ?? 0),
+      ayudaSocial: Number(legacyAcum?.ayudaSocial ?? 0),
+      operacion: Number(legacyAcum?.operacion ?? 0),
+      operacionPorArea: (legacyAcum?.operacionPorArea as GameState['gobierno']['acumuladoPeriodo']['operacionPorArea']) ?? {
+        seguridad: 0,
+        salud: 0,
+        infraestructura: 0,
+      },
+      prensa: Number(legacyAcum?.prensa ?? 0),
+      importaciones: Number(legacyAcum?.importaciones ?? legacyAcum?.comprasAlimento ?? 0),
+      exportaciones: Number(legacyAcum?.exportaciones ?? legacyAcum?.ventasAlimento ?? 0),
+    };
+
+    const legacyOut = loaded.ultimaSalidaEconomica as unknown as Record<string, unknown>;
+    if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
+      loaded.ultimaSalidaEconomica.saldoDiarioEstimado = Number(legacyOut.disponibleDiarioEstimado ?? 0);
+      delete legacyOut.disponibleDiarioEstimado;
+    }
 
     if (!loaded.ultimaOrdenZona) {
       loaded.ultimaOrdenZona = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
     }
-    if (typeof loaded.cooldownsCondicion.disturbios !== 'number') {
-      loaded.cooldownsCondicion.disturbios = 0;
-    }
+    loaded.cooldownsCondicion = {
+      impago: loaded.cooldownsCondicion?.impago ?? 0,
+      descontento: loaded.cooldownsCondicion?.descontento ?? 0,
+      hambre: loaded.cooldownsCondicion?.hambre ?? 0,
+    };
     if (typeof loaded.alimento.precioMercado !== 'number') {
       loaded.alimento.precioMercado = loaded.alimento.precio;
+    }
+
+    for (const medio of loaded.medios) {
+      if (typeof medio.afinidadBase !== 'number') {
+        medio.afinidadBase = medio.lineaEditorial.afinidadGobierno;
+      }
+      if ('intervencion' in (medio as unknown as Record<string, unknown>)) {
+        delete (medio as unknown as Record<string, unknown>).intervencion;
+      }
     }
 
     for (const art of loaded.noticias) {
@@ -411,6 +501,9 @@ export class GameController {
     }
 
     for (const npc of loaded.npcs) {
+      if ('progreso' in (npc.educacion as unknown as Record<string, unknown>)) {
+        delete (npc.educacion as unknown as Record<string, unknown>).progreso;
+      }
       if (typeof npc.economia.despensa !== 'number') {
         npc.economia.despensa = ECON_CONSTANTS.objetivoBaseDias;
       }
@@ -443,23 +536,11 @@ export class GameController {
       }
     }
 
-    if (!loaded.empresas) {
-      const emp = loaded.npcs.find((n) => n.vivo && n.rol === 'empresario') || null;
-      const comerciales: CommercialEnterpriseState[] = loaded.npcs
-        .filter((n) => n.vivo && n.rol === 'comerciante')
-        .map((c, idxCom) => ({
-          id: `com_${idxCom + 1}`,
-          dueno: c.id,
-          ingresosAcum: 0,
-          sueldosAcum: 0,
-          diasPeriodo: 0,
-          ultimaGanancia: 0,
-          ultimoIngresoPeriodo: 0,
-          ultimoSueldosPeriodo: 0,
-          respuesta: null,
-        }));
+    const emp = loaded.npcs.find((n) => n.vivo && n.rol === 'empresario') || null;
+    const liveComerciantes = loaded.npcs.filter((n) => n.vivo && n.rol === 'comerciante').map((c) => c.id);
+    if (!loaded.empresas || !loaded.empresas.comercio) {
       loaded.empresas = {
-        alimento: {
+        alimento: loaded.empresas?.alimento ?? {
           id: 'alimento',
           dueno: emp ? emp.id : null,
           stock: loaded.alimento.stock,
@@ -473,8 +554,20 @@ export class GameController {
           ultimoSueldosPeriodo: 0,
           respuesta: null,
         },
-        comerciales,
+        comercio: {
+          id: 'comercio',
+          socios: liveComerciantes,
+          ingresosAcum: 0,
+          sueldosAcum: 0,
+          diasPeriodo: 0,
+          ultimaGanancia: 0,
+          ultimoIngresoPeriodo: 0,
+          ultimoSueldosPeriodo: 0,
+          respuesta: null,
+        },
       };
+    } else {
+      loaded.empresas.comercio.socios = liveComerciantes;
     }
 
     this.state = loaded;
@@ -556,27 +649,6 @@ export class GameController {
   updateLevers(updater: (prev: GovernorLevers) => GovernorLevers): void {
     const next = structuredClone(this.state);
     next.gobierno.palancasObjetivo = updater(next.gobierno.palancasObjetivo);
-    this.state = next;
-    this.derived = deriveCommunityStats(next);
-    this.lastDerivedKey = this.computeDerivedKey(next);
-    this.commit();
-  }
-
-  updateMediaIntervention(
-    medioId: string,
-    field: 'financiamiento' | 'regulacion',
-    value: number
-  ): void {
-    const updatedTarget = rebalanceMediaIntervention(
-      this.state.gobierno.prensaObjetivo,
-      medioId,
-      field,
-      value
-    );
-    if (!updatedTarget) return;
-
-    const next = structuredClone(this.state);
-    next.gobierno.prensaObjetivo = updatedTarget;
     this.state = next;
     this.derived = deriveCommunityStats(next);
     this.lastDerivedKey = this.computeDerivedKey(next);

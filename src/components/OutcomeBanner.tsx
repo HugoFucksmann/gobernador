@@ -18,49 +18,73 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
   onDismissMilestone,
   onOpenNewGame,
 }) => {
+  const missedEvent = state.eventos.find((e) => e.tipo === 'objetivo_perdido');
+  const victoryCumplida = Boolean(state.resultado.victoriaCumplida);
   const showMilestone =
     state.resultado.estado === 'jugando' &&
-    Boolean(state.resultado.victoriaCumplida) &&
+    (victoryCumplida || Boolean(missedEvent)) &&
     !milestoneBannerDismissed;
   const isDefeat = state.resultado.estado === 'derrota';
 
   if (!showMilestone && !isDefeat) return null;
 
   if (showMilestone) {
+    const isVictory = victoryCumplida;
     return (
       <div
         role="dialog"
         aria-modal="true"
         className="fixed inset-0 z-40 bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4"
       >
-        <div className="bg-white text-slate-900 border border-emerald-200 rounded-xl max-w-md w-full p-6 space-y-5 shadow-xl">
+        <div
+          className={`bg-white text-slate-900 border ${
+            isVictory ? 'border-emerald-200' : 'border-amber-200'
+          } rounded-xl max-w-md w-full p-6 space-y-5 shadow-xl`}
+        >
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-emerald-50 text-emerald-700">
-              <Trophy className="w-6 h-6" />
+            <div
+              className={`p-2.5 rounded-lg ${
+                isVictory ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+              }`}
+            >
+              {isVictory ? <Trophy className="w-6 h-6" /> : <AlertOctagon className="w-6 h-6" />}
             </div>
             <div>
               <h2 className="font-display text-2xl font-bold text-slate-900">
-                ¡Objetivo de mandato cumplido!
+                {isVictory ? '¡Objetivo de mandato cumplido!' : 'Objetivo de mandato perdido'}
               </h2>
               <p className="text-xs text-slate-500 font-mono tabular-nums">
-                Hito alcanzado en el día {state.resultado.diaVictoria ?? state.reloj.dia}
+                {isVictory
+                  ? `Hito alcanzado en el día ${state.resultado.diaVictoria ?? state.reloj.dia}`
+                  : `Evaluado al cierre del plazo (día ${missedEvent?.dia ?? state.reloj.dia})`}
               </p>
             </div>
           </div>
 
           <p className="text-sm text-slate-700 leading-relaxed">
-            {state.resultado.razon ||
-              'Alcanzaste la meta del escenario. Podés seguir gobernando de manera continua para ver cómo evoluciona la comunidad o iniciar una nueva partida.'}
+            {isVictory
+              ? state.resultado.razon ||
+                'Alcanzaste la meta del escenario. Podés seguir gobernando de manera continua para ver cómo evoluciona la comunidad o iniciar una nueva partida.'
+              : state.resultado.razon ||
+                'No se alcanzó la meta al cumplirse el plazo, pero la comunidad sigue adelante y podés continuar gobernando.'}
           </p>
 
           <div className="grid grid-cols-2 gap-3 py-3 border-y border-slate-100 text-xs font-mono tabular-nums">
             <div>
               <span className="font-sans text-slate-500 block">Población</span>
-              <span className="text-base font-semibold text-slate-900">{derived.poblacion}</span>
+              <span className="text-base font-semibold text-slate-900">
+                {derived.poblacion} ({derived.poblacionPct}%)
+              </span>
             </div>
             <div>
               <span className="font-sans text-slate-500 block">Apoyo electoral</span>
-              <span className="text-base font-semibold text-emerald-700">{derived.apoyoPct}%</span>
+              <span
+                className={`text-base font-semibold ${
+                  isVictory ? 'text-emerald-700' : 'text-amber-700'
+                }`}
+              >
+                {derived.apoyoPct}%
+              </span>
             </div>
             <div>
               <span className="font-sans text-slate-500 block">Reserva estatal</span>
@@ -83,7 +107,9 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
             <button
               type="button"
               onClick={onDismissMilestone}
-              className="flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg"
+              className={`flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white rounded-lg ${
+                isVictory ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-amber-700 hover:bg-amber-800'
+              }`}
             >
               <Play className="w-3.5 h-3.5" />
               Seguir jugando

@@ -24,6 +24,9 @@ interface RctWindowProps {
   subtitle?: string;
   tone?: RctWindowTone;
   icon?: React.ReactNode;
+  zIndex?: number;
+  defaultOffset?: { x: number; y: number };
+  onFocus?: () => void;
   onClose: () => void;
   className?: string;
   children: React.ReactNode;
@@ -34,11 +37,14 @@ export const RctWindow: React.FC<RctWindowProps> = ({
   subtitle,
   tone = 'teal',
   icon,
+  zIndex,
+  defaultOffset,
+  onFocus,
   onClose,
   className = '',
   children,
 }) => {
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [offset, setOffset] = useState(defaultOffset ?? { x: 0, y: 0 });
   const dragState = useRef<{
     active: boolean;
     startX: number;
@@ -48,6 +54,7 @@ export const RctWindow: React.FC<RctWindowProps> = ({
   }>({ active: false, startX: 0, startY: 0, origX: 0, origY: 0 });
 
   const onPointerDownTitle = (e: React.PointerEvent<HTMLDivElement>) => {
+    onFocus?.();
     if ((e.target as HTMLElement).closest('button')) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     dragState.current = {
@@ -64,8 +71,8 @@ export const RctWindow: React.FC<RctWindowProps> = ({
     const dx = e.clientX - dragState.current.startX;
     const dy = e.clientY - dragState.current.startY;
     setOffset({
-      x: Math.max(-420, Math.min(420, dragState.current.origX + dx)),
-      y: Math.max(-40, Math.min(320, dragState.current.origY + dy)),
+      x: Math.max(-520, Math.min(820, dragState.current.origX + dx)),
+      y: Math.max(-40, Math.min(420, dragState.current.origY + dy)),
     });
   };
 
@@ -75,7 +82,11 @@ export const RctWindow: React.FC<RctWindowProps> = ({
 
   return (
     <section
-      style={{ transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` }}
+      onPointerDown={() => onFocus?.()}
+      style={{
+        transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
+        zIndex,
+      }}
       className={`pointer-events-auto bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg shadow-2xl overflow-hidden text-slate-100 ${className}`}
     >
       <div

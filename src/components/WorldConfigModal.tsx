@@ -30,7 +30,11 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
   onStartNewGame,
   onClose,
 }) => {
-  const [config, setConfig] = useState<WorldConfig>(structuredClone(initialConfig));
+  const [config, setConfig] = useState<WorldConfig>(() => {
+    const cloned = structuredClone(initialConfig);
+    cloned.poblacionInicial = SCENARIO_PRESETS[cloned.escenarioId].poblacionDefault;
+    return cloned;
+  });
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const testMode = isTestConfig(config);
@@ -43,7 +47,6 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
       cantidadMedios: nextPreset.mediosDefault,
       poblacionInicial: nextPreset.poblacionDefault,
       caos: { ...nextPreset.caosDefault },
-      disturbiosActivos: false,
       semilla: config.semilla,
       usarIaGemini: config.usarIaGemini,
     });
@@ -191,9 +194,9 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               </div>
               <p className="text-[11px] text-slate-500 mt-1">
                 {config.economiaModulo === 'base' &&
-                  'Mercado cerrado con empresas privadas, despensa propia, tope de precio, garantía alimentaria e impuestos por grupo.'}
+                  'Mercado cerrado con dos empresas privadas, despensa propia, tope de precio, garantía alimentaria, impuesto único, servicios por nivel y ayuda social.'}
                 {config.economiaModulo === 'fiscal' &&
-                  'Incluye economía base + emisión monetaria e inflación dinámica.'}
+                  'Incluye economía base + emisión monetaria (con tope de emisión) e inflación dinámica.'}
               </p>
             </div>
 
@@ -214,22 +217,11 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               />
             </div>
 
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <label className="font-medium text-slate-700">Población inicial</label>
-                <span className="font-mono font-semibold text-slate-900 tabular-nums">
-                  {config.poblacionInicial} NPCs
-                </span>
-              </div>
-              <input
-                type="range"
-                min={60}
-                max={140}
-                step={10}
-                value={config.poblacionInicial}
-                onChange={(e) => setConfig({ ...config, poblacionInicial: Number(e.target.value) })}
-                className="w-full"
-              />
+            <div className="flex items-center justify-between text-xs text-slate-600">
+              <span>Población del escenario</span>
+              <span className="font-mono font-semibold text-slate-900 tabular-nums">
+                {preset.poblacionDefault} NPCs
+              </span>
             </div>
 
             <div>
@@ -253,21 +245,6 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
             </div>
 
             <div className="space-y-2.5 pt-1">
-              <label className="flex items-start gap-2.5 cursor-pointer text-xs">
-                <input
-                  type="checkbox"
-                  checked={config.disturbiosActivos}
-                  onChange={(e) => setConfig({ ...config, disturbiosActivos: e.target.checked })}
-                  className="mt-0.5 rounded border-slate-300 text-teal-700"
-                />
-                <span>
-                  <strong className="text-slate-800 block">Habilitar disturbios (condición opcional)</strong>
-                  <span className="text-slate-500">
-                    Si hay protesta activa y el orden de la zona cae bajo 35%, puede escalar a disturbios con vandalismo.
-                  </span>
-                </span>
-              </label>
-
               <label className="flex items-start gap-2.5 cursor-pointer text-xs">
                 <input
                   type="checkbox"

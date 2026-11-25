@@ -1,4 +1,4 @@
-# Tabla inicial de acciones (BORRADOR v0.1)
+# Tabla inicial de acciones (BORRADOR v0.2)
 
 > Base de arranque del director de caos. Los efectos están en ESTADOS §7.1, el formato de cada acción en ESTADOS §7 y la selección en ESTADOS §9. Todo valor numérico (intensidades, topes, pesos) vive en CALIBRACION.md; acá solo la forma. Cada acción trae un texto base: las variantes y los textos de las noticias son del doc del director y la prensa (IDEA §13). **[propuesta]** es base para pulir con las corridas.
 
@@ -14,7 +14,7 @@
 - **Contagio:** de 0 a 1 (ESTADOS §7.2). Solo las espontáneas se frenan con orden y satisfacción.
 - **Zona:** `zona_destino` si la acción mueve a los participantes.
 
-## 2. Acciones espontáneas (20)
+## 2. Acciones espontáneas (19)
 
 Las elige el director de caos y cuentan contra los límites del caos (ESTADOS §9).
 
@@ -56,20 +56,18 @@ Las elige el director de caos y cuentan contra los límites del caos (ESTADOS §
 |---|---|---|---|---|---|---|---|---|
 | `cuidar_vecinos` | {nombre} cuida a los vecinos enfermos | Adulto | Algún vecino con la salud baja | laboriosidad+, valentía+ | `cuida` baja | 2-6 | 0,10 | |
 | `reparar_barricada` | {nombre} se pone a reforzar las barricadas | Adulto | Plaga zombie activa y la integridad de su zona por debajo de 100 | laboriosidad+, valentía+ | `repara` media | 2-6 | 0,15 | |
-| `patrullar_vecinal` | {nombre} arma una ronda vecinal | Adulto, no policía | Plaga zombie activa, o el orden de su zona por debajo de un umbral | valentía+ | `resguarda` media | 2-6 | 0,10 | |
 
-## 3. Acciones de condición (4)
+## 3. Acciones de condición (3)
 
 Las abre el motor cuando se cumple el disparador, y el director elige cómo se expresan entre las válidas (ESTADOS §7). No cuentan contra los límites del caos, no se frenan con orden y duran un tiempo finito.
 
 | Id | Texto base | Disparador | Quién puede | Afinidad | Efectos | Días | Contagio | Zona |
 |---|---|---|---|---|---|---|---|---|
-| `huelga` | {nombre} deja su puesto y se une al paro | Impago | Público | rebeldía+, resiliencia− | `fuera_de_puesto` | 3-10 | 0,20 | |
+| `huelga` | {nombre} deja su puesto y se une al paro | Impago que alcanza la nómina | Público | rebeldía+, resiliencia− | `fuera_de_puesto` | 3-10 | 0,20 | |
 | `protesta` | {nombre} marcha al centro a reclamar | `descontentos_pct` sobre su umbral | Adulto | rebeldía+, resiliencia− | `moviliza`, `agita` media, `fuera_de_puesto` | 2-6 | 0,25 | `centro` |
 | `saqueo` | {nombre} se lleva comida sin pagar | `hambre_critica_pct` sobre su umbral | Adulto con hambre | codicia+, valentía+, rebeldía+ | `toma` media, `moviliza`, `agita` baja, `fuera_de_puesto` | 2-5 | 0,20 | `centro` |
-| `disturbios` **[opcional]** | {nombre} se suma a los disturbios y rompe lo que encuentra | Una protesta en curso y el `orden` de la zona por debajo de un umbral | Adulto | rebeldía+, resiliencia− | `vandaliza` baja, `agita` media | 1-4 | 0,15 | |
 
-`disturbios` viene desactivada en el preset: conecta el orden policial con el daño a la zona en elecciones, y conviene activarla solo si las primeras corridas muestran que descuidar la seguridad no tiene consecuencias.
+Fuera de la v1: `disturbios` (daño a la zona por una protesta sin orden) y `patrullar_vecinal` (ronda vecinal que suma a la policía). Vuelven si las corridas muestran que descuidar la seguridad no tiene consecuencias.
 
 ## 4. Cómo se cubre cada situación
 
@@ -80,21 +78,18 @@ Para comprobar que la base alcanza, estas son las situaciones del juego y qué a
 | Hambre y despensas vacías | La gente protesta, se pelea por comida o la reparte | `protesta`, `saqueo`, `compartir_comida`, `acaparar_comida` |
 | Pánico o noticia alarmista | Se corre a comprar y el miedo contagia | `acaparar_comida`, `rumor_alarmista`, `sermon_apocaliptico` |
 | Impago del estado | Paro de los empleados públicos | `huelga` |
-| Impuestos altos o inflación | La gente gasta menos, y las comerciales ganan menos | `ahorro_obsesivo`, `protesta` |
+| Impuestos altos o inflación | La gente gasta menos, y la empresa de comercio gana menos | `ahorro_obsesivo`, `protesta` |
 | Buen momento | Se gasta y se festeja | `organizar_fiesta`, `compras_compulsivas`, `cantar_en_plaza` |
-| Plaga zombie | Miedo, defensa vecinal y reparación | `sermon_apocaliptico`, `patrullar_vecinal`, `reparar_barricada`, `cuidar_vecinos` |
+| Plaga zombie | Miedo, reparación y cuidado | `sermon_apocaliptico`, `reparar_barricada`, `cuidar_vecinos` |
 | Sequía | Reclamo y rezos | `rezar_por_lluvia`, `acaparar_comida`, `rumor_alarmista` |
-| Falta de orden | Ruido y, si se activa, disturbios | `predicar`, `organizar_asamblea`, `disturbios` |
+| Falta de orden | Ruido y agitación que se contagia | `predicar`, `organizar_asamblea` |
 | Caos creativo sin causa | Rarezas que cuentan una historia | `cavar_pozo`, `ver_nubes`, `coleccionar_piedras`, `hablar_con_gallinas` |
 
 ## 5. Parámetros nuevos para CALIBRACION
 
-- **Intensidades** (`baja`, `media`, `alta`) de `anima`, `agita`, `acapara`, `gasta`, `ahorra`, `comparte`, `difunde`, `repara`, `resguarda`, `cuida`, `toma` y `vandaliza`.
-- `max_pct_despensa_cedida` (por día) y `max_pct_voluntarios` de los policías equivalentes de una zona.
-- `peso_voluntario`: cuánto vale un vecino que resguarda frente a un policía.
-- `dano_vandalismo`: daño a la integridad por participante y día.
+- **Intensidades** (`baja`, `media`, `alta`) de `anima`, `agita`, `acapara`, `gasta`, `ahorra`, `comparte`, `difunde`, `repara`, `cuida` y `toma`.
+- `max_pct_despensa_cedida` (por día).
 - Tope diario de `toma` por intensidad.
-- Umbral de `orden` para el contexto de `patrullar_vecinal` y el disparador de `disturbios`.
 - Umbral de "despensa baja" y de "salud baja" para los contextos de `compartir_comida` y `cuidar_vecinos`.
 - Multiplicador de la propensión al gasto de `gasta` y de `ahorra`.
 

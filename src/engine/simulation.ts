@@ -4,21 +4,26 @@ import {
   ECON_CONSTANTS,
   EFFECT_CATALOG,
   FISCAL_PERIOD_DAYS,
-  LEVER_MAX_CHANGE_PCT,
+  FOREIGN_TRADE_STEPS,
+  LEVER_BOUNDS,
+  PRICE_CAP_FACTORS,
   PRIVATE_ROLES,
   PUBLIC_ROLES,
   ROLE_CATALOG,
-  ROLE_GROUPS,
   SCENARIO_PRESETS,
+  SERVICE_LEVEL_TABLE,
+  SERVICE_LEVER_TO_AREA,
+  SERVICE_LEVER_TO_ROLE,
+  SERVICE_PUBLIC_ROLES,
 } from '../data/catalogs';
 import {
   ActionDefinition,
   CausalStep,
   ClimatePhenomenon,
-  CommercialEnterpriseState,
   CommunityDerived,
   EnterpriseResponseType,
   EventLogEntry,
+  ForeignTradeStep,
   GameState,
   ModifiableKey,
   Modifier,
@@ -26,14 +31,17 @@ import {
   NewsTone,
   Npc,
   NpcVariable,
+  ObjectiveCondition,
   PersonalityTrait,
   PhenomenonType,
+  PriceCapMode,
   PublicRoleId,
-  RoleGroupId,
   RoleId,
   ServiceAreaId,
+  ServiceLevel,
+  ServiceLeverId,
+  ServicePublicRoleId,
   SimEvent,
-  TaxableGroupId,
   ZoneId,
 } from '../types/game';
 import { nextRand, nextSeqId, randInt } from './rng';
@@ -208,8 +216,6 @@ export function computeAmenazaPercibida(state: GameState): Record<ZoneId, number
 }
 
 export function computePoliceSplitAndMetrics(state: GameState): {
-  policiasDefensa: Record<ZoneId, number>;
-  policiasOrden: Record<ZoneId, number>;
   defensa: Record<ZoneId, number>;
   orden: Record<ZoneId, number>;
   satMediaZona: Record<ZoneId, number>;
@@ -220,17 +226,9 @@ export function computePoliceSplitAndMetrics(state: GameState): {
   const nZones = Math.max(1, zones.length);
   const seguridad = state.gobierno.indicadores.seguridad;
   const c = ECON_CONSTANTS.movilidadDefensa;
-  const minReparto = ECON_CONSTANTS.minRepartoPolicia;
   const amenaza = computeAmenazaPercibida(state);
 
   const policeCounts: Record<ZoneId, number> = {
-    centro: 0,
-    norte: 0,
-    este: 0,
-    sur: 0,
-    oeste: 0,
-  };
-  const volunteerWeight: Record<ZoneId, number> = {
     centro: 0,
     norte: 0,
     este: 0,
@@ -279,46 +277,14 @@ export function computePoliceSplitAndMetrics(state: GameState): {
     }
     if (npc.rol === 'policia' && !npc.hospital.internado && !npc.accionIa?.fueraDePuesto) {
       policeCounts[z] = (policeCounts[z] || 0) + 1;
-    } else if (!npc.hospital.internado && npc.accionIa) {
-      const resgEf = npc.accionIa.efectos.find((e) => e.id === 'resguarda');
-      if (resgEf) {
-        const spec = EFFECT_CATALOG.resguarda[resgEf.intensidad ?? 'media'];
-        volunteerWeight[z] = (volunteerWeight[z] || 0) + spec.pesoVoluntario;
-      }
     }
   }
 
-  // Cap volunteer patrols per zone by maxPctVoluntarios of zone equivalent police
-  const effectivePolice: Record<ZoneId, number> = {
-    centro: 0,
-    norte: 0,
-    este: 0,
-    sur: 0,
-    oeste: 0,
-  };
   let totalPolice = 0;
   for (const z of zones) {
-    const reg = policeCounts[z] || 0;
-    const volCap = reg * ECON_CONSTANTS.maxPctVoluntarios;
-    const eff = reg + Math.min(volunteerWeight[z] || 0, volCap);
-    effectivePolice[z] = eff;
-    totalPolice += eff;
+    totalPolice += policeCounts[z] || 0;
   }
 
-  const policiasDefensa: Record<ZoneId, number> = {
-    centro: 0,
-    norte: 0,
-    este: 0,
-    sur: 0,
-    oeste: 0,
-  };
-  const policiasOrden: Record<ZoneId, number> = {
-    centro: 0,
-    norte: 0,
-    este: 0,
-    sur: 0,
-    oeste: 0,
-  };
   const defensa: Record<ZoneId, number> = {
     centro: seguridad,
     norte: seguridad,
@@ -358,29 +324,8 @@ export function computePoliceSplitAndMetrics(state: GameState): {
     const necOrd = Math.min(100, spontPct + descontPct);
     necesidadTotalZona[z] = necDef + necOrd;
 
-    const polZ = effectivePolice[z] || 0;
-    let polDef = 0;
-    let polOrd = polZ;
-
-    if (necDef <= 0 && necOrd <= 0) {
-      polDef = 0;
-      polOrd = polZ;
-    } else if (necDef <= 0) {
-      polDef = 0;
-      polOrd = polZ;
-    } else if (necOrd <= 0) {
-      polDef = polZ;
-      polOrd = 0;
-    } else {
-      const defShare = clamp(necDef / (necDef + necOrd), minReparto, 1 - minReparto);
-      polDef = polZ * defShare;
-      polOrd = polZ * (1 - defShare);
-    }
-
-    policiasDefensa[z] = polDef;
-    policiasOrden[z] = polOrd;
-
-    const parte = totalPolice > 0 ? polDef / totalPolice : 1 / nZones;
+    const polZ = policeCounts[z] || 0;
+    const parte = totalPolice > 0 ? polZ / totalPolice : 1 / nZones;
     const integrity = state.gobierno.integridad?.[z] ?? 100;
     const integrityFactor = 1 - ECON_CONSTANTS.kIntegridad * (1 - integrity / 100);
     defensa[z] = Number(
@@ -388,11 +333,11 @@ export function computePoliceSplitAndMetrics(state: GameState): {
     );
     orden[z] =
       popZ > 0
-        ? Number(clamp((100 * (polOrd / popZ)) / ECON_CONSTANTS.objetivoOrden, 0, 100).toFixed(1))
+        ? Number(clamp((100 * (polZ / popZ)) / ECON_CONSTANTS.objetivoOrden, 0, 100).toFixed(1))
         : 0;
   }
 
-  return { policiasDefensa, policiasOrden, defensa, orden, satMediaZona, necesidadTotalZona };
+  return { defensa, orden, satMediaZona, necesidadTotalZona };
 }
 
 export function computeZoneDefense(state: GameState): Record<ZoneId, number> {
@@ -415,13 +360,6 @@ function updateZoneIntegrity(state: GameState, zonesCount: number): void {
     sur: 0,
     oeste: 0,
   };
-  const vandalDamageByZone: Record<ZoneId, number> = {
-    centro: 0,
-    norte: 0,
-    este: 0,
-    sur: 0,
-    oeste: 0,
-  };
 
   for (const npc of state.npcs) {
     if (!npc.vivo || npc.hospital.internado) continue;
@@ -435,21 +373,13 @@ function updateZoneIntegrity(state: GameState, zonesCount: number): void {
         const spec = EFFECT_CATALOG.repara[repEf.intensidad ?? 'media'];
         repairersByZone[z] = (repairersByZone[z] || 0) + spec.pesoReparador;
       }
-      if (state.config.disturbiosActivos) {
-        const vanEf = npc.accionIa.efectos.find((e) => e.id === 'vandaliza');
-        if (vanEf) {
-          const spec = EFFECT_CATALOG.vandaliza[vanEf.intensidad ?? 'baja'];
-          vandalDamageByZone[z] = (vandalDamageByZone[z] || 0) + spec.danoIntegridad;
-        }
-      }
     }
   }
 
   for (const z of zones) {
     const current = state.gobierno.integridad[z] ?? 100;
     const gain = ECON_CONSTANTS.repPorNpc * repairersByZone[z] * infraFactor;
-    const loss = vandalDamageByZone[z];
-    const next = clamp(Number((current + gain - loss).toFixed(2)), 0, 100);
+    const next = clamp(Number((current + gain).toFixed(2)), 0, 100);
     state.gobierno.integridad[z] = next;
 
     if (Math.round(next) !== Math.round(state.ultimaIntegridadZona[z] ?? 100)) {
@@ -460,7 +390,7 @@ function updateZoneIntegrity(state: GameState, zonesCount: number): void {
         tipo: 'integridad',
         zona: z,
         valor: Number(next.toFixed(1)),
-        causa: loss > 0 ? 'condicion:disturbios' : state.ultimaCausaPalanca || state.ultimoEventoClimaId,
+        causa: state.ultimaCausaPalanca || state.ultimoEventoClimaId,
       });
     }
   }
@@ -494,6 +424,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   if (vivos === 0) {
     return {
       poblacion: 0,
+      poblacionPct: 0,
       vivos: 0,
       bajas,
       satisfaccionMedia: 0,
@@ -516,6 +447,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
 
   let sumSat = 0;
   let sumDespensa = 0;
+  let electoresCount = 0;
   let apoyoCount = 0;
   let descontentosCount = 0;
   let hambreCriticaCount = 0;
@@ -529,7 +461,18 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     roles[npc.rol]++;
     sumSat += npc.variables.satisfaccion;
     sumDespensa += npc.economia.despensa ?? 0;
-    if (npc.variables.lealtad >= 50) apoyoCount++;
+    const isElector = npc.edad >= 18;
+    if (isElector) {
+      electoresCount++;
+      if (npc.variables.lealtad >= 50) apoyoCount++;
+      if (
+        npc.economia.noPudoPagarComida ||
+        (npc.economia.dinero < state.alimento.precio &&
+          npc.economia.despensa < ECON_CONSTANTS.umbralRecompraDias)
+      ) {
+        sinDineroCount++;
+      }
+    }
     if (npc.variables.satisfaccion < 30) descontentosCount++;
     if (npc.variables.hambre > 80) hambreCriticaCount++;
     if (npc.hospital.internado) internados++;
@@ -537,24 +480,23 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     if (npc.rol === 'medico' && !npc.hospital.internado && !npc.accionIa?.fueraDePuesto) {
       medicosActivos++;
     }
-    if (npc.economia.noPudoPagarComida || (getStage(npc.edad) !== 'menor' && npc.economia.dinero < state.alimento.precio && npc.economia.despensa < ECON_CONSTANTS.umbralRecompraDias)) {
-      sinDineroCount++;
-    }
     prodTotal += getNpcProductivity(npc, state) * 100;
   }
 
+  const basePop = Math.max(1, state.config.poblacionInicial || state.npcs.length);
   const camasHospital = Math.max(1, medicosActivos * ECON_CONSTANTS.pacientesPorMedico);
   const hospitalOcupacionPct = Number((((internados + esperandoCama) / camasHospital) * 100).toFixed(1));
 
   return {
     poblacion: vivos,
+    poblacionPct: Number(((vivos / basePop) * 100).toFixed(1)),
     vivos,
     bajas,
     satisfaccionMedia: Number((sumSat / vivos).toFixed(1)),
-    apoyoPct: Number(((apoyoCount / vivos) * 100).toFixed(1)),
+    apoyoPct: electoresCount > 0 ? Number(((apoyoCount / electoresCount) * 100).toFixed(1)) : 0,
     descontentosPct: Number(((descontentosCount / vivos) * 100).toFixed(1)),
     hambreCriticaPct: Number(((hambreCriticaCount / vivos) * 100).toFixed(1)),
-    sinDineroPct: Number(((sinDineroCount / vivos) * 100).toFixed(1)),
+    sinDineroPct: electoresCount > 0 ? Number(((sinDineroCount / electoresCount) * 100).toFixed(1)) : 0,
     despensaMediaDias: Number((sumDespensa / vivos).toFixed(1)),
     hospitalOcupacionPct,
     camasHospital,
@@ -571,7 +513,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
 export function getTaxRateForNpc(npc: Npc, state: GameState): number {
   const def = ROLE_CATALOG[npc.rol];
   if (def.grupo === 'sin_ingreso') return 0;
-  return state.gobierno.palancasVigentes.recaudacion.impuestoGrupo[def.grupo as TaxableGroupId];
+  return state.gobierno.palancasVigentes.impuesto;
 }
 
 export function getNpcProductivity(npc: Npc, state: GameState): number {
@@ -592,7 +534,11 @@ export function getNpcProductivity(npc: Npc, state: GameState): number {
 
   const modProd = getModifierDelta(npc, 'productividad') / 100;
   const impagoPenalty =
-    ROLE_CATALOG[npc.rol].publico && state.gobierno.finanzas.impago ? 0.65 : 1;
+    ROLE_CATALOG[npc.rol].publico &&
+    state.gobierno.finanzas.impago &&
+    state.gobierno.finanzas.alcanzaNomina
+      ? 0.65
+      : 1;
 
   const raw =
     (0.35 + 0.65 * lab) *
@@ -606,23 +552,19 @@ export function getNpcProductivity(npc: Npc, state: GameState): number {
   return clamp(raw, 0, 1.35);
 }
 
-function clampLeverToPeriod(
-  baselineVal: number,
-  targetVal: number,
-  min: number,
-  max: number
-): number {
-  const maxDelta = ((max - min) * LEVER_MAX_CHANGE_PCT) / 100;
-  return Number(clamp(targetVal, Math.max(min, baselineVal - maxDelta), Math.min(max, baselineVal + maxDelta)).toFixed(2));
-}
-
 function recordLeverEvent(
   state: GameState,
   palanca: string,
-  prevVal: number,
-  nextVal: number
+  prevVal: number | string,
+  nextVal: number | string
 ): void {
-  if (Math.abs(nextVal - prevVal) < 0.01) return;
+  const isSame =
+    typeof prevVal === 'number' && typeof nextVal === 'number'
+      ? Math.abs(nextVal - prevVal) < 0.01
+      : prevVal === nextVal;
+  if (isSame) return;
+
+  const fmt = (v: number | string) => (typeof v === 'number' ? Number(v.toFixed(1)) : v);
   const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
   emitSimEvent(state, {
     id: evId,
@@ -630,8 +572,8 @@ function recordLeverEvent(
     tipo: 'palanca',
     zona: 'centro',
     palanca,
-    valorAnterior: Number(prevVal.toFixed(1)),
-    valorNuevo: Number(nextVal.toFixed(1)),
+    valorAnterior: fmt(prevVal),
+    valorNuevo: fmt(nextVal),
   });
   state.ultimaCausaPalanca = evId;
   addLog(
@@ -639,209 +581,111 @@ function recordLeverEvent(
     'gobernador',
     `palanca:${palanca}`,
     `Cambio en ${palanca}`,
-    `${Number(prevVal.toFixed(1))} → ${Number(nextVal.toFixed(1))}`,
+    `${fmt(prevVal)} → ${fmt(nextVal)}`,
     undefined,
     evId
   );
 }
 
-function applyLeverInertia(state: GameState): void {
+function applyLeverChanges(state: GameState): void {
   const cur = state.gobierno.palancasVigentes;
   const tgt = state.gobierno.palancasObjetivo;
-  const base = state.gobierno.palancasInicioPeriodo;
-  const pop = Math.max(1, state.npcs.filter((n) => n.vivo).length);
-  const maxCupo = Math.max(1, Math.round((pop * ECON_CONSTANTS.cupoMaxPctPoblacion) / 100));
 
   const applyNum = (
     palanca: string,
     prevVal: number,
-    baseVal: number,
     tgtVal: number,
     min: number,
     max: number,
     setter: (v: number) => void
   ) => {
-    const nextVal = clampLeverToPeriod(baseVal, tgtVal, min, max);
+    const nextVal = Number(clamp(tgtVal, min, max).toFixed(2));
     if (Math.abs(nextVal - prevVal) >= 0.01) {
       setter(nextVal);
       recordLeverEvent(state, palanca, prevVal, nextVal);
     }
   };
 
-  (['agro', 'industria', 'comercio', 'publico'] as TaxableGroupId[]).forEach((g) => {
-    applyNum(
-      `recaudacion.${g}`,
-      cur.recaudacion.impuestoGrupo[g],
-      base.recaudacion.impuestoGrupo[g],
-      tgt.recaudacion.impuestoGrupo[g],
-      0,
-      60,
-      (v) => {
-        cur.recaudacion.impuestoGrupo[g] = v;
-      }
-    );
+  applyNum('impuesto', cur.impuesto, tgt.impuesto, LEVER_BOUNDS.impuesto.min, LEVER_BOUNDS.impuesto.max, (v) => {
+    cur.impuesto = v;
   });
 
   applyNum(
-    'gasto.salario_publico',
-    cur.gasto.salarioPublico,
-    base.gasto.salarioPublico,
-    tgt.gasto.salarioPublico,
-    50,
-    150,
+    'salario_publico',
+    cur.salarioPublico,
+    tgt.salarioPublico,
+    LEVER_BOUNDS.salarioPublico.min,
+    LEVER_BOUNDS.salarioPublico.max,
     (v) => {
-      cur.gasto.salarioPublico = v;
+      cur.salarioPublico = v;
     }
   );
 
-  (['salud', 'seguridad', 'infraestructura', 'educacion'] as ServiceAreaId[]).forEach((area) => {
-    applyNum(
-      `presupuesto.${area}`,
-      cur.gasto.presupuesto[area],
-      base.gasto.presupuesto[area],
-      tgt.gasto.presupuesto[area],
-      0,
-      100,
-      (v) => {
-        cur.gasto.presupuesto[area] = v;
-      }
-    );
+  (['seguridad', 'salud', 'obras'] as ServiceLeverId[]).forEach((lev) => {
+    const nextLvl = clamp(Math.round(tgt.servicios[lev]), 0, 5) as ServiceLevel;
+    const prevLvl = cur.servicios[lev];
+    if (nextLvl !== prevLvl) {
+      cur.servicios[lev] = nextLvl;
+      recordLeverEvent(state, `servicios.${lev}`, prevLvl, nextLvl);
+    }
   });
 
   applyNum(
-    'gasto.prensa',
-    cur.gasto.prensa,
-    base.gasto.prensa,
-    tgt.gasto.prensa,
-    0,
-    100,
+    'ayuda_social',
+    cur.ayudaSocial,
+    tgt.ayudaSocial,
+    LEVER_BOUNDS.ayudaSocial.min,
+    LEVER_BOUNDS.ayudaSocial.max,
     (v) => {
-      cur.gasto.prensa = v;
+      cur.ayudaSocial = v;
     }
   );
 
-  (['agro', 'industria', 'comercio', 'publico', 'sin_ingreso'] as RoleGroupId[]).forEach((g) => {
-    applyNum(
-      `subsidios.${g}`,
-      cur.gasto.subsidios[g],
-      base.gasto.subsidios[g],
-      tgt.gasto.subsidios[g],
-      0,
-      100,
-      (v) => {
-        cur.gasto.subsidios[g] = v;
-      }
-    );
-  });
+  applyNum(
+    'garantia_alimentaria',
+    cur.garantiaAlimentaria,
+    tgt.garantiaAlimentaria,
+    LEVER_BOUNDS.garantiaAlimentaria.min,
+    LEVER_BOUNDS.garantiaAlimentaria.max,
+    (v) => {
+      cur.garantiaAlimentaria = v;
+    }
+  );
 
-  const sumPct =
-    Object.values(cur.gasto.presupuesto).reduce((a, b) => a + b, 0) +
-    cur.gasto.prensa +
-    Object.values(cur.gasto.subsidios).reduce((a, b) => a + b, 0);
-  if (sumPct > 100) {
-    const scale = 100 / sumPct;
-    (['salud', 'seguridad', 'infraestructura', 'educacion'] as ServiceAreaId[]).forEach((a) => {
-      cur.gasto.presupuesto[a] = Math.floor(cur.gasto.presupuesto[a] * scale);
-    });
-    cur.gasto.prensa = Math.floor(cur.gasto.prensa * scale);
-    (['agro', 'industria', 'comercio', 'publico', 'sin_ingreso'] as RoleGroupId[]).forEach((g) => {
-      cur.gasto.subsidios[g] = Math.floor(cur.gasto.subsidios[g] * scale);
-    });
+  const validCap: PriceCapMode =
+    tgt.precioMaximo === 'moderado' || tgt.precioMaximo === 'estricto' ? tgt.precioMaximo : 'libre';
+  if (validCap !== cur.precioMaximo) {
+    const prev = cur.precioMaximo;
+    cur.precioMaximo = validCap;
+    recordLeverEvent(state, 'precio_maximo', prev, validCap);
   }
 
-  applyNum(
-    'alimento.precio_maximo',
-    cur.alimento.precioMaximo,
-    base.alimento.precioMaximo,
-    tgt.alimento.precioMaximo,
-    50,
-    ECON_CONSTANTS.precioMaximoSinTope,
-    (v) => {
-      cur.alimento.precioMaximo = v;
-    }
-  );
+  const validTradeSteps = FOREIGN_TRADE_STEPS.map((s) => s.value);
+  const nextTrade: ForeignTradeStep = validTradeSteps.includes(tgt.comercioExterior)
+    ? tgt.comercioExterior
+    : 0;
+  if (nextTrade !== cur.comercioExterior) {
+    const prev = cur.comercioExterior;
+    cur.comercioExterior = nextTrade;
+    recordLeverEvent(state, 'comercio_exterior', prev, nextTrade);
+  }
 
-  applyNum(
-    'alimento.garantia',
-    cur.alimento.garantiaAlimentaria,
-    base.alimento.garantiaAlimentaria,
-    tgt.alimento.garantiaAlimentaria,
-    0,
-    100,
-    (v) => {
-      cur.alimento.garantiaAlimentaria = v;
-    }
-  );
-
-  applyNum(
-    'alimento.intercambio',
-    cur.alimento.intercambio,
-    base.alimento.intercambio,
-    tgt.alimento.intercambio,
-    -100,
-    100,
-    (v) => {
-      cur.alimento.intercambio = v;
-    }
-  );
+  applyNum('prensa', cur.prensa, tgt.prensa, LEVER_BOUNDS.prensa.min, LEVER_BOUNDS.prensa.max, (v) => {
+    cur.prensa = v;
+  });
 
   if (state.config.economiaModulo === 'fiscal') {
     applyNum(
-      'finanzas.tope_emision',
-      cur.finanzas.topeEmision,
-      base.finanzas.topeEmision,
-      tgt.finanzas.topeEmision,
-      0,
-      30,
+      'tope_emision',
+      cur.topeEmision,
+      tgt.topeEmision,
+      LEVER_BOUNDS.topeEmision.min,
+      LEVER_BOUNDS.topeEmision.max,
       (v) => {
-        cur.finanzas.topeEmision = v;
+        cur.topeEmision = v;
       }
     );
   }
-
-  const maxCupoStep = Math.max(1, Math.round((maxCupo * LEVER_MAX_CHANGE_PCT) / 100));
-  PUBLIC_ROLES.forEach((r) => {
-    const prevVal = cur.cupos[r];
-    const baseVal = base.cupos[r];
-    const nextVal = clamp(
-      Math.round(tgt.cupos[r]),
-      Math.max(0, baseVal - maxCupoStep),
-      Math.min(maxCupo, baseVal + maxCupoStep)
-    );
-    if (nextVal !== prevVal) {
-      cur.cupos[r] = nextVal;
-      recordLeverEvent(state, `cupos.${r}`, prevVal, nextVal);
-    }
-  });
-
-  state.medios.forEach((m) => {
-    const tMedia = state.gobierno.prensaObjetivo[m.id];
-    const bMedia = state.gobierno.prensaInicioPeriodo?.[m.id] || m.intervencion;
-    if (tMedia) {
-      applyNum(
-        `prensa.${m.id}.financiamiento`,
-        m.intervencion.financiamiento,
-        bMedia.financiamiento,
-        tMedia.financiamiento,
-        0,
-        100,
-        (v) => {
-          m.intervencion.financiamiento = v;
-        }
-      );
-      applyNum(
-        `prensa.${m.id}.regulacion`,
-        m.intervencion.regulacion,
-        bMedia.regulacion,
-        tMedia.regulacion,
-        0,
-        100,
-        (v) => {
-          m.intervencion.regulacion = v;
-        }
-      );
-    }
-  });
 }
 
 function addLog(
@@ -950,7 +794,7 @@ function setNpcActionMovement(
   actionName: string,
   state: { rngState: number }
 ): void {
-  if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'disturbios'].includes(actionId)) {
+  if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea'].includes(actionId)) {
     const plaza = DISTRICTS.find((d) => d.id === (actionId === 'huelga' ? 'civico' : 'mercado'))!;
     npc.mapa.destino = {
       x: plaza.x + 30 + drawRand(state) * (plaza.w - 60),
@@ -1015,11 +859,9 @@ function applyActionEffectsToNpc(
       ef.id === 'moviliza' ||
       ef.id === 'decorativa' ||
       ef.id === 'repara' ||
-      ef.id === 'resguarda' ||
       ef.id === 'cuida' ||
       ef.id === 'comparte' ||
-      ef.id === 'toma' ||
-      ef.id === 'vandaliza'
+      ef.id === 'toma'
     ) {
       continue;
     }
@@ -1355,8 +1197,7 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
 export function isNpcEligibleForAction(
   npc: Npc,
   action: ActionDefinition,
-  state?: GameState,
-  precomputed?: { orden: Record<ZoneId, number> }
+  state?: GameState
 ): boolean {
   if (!npc.vivo || npc.hospital.internado) return false;
   const req = action.requisitos;
@@ -1398,14 +1239,6 @@ export function isNpcEligibleForAction(
         return false;
       }
     }
-    if (ctx.fenomenoOOrdenMenorA) {
-      const hasFen = active.some((f) => f.tipo === ctx.fenomenoOOrdenMenorA!.fenomeno);
-      const ordenMap = precomputed?.orden ?? computePoliceSplitAndMetrics(state).orden;
-      const ordVal = ordenMap[effZone] ?? 100;
-      if (!hasFen && ordVal >= ctx.fenomenoOOrdenMenorA.ordenMenorA) {
-        return false;
-      }
-    }
     if (ctx.vecinoDespensaBaja) {
       const hasLowPantry = state.npcs.some(
         (other) =>
@@ -1443,10 +1276,9 @@ export function scoreActionAffinity(npc: Npc, action: ActionDefinition): number 
 }
 
 export function selectCandidateActions(npc: Npc, state?: GameState): ActionDefinition[] {
-  const precomputed = state ? { orden: computePoliceSplitAndMetrics(state).orden } : undefined;
   const valid = ACTION_TABLE.filter((a) => {
     if (a.tipo !== 'espontanea') return false;
-    if (!isNpcEligibleForAction(npc, a, state, precomputed)) return false;
+    if (!isNpcEligibleForAction(npc, a, state)) return false;
     if (state && hasOutOfPostEffect(a) && !canRoleLeavePost(state, npc.rol)) return false;
     return true;
   });
@@ -1611,7 +1443,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
     const isUrgent = Boolean(
-      npc.accionIa && ['protesta', 'huelga', 'saqueo', 'disturbios'].includes(npc.accionIa.id)
+      npc.accionIa && ['protesta', 'huelga', 'saqueo'].includes(npc.accionIa.id)
     );
     const speed = isUrgent ? baseSpeed * 1.35 : npc.rol === 'policia' ? baseSpeed * 1.25 : baseSpeed;
     const dx = npc.mapa.destino.x - npc.mapa.x;
@@ -1622,7 +1454,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
       npc.mapa.x = npc.mapa.destino.x;
       npc.mapa.y = npc.mapa.destino.y;
       if (drawRand(state) < 0.42) {
-        if (npc.accionIa && ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'disturbios'].includes(npc.accionIa.id)) {
+        if (npc.accionIa && ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea'].includes(npc.accionIa.id)) {
           const zoneId = npc.accionIa.id === 'huelga' ? 'civico' : 'mercado';
           const zone = DISTRICTS.find((d) => d.id === zoneId)!;
           npc.mapa.destino = {
@@ -1630,10 +1462,10 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
             y: zone.y + 60 + drawRand(state) * (zone.h - 90),
           };
         } else if (npc.accionIa?.id === 'organizar_fiesta') {
-          const zone = DISTRICTS.find((d) => d.id === 'residencial')!;
+          const zone = DISTRICTS.find((d) => d.id === 'mercado')!;
           npc.mapa.destino = {
-            x: zone.x + 50 + drawRand(state) * (zone.w - 100),
-            y: zone.y + 240 + drawRand(state) * (zone.h - 280),
+            x: zone.x + 40 + drawRand(state) * (zone.w - 80),
+            y: zone.y + 50 + drawRand(state) * (zone.h - 80),
           };
         } else if (npc.variables.hambre > 75 && drawRand(state) < 0.65) {
           const market = DISTRICTS.find((d) => d.id === 'mercado')!;
@@ -1676,82 +1508,68 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
 function updateServiceCoverage(state: GameState): void {
   const vivos = Math.max(1, state.npcs.filter((n) => n.vivo).length);
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
-  const getTargetCov = (role: PublicRoleId | 'comercio'): number =>
+  const getTargetCov = (role: ServicePublicRoleId): number =>
     preset.objetivoCobertura?.[role] ?? ECON_CONSTANTS.objetivoCobertura[role];
 
-  const counts: Record<PublicRoleId | 'comerciante', number> = {
+  const counts: Record<ServicePublicRoleId, number> = {
     policia: 0,
-    estatal: 0,
-    docente: 0,
     medico: 0,
     ingeniero: 0,
-    comerciante: 0,
   };
   for (const n of state.npcs) {
     if (!n.vivo || n.hospital.internado) continue;
     if (n.rol in counts && !n.accionIa?.fueraDePuesto) {
-      counts[n.rol as keyof typeof counts]++;
+      counts[n.rol as ServicePublicRoleId]++;
     }
   }
   state.gobierno.coberturas = {
     policia: clamp(counts.policia / Math.max(1, vivos * getTargetCov('policia')), 0, 1),
-    estatal: clamp(counts.estatal / Math.max(1, vivos * getTargetCov('estatal')), 0, 1),
-    docente: clamp(counts.docente / Math.max(1, vivos * getTargetCov('docente')), 0, 1),
     medico: clamp(counts.medico / Math.max(1, vivos * getTargetCov('medico')), 0, 1),
     ingeniero: clamp(counts.ingeniero / Math.max(1, vivos * getTargetCov('ingeniero')), 0, 1),
-    comercio: clamp(counts.comerciante / Math.max(1, vivos * getTargetCov('comercio')), 0, 1),
   };
 }
 
 function syncEnterprisesWithOwners(state: GameState): void {
   const empresarioNpc = state.npcs.find((n) => n.vivo && n.rol === 'empresario') || null;
   state.empresas.alimento.dueno = empresarioNpc ? empresarioNpc.id : null;
+  state.empresas.comercio.socios = state.npcs
+    .filter((n) => n.vivo && n.rol === 'comerciante')
+    .map((c) => c.id);
+}
 
-  const liveMerchants = state.npcs.filter((n) => n.vivo && n.rol === 'comerciante');
-  const liveMerchantIds = new Set(liveMerchants.map((m) => m.id));
-  const current = state.empresas.comerciales;
-
-  const nextComerciales: CommercialEnterpriseState[] = [];
-  const assignedMerchantIds = new Set<string>();
-
-  for (const com of current) {
-    if (com.dueno && liveMerchantIds.has(com.dueno) && !assignedMerchantIds.has(com.dueno)) {
-      assignedMerchantIds.add(com.dueno);
-      nextComerciales.push(com);
-    }
+function getPublicRoleTargetCap(state: GameState, role: PublicRoleId, vivosCount: number): number {
+  if (role === 'estatal') {
+    return state.gobierno.cuposFijos.estatal;
   }
-
-  for (const merchant of liveMerchants) {
-    if (assignedMerchantIds.has(merchant.id)) continue;
-    const vacantReuse = current.find(
-      (c) => (!c.dueno || !liveMerchantIds.has(c.dueno)) && !nextComerciales.includes(c)
-    );
-    if (vacantReuse) {
-      vacantReuse.dueno = merchant.id;
-      nextComerciales.push(vacantReuse);
-    } else {
-      nextComerciales.push({
-        id: nextSeqId(state, 'com'),
-        dueno: merchant.id,
-        ingresosAcum: 0,
-        sueldosAcum: 0,
-        diasPeriodo: 0,
-        ultimaGanancia: 0,
-        ultimoIngresoPeriodo: 0,
-        ultimoSueldosPeriodo: 0,
-        respuesta: null,
-      });
-    }
-    assignedMerchantIds.add(merchant.id);
+  if (role === 'docente') {
+    return state.gobierno.cuposFijos.docente;
   }
+  const pal = state.gobierno.palancasVigentes;
+  const lever: ServiceLeverId =
+    role === 'policia' ? 'seguridad' : role === 'medico' ? 'salud' : 'obras';
+  const level = pal.servicios[lever];
+  if (level <= 0) return 0;
+  return Math.round((vivosCount * SERVICE_LEVEL_TABLE[lever][level].puestosPct) / 100);
+}
 
-  state.empresas.comerciales = nextComerciales;
+function estimateWorkerFloorPeriodCost(workers: Npc[], state: GameState): number {
+  const piso = ECON_CONSTANTS.pisoSueldoPct / 100;
+  let sumBaseDia = 0;
+  for (const w of workers) {
+    const def = ROLE_CATALOG[w.rol];
+    if (!def.ingreso) continue;
+    const [minI, maxI] = def.ingreso;
+    const prod = Math.max(0.2, getNpcProductivity(w, state));
+    sumBaseDia += (minI + w.economia.ingresoPos * (maxI - minI)) * prod;
+  }
+  return sumBaseDia * piso * ECON_CONSTANTS.periodoPagoDias;
 }
 
 function handleRolesAndAging(state: GameState): void {
   const dayOfYear = ((state.reloj.dia - 1) % 365) + 1;
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
-  const popScale = Math.max(0.6, state.npcs.filter((n) => n.vivo).length / 100);
+  const vivosCount = state.npcs.filter((n) => n.vivo).length;
+  const popScale = Math.max(0.6, vivosCount / 100);
 
   const counts: Record<RoleId, number> = {
     estudiante: 0,
@@ -1773,75 +1591,120 @@ function handleRolesAndAging(state: GameState): void {
     if (n.vivo) counts[n.rol]++;
   }
 
-  // Obrero gradual layoff if merchants dropped (ESTADOS §2)
-  const privateMaxObrero = Math.round(preset.topesPrivados.obrero * popScale);
-  const effectiveObreroCap = Math.min(
-    privateMaxObrero,
-    counts.comerciante * ECON_CONSTANTS.empleadosPorComerciante
-  );
+  const effectiveObreroCap = Math.round(preset.topesPrivados.obrero * popScale);
 
-  if (counts.obrero > effectiveObreroCap) {
-    const excess = counts.obrero - effectiveObreroCap;
-    const toLayOff = Math.min(excess, ECON_CONSTANTS.maxPaseDesempleoPorDia);
-    const pool = state.npcs.filter((n) => n.vivo && n.rol === 'obrero');
-    const causeRef =
-      state.ultimoEventoEmpresaId ||
-      state.eventos.find((e) => e.tipo === 'muerte' || e.tipo === 'accion_inicio')?.id ||
-      state.ultimaCausaPalanca;
-    let laidOff = 0;
-    for (let i = 0; i < toLayOff && pool.length > 0; i++) {
-      const idx = Math.floor(drawRand(state) * pool.length);
-      const chosen = pool.splice(idx, 1)[0];
-      chosen.rol = 'desempleado';
-      chosen.mapa.accion = 'buscando trabajo';
-      chosen.mapa.destino = getDistrictPosition('desempleado', state);
-      applyInstantModifierToNpc(
-        chosen,
-        {
-          afecta: { satisfaccion: -4 },
-          origen: 'estado:comercio',
-          causa: causeRef,
-          texto: 'Pasó a desempleado por reducción de comercios activos',
-          recordOnNpc: true,
-        },
-        state
-      );
-      counts.obrero--;
-      counts.desempleado++;
-      laidOff++;
-    }
-    if (laidOff > 0) {
-      addLog(
-        state,
-        'economia',
-        'estado:comercio',
-        `Ajuste gradual de obreros (${laidOff})`,
-        `Exceso sobre tope comercial (${effectiveObreroCap}): ${laidOff} obrero(s) pasan a desempleados.`,
-        causeRef
-      );
-    }
-  }
-
-  // If public cupos were lowered below current headcount, excess become desempleado
+  // Gradual layoff if service level lowered below current public headcount (ESTADOS §2)
   for (const pRole of PUBLIC_ROLES) {
-    const cap = state.gobierno.palancasVigentes.cupos[pRole];
+    const cap = getPublicRoleTargetCap(state, pRole, vivosCount);
     if (counts[pRole] > cap) {
-      let toLayOff = counts[pRole] - cap;
-      for (const n of state.npcs) {
-        if (toLayOff <= 0) break;
-        if (n.vivo && n.rol === pRole) {
-          n.rol = 'desempleado';
-          n.mapa.accion = 'buscando trabajo';
-          n.mapa.destino = getDistrictPosition('desempleado', state);
-          counts[pRole]--;
-          counts.desempleado++;
-          toLayOff--;
-        }
+      const toLayOff = Math.min(counts[pRole] - cap, ECON_CONSTANTS.maxPaseDesempleoPorDia);
+      const pool = state.npcs.filter((n) => n.vivo && n.rol === pRole);
+      let laidOff = 0;
+      for (let i = 0; i < toLayOff && pool.length > 0; i++) {
+        const idx = Math.floor(drawRand(state) * pool.length);
+        const chosen = pool.splice(idx, 1)[0];
+        chosen.rol = 'desempleado';
+        chosen.mapa.accion = 'buscando trabajo';
+        chosen.mapa.destino = getDistrictPosition('desempleado', state);
+        applyInstantModifierToNpc(
+          chosen,
+          {
+            afecta: { satisfaccion: -5 },
+            origen: 'estado:servicio_publico',
+            causa: state.ultimaCausaPalanca,
+            texto: 'Pasó a desempleado por reducción de servicio público',
+            recordOnNpc: true,
+          },
+          state
+        );
+        counts[pRole]--;
+        counts.desempleado++;
+        laidOff++;
+      }
+      if (laidOff > 0) {
+        addLog(
+          state,
+          'economia',
+          'estado:servicio_publico',
+          `Ajuste de personal en ${ROLE_CATALOG[pRole].nombre} (${laidOff})`,
+          `${laidOff} trabajador(es) público(s) pasan a desempleados tras bajar el nivel del servicio.`,
+          state.ultimaCausaPalanca
+        );
       }
     }
   }
 
-  const educSpeed = 0.7 + (state.gobierno.indicadores.educacion / 100) * 1.1;
+  // Enterprise gradual layoffs while respuesta === 'despedir' (ESTADOS §4)
+  if (state.empresas.alimento.respuesta?.tipo === 'despedir') {
+    const ent = state.empresas.alimento;
+    const workers = state.npcs.filter(
+      (n) => n.vivo && (n.rol === 'agricultor' || n.rol === 'tecnico')
+    );
+    const estFloorPayroll = estimateWorkerFloorPeriodCost(workers, state);
+    if (estFloorPayroll > ent.ultimoIngresoPeriodo + 0.5 && workers.length > 0) {
+      let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
+      const pool = [...workers];
+      while (cutsLeft > 0 && pool.length > 0) {
+        const currentCost = estimateWorkerFloorPeriodCost(pool, state);
+        if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
+        const idx = Math.floor(drawRand(state) * pool.length);
+        const target = pool.splice(idx, 1)[0];
+        counts[target.rol]--;
+        counts.desempleado++;
+        target.rol = 'desempleado';
+        target.mapa.accion = 'buscando trabajo';
+        target.mapa.destino = getDistrictPosition('desempleado', state);
+        applyInstantModifierToNpc(
+          target,
+          {
+            afecta: { satisfaccion: -8 },
+            origen: 'empresa:alimento/respuesta',
+            causa: ent.respuesta?.causa,
+            texto: 'Despedido por déficit de alimento',
+            recordOnNpc: true,
+          },
+          state
+        );
+        cutsLeft--;
+      }
+    }
+  }
+
+  if (state.empresas.comercio.respuesta?.tipo === 'despedir') {
+    const ent = state.empresas.comercio;
+    const workers = state.npcs.filter((n) => n.vivo && n.rol === 'obrero');
+    const estFloorPayroll = estimateWorkerFloorPeriodCost(workers, state);
+    if (estFloorPayroll > ent.ultimoIngresoPeriodo + 0.5 && workers.length > 0) {
+      let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
+      const pool = [...workers];
+      while (cutsLeft > 0 && pool.length > 0) {
+        const currentCost = estimateWorkerFloorPeriodCost(pool, state);
+        if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
+        const idx = Math.floor(drawRand(state) * pool.length);
+        const target = pool.splice(idx, 1)[0];
+        counts.obrero--;
+        counts.desempleado++;
+        target.rol = 'desempleado';
+        target.mapa.accion = 'buscando trabajo';
+        target.mapa.destino = getDistrictPosition('desempleado', state);
+        applyInstantModifierToNpc(
+          target,
+          {
+            afecta: { satisfaccion: -8 },
+            origen: 'empresa:comercio/respuesta',
+            causa: ent.respuesta?.causa,
+            texto: 'Despedido por déficit de comercio',
+            recordOnNpc: true,
+          },
+          state
+        );
+        cutsLeft--;
+      }
+    }
+  }
+
+  const foodFrozen = state.empresas.alimento.respuesta !== null;
+  const comFrozen = state.empresas.comercio.respuesta !== null;
 
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
@@ -1869,27 +1732,28 @@ function handleRolesAndAging(state: GameState): void {
       }
     }
 
-    if (npc.rol === 'estudiante' && npc.educacion.nivel < 3) {
-      npc.educacion.progreso += educSpeed;
-      if (npc.educacion.progreso >= 100) {
-        npc.educacion.progreso = 0;
-        npc.educacion.nivel = Math.min(3, npc.educacion.nivel + 1);
-      }
-    }
-
     if (npc.rol === 'desempleado' && state.reloj.dia % 3 === 0) {
       const candidateRoles: Array<{ rol: RoleId; score: number }> = [];
 
       for (const pRole of PUBLIC_ROLES) {
-        const cap = state.gobierno.palancasVigentes.cupos[pRole];
+        const cap = getPublicRoleTargetCap(state, pRole, vivosCount);
         const def = ROLE_CATALOG[pRole];
         if (counts[pRole] < cap && npc.educacion.nivel >= def.educMin) {
           const traitVal = def.afinidad ? getEffectiveTrait(npc, def.afinidad) : 50;
-          candidateRoles.push({ rol: pRole, score: traitVal + state.gobierno.palancasVigentes.gasto.salarioPublico * 0.25 });
+          candidateRoles.push({
+            rol: pRole,
+            score: traitVal + state.gobierno.palancasVigentes.salarioPublico * 0.25,
+          });
         }
       }
 
       for (const privRole of PRIVATE_ROLES) {
+        if (foodFrozen && (privRole === 'agricultor' || privRole === 'tecnico' || privRole === 'empresario')) {
+          continue;
+        }
+        if (comFrozen && (privRole === 'obrero' || privRole === 'comerciante')) {
+          continue;
+        }
         const cap =
           privRole === 'obrero'
             ? effectiveObreroCap
@@ -1924,13 +1788,15 @@ function handleRolesAndAging(state: GameState): void {
     let transfersLeft = 2;
     const targetRoles: RoleId[] = [
       ...PUBLIC_ROLES,
-      ...(counts.empresario < Math.max(1, preset.topesPrivados.empresario) ? (['empresario'] as RoleId[]) : []),
+      ...(!foodFrozen && counts.empresario < Math.max(1, preset.topesPrivados.empresario)
+        ? (['empresario'] as RoleId[])
+        : []),
     ];
     const vacantTarget = targetRoles.filter((r) => {
       const cap =
         r === 'empresario'
           ? Math.max(1, preset.topesPrivados.empresario)
-          : state.gobierno.palancasVigentes.cupos[r as PublicRoleId];
+          : getPublicRoleTargetCap(state, r as PublicRoleId, vivosCount);
       return counts[r] < cap;
     });
 
@@ -1938,7 +1804,7 @@ function handleRolesAndAging(state: GameState): void {
       const cap =
         targetRole === 'empresario'
           ? Math.max(1, preset.topesPrivados.empresario)
-          : state.gobierno.palancasVigentes.cupos[targetRole as PublicRoleId];
+          : getPublicRoleTargetCap(state, targetRole as PublicRoleId, vivosCount);
       while (transfersLeft > 0 && counts[targetRole] < cap) {
         const def = ROLE_CATALOG[targetRole];
         const minKeep = (r: RoleId) => (r === 'agricultor' ? 25 : r === 'empresario' ? 1 : 2);
@@ -1954,10 +1820,11 @@ function handleRolesAndAging(state: GameState): void {
             return false;
           }
           if (counts[n.rol] <= minKeep(n.rol)) return false;
-          if (n.rol === 'comerciante' && (counts.comerciante - 1) * ECON_CONSTANTS.empleadosPorComerciante < counts.obrero) {
-            return false;
-          }
-          return n.educacion.nivel >= def.educMin && n.edad >= def.edadMin && (def.edadMax === null || n.edad <= def.edadMax);
+          return (
+            n.educacion.nivel >= def.educMin &&
+            n.edad >= def.edadMin &&
+            (def.edadMax === null || n.edad <= def.edadMax)
+          );
         });
         if (eligible.length === 0) break;
         eligible.sort((a, b) => {
@@ -2113,7 +1980,6 @@ function settleSingleEnterprise(
   state: GameState,
   ent: {
     id: string;
-    dueno: string | null;
     ingresosAcum: number;
     sueldosAcum: number;
     diasPeriodo: number;
@@ -2124,10 +1990,7 @@ function settleSingleEnterprise(
   },
   isFoodEnterprise: boolean,
   vivos: Npc[],
-  comIndex: number,
-  totalCom: number,
-  adminEfficiency: number,
-  comercioTaxRate: number
+  taxRate: number
 ): number {
   const gananciaBruta = ent.ingresosAcum - ent.sueldosAcum;
   ent.ultimoIngresoPeriodo = Number(ent.ingresosAcum.toFixed(1));
@@ -2136,105 +1999,87 @@ function settleSingleEnterprise(
   ent.sueldosAcum = 0;
   ent.diasPeriodo = 0;
 
-  const duenoNpc = ent.dueno ? vivos.find((n) => n.id === ent.dueno) || null : null;
+  const duenoNpc = isFoodEnterprise
+    ? state.empresas.alimento.dueno
+      ? vivos.find((n) => n.id === state.empresas.alimento.dueno) || null
+      : null
+    : null;
+  const sociosNpcs = isFoodEnterprise ? [] : vivos.filter((n) => n.rol === 'comerciante');
 
   if (gananciaBruta >= 0) {
     ent.ultimaGanancia = Number(gananciaBruta.toFixed(1));
-    const tax = gananciaBruta * (comercioTaxRate / 100);
+    const tax = gananciaBruta * (taxRate / 100);
     const netProfit = gananciaBruta - tax;
-    if (duenoNpc) {
-      duenoNpc.economia.dinero += netProfit;
-      duenoNpc.economia.ultimoIngresoNeto = Number(
-        (netProfit / ECON_CONSTANTS.periodoPagoDias).toFixed(2)
-      );
+    if (isFoodEnterprise) {
+      if (duenoNpc) {
+        duenoNpc.economia.dinero += netProfit;
+        duenoNpc.economia.ultimoIngresoNeto = Number(
+          (netProfit / ECON_CONSTANTS.periodoPagoDias).toFixed(2)
+        );
+      }
+    } else if (sociosNpcs.length > 0) {
+      const share = netProfit / sociosNpcs.length;
+      const dailyShare = Number((share / ECON_CONSTANTS.periodoPagoDias).toFixed(2));
+      for (const socio of sociosNpcs) {
+        socio.economia.dinero += share;
+        socio.economia.ultimoIngresoNeto = dailyShare;
+      }
     }
-    return tax * adminEfficiency;
+    return tax;
   }
 
-  // Negative profit -> deterministic seeded weighted response (ESTADOS §4)
+  // Negative profit -> deterministic response rule (ESTADOS §4)
   const deficit = Math.abs(gananciaBruta);
   const employees = isFoodEnterprise
-    ? vivos.filter((n) => (n.rol === 'agricultor' || n.rol === 'tecnico') && !n.hospital.internado)
-    : vivos.filter((n, idx) => n.rol === 'obrero' && idx % Math.max(1, totalCom) === comIndex);
+    ? vivos.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico')
+    : vivos.filter((n) => n.rol === 'obrero');
 
-  const codicia = duenoNpc ? getEffectiveTrait(duenoNpc, 'codicia') : 50;
-  const resiliencia = duenoNpc ? getEffectiveTrait(duenoNpc, 'resiliencia') : 50;
-
-  const candidates: Array<{ tipo: EnterpriseResponseType; peso: number }> = [
-    { tipo: 'recortar_sueldos', peso: 35 + codicia * 0.2 },
-  ];
-  if (duenoNpc && duenoNpc.economia.dinero >= deficit * 0.5) {
-    candidates.push({
-      tipo: 'absorber',
-      peso: 35 + (100 - codicia) * 0.45 + resiliencia * 0.4,
-    });
-  }
-  if (employees.length > 0) {
-    candidates.push({ tipo: 'despedir', peso: 18 + codicia * 0.55 });
-  }
-  if (!isFoodEnterprise) {
-    candidates.push({ tipo: 'subir_margen', peso: 28 + codicia * 0.6 });
-  }
-
-  const totalPeso = candidates.reduce((acc, c) => acc + c.peso, 0);
-  let r = drawRand(state) * Math.max(1, totalPeso);
-  let chosen: EnterpriseResponseType = candidates[0].tipo;
-  for (const c of candidates) {
-    r -= c.peso;
-    if (r <= 0) {
-      chosen = c.tipo;
-      break;
-    }
-  }
+  const piso = ECON_CONSTANTS.pisoSueldoPct / 100;
+  const neededFactor =
+    ent.ultimoSueldosPeriodo > 0.01 ? ent.ultimoIngresoPeriodo / ent.ultimoSueldosPeriodo : 0;
+  const chosen: EnterpriseResponseType =
+    neededFactor >= piso || employees.length === 0 ? 'recortar_sueldos' : 'despedir';
+  const factorSueldo = clamp(neededFactor, piso, 1);
 
   const origen = `empresa:${ent.id}/respuesta`;
   const causa = state.ultimaCausaPalanca || state.ultimoEventoClimaId;
   const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
   state.ultimoEventoEmpresaId = evId;
 
+  const repNpc = duenoNpc || sociosNpcs[0] || null;
+
   emitSimEvent(state, {
     id: evId,
     dia: state.reloj.dia,
     tipo: 'empresa_respuesta',
-    zona: duenoNpc?.zona ?? 'centro',
+    zona: repNpc?.zona ?? 'centro',
     empresaId: ent.id,
-    duenoId: ent.dueno,
+    duenoId: duenoNpc ? duenoNpc.id : sociosNpcs[0]?.id ?? null,
     respuesta: chosen,
     deficit: Number(deficit.toFixed(1)),
     origen,
     causa,
   });
 
-  if (chosen === 'absorber' && duenoNpc) {
-    const absorbed = Math.min(duenoNpc.economia.dinero, deficit);
-    duenoNpc.economia.dinero = Math.max(0, duenoNpc.economia.dinero - absorbed);
-    duenoNpc.economia.ultimoIngresoNeto = Number(
-      (-absorbed / ECON_CONSTANTS.periodoPagoDias).toFixed(2)
-    );
-    ent.ultimaGanancia = Number((-absorbed).toFixed(1));
-    ent.respuesta = {
-      tipo: 'absorber',
-      diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
-      duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
-      origen,
-      causa: evId,
-    };
-  } else if (chosen === 'recortar_sueldos') {
-    ent.ultimaGanancia = 0;
+  ent.ultimaGanancia = 0;
+  if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
+  for (const socio of sociosNpcs) socio.economia.ultimoIngresoNeto = 0;
+
+  if (chosen === 'recortar_sueldos') {
     ent.respuesta = {
       tipo: 'recortar_sueldos',
       diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
       duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
-      factorSueldo: ECON_CONSTANTS.factorRecorteSueldo,
+      factorSueldo: Number(factorSueldo.toFixed(3)),
       origen,
       causa: evId,
     };
-    if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
-  } else if (chosen === 'despedir') {
-    ent.ultimaGanancia = 0;
+  } else {
     const pool = [...employees];
-    const toFire = Math.min(pool.length, ECON_CONSTANTS.maxPaseDesempleoPorDia);
-    for (let i = 0; i < toFire; i++) {
+    let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
+    while (cutsLeft > 0 && pool.length > 0) {
+      const currentCost = estimateWorkerFloorPeriodCost(pool, state);
+      if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
       const idx = Math.floor(drawRand(state) * pool.length);
       const target = pool.splice(idx, 1)[0];
       target.rol = 'desempleado';
@@ -2251,26 +2096,16 @@ function settleSingleEnterprise(
         },
         state
       );
+      cutsLeft--;
     }
     ent.respuesta = {
       tipo: 'despedir',
       diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
       duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
+      factorSueldo: piso,
       origen,
       causa: evId,
     };
-    if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
-  } else if (chosen === 'subir_margen') {
-    ent.ultimaGanancia = 0;
-    ent.respuesta = {
-      tipo: 'subir_margen',
-      diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
-      duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
-      margenExtraPct: ECON_CONSTANTS.margenExtraSubirPct,
-      origen,
-      causa: evId,
-    };
-    if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
   }
 
   addLog(
@@ -2288,9 +2123,7 @@ function settleSingleEnterprise(
 
 function settleEnterprises(state: GameState): void {
   const vivos = state.npcs.filter((n) => n.vivo);
-  const pal = state.gobierno.palancasVigentes;
-  const adminEfficiency = 1 - (1 - state.gobierno.coberturas.estatal) * ECON_CONSTANTS.perdidaAdminMax;
-  const comercioTax = pal.recaudacion.impuestoGrupo.comercio;
+  const taxRate = state.gobierno.palancasVigentes.impuesto;
 
   const foodEnt = state.empresas.alimento;
   foodEnt.diasPeriodo += 1;
@@ -2301,42 +2134,22 @@ function settleEnterprises(state: GameState): void {
     }
   }
   if (foodEnt.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias) {
-    const netTax = settleSingleEnterprise(
-      state,
-      foodEnt,
-      true,
-      vivos,
-      0,
-      Math.max(1, state.empresas.comerciales.length),
-      adminEfficiency,
-      comercioTax
-    );
+    const netTax = settleSingleEnterprise(state, foodEnt, true, vivos, taxRate);
     state.gobierno.acumuladoPeriodo.impuestos += netTax;
   }
 
-  const totalCom = state.empresas.comerciales.length;
-  state.empresas.comerciales.forEach((comEnt, idx) => {
-    comEnt.diasPeriodo += 1;
-    if (comEnt.respuesta) {
-      comEnt.respuesta.diasRestantes -= 1;
-      if (comEnt.respuesta.diasRestantes <= 0) {
-        comEnt.respuesta = null;
-      }
+  const comEnt = state.empresas.comercio;
+  comEnt.diasPeriodo += 1;
+  if (comEnt.respuesta) {
+    comEnt.respuesta.diasRestantes -= 1;
+    if (comEnt.respuesta.diasRestantes <= 0) {
+      comEnt.respuesta = null;
     }
-    if (comEnt.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias) {
-      const netTax = settleSingleEnterprise(
-        state,
-        comEnt,
-        false,
-        vivos,
-        idx,
-        totalCom,
-        adminEfficiency,
-        comercioTax
-      );
-      state.gobierno.acumuladoPeriodo.impuestos += netTax;
-    }
-  });
+  }
+  if (comEnt.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias) {
+    const netTax = settleSingleEnterprise(state, comEnt, false, vivos, taxRate);
+    state.gobierno.acumuladoPeriodo.impuestos += netTax;
+  }
 }
 
 function runDailyEconomyAndNeeds(state: GameState): void {
@@ -2411,16 +2224,17 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   const precioMercado = Number(
     (ECON_CONSTANTS.precioBaseAlimento * preEscasez * climaPrecioFactor * inflFactor).toFixed(2)
   );
+  const capMult = PRICE_CAP_FACTORS[pal.precioMaximo];
   const precioTope =
-    pal.alimento.precioMaximo >= ECON_CONSTANTS.precioMaximoSinTope
+    capMult === null
       ? Infinity
-      : Number((ECON_CONSTANTS.precioBaseAlimento * (pal.alimento.precioMaximo / 100)).toFixed(2));
+      : Number((ECON_CONSTANTS.precioBaseAlimento * capMult).toFixed(2));
   const precioAlimento = Number(Math.min(precioMercado, precioTope).toFixed(2));
 
-  // 2. External Trade (Intercambio, ESTADOS §12)
-  let comprasAlimentoDia = 0;
-  let ventasAlimentoDia = 0;
-  const tradeLever = pal.alimento.intercambio;
+  // 2. Foreign Trade (comercioExterior, ESTADOS §12)
+  let importacionesDia = 0;
+  let exportacionesDia = 0;
+  const tradeLever = pal.comercioExterior;
   const activeComerciantes = vivos.filter(
     (n) => n.rol === 'comerciante' && !n.hospital.internado && !n.accionIa?.fueraDePuesto
   ).length;
@@ -2428,9 +2242,9 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   const externalPriceBase =
     ECON_CONSTANTS.precioBaseAlimento * (1 + state.gobierno.inflacion / 100) * climaPrecioFactor;
 
-  if (tradeLever > 5 && maxTradeUnits > 0) {
+  if (tradeLever > 0 && maxTradeUnits > 0) {
     const rawUnits = maxTradeUnits * (tradeLever / 100);
-    const purchaseUnitPrice = externalPriceBase * 1.3;
+    const purchaseUnitPrice = externalPriceBase * ECON_CONSTANTS.diferencialImportacion;
     const affordableUnits =
       purchaseUnitPrice > 0
         ? Math.min(rawUnits, Math.max(0, state.gobierno.reserva) / purchaseUnitPrice)
@@ -2438,26 +2252,23 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     const units = Number(affordableUnits.toFixed(2));
     if (units > 0) {
       state.alimento.stock = Math.min(maxSiloStock, state.alimento.stock + units);
-      comprasAlimentoDia = units * purchaseUnitPrice;
-      state.gobierno.reserva = Number(Math.max(0, state.gobierno.reserva - comprasAlimentoDia).toFixed(1));
+      importacionesDia = units * purchaseUnitPrice;
+      state.gobierno.reserva = Number(Math.max(0, state.gobierno.reserva - importacionesDia).toFixed(1));
     }
-  } else if (tradeLever < -5 && maxTradeUnits > 0 && state.alimento.stock > pop * 0.5) {
-    // Export: state buys surplus from food enterprise at internal precioAlimento (from reserva) and sells externally
-    const rawUnits = Math.min(
-      maxTradeUnits * (Math.abs(tradeLever) / 100),
-      state.alimento.stock - pop * 0.5
-    );
-    const affordableBuyout =
-      precioAlimento > 0
-        ? Math.min(rawUnits, Math.max(0, state.gobierno.reserva) / precioAlimento)
-        : rawUnits;
-    const units = Number(Math.max(0, affordableBuyout).toFixed(2));
-    if (units > 0) {
-      state.alimento.stock -= units;
-      const buyoutCost = units * precioAlimento;
-      state.gobierno.reserva = Number(Math.max(0, state.gobierno.reserva - buyoutCost).toFixed(1));
-      state.empresas.alimento.ingresosAcum += buyoutCost;
-      ventasAlimentoDia = units * externalPriceBase;
+  } else if (tradeLever < 0 && maxTradeUnits > 0) {
+    const minStockReserve = pop * ECON_CONSTANTS.consumoPorNpc * ECON_CONSTANTS.stockMinExportarDias;
+    if (state.alimento.stock > minStockReserve) {
+      const rawUnits = Math.min(
+        maxTradeUnits * (Math.abs(tradeLever) / 100),
+        state.alimento.stock - minStockReserve
+      );
+      const units = Number(Math.max(0, rawUnits).toFixed(2));
+      if (units > 0) {
+        state.alimento.stock = Number(Math.max(0, state.alimento.stock - units).toFixed(2));
+        const exportRevenue = units * externalPriceBase;
+        state.empresas.alimento.ingresosAcum += exportRevenue;
+        exportacionesDia = exportRevenue;
+      }
     }
   }
 
@@ -2523,7 +2334,10 @@ function runDailyEconomyAndNeeds(state: GameState): void {
 
   let garantiaAlimentariaDia = 0;
   let paidFoodMoney = 0;
-  const garantiaPct = pal.alimento.garantiaAlimentaria / 100;
+  const garantiaPct = pal.garantiaAlimentaria / 100;
+  const prorrateoSec = state.gobierno.finanzas.impago
+    ? clamp(state.gobierno.finanzas.prorrateoPensionGarantia ?? 1, 0, 1)
+    : 1;
 
   for (const npc of vivos) {
     const desired = desiredMap.get(npc.id) || 0;
@@ -2534,8 +2348,9 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     let paidUnits = 0;
 
     if (stage === 'menor') {
-      paidUnits = allocated;
+      // Minors food is ALWAYS 100% covered by the state (ESTADOS §12)
       garantiaAlimentariaDia += cost;
+      paidUnits = allocated;
       paidFoodMoney += cost;
     } else if (npc.economia.dinero >= cost) {
       npc.economia.dinero -= cost;
@@ -2544,9 +2359,10 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     } else {
       npc.economia.noPudoPagarComida = true;
       const faltante = Math.max(0, cost - npc.economia.dinero);
-      const cubierto = faltante * garantiaPct;
-      garantiaAlimentariaDia += cubierto;
-      const pagoTotal = npc.economia.dinero + cubierto;
+      const cubiertoFull = faltante * garantiaPct;
+      const cubiertoPaid = cubiertoFull * prorrateoSec;
+      garantiaAlimentariaDia += cubiertoFull;
+      const pagoTotal = npc.economia.dinero + cubiertoPaid;
       npc.economia.dinero = 0;
       const frac = cost > 0 ? clamp(pagoTotal / cost, 0, 1) : 0;
       paidUnits = allocated * frac;
@@ -2564,25 +2380,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
-  // Credit paid food revenue to comerciales (margin) and food enterprise (rest)
-  const comerciales = state.empresas.comerciales;
+  // Credit paid food revenue to comercio (margin) and food enterprise (rest) (ESTADOS §4)
   if (paidFoodMoney > 0) {
-    if (comerciales.length > 0) {
-      const margins = comerciales.map((c) => {
-        const extra = c.respuesta?.tipo === 'subir_margen' ? (c.respuesta.margenExtraPct ?? ECON_CONSTANTS.margenExtraSubirPct) : 0;
-        return clamp(ECON_CONSTANTS.margenComercialPct + extra, 0, ECON_CONSTANTS.margenComercialMaxPct);
-      });
-      const avgMarginPct = margins.reduce((a, b) => a + b, 0) / margins.length;
-      const toComTotal = paidFoodMoney * (avgMarginPct / 100);
-      const toAlim = paidFoodMoney - toComTotal;
-      state.empresas.alimento.ingresosAcum += toAlim;
-      const sumM = margins.reduce((a, b) => a + b, 0);
-      comerciales.forEach((c, idx) => {
-        c.ingresosAcum += sumM > 0 ? toComTotal * (margins[idx] / sumM) : toComTotal / comerciales.length;
-      });
-    } else {
-      state.empresas.alimento.ingresosAcum += paidFoodMoney;
-    }
+    const toComercio = paidFoodMoney * (ECON_CONSTANTS.margenComercialPct / 100);
+    state.empresas.comercio.ingresosAcum += toComercio;
+    state.empresas.alimento.ingresosAcum += paidFoodMoney - toComercio;
   }
 
   // 5. Effect 'comparte' (transfers pantry between same-zone neighbors before eating)
@@ -2638,39 +2440,44 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   state.empresas.alimento.stock = Number(state.alimento.stock.toFixed(2));
   state.empresas.alimento.diasStock = state.alimento.diasStock;
 
-  // 7. Incomes, Taxes, Wages to Enterprises & Living Expenses
-  const salarioPublicoDia = ECON_CONSTANTS.salarioBasePublico * (pal.gasto.salarioPublico / 100);
-  const foodWageFactor =
-    state.empresas.alimento.respuesta?.tipo === 'recortar_sueldos'
-      ? clamp(
-          state.empresas.alimento.respuesta.factorSueldo ?? ECON_CONSTANTS.factorRecorteSueldo,
-          ECON_CONSTANTS.pisoSueldoPct / 100,
-          1
-        )
-      : 1;
+  // 7. Incomes, Taxes, Wages to Enterprises, Ayuda Social & Living Expenses
+  const salarioPublicoDia = ECON_CONSTANTS.salarioBasePublico * (pal.salarioPublico / 100);
+  const pisoSueldo = ECON_CONSTANTS.pisoSueldoPct / 100;
+  const foodWageFactor = state.empresas.alimento.respuesta
+    ? clamp(state.empresas.alimento.respuesta.factorSueldo, pisoSueldo, 1)
+    : 1;
+  const comWageFactor = state.empresas.comercio.respuesta
+    ? clamp(state.empresas.comercio.respuesta.factorSueldo, pisoSueldo, 1)
+    : 1;
 
   let impuestosDia = 0;
   let nominaDia = 0;
   let pensionesDia = 0;
-  let obreroCursor = 0;
+  let ayudaSocialDia = 0;
   let livingPoolDomestico = 0;
   const inflDiaria = mod === 'fiscal' ? state.gobierno.inflacion / 100 / 365 : 0;
   const poderAdquisitivo: Record<string, number> = {};
+  const ayudaRecibidaByNpc: Record<string, number> = {};
+
+  const prorrateoNomina = state.gobierno.finanzas.impago
+    ? clamp(state.gobierno.finanzas.prorrateoNomina ?? 1, 0, 1)
+    : 1;
+  const prorrateoDisc = state.gobierno.finanzas.impago
+    ? clamp(state.gobierno.finanzas.prorrateoDiscrecional ?? 1, 0, 1)
+    : 1;
 
   for (const npc of vivos) {
     const def = ROLE_CATALOG[npc.rol];
     const taxRate = getTaxRateForNpc(npc, state);
     let bruto = 0;
-    let isOwner = npc.rol === 'empresario' || npc.rol === 'comerciante';
+    const isOwner = npc.rol === 'empresario' || npc.rol === 'comerciante';
 
     if (def.publico) {
-      if (!state.gobierno.finanzas.impago) {
-        bruto = salarioPublicoDia;
-        nominaDia += bruto;
-      }
+      nominaDia += salarioPublicoDia;
+      bruto = salarioPublicoDia * prorrateoNomina;
     } else if (npc.rol === 'jubilado') {
-      bruto = ECON_CONSTANTS.pensionBase;
-      pensionesDia += bruto;
+      pensionesDia += ECON_CONSTANTS.pensionBase;
+      bruto = ECON_CONSTANTS.pensionBase * prorrateoSec;
     } else if (!isOwner && def.ingreso && !npc.hospital.internado) {
       const prod = getNpcProductivity(npc, state);
       const [minI, maxI] = def.ingreso;
@@ -2680,22 +2487,8 @@ function runDailyEconomyAndNeeds(state: GameState): void {
         bruto = baseWage * foodWageFactor;
         state.empresas.alimento.sueldosAcum += bruto;
       } else if (npc.rol === 'obrero') {
-        if (comerciales.length > 0) {
-          const comEnt = comerciales[obreroCursor % comerciales.length];
-          obreroCursor++;
-          const comFactor =
-            comEnt.respuesta?.tipo === 'recortar_sueldos'
-              ? clamp(
-                  comEnt.respuesta.factorSueldo ?? ECON_CONSTANTS.factorRecorteSueldo,
-                  ECON_CONSTANTS.pisoSueldoPct / 100,
-                  1
-                )
-              : 1;
-          bruto = baseWage * comFactor;
-          comEnt.sueldosAcum += bruto;
-        } else {
-          bruto = baseWage;
-        }
+        bruto = baseWage * comWageFactor;
+        state.empresas.comercio.sueldosAcum += bruto;
       } else {
         // periodista (simplified private media model)
         bruto = baseWage;
@@ -2709,11 +2502,19 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       npc.economia.ultimoIngresoNeto = Number(neto.toFixed(2));
       npc.economia.dinero = Math.max(0, npc.economia.dinero * (1 - inflDiaria) + neto);
     } else {
-      // Owners receive net profit at 7-day settlement; only apply inflation erosion here
       npc.economia.dinero = Math.max(0, npc.economia.dinero * (1 - inflDiaria));
     }
 
-    // Gasto de vida (% of net income, modified by gasta/ahorra effects; ESTADOS §4 & §12)
+    // Ayuda social -> desempleados y jubilados (GOBERNADOR §4, ESTADOS §12)
+    if ((npc.rol === 'desempleado' || npc.rol === 'jubilado') && pal.ayudaSocial > 0) {
+      ayudaSocialDia += pal.ayudaSocial;
+      const paidAyuda = pal.ayudaSocial * prorrateoDisc;
+      npc.economia.dinero += paidAyuda;
+      npc.economia.ultimoIngresoNeto = Number((npc.economia.ultimoIngresoNeto + paidAyuda).toFixed(2));
+      ayudaRecibidaByNpc[npc.id] = paidAyuda;
+    }
+
+    // Gasto de vida -> 100% goes to empresa de comercio (ESTADOS §4 & §12)
     if (getStage(npc.edad) !== 'menor') {
       const propMod = getModifierDelta(npc, 'propensionGasto');
       const effProp = clamp(npc.economia.propensionGasto + propMod, 0.05, 0.9);
@@ -2722,7 +2523,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       const actualLiving = Math.min(npc.economia.dinero, desiredLiving);
       if (actualLiving > 0) {
         npc.economia.dinero -= actualLiving;
-        livingPoolDomestico += actualLiving * (1 - ECON_CONSTANTS.fraccionGastoExterior);
+        livingPoolDomestico += actualLiving;
       }
     }
 
@@ -2736,33 +2537,41 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     poderAdquisitivo[npc.id] = npc.rol === 'desempleado' ? Math.min(wealthScore, 35) : wealthScore;
   }
 
-  // Distribute domestic living expenses equally across active commercial enterprises
-  if (livingPoolDomestico > 0 && comerciales.length > 0) {
-    const share = livingPoolDomestico / comerciales.length;
-    for (const comEnt of comerciales) {
-      comEnt.ingresosAcum += share;
-    }
+  if (livingPoolDomestico > 0) {
+    state.empresas.comercio.ingresosAcum += livingPoolDomestico;
   }
 
-  const adminLoss = (1 - state.gobierno.coberturas.estatal) * ECON_CONSTANTS.perdidaAdminMax;
-  const impuestosNetosDia = impuestosDia * (1 - adminLoss);
+  const areaOpDia: Record<ServiceAreaId, number> = {
+    seguridad: SERVICE_LEVEL_TABLE.seguridad[pal.servicios.seguridad].operacionPeriodo / FISCAL_PERIOD_DAYS,
+    salud: SERVICE_LEVEL_TABLE.salud[pal.servicios.salud].operacionPeriodo / FISCAL_PERIOD_DAYS,
+    infraestructura: SERVICE_LEVEL_TABLE.obras[pal.servicios.obras].operacionPeriodo / FISCAL_PERIOD_DAYS,
+  };
+  const operacionDia = areaOpDia.seguridad + areaOpDia.salud + areaOpDia.infraestructura;
+  const prensaDia = pal.prensa / FISCAL_PERIOD_DAYS;
 
   const acum = state.gobierno.acumuladoPeriodo;
   acum.dias += 1;
-  acum.impuestos += impuestosNetosDia;
-  acum.ventasAlimento += ventasAlimentoDia;
+  acum.impuestos += impuestosDia;
   acum.nomina += nominaDia;
   acum.pensiones += pensionesDia;
   acum.garantiaAlimentaria += garantiaAlimentariaDia;
-  acum.comprasAlimento += comprasAlimentoDia;
+  acum.ayudaSocial += ayudaSocialDia;
+  acum.operacion += operacionDia;
+  acum.operacionPorArea.seguridad += areaOpDia.seguridad;
+  acum.operacionPorArea.salud += areaOpDia.salud;
+  acum.operacionPorArea.infraestructura += areaOpDia.infraestructura;
+  acum.prensa += prensaDia;
+  acum.importaciones += importacionesDia;
+  acum.exportaciones += exportacionesDia;
 
-  const estDispDia =
-    impuestosNetosDia + ventasAlimentoDia - (nominaDia + pensionesDia + garantiaAlimentariaDia);
+  const estSaldoDia =
+    impuestosDia -
+    (nominaDia + pensionesDia + garantiaAlimentariaDia + ayudaSocialDia + operacionDia + prensaDia);
 
   state.ultimaSalidaEconomica = {
     accesoComida,
     poderAdquisitivo,
-    disponibleDiarioEstimado: Number(estDispDia.toFixed(1)),
+    saldoDiarioEstimado: Number(estSaldoDia.toFixed(1)),
     precioAlimento,
     inflacion: state.gobierno.inflacion,
   };
@@ -2833,7 +2642,10 @@ function runDailyEconomyAndNeeds(state: GameState): void {
           causa: state.ultimoEventoClimaId || causa,
         });
       } else {
-        const dano = Math.round(cfg.danoMin + drawRand(state) * (cfg.danoMax - cfg.danoMin));
+        let dano = Math.round(cfg.danoMin + drawRand(state) * (cfg.danoMax - cfg.danoMin));
+        if (npc.edad < 18 || npc.edad >= 65) {
+          dano = Math.round(dano * ECON_CONSTANTS.kVulnerabilidadEdad);
+        }
         const ataqueEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
         const golpeEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
 
@@ -3142,6 +2954,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     const inflDrag = mod === 'fiscal' ? Math.max(0, state.gobierno.inflacion - 10) * 0.35 : 0;
     const desempDrag = npc.rol === 'desempleado' ? 16 : 0;
     const modSat = getModifierDelta(npc, 'satisfaccion') * 0.3;
+    const ayudaBoost = Math.min(12, (ayudaRecibidaByNpc[npc.id] || 0) * 2.2);
 
     const targetSat = clamp(
       52 +
@@ -3155,6 +2968,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
         inflDrag -
         desempDrag -
         medicoLowPenalty +
+        ayudaBoost +
         modSat,
       0,
       100
@@ -3186,103 +3000,31 @@ function settleFiscalPeriod(state: GameState): void {
     state.gobierno.reserva = Math.max(0, state.gobierno.reserva * (1 - erosion));
   }
 
-  const ingresos = acum.impuestos + acum.ventasAlimento;
-  const obligatorios = acum.nomina + acum.pensiones + acum.garantiaAlimentaria;
-  const disponible = ingresos - obligatorios;
+  const ingresos = acum.impuestos;
+  const gastos =
+    acum.nomina +
+    acum.pensiones +
+    acum.garantiaAlimentaria +
+    acum.ayudaSocial +
+    acum.operacion +
+    acum.prensa;
+  const saldo = ingresos - gastos;
 
-  let deficit = 0;
+  const wasImpago = state.gobierno.finanzas.impago;
   let emision = 0;
   let impago = false;
-  let presupuestoAsignado = 0;
-  let subsidiosAsignados = 0;
-  let prensaAsignada = 0;
-  let aReserva = 0;
+  let alcanzaNomina = false;
+  let prorrateoDiscrecional = 1;
+  let prorrateoNomina = 1;
+  let prorrateoPensionGarantia = 1;
 
-  if (disponible >= 0) {
-    const areaPcts = pal.gasto.presupuesto;
-    const subPcts = pal.gasto.subsidios;
-    const prensaPct = pal.gasto.prensa;
-
-    const totalAssignedPct =
-      areaPcts.salud +
-      areaPcts.seguridad +
-      areaPcts.infraestructura +
-      areaPcts.educacion +
-      prensaPct +
-      Object.values(subPcts).reduce((a, b) => a + b, 0);
-
-    const effectiveAssignedPct = Math.min(100, totalAssignedPct);
-    const adminEfficiency = 1 - (1 - state.gobierno.coberturas.estatal) * ECON_CONSTANTS.perdidaAdminMax;
-
-    const costoBase = pop * ECON_CONSTANTS.costoBaseServicioPorPoblacion * FISCAL_PERIOD_DAYS;
-    const areaToCoverage: Record<ServiceAreaId, number> = {
-      salud: state.gobierno.coberturas.medico,
-      seguridad: state.gobierno.coberturas.policia,
-      infraestructura: state.gobierno.coberturas.ingeniero,
-      educacion: state.gobierno.coberturas.docente,
-    };
-
-    (['salud', 'seguridad', 'infraestructura', 'educacion'] as ServiceAreaId[]).forEach((area) => {
-      const monto = disponible * (areaPcts[area] / 100) * adminEfficiency;
-      presupuestoAsignado += monto;
-      const ratio = monto / Math.max(1, costoBase);
-      const inversion = ratio <= 1 ? ratio : 1 + Math.sqrt(ratio - 1) * 0.5;
-      const gain = areaToCoverage[area] * inversion * 6.5;
-      const decay = 4.2;
-      state.gobierno.indicadores[area] = clamp(
-        Number((state.gobierno.indicadores[area] + gain - decay).toFixed(1)),
-        0,
-        100
-      );
-    });
-
-    (['agro', 'industria', 'comercio', 'publico', 'sin_ingreso'] as RoleGroupId[]).forEach((grp) => {
-      const pct = subPcts[grp] || 0;
-      if (pct <= 0) return;
-      const monto = disponible * (pct / 100);
-      subsidiosAsignados += monto;
-      const members = vivos.filter((n) => ROLE_CATALOG[n.rol].grupo === grp);
-      if (members.length > 0) {
-        const perNpc = monto / members.length;
-        for (const npc of members) {
-          npc.economia.dinero += perNpc;
-          npc.variables.satisfaccion = clamp(npc.variables.satisfaccion + Math.min(6, perNpc * 0.3), 0, 100);
-        }
-      }
-    });
-
-    prensaAsignada = disponible * (prensaPct / 100);
-    for (const medio of state.medios) {
-      const fondos = prensaAsignada * (medio.intervencion.financiamiento / 100);
-      medio.finanzas.fondosEstado = Number(fondos.toFixed(1));
-      medio.finanzas.dependenciaPct = Number(
-        ((fondos / Math.max(1, medio.finanzas.ingresosPropios + fondos)) * 100).toFixed(1)
-      );
-      const targetReach = clamp(14 + Math.sqrt(fondos) * 11.5, 12, 95);
-      medio.alcancePct = Math.round(medio.alcancePct + (targetReach - medio.alcancePct) * 0.35);
-
-      if (medio.finanzas.dependenciaPct > 35) {
-        medio.lineaEditorial.afinidadGobierno = clamp(medio.lineaEditorial.afinidadGobierno + 2.5, 0, 100);
-        medio.credibilidad = clamp(medio.credibilidad - (medio.finanzas.dependenciaPct - 35) * 0.08, 15, 98);
-      } else {
-        medio.credibilidad = clamp(medio.credibilidad + 0.6, 15, 98);
-      }
-
-      const reg = medio.intervencion.regulacion;
-      if (reg > 25) {
-        medio.lineaEditorial.sensacionalismo = clamp(medio.lineaEditorial.sensacionalismo - (reg - 25) * 0.12, 10, 95);
-        medio.credibilidad = clamp(medio.credibilidad - (reg - 25) * 0.09, 15, 98);
-      }
-    }
-
-    aReserva = disponible * ((100 - effectiveAssignedPct) / 100);
-    state.gobierno.reserva = Number((state.gobierno.reserva + aReserva).toFixed(1));
+  if (saldo >= 0) {
+    state.gobierno.reserva = Number((state.gobierno.reserva + saldo).toFixed(1));
     if (mod === 'fiscal') {
       state.gobierno.inflacion = Math.max(2, Number((state.gobierno.inflacion * 0.94).toFixed(1)));
     }
   } else {
-    deficit = Math.abs(disponible);
-    let remaining = deficit;
+    let remaining = Math.abs(saldo);
 
     if (state.gobierno.reserva > 0) {
       const used = Math.min(state.gobierno.reserva, remaining);
@@ -3291,7 +3033,7 @@ function settleFiscalPeriod(state: GameState): void {
     }
 
     if (remaining > 0 && mod === 'fiscal') {
-      const maxEmit = Math.max(0, ingresos) * (pal.finanzas.topeEmision / 100);
+      const maxEmit = Math.max(0, ingresos) * (pal.topeEmision / 100);
       emision = Math.min(remaining, maxEmit);
       remaining -= emision;
       if (emision > 0) {
@@ -3309,12 +3051,29 @@ function settleFiscalPeriod(state: GameState): void {
 
     if (remaining > 0.5) {
       impago = true;
-      for (const npc of vivos) {
-        if (ROLE_CATALOG[npc.rol].publico) {
-          npc.variables.satisfaccion = clamp(npc.variables.satisfaccion - 14, 0, 100);
-          npc.variables.lealtad = clamp(npc.variables.lealtad - 12, 0, 100);
+      const discTotal = acum.prensa + acum.operacion + acum.ayudaSocial;
+      const discShortfall = Math.min(discTotal, remaining);
+      prorrateoDiscrecional = discTotal > 0 ? clamp(1 - discShortfall / discTotal, 0, 1) : 1;
+
+      const rem1 = Math.max(0, remaining - discTotal);
+      alcanzaNomina = rem1 > 0.01 && acum.nomina > 0;
+      const nominaShortfall = Math.min(acum.nomina, rem1);
+      prorrateoNomina = acum.nomina > 0 ? clamp(1 - nominaShortfall / acum.nomina, 0, 1) : 1;
+
+      const rem2 = Math.max(0, rem1 - acum.nomina);
+      const secTotal = acum.pensiones + acum.garantiaAlimentaria;
+      const secShortfall = Math.min(secTotal, rem2);
+      prorrateoPensionGarantia = secTotal > 0 ? clamp(1 - secShortfall / secTotal, 0, 1) : 1;
+
+      if (alcanzaNomina) {
+        for (const npc of vivos) {
+          if (ROLE_CATALOG[npc.rol].publico) {
+            npc.variables.satisfaccion = clamp(npc.variables.satisfaccion - 14, 0, 100);
+            npc.variables.lealtad = clamp(npc.variables.lealtad - 12, 0, 100);
+          }
         }
       }
+
       const impEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
       emitSimEvent(state, {
         id: impEvId,
@@ -3322,80 +3081,125 @@ function settleFiscalPeriod(state: GameState): void {
         tipo: 'impago',
         zona: 'centro',
         faltante: Number(remaining.toFixed(1)),
+        alcanzaNomina,
         causa: state.ultimaCausaPalanca,
       });
       addLog(
         state,
         'economia',
         'finanzas:impago',
-        'Impago de nómina pública',
-        `Faltaron $${remaining.toFixed(0)} para cubrir los gastos obligatorios del período.`,
+        alcanzaNomina ? 'Impago de nómina pública' : 'Impago de gastos discrecionales',
+        `Faltaron $${remaining.toFixed(0)} en la liquidación del período.`,
         state.ultimaCausaPalanca,
         impEvId
       );
     }
-
-    (['salud', 'seguridad', 'infraestructura', 'educacion'] as ServiceAreaId[]).forEach((area) => {
-      state.gobierno.indicadores[area] = clamp(Number((state.gobierno.indicadores[area] - 4.2).toFixed(1)), 0, 100);
-    });
   }
 
+  // Update all 3 service indicators every settlement using paid operation * coverage (ESTADOS §12)
+  const costoBase = pop * ECON_CONSTANTS.costoBaseServicioPorPoblacion * FISCAL_PERIOD_DAYS;
+  const areaToCoverage: Record<ServiceAreaId, number> = {
+    salud: state.gobierno.coberturas.medico,
+    seguridad: state.gobierno.coberturas.policia,
+    infraestructura: state.gobierno.coberturas.ingeniero,
+  };
+  (['salud', 'seguridad', 'infraestructura'] as ServiceAreaId[]).forEach((area) => {
+    const paidOp = acum.operacionPorArea[area] * prorrateoDiscrecional;
+    const ratio = paidOp / Math.max(1, costoBase);
+    const inversion = ratio <= 1 ? ratio : 1 + Math.sqrt(ratio - 1) * 0.55;
+    const gain = areaToCoverage[area] * inversion * 6.8;
+    const decay = 0.8 + state.gobierno.indicadores[area] * 0.08;
+    state.gobierno.indicadores[area] = clamp(
+      Number((state.gobierno.indicadores[area] + gain - decay).toFixed(1)),
+      0,
+      100
+    );
+  });
+
+  if (wasImpago && !impago) {
+    const impFinEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
+    emitSimEvent(state, {
+      id: impFinEvId,
+      dia: state.reloj.dia,
+      tipo: 'impago_fin',
+      zona: 'centro',
+      causa: state.ultimaCausaPalanca,
+    });
+    addLog(
+      state,
+      'economia',
+      'finanzas:impago_fin',
+      'Fin de impago fiscal',
+      'La liquidación cubrió los gastos obligatorios sin faltante.',
+      state.ultimaCausaPalanca,
+      impFinEvId
+    );
+  }
+
+  const paidPrensa = acum.prensa * prorrateoDiscrecional;
+  const fondosPorMedio = state.medios.length > 0 ? paidPrensa / state.medios.length : 0;
   for (const medio of state.medios) {
-    if (medio.intervencion.regulacion > 40) {
-      const sample = vivos.slice(0, Math.round(vivos.length * (medio.alcancePct / 100) * 0.4));
-      for (const npc of sample) {
-        applyModifierToNpc(
-          npc,
-          {
-            afecta: { rebeldia: Math.round((medio.intervencion.regulacion - 40) * 0.15) },
-            duracionDias: FISCAL_PERIOD_DAYS,
-            origen: `prensa:regulacion/${medio.id}`,
-            causa: state.ultimaCausaPalanca,
-            texto: `Molesto por la regulación estatal sobre ${medio.nombre}`,
-          },
-          state
-        );
-      }
+    medio.finanzas.fondosEstado = Number(fondosPorMedio.toFixed(1));
+    medio.finanzas.dependenciaPct = Number(
+      ((fondosPorMedio / Math.max(1, medio.finanzas.ingresosPropios + fondosPorMedio)) * 100).toFixed(1)
+    );
+    const targetReach = clamp(14 + Math.sqrt(fondosPorMedio) * 11.5, 12, 95);
+    medio.alcancePct = Math.round(targetReach);
+
+    const baseAff = medio.afinidadBase ?? 45;
+    const targetAff = clamp(baseAff + Math.max(0, medio.finanzas.dependenciaPct - 15) * 0.65, 0, 100);
+    medio.lineaEditorial.afinidadGobierno = Math.round(
+      medio.lineaEditorial.afinidadGobierno + (targetAff - medio.lineaEditorial.afinidadGobierno) * 0.45
+    );
+
+    if (medio.finanzas.dependenciaPct > ECON_CONSTANTS.umbralDependenciaPrensaPct) {
+      medio.credibilidad = clamp(
+        Number(
+          (
+            medio.credibilidad -
+            (medio.finanzas.dependenciaPct - ECON_CONSTANTS.umbralDependenciaPrensaPct) * 0.12
+          ).toFixed(1)
+        ),
+        15,
+        98
+      );
+    } else {
+      medio.credibilidad = clamp(Number((medio.credibilidad + 0.6).toFixed(1)), 15, 98);
     }
   }
 
   state.gobierno.finanzas = {
     ingresos: Number(ingresos.toFixed(1)),
-    impuestos: Number(acum.impuestos.toFixed(1)),
-    ventasAlimento: Number(acum.ventasAlimento.toFixed(1)),
     nomina: Number(acum.nomina.toFixed(1)),
     pensiones: Number(acum.pensiones.toFixed(1)),
     garantiaAlimentaria: Number(acum.garantiaAlimentaria.toFixed(1)),
-    comprasAlimento: Number(acum.comprasAlimento.toFixed(1)),
-    disponible: Number(disponible.toFixed(1)),
-    presupuestoAsignado: Number(presupuestoAsignado.toFixed(1)),
-    subsidiosAsignados: Number(subsidiosAsignados.toFixed(1)),
-    prensaAsignada: Number(prensaAsignada.toFixed(1)),
-    aReserva: Number(aReserva.toFixed(1)),
-    deficit: Number(deficit.toFixed(1)),
+    ayudaSocial: Number(acum.ayudaSocial.toFixed(1)),
+    operacion: Number(acum.operacion.toFixed(1)),
+    prensa: Number(acum.prensa.toFixed(1)),
+    saldo: Number(saldo.toFixed(1)),
     emision: Number(emision.toFixed(1)),
+    importaciones: Number(acum.importaciones.toFixed(1)),
+    exportaciones: Number(acum.exportaciones.toFixed(1)),
     impago,
+    alcanzaNomina,
+    prorrateoDiscrecional: Number(prorrateoDiscrecional.toFixed(4)),
+    prorrateoNomina: Number(prorrateoNomina.toFixed(4)),
+    prorrateoPensionGarantia: Number(prorrateoPensionGarantia.toFixed(4)),
   };
 
   state.gobierno.acumuladoPeriodo = {
     dias: 0,
     impuestos: 0,
-    ventasAlimento: 0,
     nomina: 0,
     pensiones: 0,
     garantiaAlimentaria: 0,
-    comprasAlimento: 0,
+    ayudaSocial: 0,
+    operacion: 0,
+    operacionPorArea: { seguridad: 0, salud: 0, infraestructura: 0 },
+    prensa: 0,
+    importaciones: 0,
+    exportaciones: 0,
   };
-
-  state.gobierno.palancasInicioPeriodo = structuredClone(state.gobierno.palancasVigentes);
-  const nextPrensaInicio: Record<string, { financiamiento: number; regulacion: number }> = {};
-  for (const m of state.medios) {
-    nextPrensaInicio[m.id] = {
-      financiamiento: m.intervencion.financiamiento,
-      regulacion: m.intervencion.regulacion,
-    };
-  }
-  state.gobierno.prensaInicioPeriodo = nextPrensaInicio;
 }
 
 function updateClimate(state: GameState): void {
@@ -3531,8 +3335,6 @@ function updateClimate(state: GameState): void {
 function checkConditionTriggers(state: GameState, preDerived?: CommunityDerived): void {
   const derived = preDerived ?? deriveCommunityStats(state);
   const dia = state.reloj.dia;
-  const preset = SCENARIO_PRESETS[state.config.escenarioId];
-  const zonesCount = Object.keys(preset.zonas).length;
 
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente' && dia >= win.diaLimite) {
@@ -3540,8 +3342,12 @@ function checkConditionTriggers(state: GameState, preDerived?: CommunityDerived)
     }
   }
 
-  // Trigger: Impago -> Huelga
-  if (state.gobierno.finanzas.impago && dia >= state.cooldownsCondicion.impago) {
+  // Trigger: Impago que alcanza la nómina -> Huelga
+  if (
+    state.gobierno.finanzas.impago &&
+    state.gobierno.finanzas.alcanzaNomina &&
+    dia >= state.cooldownsCondicion.impago
+  ) {
     const huelga = ACTION_TABLE.find((a) => a.id === 'huelga')!;
     const elegibles = state.npcs.filter(
       (n) => n.vivo && !n.hospital.internado && !n.accionIa && isNpcEligibleForAction(n, huelga, state)
@@ -3621,50 +3427,6 @@ function checkConditionTriggers(state: GameState, preDerived?: CommunityDerived)
     }
   }
 
-  // Trigger (optional): Disturbios if disturbiosActivos && active protesta in zone && zone orden < umbralOrdenDisturbios
-  if (state.config.disturbiosActivos && dia >= (state.cooldownsCondicion.disturbios ?? 0)) {
-    const disturbios = ACTION_TABLE.find((a) => a.id === 'disturbios');
-    if (disturbios) {
-      const lowOrderProtestZones = new Set<ZoneId>();
-      for (const npc of state.npcs) {
-        if (!npc.vivo || npc.accionIa?.id !== 'protesta') continue;
-        const z = getEffectiveZone(npc, zonesCount);
-        if ((derived.orden[z] ?? 100) < ECON_CONSTANTS.umbralOrdenDisturbios) {
-          lowOrderProtestZones.add(z);
-        }
-      }
-      if (lowOrderProtestZones.size > 0) {
-        const elegibles = state.npcs.filter(
-          (n) =>
-            n.vivo &&
-            !n.hospital.internado &&
-            !n.accionIa &&
-            lowOrderProtestZones.has(getEffectiveZone(n, zonesCount)) &&
-            isNpcEligibleForAction(n, disturbios, state)
-        );
-        if (elegibles.length > 0) {
-          const cantidad = Math.max(1, Math.round(elegibles.length * 0.12));
-          const elegidos = [...elegibles]
-            .sort((a, b) => scoreActionAffinity(b, disturbios) - scoreActionAffinity(a, disturbios))
-            .slice(0, cantidad)
-            .map((n) => n.id);
-          state.ventanasCondicion.push({
-            id: `cond_disturbios_${dia}`,
-            disparador: 'disturbios',
-            diaInicio: dia,
-            diaLimite: dia + 1,
-            intensidadCantidad: cantidad,
-            candidatas: [disturbios],
-            npcIds: elegidos,
-            estado: 'pendiente',
-            causaId: state.eventos.find((e) => e.tipo === 'accion_inicio' && e.accion === 'protesta')?.id,
-          });
-          state.cooldownsCondicion.disturbios = dia + 7;
-        }
-      }
-    }
-  }
-
   if (state.ventanasCondicion.length > 15) {
     state.ventanasCondicion = state.ventanasCondicion.slice(-10);
   }
@@ -3675,9 +3437,10 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const derived = preDerived ?? deriveCommunityStats(state);
 
-  const getMetric = (m: 'apoyoPct' | 'hambreCriticaPct' | 'poblacion') => {
+  const getMetric = (m: ObjectiveCondition['metrica']) => {
     if (m === 'apoyoPct') return derived.apoyoPct;
     if (m === 'hambreCriticaPct') return derived.hambreCriticaPct;
+    if (m === 'poblacionPct') return derived.poblacionPct;
     return derived.poblacion;
   };
 
@@ -3723,7 +3486,10 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
   }
 
   const plazo = preset.victoria.plazoDia ?? 365;
-  if (state.reloj.dia >= plazo && !state.resultado.victoriaCumplida) {
+  const alreadyEvaluatedDeadline =
+    Boolean(state.resultado.victoriaCumplida) ||
+    state.eventos.some((e) => e.tipo === 'objetivo_perdido');
+  if (state.reloj.dia >= plazo && !alreadyEvaluatedDeadline) {
     const vicVal = getMetric(preset.victoria.metrica);
     if (checkCond(vicVal, preset.victoria.op, preset.victoria.umbral)) {
       const vicEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
@@ -3753,11 +3519,11 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
         vicEvId
       );
     } else {
-      const endEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
+      const missEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
       emitSimEvent(state, {
-        id: endEvId,
+        id: missEvId,
         dia: state.reloj.dia,
-        tipo: 'fin_partida',
+        tipo: 'objetivo_perdido',
         zona: 'centro',
         metrica: preset.victoria.metrica,
         valor: vicVal,
@@ -3765,18 +3531,18 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
       });
       state.resultado = {
         ...state.resultado,
-        estado: 'derrota',
+        estado: 'jugando',
+        victoriaCumplida: false,
         razon: `No se cumplió la meta al día ${plazo}: ${preset.victoria.descripcion}`,
-        diaFinal: state.reloj.dia,
       };
       addLog(
         state,
         'sistema',
-        'objetivo:derrota',
-        'Fin de partida: Derrota',
-        `Meta no alcanzada al día ${plazo}.`,
+        'objetivo:perdido',
+        'Objetivo de mandato perdido',
+        `No se cumplió la meta al día ${plazo}. La partida continúa.`,
         state.ultimoEventoClimaId || state.ultimaCausaPalanca,
-        endEvId
+        missEvId
       );
     }
   }
@@ -3817,7 +3583,7 @@ function advanceDay(state: GameState): void {
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const zonesCount = Object.keys(preset.zonas).length;
 
-  applyLeverInertia(state);
+  applyLeverChanges(state);
 
   const minHitKeep = state.reloj.dia - ECON_CONSTANTS.golpeAmenazaVentanaDias;
   for (const z of Object.keys(state.golpesPorZonaHistorial) as ZoneId[]) {
@@ -3995,9 +3761,11 @@ export function pickPressTopicAndTone(state: GameState): {
   if (state.gobierno.finanzas.impago) {
     return {
       tema: 'impago',
-      tono: 'alarmista',
+      tono: state.gobierno.finanzas.alcanzaNomina ? 'alarmista' : 'critico',
       origen: 'estado:impago_nomina',
-      detalle: 'El estado no pudo cubrir la nómina de los trabajadores públicos en el último cierre fiscal.',
+      detalle: state.gobierno.finanzas.alcanzaNomina
+        ? 'El estado no pudo cubrir la nómina de los trabajadores públicos en el último cierre fiscal.'
+        : 'El estado recortó gastos discrecionales por déficit en el último cierre fiscal.',
     };
   }
   if (derived.hambreCriticaPct > 15) {
@@ -4172,8 +3940,17 @@ function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         dia: ev.dia,
         tipo: ev.tipo,
         zona: ev.zona,
-        titulo: 'Impago de nómina pública',
+        titulo: ev.alcanzaNomina ? 'Impago de nómina pública' : 'Impago de gastos discrecionales',
         detalle: `Faltante fiscal de $${ev.faltante}.`,
+      };
+    case 'impago_fin':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: 'Fin de impago fiscal',
+        detalle: 'La liquidación cubrió los gastos obligatorios sin faltante.',
       };
     case 'empresa_respuesta':
       return {
@@ -4257,6 +4034,15 @@ function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         zona: ev.zona,
         titulo: 'Hito de objetivo cumplido',
         detalle: `${ev.metrica} alcanzó ${ev.valor}.`,
+      };
+    case 'objetivo_perdido':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: 'Objetivo de mandato perdido',
+        detalle: `${ev.metrica} cerró el plazo en ${ev.valor}.`,
       };
     case 'fin_partida':
       return {

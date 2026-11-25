@@ -1,4 +1,4 @@
-# UI del juego: estructura (BORRADOR v0.15)
+# UI del juego: estructura (BORRADOR v0.16)
 
 > Solo la estructura de la interfaz final en Godot (nivel 2, HOJA_DE_RUTA). La UI de depuración del motor (nivel 1) es del prototipo y no se define acá. Los detalles (colores, tooltips, leyendas, estilo de ventanas) se definen después. Palancas: GOBERNADOR.md. Estados y reglas: ESTADOS.md. Idea general: IDEA_JUEGO.md. **[decidido]** lo fijó el autor; **[propuesta]** es base para pulir.
 
@@ -33,7 +33,7 @@ Cuatro capas, de atrás hacia adelante:
 
 1. **Mundo 3D** con los NPCs y el clima visibles.
 2. **HUD fijo:**
-   - Barra superior: datos siempre exactos (reserva, ingresos, gastos, déficit, inflación, días de stock y avisos de fenómenos con su zona de origen), el objetivo con su progreso siempre visible (ESTADOS §11), reloj, pausa y velocidad.
+   - Barra superior: datos siempre exactos (reserva, ingresos, gastos, saldo, inflación, días de stock y avisos de fenómenos con su zona de origen), el objetivo con su progreso siempre visible (ESTADOS §11), reloj, pausa y velocidad.
    - Barra inferior: accesos a ventanas y selector de capas de lectura del mapa.
    - Zona de alertas.
 3. **Panel lateral:** alterna entre noticias y ficha del NPC. Es la vista rápida: la ventana correspondiente es la misma vista, desprendible (sección 5).
@@ -43,7 +43,7 @@ Cuatro capas, de atrás hacia adelante:
 
 - **[propuesta]** Un gestor central abre, cierra, mueve y apila ventanas. Recuerda posición y estado, y permite varias abiertas a la vez.
 - **[decidido]** Ventanas:
-  - Palancas por área (recaudación, gasto, alimento, cupos). El gasto de prensa está dentro de gasto.
+  - Palancas (las 10 de GOBERNADOR §3) en tres grupos: finanzas (impuesto, salario público, ayuda social, prensa), servicios (seguridad, salud, obras, con su nivel de 0 a 5) y alimento (garantía, precio máximo, comercio exterior). Las del nivel 1.1 (`tope_emision`, `presion` y `acceso`, GOBERNADOR §9) se suman a estos grupos; su ubicación se define al cerrarlas.
   - Economía: las empresas (ganancia, sueldos y respuesta vigente, ESTADOS §4), el precio de la comida y las despensas en resumen.
   - Gobierno y finanzas.
   - Comunidad (resumen derivado).
@@ -52,7 +52,7 @@ Cuatro capas, de atrás hacia adelante:
   - Historial: gráficos de línea de las 6 series del motor (reserva, inflación, satisfacción media, hambre crítica, apoyo y población) y registro de hechos con filtro. Las series las guarda el motor y la ventana solo las lee (ESTADOS §10).
   - Clima.
   - Objetivo, con progreso claro y condición de derrota (el HUD lo muestra siempre en resumen). Al llegar el plazo queda marcado como cumplido o perdido (pendiente, cumplido, perdido).
-- Toda palanca muestra su valor, su rango, sus efectos y costos antes de confirmar, el margen de cambio que le queda y los días que faltan para la próxima liquidación (GOBERNADOR §4, §5 y §7).
+- Toda palanca muestra su valor, sus opciones (nivel, modo o escalón), sus efectos y su costo por período antes de confirmar, y los días que faltan para la próxima liquidación (GOBERNADOR §4, §5 y §7).
 
 ## 6. Interacción con el mundo
 
@@ -125,7 +125,7 @@ Cómo se ven los ataques zombie, las obras y la destrucción. El motor conoce el
 - La simulación es barata. El cuello de botella es dibujar y mover NPCs.
 - **[decidido]** Escala: arranque en 100 NPCs y techo de 1.000. Más escala se prueba después con mediciones reales.
 - **[decidido]** Tope de recursos: entre la IA y el render no se pasa de 6 GB de VRAM en total. Se usan topes fijos, no control dinámico de la carga. La IA es opcional: apagada, el render usa todo el presupuesto; activa, el reparto lo fijan los modelos elegidos (ESTADOS §9).
-- **[decidido]** Tres perfiles de calidad (bajo, medio, alto) con detección automática al primer arranque. Cada perfil fija solo tres cosas: cuántos NPCs se dibujan con modelo completo, la distancia a la que cambia el nivel de detalle y la calidad del clima. El usuario elige el perfil y no ve los valores internos.
+- **[decidido]** Tres perfiles de calidad (bajo, medio, alto) con detección automática al primer arranque. Cada perfil fija solo tres cosas: cuántos NPCs se dibujan con modelo completo, la distancia a la que cambia el nivel de detalle y la calidad del clima. El usuario elige el perfil y no ve los valores internos. La detección solo elige el perfil gráfico: no sugiere ni activa la IA, que viene apagada y solo el usuario la prende desde las opciones (sección 13).
 - **[propuesta]** No se muestran todos los NPCs con el mismo detalle:
   - Nivel de detalle por distancia a la cámara.
   - Solo se dibuja lo que entra en cámara.
@@ -165,7 +165,7 @@ Idiomas adicionales, tutorial, gamepad y Steam Deck (nivel 3, HOJA_DE_RUTA §5) 
 
 ## 18. Preguntas abiertas
 
-1. **Sugerencia de IA:** con la IA apagada por defecto, si la detección automática de perfil (sección 12) también sugiere activarla cuando la PC alcanza (por ejemplo, un aviso único) o solo elige la calidad gráfica.
+Ninguna por ahora.
 
 ## 19. Detalle para más adelante
 

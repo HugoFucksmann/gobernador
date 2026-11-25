@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { GameController } from '../engine/gameController';
 import { hasActiveCrisisAlert } from '../engine/policies';
 import { DistrictId, GovernorLevers, PhenomenonType, RoleId, WorldConfig, ZoneId } from '../types/game';
-import { CameraTarget, CityTab, DockSection, MapFilter, MapLens } from '../types/ui';
+import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
 
 export interface CausalInspectTarget {
   title: string;
@@ -19,8 +19,9 @@ export function useGameSession() {
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
-  // Pure UI / viewport state
-  const [activeSection, setActiveSection] = useState<DockSection | null>(null);
+  // Start flow & multi-window HUD state
+  const [hasStarted, setHasStarted] = useState<boolean>(false);
+  const [openWindows, setOpenWindows] = useState<WindowId[]>([]);
   const [ciudadTabRequest, setCiudadTabRequest] = useState<{ tab: CityTab; seq: number } | null>(null);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
@@ -33,15 +34,16 @@ export function useGameSession() {
   const [milestoneBannerDismissed, setMilestoneBannerDismissed] = useState<boolean>(false);
   const [causalInspect, setCausalInspect] = useState<CausalInspectTarget | null>(null);
 
-  // Start controller simulation + AI health check on mount
+  // Start controller paused on Day 1 until player confirms scenario briefing
   useEffect(() => {
+    controller.setPaused(true);
     controller.start();
     return () => {
       controller.destroy();
     };
   }, [controller]);
 
-  // Global keyboard shortcuts (Escape closes UI panels, Space toggles pause)
+  // Global keyboard shortcuts (Escape closes topmost overlay/window, Space toggles pause)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -49,14 +51,15 @@ export function useGameSession() {
           setCausalInspect(null);
         } else if (showConfigModal) {
           setShowConfigModal(false);
-        } else if (activeSection) {
-          setActiveSection(null);
+        } else if (openWindows.length > 0) {
+          setOpenWindows((prev) => prev.slice(0, -1));
         } else if (selectedNpcId) {
           setSelectedNpcId(null);
           setFollowSelected(false);
         }
       } else if (
         e.key === ' ' &&
+        hasStarted &&
         !showConfigModal &&
         document.activeElement?.tagName !== 'INPUT' &&
         document.activeElement?.tagName !== 'SELECT'
@@ -67,7 +70,7 @@ export function useGameSession() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeSection, selectedNpcId, showConfigModal, causalInspect, controller]);
+  }, [hasStarted, openWindows.length, selectedNpcId, showConfigModal, causalInspect, controller]);
 
   const selectedNpc = useMemo(
     () => snapshot.state.npcs.find((n) => n.id === selectedNpcId && n.vivo) || null,
@@ -79,7 +82,6 @@ export function useGameSession() {
     [snapshot.state, snapshot.derived]
   );
 
-  // Actions bridging UI events -> Headless Controller
   const selectNpc = useCallback((npcId: string) => {
     setSelectedNpcId(npcId);
   }, []);
@@ -104,6 +106,7 @@ export function useGameSession() {
   const setSpeed = useCallback((spd: number) => controller.setSpeed(spd), [controller]);
   const stepDay = useCallback(() => controller.stepDay(), [controller]);
   const setDevMode = useCallback((enabled: boolean) => controller.setDevMode(enabled), [controller]);
+  const setDevPopulation = useCallback((pop: number) => controller.setDevPopulation(pop), [controller]);
 
   const forceClimatePhenomenon = useCallback(
     (tipo: PhenomenonType, zona?: ZoneId) => controller.forceClimatePhenomenon(tipo, zona),
@@ -115,6 +118,7 @@ export function useGameSession() {
   const loadManual = useCallback(() => {
     const ok = controller.loadManual();
     if (ok) {
+      setHasStarted(true);
       setSelectedNpcId(null);
       setFollowSelected(false);
       setShowConfigModal(false);
@@ -127,6 +131,7 @@ export function useGameSession() {
   const loadAutoSave = useCallback(() => {
     const ok = controller.loadAutoSave();
     if (ok) {
+      setHasStarted(true);
       setSelectedNpcId(null);
       setFollowSelected(false);
       setShowConfigModal(false);
@@ -143,25 +148,42 @@ export function useGameSession() {
     [controller]
   );
 
-  const updateMediaIntervention = useCallback(
-    (medioId: string, field: 'financiamiento' | 'regulacion', value: number) => {
-      controller.updateMediaIntervention(medioId, field, value);
-    },
-    [controller]
-  );
-
   const triggerPressManual = useCallback(() => {
     void controller.triggerPressManual();
   }, [controller]);
+
+  const beginQuickGame = useCallback(
+    (escenarioId: 'elecciones' | 'zombies') => {
+      const current = controller.getState().config;
+      if (current.escenarioId === escenarioId && controller.getState().reloj.dia === 1) {
+        setHasStarted(true);
+        controller.setPaused(false);
+        return;
+      }
+      setSelectedNpcId(null);
+      setFollowSelected(false);
+      setShowConfigModal(false);
+      setOpenWindows([]);
+      setMilestoneBannerDismissed(false);
+      setCausalInspect(null);
+      setHasStarted(true);
+      controller.startNewGame({
+        ...current,
+        escenarioId,
+      });
+    },
+    [controller]
+  );
 
   const startNewGame = useCallback(
     (newConfig: WorldConfig) => {
       setSelectedNpcId(null);
       setFollowSelected(false);
       setShowConfigModal(false);
-      setActiveSection(null);
+      setOpenWindows([]);
       setMilestoneBannerDismissed(false);
       setCausalInspect(null);
+      setHasStarted(true);
       controller.startNewGame(newConfig);
     },
     [controller]
@@ -172,23 +194,48 @@ export function useGameSession() {
     setCameraTarget({ district, seq: Date.now() + Math.random() });
   }, []);
 
-  const openCiudadTab = useCallback((tab: CityTab) => {
-    setActiveSection('ciudad');
-    setCiudadTabRequest({ tab, seq: Date.now() + Math.random() });
+  const focusWindow = useCallback((winId: WindowId) => {
+    setOpenWindows((prev) => {
+      if (!prev.includes(winId)) return [...prev, winId];
+      if (prev[prev.length - 1] === winId) return prev;
+      return [...prev.filter((w) => w !== winId), winId];
+    });
   }, []);
+
+  const openWindow = useCallback((winId: WindowId) => {
+    setOpenWindows((prev) => [...prev.filter((w) => w !== winId), winId]);
+  }, []);
+
+  const closeWindow = useCallback((winId: WindowId) => {
+    setOpenWindows((prev) => prev.filter((w) => w !== winId));
+  }, []);
+
+  const toggleWindow = useCallback((winId: WindowId) => {
+    setOpenWindows((prev) =>
+      prev.includes(winId) ? prev.filter((w) => w !== winId) : [...prev, winId]
+    );
+  }, []);
+
+  const openCiudadTab = useCallback(
+    (tab: CityTab) => {
+      openWindow('ciudad');
+      setCiudadTabRequest({ tab, seq: Date.now() + Math.random() });
+    },
+    [openWindow]
+  );
 
   const openAlertsDrawer = useCallback(() => {
     openCiudadTab('alertas');
   }, [openCiudadTab]);
 
-  const openLandmarkSection = useCallback(
-    (sec: DockSection, tabHint?: CityTab) => {
-      setActiveSection(sec);
-      if (sec === 'ciudad' && tabHint) {
+  const openLandmarkWindow = useCallback(
+    (winId: WindowId, tabHint?: CityTab) => {
+      openWindow(winId);
+      if (winId === 'ciudad' && tabHint) {
         setCiudadTabRequest({ tab: tabHint, seq: Date.now() + Math.random() });
       }
     },
-    []
+    [openWindow]
   );
 
   const requestZoom = useCallback((delta: number) => {
@@ -196,10 +243,6 @@ export function useGameSession() {
   }, []);
 
   const cancelFollow = useCallback(() => setFollowSelected(false), []);
-
-  const toggleSection = useCallback((sec: DockSection) => {
-    setActiveSection((prev) => (prev === sec ? null : sec));
-  }, []);
 
   const openCausalInspect = useCallback((target: CausalInspectTarget) => {
     setCausalInspect(target);
@@ -214,13 +257,13 @@ export function useGameSession() {
   }, []);
 
   return {
-    // Domain snapshot
     ...snapshot,
     selectedNpc,
     hasConditionAlert,
 
     // UI/Camera state
-    activeSection,
+    hasStarted,
+    openWindows,
     ciudadTabRequest,
     followSelected,
     mapFilter,
@@ -233,11 +276,13 @@ export function useGameSession() {
     causalInspect,
 
     // UI setters
-    setActiveSection,
-    toggleSection,
+    openWindow,
+    closeWindow,
+    toggleWindow,
+    focusWindow,
     openAlertsDrawer,
     openCiudadTab,
-    openLandmarkSection,
+    openLandmarkWindow,
     setFollowSelected,
     cancelFollow,
     setMapFilter,
@@ -249,6 +294,7 @@ export function useGameSession() {
     closeCausalInspect,
 
     // Commands
+    beginQuickGame,
     selectNpc,
     clearSelectedNpc,
     selectRoleSample,
@@ -256,16 +302,15 @@ export function useGameSession() {
     setSpeed,
     stepDay,
     setDevMode,
+    setDevPopulation,
     forceClimatePhenomenon,
     saveManual,
     loadManual,
     loadAutoSave,
     updateLevers,
-    updateMediaIntervention,
     triggerPressManual,
     startNewGame,
     jumpToDistrict,
     requestZoom,
   };
 }
-

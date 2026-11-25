@@ -299,7 +299,6 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
           afinidad_gobierno: Math.round(medio.lineaEditorial.afinidadGobierno),
           sensacionalismo: Math.round(medio.lineaEditorial.sensacionalismo),
           credibilidad: Math.round(medio.credibilidad),
-          regulacion: Math.round(medio.intervencion.regulacion),
         },
         periodista: {
           nombre: periodista.nombre,

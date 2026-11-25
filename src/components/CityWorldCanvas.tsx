@@ -7,9 +7,9 @@ import {
 } from '../engine/npcInsights';
 import { TICKS_PER_DAY } from '../engine/simulation';
 import { CommunityDerived, DistrictId, GameState, Npc, RoleId, ZoneId } from '../types/game';
-import { CameraTarget, CityTab, DockSection, MapFilter, MapLens } from '../types/ui';
+import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
 
-export type { CameraTarget, DockSection, MapFilter, MapLens };
+export type { CameraTarget, MapFilter, MapLens, WindowId };
 
 interface CityWorldCanvasProps {
   state: GameState;
@@ -23,7 +23,7 @@ interface CityWorldCanvasProps {
   cameraTarget: CameraTarget | null;
   zoomRequest: { delta: number; seq: number } | null;
   onSelectNpc: (npcId: string) => void;
-  onOpenSection: (section: DockSection, tabHint?: CityTab) => void;
+  onOpenSection: (section: WindowId, tabHint?: CityTab) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
 }
@@ -101,7 +101,7 @@ interface LandmarkDef {
   id: string;
   label: string;
   hint: string;
-  section: DockSection;
+  section: WindowId;
   tabHint?: CityTab;
   wx: number;
   wy: number;
@@ -114,8 +114,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'palacio',
     label: 'Palacio de Gobierno',
-    hint: 'Impuestos, salarios y presupuesto',
-    section: 'gobierno',
+    hint: 'Abrir Palancas de Gobierno',
+    section: 'palancas',
     wx: 500,
     wy: 365,
     ww: 132,
@@ -125,9 +125,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'prensa',
     label: 'Redacción de Prensa',
-    hint: 'Gaceta del Valle y medios',
-    section: 'ciudad',
-    tabHint: 'gaceta',
+    hint: 'Abrir Gaceta del Valle',
+    section: 'gaceta',
     wx: 540,
     wy: 196,
     ww: 62,
@@ -137,8 +136,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'mercado',
     label: 'Plaza y Mercado',
-    hint: 'Precio, empresas, stock e intercambio',
-    section: 'alimento',
+    hint: 'Abrir Economía y Empresas',
+    section: 'economia',
     wx: 408,
     wy: 74,
     ww: 196,
@@ -148,8 +147,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'campos',
     label: 'Campos del Valle',
-    hint: 'Producción agrícola y alimento',
-    section: 'alimento',
+    hint: 'Abrir Economía y Abasto',
+    section: 'economia',
     wx: 34,
     wy: 72,
     ww: 298,
@@ -159,8 +158,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'clinica',
     label: 'Clínica y Comisaría',
-    hint: 'Salud, seguridad y cupos públicos',
-    section: 'gobierno',
+    hint: 'Salud, seguridad y cupos (Palancas)',
+    section: 'palancas',
     wx: 380,
     wy: 366,
     ww: 108,
@@ -170,8 +169,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'escuela',
     label: 'Escuela del Valle',
-    hint: 'Educación, docentes y subsidios',
-    section: 'gobierno',
+    hint: 'Docentes fijos y estudiantes (Palancas / Ciudad)',
+    section: 'palancas',
     wx: 714,
     wy: 78,
     ww: 156,
@@ -181,8 +180,8 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'taller',
     label: 'Talleres Industriales',
-    hint: 'Obras públicas, técnicos y subsidios',
-    section: 'gobierno',
+    hint: 'Obras públicas e industria (Palancas)',
+    section: 'palancas',
     wx: 42,
     wy: 358,
     ww: 280,
@@ -1573,8 +1572,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 const badgeText =
                   npc.accionIa.id === 'protesta' || npc.accionIa.id === 'huelga'
                     ? '!'
-                    : npc.accionIa.id === 'disturbios'
-                    ? '‼'
                     : npc.accionIa.id === 'saqueo'
                     ? '×'
                     : npc.accionIa.id === 'organizar_fiesta'
@@ -1585,8 +1582,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                     ? '+'
                     : npc.accionIa.id === 'reparar_barricada'
                     ? '⚒'
-                    : npc.accionIa.id === 'patrullar_vecinal'
-                    ? '★'
                     : npc.accionIa.id === 'organizar_asamblea'
                     ? '⚑'
                     : '•';

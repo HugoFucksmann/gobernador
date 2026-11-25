@@ -1,15 +1,21 @@
 import { CityWorldCanvas } from './components/CityWorldCanvas';
 import { CausalInspectModal } from './components/hud/CausalChainView';
 import { CitizenCard } from './components/hud/CitizenCard';
+import { CityWindow } from './components/hud/CityWindow';
+import { EconomyWindow } from './components/hud/EconomyWindow';
 import { GameHudTop } from './components/hud/GameHudTop';
-import { PolicyDrawers } from './components/hud/PolicyDrawers';
+import { GazetteWindow } from './components/hud/GazetteWindow';
+import { LeversWindow } from './components/hud/LeversWindow';
 import { RctStatusBar } from './components/hud/RctStatusBar';
 import { OutcomeBanner } from './components/OutcomeBanner';
+import { StartBriefingModal } from './components/StartBriefingModal';
 import { WorldConfigModal } from './components/WorldConfigModal';
 import { useGameSession } from './hooks/useGameSession';
 
 export default function App() {
   const session = useGameSession();
+  const zFor = (id: 'palancas' | 'economia' | 'ciudad' | 'gaceta') =>
+    22 + Math.max(0, session.openWindows.indexOf(id));
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#2d4726] text-slate-100">
@@ -26,7 +32,7 @@ export default function App() {
         cameraTarget={session.cameraTarget}
         zoomRequest={session.zoomRequest}
         onSelectNpc={session.selectNpc}
-        onOpenSection={session.openLandmarkSection}
+        onOpenSection={session.openLandmarkWindow}
         onCancelFollow={session.cancelFollow}
         onHoverInfoChange={session.setHoverInfo}
       />
@@ -41,20 +47,20 @@ export default function App() {
         aiStatus={session.aiStatus}
         devMode={session.devMode}
         simStepMs={session.simStepMs}
-        activeSection={session.activeSection}
+        openWindows={session.openWindows}
         hasConditionAlert={session.hasConditionAlert}
         onTogglePause={session.togglePause}
         onSetSpeed={session.setSpeed}
         onStepDay={session.stepDay}
         onToggleDevMode={() => session.setDevMode(!session.devMode)}
+        onSetDevPopulation={session.setDevPopulation}
         onForceClimate={session.forceClimatePhenomenon}
-        onToggleSection={session.toggleSection}
-        onOpenAlerts={session.openAlertsDrawer}
-        onOpenObjetivo={() => session.openCiudadTab('objetivo')}
+        onToggleWindow={session.toggleWindow}
+        onOpenObjetivo={() => session.openCiudadTab('bitacora')}
         onOpenNewGame={() => session.setShowConfigModal(true)}
       />
 
-      {/* 3. Right Citizen Inspector / Community Pulse */}
+      {/* 3. Right Citizen Inspector / Quick Pulse & News */}
       <CitizenCard
         state={session.state}
         derived={session.derived}
@@ -63,26 +69,61 @@ export default function App() {
         onToggleFollow={() => session.setFollowSelected((f) => !f)}
         onClearSelection={session.clearSelectedNpc}
         onOpenCommunityDrawer={() => session.openCiudadTab('vecinos')}
+        onOpenGazette={() => session.openWindow('gaceta')}
         onInspectCausal={(title, ref, fallbackText) =>
           session.openCausalInspect({ title, ref, fallbackText })
         }
       />
 
-      {/* 4. Left Centralized Governance Window */}
-      {session.activeSection && (
-        <PolicyDrawers
-          section={session.activeSection}
+      {/* 4. Multi-Window Workspace */}
+      {session.openWindows.includes('palancas') && (
+        <LeversWindow
           state={session.state}
           derived={session.derived}
-          aiBusy={session.aiBusy}
-          ciudadTabRequest={session.ciudadTabRequest}
-          onClose={() => session.setActiveSection(null)}
+          zIndex={zFor('palancas')}
+          onFocus={() => session.focusWindow('palancas')}
+          onClose={() => session.closeWindow('palancas')}
           onUpdateLevers={session.updateLevers}
-          onUpdateMediaIntervention={session.updateMediaIntervention}
-          onTriggerPress={session.triggerPressManual}
+        />
+      )}
+
+      {session.openWindows.includes('economia') && (
+        <EconomyWindow
+          state={session.state}
+          derived={session.derived}
+          zIndex={zFor('economia')}
+          onFocus={() => session.focusWindow('economia')}
+          onClose={() => session.closeWindow('economia')}
+          onOpenPalancas={() => session.openWindow('palancas')}
+        />
+      )}
+
+      {session.openWindows.includes('ciudad') && (
+        <CityWindow
+          state={session.state}
+          derived={session.derived}
+          zIndex={zFor('ciudad')}
+          ciudadTabRequest={session.ciudadTabRequest}
+          onFocus={() => session.focusWindow('ciudad')}
+          onClose={() => session.closeWindow('ciudad')}
           onJumpDistrict={session.jumpToDistrict}
           onSelectRoleSample={session.selectRoleSample}
           onSelectNpc={session.selectNpc}
+          onInspectCausal={(title, ref, fallbackText) =>
+            session.openCausalInspect({ title, ref, fallbackText })
+          }
+        />
+      )}
+
+      {session.openWindows.includes('gaceta') && (
+        <GazetteWindow
+          state={session.state}
+          aiBusy={session.aiBusy}
+          zIndex={zFor('gaceta')}
+          onFocus={() => session.focusWindow('gaceta')}
+          onClose={() => session.closeWindow('gaceta')}
+          onTriggerPress={session.triggerPressManual}
+          onOpenPalancas={() => session.openWindow('palancas')}
           onInspectCausal={(title, ref, fallbackText) =>
             session.openCausalInspect({ title, ref, fallbackText })
           }
@@ -99,8 +140,21 @@ export default function App() {
         onChangeFilter={session.setMapFilter}
         onJumpDistrict={session.jumpToDistrict}
         onZoom={session.requestZoom}
-        onOpenPress={() => session.openCiudadTab('gaceta')}
+        onOpenPress={() => session.openWindow('gaceta')}
       />
+
+      {/* Initial Scenario Briefing before Day 1 starts */}
+      {!session.hasStarted && !session.showConfigModal && (
+        <StartBriefingModal
+          initialScenario={session.state.config.escenarioId}
+          manualSaveMeta={session.manualSaveMeta}
+          autoSaveMeta={session.autoSaveMeta}
+          onStartScenario={session.beginQuickGame}
+          onOpenAdvancedConfig={() => session.setShowConfigModal(true)}
+          onLoadManual={session.loadManual}
+          onLoadAutoSave={session.loadAutoSave}
+        />
+      )}
 
       {session.showConfigModal && (
         <WorldConfigModal

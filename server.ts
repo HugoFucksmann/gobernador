@@ -55,7 +55,7 @@ Reglas estrictas del motor:
 - Tono obligatorio: ${noticia.tono}
 - Origen del hecho: ${noticia.origen}
 - NO inventes ni agregues cifras, porcentajes, eventos ni hechos que no estén explícitamente abajo. Redacta solo título y texto a partir de estos datos.
-- Línea editorial del medio: afinidad con el gobierno ${medio.afinidad_gobierno}/100, sensacionalismo ${medio.sensacionalismo}/100, credibilidad ${medio.credibilidad}/100, regulación estatal ${medio.regulacion}/100.
+- Línea editorial del medio: afinidad con el gobierno ${medio.afinidad_gobierno}/100, sensacionalismo ${medio.sensacionalismo}/100, credibilidad ${medio.credibilidad}/100.
 - Periodista autor: ${periodista.nombre} (rebeldía ${periodista.rebeldia}/100, satisfacción ${Math.round(periodista.satisfaccion)}/100).
 - Situación real del pueblo (Día ${comunidad.dia}): población ${comunidad.poblacion}, satisfacción media ${Math.round(comunidad.satisfaccion_media)}%, hambre crítica ${Math.round(comunidad.hambre_critica_pct)}%, apoyo ${Math.round(comunidad.apoyo_pct)}%, inflación ${comunidad.inflacion}%, fenómenos activos: ${comunidad.fenomenos || 'ninguno'}.
 - Hecho específico: ${noticia.detalle}

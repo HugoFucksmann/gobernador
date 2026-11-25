@@ -29,7 +29,6 @@ export function evaluateNpcBubbleText(npc: Npc): string {
     if (npc.accionIa.id === 'huelga') return '¡Exigimos nuestros pagos!';
     if (npc.accionIa.id === 'protesta') return '¡Queremos respuestas!';
     if (npc.accionIa.id === 'saqueo') return '¡Necesitamos comida ya!';
-    if (npc.accionIa.id === 'disturbios') return '¡Basta de atropellos!';
     if (npc.accionIa.id === 'organizar_fiesta') return '¡Que siga la música!';
     if (npc.accionIa.id === 'organizar_asamblea') return '¡Vecinos, a debatir!';
     if (npc.accionIa.id === 'predicar') return '¡Escuchen lo que viene!';
@@ -38,7 +37,6 @@ export function evaluateNpcBubbleText(npc: Npc): string {
     if (npc.accionIa.id === 'compartir_comida') return 'Tomá, llevate algo para comer';
     if (npc.accionIa.id === 'cuidar_vecinos') return 'Te traigo algo para la fiebre';
     if (npc.accionIa.id === 'reparar_barricada') return 'Reforzando estas tablas';
-    if (npc.accionIa.id === 'patrullar_vecinal') return 'Cuidando la cuadra';
     if (npc.accionIa.id === 'sermon_apocaliptico') return '¡Se acerca el fin!';
     return npc.accionIa.nombre;
   }

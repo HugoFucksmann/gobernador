@@ -2,18 +2,23 @@ import {
   ActionDefinition,
   ChaosLimits,
   DistrictZone,
+  ForeignTradeStep,
+  PriceCapMode,
   PrivateRoleId,
   PublicRoleId,
   RoleDefinition,
   RoleGroupId,
   RoleId,
   ScenarioPreset,
+  ServiceAreaId,
+  ServiceLevel,
+  ServiceLeverId,
+  ServicePublicRoleId,
   ZoneId,
 } from '../types/game';
 
-export const SAVE_FORMAT_VERSION = 1;
+export const SAVE_FORMAT_VERSION = 2;
 export const FISCAL_PERIOD_DAYS = 7;
-export const LEVER_MAX_CHANGE_PCT = 20;
 
 export const ZONE_IDS: ZoneId[] = ['centro', 'norte', 'este', 'sur', 'oeste'];
 
@@ -42,12 +47,76 @@ export const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
   jubilado: ['centro', 'norte', 'este', 'sur', 'oeste'],
 };
 
+export const SERVICE_LEVEL_TABLE: Record<
+  ServiceLeverId,
+  Record<ServiceLevel, { puestosPct: number; operacionPeriodo: number; label: string }>
+> = {
+  seguridad: {
+    0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
+    1: { puestosPct: 3, operacionPeriodo: 8, label: 'Mínimo' },
+    2: { puestosPct: 5, operacionPeriodo: 18, label: 'Básico' },
+    3: { puestosPct: 8, operacionPeriodo: 32, label: 'Reforzado' },
+    4: { puestosPct: 12, operacionPeriodo: 46, label: 'Alto' },
+    5: { puestosPct: 16, operacionPeriodo: 70, label: 'Máximo' },
+  },
+  salud: {
+    0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
+    1: { puestosPct: 2, operacionPeriodo: 8, label: 'Mínimo' },
+    2: { puestosPct: 3, operacionPeriodo: 18, label: 'Básico' },
+    3: { puestosPct: 5, operacionPeriodo: 32, label: 'Estándar' },
+    4: { puestosPct: 7, operacionPeriodo: 52, label: 'Reforzado' },
+    5: { puestosPct: 10, operacionPeriodo: 76, label: 'Máximo' },
+  },
+  obras: {
+    0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
+    1: { puestosPct: 1, operacionPeriodo: 8, label: 'Mínimo' },
+    2: { puestosPct: 3, operacionPeriodo: 18, label: 'Básico' },
+    3: { puestosPct: 4, operacionPeriodo: 30, label: 'Activo' },
+    4: { puestosPct: 6, operacionPeriodo: 48, label: 'Intensivo' },
+    5: { puestosPct: 8, operacionPeriodo: 70, label: 'Máximo' },
+  },
+};
+
+export const SERVICE_LEVER_TO_AREA: Record<ServiceLeverId, ServiceAreaId> = {
+  seguridad: 'seguridad',
+  salud: 'salud',
+  obras: 'infraestructura',
+};
+
+export const SERVICE_LEVER_TO_ROLE: Record<ServiceLeverId, ServicePublicRoleId> = {
+  seguridad: 'policia',
+  salud: 'medico',
+  obras: 'ingeniero',
+};
+
+export const PRICE_CAP_FACTORS: Record<PriceCapMode, number | null> = {
+  libre: null,
+  moderado: 1.4,
+  estricto: 1.05,
+};
+
+export const FOREIGN_TRADE_STEPS: Array<{ value: ForeignTradeStep; label: string; shortLabel: string }> = [
+  { value: -100, label: 'Exportar máx (-100%)', shortLabel: 'Exp. máx' },
+  { value: -50, label: 'Exportar (-50%)', shortLabel: 'Exportar' },
+  { value: 0, label: 'Cerrado (0%)', shortLabel: 'Cerrado' },
+  { value: 50, label: 'Importar (+50%)', shortLabel: 'Importar' },
+  { value: 100, label: 'Importar máx (+100%)', shortLabel: 'Imp. máx' },
+];
+
+export const LEVER_BOUNDS = {
+  impuesto: { min: 0, max: 60, step: 1 },
+  salarioPublico: { min: 50, max: 150, step: 5 },
+  ayudaSocial: { min: 0, max: 10, step: 0.5 },
+  garantiaAlimentaria: { min: 0, max: 100, step: 5 },
+  prensa: { min: 0, max: 100, step: 5 },
+  topeEmision: { min: 0, max: 30, step: 1 },
+} as const;
+
 export const ECON_CONSTANTS = {
-  salarioBasePublico: 3.85,
-  pensionBase: 2.8,
-  empleadosPorComerciante: 4,
+  salarioBasePublico: 3.15,
+  pensionBase: 1.95,
   maxPaseDesempleoPorDia: 2,
-  precioBaseAlimento: 2.65,
+  precioBaseAlimento: 2.55,
   consumoPorNpc: 1.0,
   siloDias: 25,
   despensaMaxDias: 14,
@@ -57,30 +126,28 @@ export const ECON_CONSTANTS = {
   umbralSaludBaja: 75,
   kPrudenciaDespensa: 0.35,
   kMiedoDespensa: 0.45,
-  margenComercialPct: 23,
-  margenComercialMaxPct: 60,
+  margenComercialPct: 26,
   periodoPagoDias: 7,
   pisoSueldoPct: 60,
-  factorRecorteSueldo: 0.75,
   diasRespuestaEmpresa: 7,
-  margenExtraSubirPct: 8,
-  fraccionGastoExterior: 0,
   propensionGastoBase: 0.85,
   propensionGastoMin: 0.55,
   propensionGastoMax: 0.95,
-  produccionBaseAgricultor: 5.0,
+  produccionBaseAgricultor: 5.35,
   tecnicosPorAgricultor: 0.2,
   kTecnificacion: 1.5,
   intercambioPorComerciante: 10,
-  perdidaAdminMax: 0.3,
+  diferencialImportacion: 1.3,
+  stockMinExportarDias: 5,
   costoBaseServicioPorPoblacion: 0.032,
   coefHambreSubida: 24,
   coefHambreBaja: 14,
   coefDanoHambreCritica: 2,
+  kVulnerabilidadEdad: 1.35,
   coefSequiaProduccion: 0.5,
-  coefSequiaPrecio: 0.65,
+  coefSequiaPrecio: 0.25,
   coefPlagaProduccion: 0.45,
-  coefPlagaPrecio: 0.5,
+  coefPlagaPrecio: 0.25,
   fiscalUmbral: 40,
   fiscalPendiente: 0.01,
   coberturaBajaUmbral: 0.6,
@@ -97,23 +164,17 @@ export const ECON_CONSTANTS = {
   danoIntegridad: 0.45,
   repPorNpc: 0.45,
   reubicacionPoliciasPct: 20,
-  minRepartoPolicia: 0.2,
   objetivoOrden: 0.05,
   kOrdenContagio: 0.5,
   kSatisfaccionContagio: 0.3,
-  umbralOrdenPatrulla: 50,
-  umbralOrdenDisturbios: 35,
-  pesoVoluntario: 0.5,
-  maxPctVoluntarios: 0.5,
   maxPctDespensaCedida: 0.25,
   golpeAmenazaPeso: 20,
   golpeAmenazaVentanaDias: 5,
-  cupoMaxPctPoblacion: 25,
+  umbralDependenciaPrensaPct: 35,
   candidatasPorDecision: 8,
   npcsCandidatosPorPeriodo: 3,
   umbralAlertaDerrota: 0.7,
   historialMaxDias: 200,
-  precioMaximoSinTope: 250,
   fenomenosSalud: {
     plaga_zombie: {
       exposicionMax: 0.65,
@@ -133,11 +194,8 @@ export const ECON_CONSTANTS = {
   objetivoCobertura: {
     medico: 0.05,
     policia: 0.05,
-    docente: 0.04,
-    estatal: 0.04,
     ingeniero: 0.03,
-    comercio: 0.04,
-  } as Record<PublicRoleId | 'comercio', number>,
+  } as Record<ServicePublicRoleId, number>,
 };
 
 export const EFFECT_CATALOG = {
@@ -181,11 +239,6 @@ export const EFFECT_CATALOG = {
     media: { pesoReparador: 1.0 },
     alta: { pesoReparador: 1.4 },
   },
-  resguarda: {
-    baja: { pesoVoluntario: 0.35 },
-    media: { pesoVoluntario: 0.5 },
-    alta: { pesoVoluntario: 0.7 },
-  },
   cuida: {
     baja: { curaExtra: 1.5 },
     media: { curaExtra: 2.5 },
@@ -195,11 +248,6 @@ export const EFFECT_CATALOG = {
     baja: { topeDiario: 1.5 },
     media: { topeDiario: 2.5 },
     alta: { topeDiario: 4.0 },
-  },
-  vandaliza: {
-    baja: { danoIntegridad: 0.35 },
-    media: { danoIntegridad: 0.65 },
-    alta: { danoIntegridad: 1.0 },
   },
 } as const;
 
@@ -278,7 +326,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 0,
     afinidad: 'laboriosidad',
     produce: { alimento: ECON_CONSTANTS.produccionBaseAgricultor },
-    ingreso: [6.0, 8.4],
+    ingreso: [6.6, 8.8],
     color: '#16a34a',
     distrito: 'campos',
   },
@@ -354,7 +402,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 2,
     afinidad: 'laboriosidad',
     produce: { tecnificacion: 1 },
-    ingreso: [8.8, 12.2],
+    ingreso: [9.0, 12.2],
     color: '#15803d',
     distrito: 'campos',
   },
@@ -443,6 +491,7 @@ export const ROLE_GROUPS: Record<RoleGroupId, { nombre: string; roles: RoleId[] 
 };
 
 export const PUBLIC_ROLES: PublicRoleId[] = ['policia', 'estatal', 'docente', 'medico', 'ingeniero'];
+export const SERVICE_PUBLIC_ROLES: ServicePublicRoleId[] = ['policia', 'medico', 'ingeniero'];
 export const PRIVATE_ROLES: PrivateRoleId[] = [
   'agricultor',
   'obrero',
@@ -453,7 +502,7 @@ export const PRIVATE_ROLES: PrivateRoleId[] = [
 ];
 
 export const ACTION_TABLE: ActionDefinition[] = [
-  // === 20 Acciones espontáneas (ACCIONES.md §2) ===
+  // === 19 Acciones espontáneas (ACCIONES.md §2) ===
   // Rarezas y trabajo (6)
   {
     id: 'cavar_pozo',
@@ -760,7 +809,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
     contagio: 0.1,
   },
 
-  // Cuidado y defensa (3)
+  // Cuidado y defensa (2)
   {
     id: 'cuidar_vecinos',
     nombre: 'Cuidar vecinos',
@@ -795,30 +844,8 @@ export const ACTION_TABLE: ActionDefinition[] = [
     duracionDias: [2, 6],
     contagio: 0.15,
   },
-  {
-    id: 'patrullar_vecinal',
-    nombre: 'Ronda vecinal',
-    descripcion: 'Organiza patrullas ciudadanas voluntarias que apoyan defensa y orden.',
-    tipo: 'espontanea',
-    textos: [
-      '{nombre} arma una ronda vecinal',
-      '{nombre} vigila las esquinas junto a voluntarios del barrio',
-      '{nombre} recorre las cuadras de noche para sostener la calma',
-    ],
-    requisitos: { etapa: 'adulto', rolNoEn: ['policia'] },
-    contexto: {
-      fenomenoOOrdenMenorA: {
-        fenomeno: 'plaga_zombie',
-        ordenMenorA: ECON_CONSTANTS.umbralOrdenPatrulla,
-      },
-    },
-    afinidad: { valentia: '+' },
-    efectos: [{ id: 'resguarda', intensidad: 'media' }],
-    duracionDias: [2, 6],
-    contagio: 0.1,
-  },
 
-  // === 4 Acciones de condición (ACCIONES.md §3) ===
+  // === 3 Acciones de condición (ACCIONES.md §3) ===
   {
     id: 'huelga',
     nombre: 'Huelga de estatales',
@@ -829,7 +856,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
       '{nombre} se suma a la huelga por salarios impagos',
       '{nombre} detiene su labor pública hasta que se regularicen los sueldos',
     ],
-    disparador: { impago: true },
+    disparador: { impagoNomina: true },
     requisitos: { publico: true },
     afinidad: { rebeldia: '+', resiliencia: '-' },
     efectos: [{ id: 'fuera_de_puesto' }],
@@ -881,27 +908,6 @@ export const ACTION_TABLE: ActionDefinition[] = [
     duracionDias: [2, 5],
     contagio: 0.2,
   },
-  {
-    id: 'disturbios',
-    nombre: 'Disturbios callejeros',
-    descripcion: 'En medio de protestas sin orden policial, dañan la integridad de la zona.',
-    tipo: 'condicion',
-    opcional: true,
-    textos: [
-      '{nombre} se suma a los disturbios y rompe lo que encuentra',
-      '{nombre} participa en destrozos frente a los comercios del barrio',
-      '{nombre} arroja piedras contra fachadas ante la falta de orden',
-    ],
-    disparador: { protestaEnCursoYOrdenMenorA: ECON_CONSTANTS.umbralOrdenDisturbios },
-    requisitos: { etapa: 'adulto' },
-    afinidad: { rebeldia: '+', resiliencia: '-' },
-    efectos: [
-      { id: 'vandaliza', intensidad: 'baja' },
-      { id: 'agita', intensidad: 'media' },
-    ],
-    duracionDias: [1, 4],
-    contagio: 0.15,
-  },
 ];
 
 export const DEFAULT_CHAOS_LIMITS: ChaosLimits = {
@@ -923,7 +929,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     poblacionDefault: 100,
     mediosDefault: 2,
     inflacionInicial: 10,
-    reservaInicial: 4000,
+    reservaInicial: 4800,
     stockAlimentoInicial: 1600,
     topesPrivados: {
       agricultor: 30,
@@ -933,12 +939,29 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       tecnico: 3,
       periodista: 3,
     },
-    cuposIniciales: {
-      policia: 5,
+    cuposFijos: {
       estatal: 4,
       docente: 4,
-      medico: 5,
-      ingeniero: 3,
+    },
+    serviciosIniciales: {
+      seguridad: 2,
+      salud: 3,
+      obras: 2,
+    },
+    initialLevers: {
+      impuesto: 38,
+      salarioPublico: 100,
+      servicios: {
+        seguridad: 2,
+        salud: 3,
+        obras: 2,
+      },
+      ayudaSocial: 0,
+      garantiaAlimentaria: 85,
+      precioMaximo: 'libre',
+      comercioExterior: 0,
+      prensa: 12,
+      topeEmision: 10,
     },
     zonas: structuredClone(DEFAULT_ZONAS),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
@@ -967,7 +990,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     poblacionDefault: 100,
     mediosDefault: 2,
     inflacionInicial: 12,
-    reservaInicial: 2400,
+    reservaInicial: 3400,
     stockAlimentoInicial: 1800,
     topesPrivados: {
       agricultor: 30,
@@ -977,12 +1000,29 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       tecnico: 3,
       periodista: 3,
     },
-    cuposIniciales: {
-      policia: 6,
+    cuposFijos: {
       estatal: 4,
       docente: 3,
-      medico: 5,
-      ingeniero: 3,
+    },
+    serviciosIniciales: {
+      seguridad: 2,
+      salud: 3,
+      obras: 2,
+    },
+    initialLevers: {
+      impuesto: 40,
+      salarioPublico: 100,
+      servicios: {
+        seguridad: 2,
+        salud: 3,
+        obras: 2,
+      },
+      ayudaSocial: 0,
+      garantiaAlimentaria: 85,
+      precioMaximo: 'libre',
+      comercioExterior: 0,
+      prensa: 12,
+      topeEmision: 10,
     },
     objetivoCobertura: {
       policia: 0.15,
@@ -990,17 +1030,17 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     zonas: structuredClone(DEFAULT_ZONAS),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     victoria: {
-      metrica: 'poblacion',
+      metrica: 'poblacionPct',
       op: '>=',
       umbral: 40,
       plazoDia: 180,
-      descripcion: 'Sobrevivir hasta el día 180 con al menos 40 habitantes.',
+      descripcion: 'Sobrevivir hasta el día 180 con al menos 40% de la población inicial.',
     },
     derrota: {
-      metrica: 'poblacion',
+      metrica: 'poblacionPct',
       op: '<',
       umbral: 40,
-      descripcion: 'La población cae por debajo de 40 habitantes.',
+      descripcion: 'La población viva cae por debajo del 40% de la inicial.',
     },
     caosDefault: { ...DEFAULT_CHAOS_LIMITS },
   },

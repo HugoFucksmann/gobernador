@@ -1,4 +1,4 @@
-# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.15)
+# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.16)
 
 > Estado del documento: idea en definición. El detalle del gobernador está en GOBERNADOR.md. El detalle técnico (estados, tabla de acciones, medios) vive en ESTADOS.md. La interfaz final está en UI.md y los niveles del juego en HOJA_DE_RUTA.md.
 
@@ -18,7 +18,7 @@ La tensión entre **el orden que intenta imponer el gobernador** y **el caos cre
 2. **Caos mecánico, IA opcional.** Un director de caos elige qué hacen los NPCs entre una gran tabla de acciones predefinidas, acotadas y animables, y los textos salen de plantillas. La IA es opcional y de dos tipos: un modelo clasificador (no generativo) que elige entre las candidatas que el juego le ofrece, y un modelo generativo que escribe el texto de las noticias, que es decorativo. El modelo aporta elección y texto; las reglas, la magnitud de los efectos y cuánto caos entra los controla el juego. Con o sin IA las reglas son las mismas, y un modelo mejor mejora lo que se ve, no cambia las reglas.
 3. **Gobernador que interviene.** Influye sobre la comunidad y sus estadísticas sin mandar directamente a cada NPC. El jugador responde a la comunidad: el director de caos la altera.
 4. **Sucesos generales.** Dependen del mundo. Por ejemplo, los fenómenos naturales (sequías, plagas, pandemias) alteran los recursos y a los NPCs, y afectan a la comunidad y a sus estadísticas, condicionando la gestión del gobernador.
-5. **Economía de la comunidad.** Los NPCs trabajan, ganan y gastan. Cada grupo vive distinto y la desigualdad genera descontento. Hay empresas privadas con dueño: la de alimento emplea a los agricultores y técnicos, y las comerciales venden la comida y emplean a obreros. Cada habitante compra su comida con su dinero y la guarda en casa. El estado no reparte comida: tiene que garantizar que todos puedan comer con las palancas que tiene.
+5. **Economía de la comunidad.** Los NPCs trabajan, ganan y gastan. Cada grupo vive distinto y la desigualdad genera descontento. Hay dos empresas privadas: la de alimento, con un dueño, emplea a los agricultores y técnicos, y la de comercio, con los comerciantes como socios, vende la comida y emplea a obreros. Cada habitante compra su comida con su dinero y la guarda en casa. El estado no reparte comida: tiene que garantizar que todos puedan comer con las palancas que tiene.
 6. **Prensa.** Los medios cuentan lo que pasa en la comunidad, influyen en el humor social y en lo que los NPCs saben. Es la forma en que el jugador ve lo que hace la comunidad, y una herramienta más con la que el gobernador tiene que lidiar. Cada noticia nace de datos del motor; el texto sale de plantillas o, si la IA opcional está activa, de un modelo generativo.
 7. **Todo relacionado con todo.** Una acción de un NPC, el clima, una noticia o una decisión del gobernador pueden afectarse entre sí. Las consecuencias pueden encadenarse, y el jugador debe poder entender por qué pasó lo que pasó.
 8. **Mundos intercambiables.** Se empieza con mundos chicos para experimentar; los mundos se pueden cambiar.
@@ -31,14 +31,14 @@ Estados que sabemos que existen:
 - **Estado del clima.** Los fenómenos naturales (sequías, plagas, pandemias) alteran recursos y NPCs.
 - **Estado de los medios.** Cada medio de prensa tiene su propia identidad y alcance.
 - **Estado de cada NPC:** personalidad y rasgos únicos de cada personaje.
-- **Estado de las empresas:** la de alimento y las comerciales, con su respuesta cuando no pueden pagar los sueldos (ESTADOS §4).
+- **Estado de las empresas:** la de alimento y la de comercio, con su respuesta cuando no pueden pagar los sueldos (ESTADOS §4).
 - **Integridad de cada zona:** cuánto aguanta frente a los ataques (ESTADOS §14).
 
 Además:
 
 - **La comunidad no tiene estado propio:** se deriva de los NPCs.
 - **El espacio es por zonas:** el motor conoce 4 a 6 zonas por mundo (con vecindad) y cada NPC tiene una. Las coordenadas y el movimiento son de la UI (ESTADOS §14).
-- **La economía la mueven los NPCs:** cada uno gana y gasta su propio dinero. El gobierno recauda impuestos y administra los fondos. Las empresas pagan sueldos y los NPCs les compran comida y otros bienes (circuito cerrado), y el estado lo regula con impuestos, subsidios, garantía alimentaria, intercambio y precio máximo. La economía tiene un módulo base y una extensión `fiscal` (ESTADOS §3.1, §4).
+- **La economía la mueven los NPCs:** cada uno gana y gasta su propio dinero. El gobierno recauda impuestos y administra los fondos. Las empresas pagan sueldos y los NPCs les compran comida y otros bienes (circuito cerrado), y el estado lo regula con impuesto, ayuda social, garantía alimentaria, comercio exterior y precio máximo. La economía tiene un módulo base y una extensión `fiscal` (ESTADOS §3.1, §4).
 
 El diseño detallado de los estados está en ESTADOS.md (en borrador).
 
@@ -53,8 +53,8 @@ Antes de arrancar una partida hay un **panel de configuración del mundo**, dond
   - Los **límites del caos**. Los valores por defecto son los de balance, y cualquier cambio queda marcado como "configuración de prueba".
   - La **economía** (el módulo base o, en el nivel 1.1, con la extensión `fiscal`).
 - **Mundos iniciales (2):**
-  - *Elecciones:* el objetivo es gobernar y ganar elecciones, manteniendo a la comunidad a gusto. En el nivel 1 el dilema es gastar hoy (subsidios) contra ahorrar la reserva para cubrir el déficit. Si la reserva se agota hay impago: los empleados públicos se declaran en huelga y los servicios caen.
-  - *Apocalipsis zombie:* el objetivo es que la comunidad sobreviva. Hay que administrar más seguridad (policía), con el riesgo de quedarse sin recursos para la garantía alimentaria y los subsidios. Los NPCs pueden sumarse a la policía. Los policías se reubican hacia la zona por donde vienen los zombies, según lo que la ciudadanía se entere por la prensa. Los zombis dañan la integridad de las zonas y los NPCs la reparan.
+  - *Elecciones:* el objetivo es gobernar y ganar elecciones, manteniendo a la comunidad a gusto. En el nivel 1 el dilema es gastar hoy (ayuda social, servicios) contra ahorrar la reserva para cubrir un saldo negativo. Si la reserva se agota hay impago: los empleados públicos se declaran en huelga y los servicios caen.
+  - *Apocalipsis zombie:* el objetivo es que la comunidad sobreviva. Hay que administrar más seguridad (policía), con el riesgo de quedarse sin recursos para la garantía alimentaria y la ayuda social. Los NPCs pueden sumarse a la policía (cubriendo los puestos del nivel de seguridad). Los policías se reubican hacia la zona por donde vienen los zombies, según lo que la ciudadanía se entere por la prensa. Los zombis dañan la integridad de las zonas y los NPCs la reparan.
 - **Orden de implementación:** primero *elecciones*, después *zombies*.
 - **Escala:** mundos de **alrededor de 100 NPCs** para empezar. La cantidad es un parámetro del mundo; el techo del nivel 1 es 1.000 (UI §12). La fija el preset (100) y solo se cambia en modo desarrollador, no desde el panel del jugador (UI §15). Se eligió 100 porque con más gente los roles y los porcentajes se vuelven más estables y significativos.
 
@@ -91,9 +91,9 @@ Decisión: cerrado.
 - En la primera versión hay **un único gobernante, el usuario, sin división de poderes**.
 - **La comunidad genera la riqueza** (los NPCs trabajan y ganan) y **el gobierno recauda y administra los fondos.**
 - **La mecánica del juego son las palancas que el gobernador tiene** (áreas y palancas concretas: GOBERNADOR §3 y §4). Cada palanca tiene consecuencias y trade-offs. Ejemplos rápidos:
-  - Zombies: invertir más en seguridad/policía, pero te podés quedar sin recursos para sostener la garantía alimentaria y los subsidios.
-  - Elecciones: gastar hoy en subsidios o ahorrar la reserva para cubrir un déficit; si se gasta de más, la reserva se agota y llega el impago. Con el módulo `fiscal` (nivel 1.1), además, se puede emitir dinero y sube la inflación.
-- **Prensa como palanca (decidido):** el gobernador actúa sobre la prensa solo de forma **indirecta** (financiar, con la palanca `gasto_prensa`, en el nivel 1; presionar y dar o quitar acceso en el nivel 1.1; regular u otras palancas de prensa se agregan solo si la jugabilidad lo pide). Nunca escribe la noticia. Financiar tiene costos (presupuesto, pérdida de credibilidad si se nota la propaganda).
+  - Zombies: invertir más en seguridad/policía, pero te podés quedar sin recursos para sostener la garantía alimentaria y la ayuda social.
+  - Elecciones: gastar hoy en ayuda social o servicios, o ahorrar la reserva para cubrir un saldo negativo; si se gasta de más, la reserva se agota y llega el impago. Con el módulo `fiscal` (nivel 1.1), además, se puede emitir dinero y sube la inflación.
+- **Prensa como palanca (decidido):** el gobernador actúa sobre la prensa solo de forma **indirecta** (financiar, con la palanca `prensa`, en el nivel 1; presionar y dar o quitar acceso en el nivel 1.1; regular u otras palancas de prensa se agregan solo si la jugabilidad lo pide). Nunca escribe la noticia. Financiar tiene costos (gasto, pérdida de credibilidad si se nota la propaganda).
 - **Sancionar leyes:** queda como **idea a futuro** (ver sección 10).
 
 ## 8. Estados internos del juego
@@ -104,7 +104,7 @@ El detalle está en ESTADOS.md. Toda consecuencia (de una acción de un NPC, un 
 
 - **Tiempo real**, con reloj **del juego** (no el reloj real). La regla está en ESTADOS §5 y la escala y las velocidades, en CALIBRACION.md.
 - **Aceleración (decidido):** si se acelera, acelera la simulación. La IA opcional sigue a su propio ritmo y sus resultados se incorporan cuando están listos; si no llegan, el motor decide y usa plantillas. Nada frena el juego. Las velocidades siguen bajas por ahora (ESTADOS §5) y se revisan.
-- **Duración de la partida:** no tiene un largo fijo, solo termina por derrota (IDEA §5, ESTADOS §11). Con la escala inicial de CALIBRACION.md, a x1 el plazo de elecciones (365 días) son unas 2 horas reales y el de zombies (180 días), una hora.
+- **Duración de la partida:** no tiene un largo fijo, solo termina por derrota (sección 5, ESTADOS §11). Con la escala inicial de CALIBRACION.md, a x1 el plazo de elecciones (365 días) son unas 2 horas reales y el de zombies (180 días), una hora.
 - **Mapa con NPCs visibles:** la UI muestra a los NPCs y todo lo que pasa. Dibuja lo que el motor decidió (qué, cuándo y en qué zona) y coreografía el cómo; no inventa eventos con efecto. Como las acciones salen de una tabla cerrada, cada una tiene su animación. El contrato está en ESTADOS §14 y UI §9.
 - **Plataforma y estilo:** Steam, UI final en Godot, 3D low-poly con cámara libre (UI.md, nivel 2). El prototipo del nivel 1 usa su propia UI de depuración.
 
