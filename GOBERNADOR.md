@@ -155,7 +155,7 @@ Los efectos sobre el dinero pasan por las empresas y las despensas de los NPCs (
 
 ## 7. Qué ve el gobernador
 
-- Siempre exacto: reserva, ingresos, gastos, saldo, inflación, días de stock de alimento, la ganancia y la respuesta vigente de cada empresa (ESTADOS §4), el objetivo y la derrota con su progreso (ESTADOS §11), el aviso de un fenómeno con su zona de origen (ESTADOS §5), el costo por período de cada palanca y los días que faltan para la próxima liquidación.
+- Siempre exacto: reserva, ingresos, gastos, saldo, inflación, días de stock de alimento, la ganancia, el factor de sueldos y el empleo de cada empresa (ECONOMIA §5), el objetivo y la derrota con su progreso (ESTADOS §11), el aviso de un fenómeno con su zona de origen (ESTADOS §5), el costo por período de cada palanca y los días que faltan para la próxima liquidación.
 - Resumido: datos derivados de la comunidad (ESTADOS §10): porcentajes y conteos agregados, por zona cuando importa, sin el detalle de cada NPC (salvo la ficha del NPC en foco).
 - Con sesgo: la prensa.
 

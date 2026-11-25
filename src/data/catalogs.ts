@@ -15,10 +15,13 @@ import {
   ServiceLeverId,
   ServicePublicRoleId,
   ZoneId,
+  NewsTone,
+  NewsTopic,
+  PressValence,
 } from '../types/game';
 
-export const SAVE_FORMAT_VERSION = 2;
-export const FISCAL_PERIOD_DAYS = 7;
+export const SAVE_FORMAT_VERSION = 3;
+export const PERIOD_DAYS = 7;
 
 export const ZONE_IDS: ZoneId[] = ['centro', 'norte', 'este', 'sur', 'oeste'];
 
@@ -57,7 +60,7 @@ export const SERVICE_LEVEL_TABLE: Record<
     2: { puestosPct: 5, operacionPeriodo: 18, label: 'Básico' },
     3: { puestosPct: 8, operacionPeriodo: 32, label: 'Reforzado' },
     4: { puestosPct: 12, operacionPeriodo: 46, label: 'Alto' },
-    5: { puestosPct: 16, operacionPeriodo: 70, label: 'Máximo' },
+    5: { puestosPct: 16, operacionPeriodo: 76, label: 'Máximo' },
   },
   salud: {
     0: { puestosPct: 0, operacionPeriodo: 0, label: 'Desactivado' },
@@ -73,7 +76,7 @@ export const SERVICE_LEVEL_TABLE: Record<
     2: { puestosPct: 3, operacionPeriodo: 18, label: 'Básico' },
     3: { puestosPct: 4, operacionPeriodo: 30, label: 'Activo' },
     4: { puestosPct: 6, operacionPeriodo: 48, label: 'Intensivo' },
-    5: { puestosPct: 8, operacionPeriodo: 70, label: 'Máximo' },
+    5: { puestosPct: 8, operacionPeriodo: 78, label: 'Máximo' },
   },
 };
 
@@ -91,8 +94,8 @@ export const SERVICE_LEVER_TO_ROLE: Record<ServiceLeverId, ServicePublicRoleId> 
 
 export const PRICE_CAP_FACTORS: Record<PriceCapMode, number | null> = {
   libre: null,
-  moderado: 1.4,
-  estricto: 1.05,
+  moderado: 1.25,
+  estricto: 0.6,
 };
 
 export const FOREIGN_TRADE_STEPS: Array<{ value: ForeignTradeStep; label: string; shortLabel: string }> = [
@@ -116,6 +119,7 @@ export const ECON_CONSTANTS = {
   salarioBasePublico: 3.15,
   pensionBase: 1.95,
   maxPaseDesempleoPorDia: 2,
+  maxContratacionesPorPeriodo: 3,
   precioBaseAlimento: 2.55,
   consumoPorNpc: 1.0,
   siloDias: 25,
@@ -127,9 +131,10 @@ export const ECON_CONSTANTS = {
   kPrudenciaDespensa: 0.35,
   kMiedoDespensa: 0.45,
   margenComercialPct: 26,
-  periodoPagoDias: 7,
-  pisoSueldoPct: 60,
-  diasRespuestaEmpresa: 7,
+  pisoSueldoPct: 70,
+  factorMax: 1.5,
+  kRiqueza: 0.045,
+  colchonDias: 7,
   propensionGastoBase: 0.85,
   propensionGastoMin: 0.55,
   propensionGastoMax: 0.95,
@@ -158,7 +163,7 @@ export const ECON_CONSTANTS = {
   curaBaseHospital: 15,
   altaHospital: 90,
   curaNaturalSalud: 0.5,
-  proteccionMaxZona: 0.9,
+  proteccionMaxZona: 0.78,
   movilidadDefensa: 0.4,
   kIntegridad: 0.5,
   danoIntegridad: 0.45,
@@ -177,9 +182,9 @@ export const ECON_CONSTANTS = {
   historialMaxDias: 200,
   fenomenosSalud: {
     plaga_zombie: {
-      exposicionMax: 0.65,
-      danoMin: 16,
-      danoMax: 38,
+      exposicionMax: 0.52,
+      danoMin: 14,
+      danoMax: 34,
       atenuacion: 0.7,
       usaProteccion: true,
     },
@@ -365,7 +370,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 1,
     afinidad: 'laboriosidad',
     publico: true,
-    produce: { administracion: 1 },
+    produce: {},
     color: '#0f766e',
     distrito: 'civico',
   },
@@ -415,7 +420,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 2,
     afinidad: 'laboriosidad',
     publico: true,
-    produce: { educacion: 1 },
+    produce: {},
     color: '#0284c7',
     distrito: 'residencial',
   },
@@ -1025,16 +1030,16 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       topeEmision: 10,
     },
     objetivoCobertura: {
-      policia: 0.15,
+      policia: 0.12,
     },
     zonas: structuredClone(DEFAULT_ZONAS),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     victoria: {
       metrica: 'poblacionPct',
       op: '>=',
-      umbral: 40,
+      umbral: 70,
       plazoDia: 180,
-      descripcion: 'Sobrevivir hasta el día 180 con al menos 40% de la población inicial.',
+      descripcion: 'Sobrevivir hasta el día 180 con al menos 70% de la población inicial.',
     },
     derrota: {
       metrica: 'poblacionPct',
@@ -1043,6 +1048,533 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       descripcion: 'La población viva cae por debajo del 40% de la inicial.',
     },
     caosDefault: { ...DEFAULT_CHAOS_LIMITS },
+  },
+};
+
+export const DIRECTOR_CONSTANTS = {
+  ofertasPorDia: 2,
+  kExtremo: 0.75,
+  kDescontento: 1.5,
+  kReciente: 1.0,
+  recienteVentanaDias: 3,
+  candidatasMax: 8,
+  kAfinidad: 0.85,
+  plazoClasificadorMs: 4500,
+  plazoGenerativoMs: 4500,
+  maxPctAccion: 35,
+} as const;
+
+export const PRESS_CONSTANTS = {
+  relevanciaMin: 20,
+  relevanciaPorTema: {
+    aviso: 100,
+    objetivo: 100,
+    ataque: 85,
+    salud: 80,
+    hambre: 80,
+    impago: 80,
+    conflicto: 78,
+    clima: 75,
+    precio: 55,
+    empresas: 55,
+    gobierno: 50,
+    vecinos: 25,
+  } as Record<NewsTopic, number>,
+  noticiasPorColumnista: 1,
+  ventanaRepeticionDias: 5,
+  factorRepeticionPeso: 0.35,
+  factorRepeticionEfecto: 0.4,
+  pesosTonoBase: {
+    neutral: 1.1,
+    alarmista: 0.45,
+    critico: 0.45,
+    favorable: 0.45,
+  } as Record<NewsTone, number>,
+  baseEfectoTono: {
+    alarmista: 10,
+    critico: -10,
+    favorable: 8,
+    neutral: 0,
+  } as Record<NewsTone, number>,
+  duracionEfectoNoticia: 5,
+  maxEfectoNoticiasDia: 14,
+  hambreSubaUmbralPct: 12,
+  precioCambioFuertePct: 18,
+} as const;
+
+export const LEVER_VALENCIA: Record<string, { alSubir: PressValence; alBajar: PressValence }> = {
+  impuesto: { alSubir: 'mala', alBajar: 'buena' },
+  salarioPublico: { alSubir: 'buena', alBajar: 'mala' },
+  'servicios.seguridad': { alSubir: 'buena', alBajar: 'mala' },
+  'servicios.salud': { alSubir: 'buena', alBajar: 'mala' },
+  'servicios.obras': { alSubir: 'buena', alBajar: 'mala' },
+  ayudaSocial: { alSubir: 'buena', alBajar: 'mala' },
+  garantiaAlimentaria: { alSubir: 'buena', alBajar: 'mala' },
+  precioMaximo: { alSubir: 'neutra', alBajar: 'buena' },
+  comercioExterior: { alSubir: 'neutra', alBajar: 'neutra' },
+  prensa: { alSubir: 'neutra', alBajar: 'neutra' },
+  topeEmision: { alSubir: 'mala', alBajar: 'buena' },
+};
+
+export interface NewsTemplateVariant {
+  titulo: string;
+  texto: string;
+}
+
+export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemplateVariant[]>>> = {
+  aviso: {
+    neutral: [
+      {
+        titulo: 'Aviso climático en {zona}: {fenomeno} en {dias} días',
+        texto: '{autor} informa en {medio} que se espera {fenomeno} con origen en {zona} dentro de {dias} días.',
+      },
+      {
+        titulo: 'Alerta oficial por {fenomeno} hacia {zona}',
+        texto: 'Según el reporte difundido por {medio} ({autor}), el fenómeno de {fenomeno} afectará la región desde {zona} en {dias} días.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Advierten demoras ante {fenomeno} en {zona}',
+        texto: '{autor} cuestiona en {medio} la preparación previa frente a {fenomeno}, previsto desde {zona} en {dias} días.',
+      },
+      {
+        titulo: 'Preocupación por falta de margen antes de {fenomeno}',
+        texto: 'Con {dias} días de antelación, {medio} señala que la llegada de {fenomeno} a {zona} pondrá a prueba las medidas del gobernador.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Alerta máxima! {fenomeno} se acerca por {zona}',
+        texto: '{autor} advierte en {medio} que en apenas {dias} días golpeará {fenomeno} desde {zona} y crece la inquietud vecinal.',
+      },
+      {
+        titulo: 'Temor en {zona}: cuentan los días para {fenomeno}',
+        texto: 'Las filas se multiplican tras el anuncio de {fenomeno} en {zona} para dentro de {dias} días, reporta {medio}.',
+      },
+    ],
+  },
+  clima: {
+    favorable: [
+      {
+        titulo: 'Alivio en {zona}: cede {fenomeno}',
+        texto: '{autor} destaca en {medio} que la mejora climática tras {fenomeno} devuelve previsibilidad a los vecinos de {zona}.',
+      },
+      {
+        titulo: 'La comunidad respira tras el fin de {fenomeno}',
+        texto: 'El repliegue de {fenomeno} en {zona} abre margen para recomponer reservas y actividad normal, según {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Cambio climático en {zona}: {fenomeno}',
+        texto: '{autor} registra en {medio} la evolución de {fenomeno} en {zona}, con duración estimada de {dias} días.',
+      },
+      {
+        titulo: 'Reporte del día sobre {fenomeno} en {zona}',
+        texto: '{medio} sigue el curso de {fenomeno} en el sector de {zona} y su impacto sobre la rutina local.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Exigen respuesta rápida por {fenomeno} en {zona}',
+        texto: 'La presencia de {fenomeno} durante {dias} días en {zona} expone flancos en la planificación oficial, escribe {autor} en {medio}.',
+      },
+      {
+        titulo: '{fenomeno} golpea a {zona} sin resguardo suficiente',
+        texto: '{medio} recoge reclamos por los efectos de {fenomeno} en {zona} y pide ajustes inmediatos.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Estalla {fenomeno} y golpea a {zona}!',
+        texto: '{autor} alerta en {medio} sobre el avance de {fenomeno} desde {zona}, con fuerte tensión en las calles.',
+      },
+      {
+        titulo: 'Impacto severo por {fenomeno} en {zona}',
+        texto: 'Vecinos de {zona} miran con temor el despliegue de {fenomeno} durante los próximos {dias} días, informa {medio}.',
+      },
+    ],
+  },
+  ataque: {
+    neutral: [
+      {
+        titulo: 'Parte de seguridad en {zona}: {cifra} afectados',
+        texto: '{autor} detalla en {medio} los incidentes de la jornada por la plaga en {zona}, con un saldo de {cifra}.',
+      },
+      {
+        titulo: 'Balance del perímetro en {zona}',
+        texto: 'La jornada dejó {cifra} en {zona} tras los cruces con la plaga zombie, reporta {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Cuestionan la cobertura defensiva tras bajas en {zona}',
+        texto: '{autor} señala en {medio} que los episodios en {zona} ({cifra}) muestran brechas que el gobierno debe corregir.',
+      },
+      {
+        titulo: 'Presión sobre el mando por golpes de la plaga en {zona}',
+        texto: 'Con {cifra} registrados en {zona}, crecen las críticas en {medio} hacia el despliegue actual.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Pánico en {zona}! La plaga deja {cifra}',
+        texto: '{autor} relata en {medio} una jornada crítica en {zona}, donde la incursión zombie sumó {cifra}.',
+      },
+      {
+        titulo: 'Noche de miedo en {zona} tras nuevos ataques',
+        texto: 'El terror recorre {zona} luego de que la plaga provocara {cifra}, advierte {medio}.',
+      },
+    ],
+  },
+  salud: {
+    neutral: [
+      {
+        titulo: 'Situación sanitaria: {cifra} de presión en salud',
+        texto: '{autor} informa en {medio} sobre la demanda hospitalaria y los cuadros registrados en {zona} ({cifra}).',
+      },
+      {
+        titulo: 'Informe del hospital del centro sobre {zona}',
+        texto: 'El sistema médico registra {cifra} mientras atiende a los afectados derivados hacia el centro, señala {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'El hospital no da abasto y llueven críticas',
+        texto: 'Con {cifra}, {autor} apunta en {medio} a la falta de inversión y médicos frente a la demanda sanitaria.',
+      },
+      {
+        titulo: 'Demoras en camas revelan falta de previsión en salud',
+        texto: '{medio} cuestiona que el sistema de atención alcance {cifra} mientras crecen las listas de espera.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Emergencia sanitaria! Alarma por {cifra}',
+        texto: '{autor} advierte en {medio} un escenario delicado en salud con {cifra} y vecinos en espera de atención.',
+      },
+      {
+        titulo: 'Desborde sanitario sacude a {zona}',
+        texto: 'Las guardias crujen bajo {cifra}, generando alarma en toda la comunidad según {medio}.',
+      },
+    ],
+  },
+  hambre: {
+    neutral: [
+      {
+        titulo: 'Sube el hambre crítica a {cifra}',
+        texto: '{autor} reporta en {medio} que el porcentaje de vecinos con hambre crítica alcanzó {cifra}.',
+      },
+      {
+        titulo: 'Despensas ajustadas llevan el hambre a {cifra}',
+        texto: 'El monitoreo social registra {cifra} de hambre crítica con foco en {zona}, indica {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Duras críticas al gobierno por hambre en {cifra}',
+        texto: 'Con el indicador en {cifra}, {autor} responsabiliza en {medio} a las decisiones oficiales sobre ingresos y comida.',
+      },
+      {
+        titulo: 'El costo de vida deja al {cifra} sin plato asegurado',
+        texto: '{medio} exige revisar asistencia e impuestos tras la suba del hambre crítica a {cifra}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Crisis alimentaria! El hambre crítica toca {cifra}',
+        texto: '{autor} alerta en {medio} que ya es {cifra} la población en hambre crítica y crece la desesperación.',
+      },
+      {
+        titulo: 'Alacenas vacías en {zona}: alarma por {cifra}',
+        texto: 'Temen saqueos e inestabilidad mientras el hambre escala a {cifra}, informa {medio}.',
+      },
+    ],
+  },
+  precio: {
+    favorable: [
+      {
+        titulo: 'Respiro en el mercado: la comida baja a {cifra}',
+        texto: '{autor} celebra en {medio} la caída del precio de la comida hasta {cifra} por unidad.',
+      },
+      {
+        titulo: 'Alivio en las compras diarias con comida a {cifra}',
+        texto: 'La baja del precio a {cifra} mejora el poder de compra de los hogares en {zona}, destaca {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'La comida ajusta su precio a {cifra}',
+        texto: '{autor} consigna en {medio} una variación marcada en el mercado, donde la comida se ubica en {cifra}.',
+      },
+      {
+        titulo: 'Movimiento en las góndolas: precio en {cifra}',
+        texto: 'Comerciantes y vecinos de {zona} se adaptan al nuevo valor de {cifra} reportado hoy en {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'El precio en {cifra} reabre el debate sobre el rumbo',
+        texto: '{autor} critica en {medio} los desajustes de oferta y topes que llevaron la comida a {cifra}.',
+      },
+      {
+        titulo: 'Tensión por el precio de la comida en {cifra}',
+        texto: '{medio} advierte que el salto a {cifra} erosiona los bolsillos más frágiles de {zona}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡La comida se dispara a {cifra}!',
+        texto: '{autor} informa en {medio} que los vecinos de {zona} corren a comprar ante un salto súbito a {cifra}.',
+      },
+      {
+        titulo: 'Precios fuera de control: comida a {cifra}',
+        texto: 'El nerviosismo domina los mostradores de {zona} con la comida tocando {cifra}, señala {medio}.',
+      },
+    ],
+  },
+  impago: {
+    favorable: [
+      {
+        titulo: 'El Estado normaliza pagos y cierra el impago',
+        texto: '{autor} destaca en {medio} que las cuentas públicas cubrieron la liquidación sin nuevo faltante.',
+      },
+      {
+        titulo: 'Fin del impago devuelve calma a la administración',
+        texto: 'Con los salarios al día, la comunidad recupera certidumbre financiera según {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Cierre fiscal con faltante de {cifra}',
+        texto: '{autor} informa en {medio} que la liquidación dejó un impago de {cifra} al agotarse la reserva.',
+      },
+      {
+        titulo: 'Tesorería reporta ajuste de {cifra} en pagos',
+        texto: 'La caja pública no alcanzó a cubrir la totalidad de los compromisos y cerró con {cifra} pendientes, indica {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'El impago de {cifra} golpea la credibilidad oficial',
+        texto: '{autor} cuestiona en {medio} el manejo de la reserva tras un faltante de {cifra} en la liquidación.',
+      },
+      {
+        titulo: 'Malestar por cuentas en rojo: faltaron {cifra}',
+        texto: 'Para {medio}, el déficit no cubierto de {cifra} refleja gastos desbalanceados.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Caja vacía! Impago estatal de {cifra}',
+        texto: '{autor} advierte en {medio} sobre una fuerte crisis fiscal tras el faltante de {cifra} en el día de pago.',
+      },
+      {
+        titulo: 'Alarma en empleados públicos por faltante de {cifra}',
+        texto: 'El impago de {cifra} amenaza con paralizar servicios esenciales desde {zona}, reporta {medio}.',
+      },
+    ],
+  },
+  conflicto: {
+    neutral: [
+      {
+        titulo: 'Conflicto activo en {zona} ({cifra} participantes)',
+        texto: '{autor} reporta en {medio} una movilización en {zona} que reúne a {cifra} vecinos.',
+      },
+      {
+        titulo: 'Jornada de reclamos con {cifra} en {zona}',
+        texto: 'La protesta o medida de fuerza concentra atención en {zona} sin incidentes mayores reportados aún, según {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'El conflicto en {zona} interpela al gobernador',
+        texto: '{autor} sostiene en {medio} que los {cifra} movilizados en {zona} expresan un desgaste acumulado por la gestión.',
+      },
+      {
+        titulo: 'Reclamos de {cifra} vecinos ponen en jaque la calma',
+        texto: 'La falta de respuestas alimenta las medidas de fuerza en {zona}, apunta {medio}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Tensión en {zona}! {cifra} en las calles',
+        texto: '{autor} describe en {medio} un clima caldeado en {zona} con {cifra} vecinos movilizados.',
+      },
+      {
+        titulo: 'Estalla el conflicto social en {zona}',
+        texto: 'Las actividades se ven alteradas mientras {cifra} personas mantienen su medida en {zona}, alerta {medio}.',
+      },
+    ],
+  },
+  empresas: {
+    favorable: [
+      {
+        titulo: '{empresa} mejora salarios (factor {cifra})',
+        texto: '{autor} destaca en {medio} el buen período de {empresa}, que elevó sus sueldos al factor {cifra}.',
+      },
+      {
+        titulo: 'Crecimiento en {empresa} impulsa ingresos',
+        texto: 'Las ventas sostenidas permiten a {empresa} pagar por encima de la referencia ({cifra}), informa {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Balance en {empresa}: ajuste con cifra {cifra}',
+        texto: '{autor} informa en {medio} la liquidación de {empresa}, que cerró el período con {cifra}.',
+      },
+      {
+        titulo: 'Novedades laborales en {empresa}',
+        texto: 'La empresa {empresa} ajustó su reparto de ingresos y plantilla dejando un registro de {cifra}, señala {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Preocupa la situación en {empresa} ({cifra})',
+        texto: '{autor} vincula en {medio} las dificultades de {empresa} ({cifra}) con el peso de las cargas y topes vigentes.',
+      },
+      {
+        titulo: 'Golpe al empleo: {empresa} cierra período en {cifra}',
+        texto: '{medio} advierte que los recortes o despidos en {empresa} enfriarán aún más el consumo.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Alarma económica! Crisis en {empresa} ({cifra})',
+        texto: '{autor} alerta en {medio} por la contracción en {empresa}, que marcó {cifra} y golpea a las familias.',
+      },
+      {
+        titulo: 'Temor por el empleo tras ajuste en {empresa}',
+        texto: 'El sector privado acusa recibo del freno en {empresa} ({cifra}), reporta {medio}.',
+      },
+    ],
+  },
+  gobierno: {
+    favorable: [
+      {
+        titulo: 'Respaldo al ajuste en {palanca}: pasa a {valor_nuevo}',
+        texto: '{autor} elogia en {medio} la medida oficial que llevó {palanca} de {valor_anterior} a {valor_nuevo}.',
+      },
+      {
+        titulo: 'Ven con buenos ojos el cambio en {palanca}',
+        texto: 'La decisión de fijar {palanca} en {valor_nuevo} genera expectativas positivas en {zona}, señala {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Entra en vigor cambio en {palanca}: {valor_nuevo}',
+        texto: '{autor} informa en {medio} que {palanca} pasó de {valor_anterior} a {valor_nuevo} desde hoy.',
+      },
+      {
+        titulo: 'Nueva disposición para {palanca}',
+        texto: 'El gobierno modificó {palanca} de {valor_anterior} a {valor_nuevo} en todo el distrito, consigna {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Cuestionan la suba o giro en {palanca} a {valor_nuevo}',
+        texto: '{autor} advierte en {medio} sobre los costos de mover {palanca} desde {valor_anterior} hacia {valor_nuevo}.',
+      },
+      {
+        titulo: 'Críticas al decreto sobre {palanca}',
+        texto: 'Sectores locales miran con recelo el paso de {palanca} a {valor_nuevo}, según {medio}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Fuerte giro en {palanca} desata inquietud!',
+        texto: '{autor} señala en {medio} sorpresa y nerviosismo por el salto de {palanca} de {valor_anterior} a {valor_nuevo}.',
+      },
+      {
+        titulo: 'Alerta en la plaza tras cambio en {palanca}',
+        texto: 'El paso de {palanca} a {valor_nuevo} reconfigura el humor social de inmediato, advierte {medio}.',
+      },
+    ],
+  },
+  vecinos: {
+    favorable: [
+      {
+        titulo: 'Iniciativa solidaria contagia a {cifra} vecinos en {zona}',
+        texto: '{autor} celebra en {medio} que {cifra} residentes de {zona} se sumen a una acción comunitaria.',
+      },
+      {
+        titulo: 'Buen clima barrial en {zona}',
+        texto: 'Un grupo de {cifra} vecinos protagoniza jornadas positivas en {zona}, destaca {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Movida vecinal en {zona} reúne a {cifra} personas',
+        texto: '{autor} comenta en {medio} una iniciativa espontánea que sumó {cifra} participantes en {zona}.',
+      },
+      {
+        titulo: 'Postales del día en {zona}',
+        texto: 'La rutina de {zona} se vio alterada por {cifra} vecinos compartiendo una actividad inusual, según {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Desconcierto por ausencias y revuelo en {zona}',
+        texto: '{autor} observa en {medio} que {cifra} vecinos de {zona} dejaron sus tareas para sumarse a la movida.',
+      },
+      {
+        titulo: 'Señalan falta de control en {zona}',
+        texto: 'Con {cifra} involucrados en {zona}, {medio} pide atención sobre el ánimo del barrio.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Inquietud en {zona}! {cifra} vecinos alteran la calma',
+        texto: '{autor} informa en {medio} que la concentración de {cifra} personas en {zona} alimenta rumores.',
+      },
+      {
+        titulo: 'Revuelo creciente en las calles de {zona}',
+        texto: 'Un episodio con {cifra} participantes despierta preocupación en {zona}, reporta {medio}.',
+      },
+    ],
+  },
+  objetivo: {
+    favorable: [
+      {
+        titulo: '¡Meta alcanzada! La gestión cumple el objetivo ({cifra})',
+        texto: '{autor} destaca en {medio} que al cumplirse el plazo la comunidad cerró con {cifra}.',
+      },
+      {
+        titulo: 'Balance positivo del mandato al llegar al plazo',
+        texto: 'Con {cifra} registrado en el cierre, el gobierno superó la meta del escenario según {medio}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Cierre de plazo del objetivo con {cifra}',
+        texto: '{autor} resume en {medio} el resultado oficial de la etapa al alcanzarse {cifra}.',
+      },
+      {
+        titulo: 'Veredicto del plazo: la comunidad marca {cifra}',
+        texto: 'Se cumplió el día clave del mandato con un indicador de {cifra}, informa {medio}.',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Objetivo incumplido al cierre del plazo ({cifra})',
+        texto: '{autor} remarca en {medio} que el resultado de {cifra} dejó al gobierno por debajo de la meta prometida.',
+      },
+      {
+        titulo: 'Duro balance político tras quedar en {cifra}',
+        texto: 'La comunidad no alcanzó el umbral previsto y cerró el plazo en {cifra}, analiza {medio}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Fracaso en la meta! Cierre crítico con {cifra}',
+        texto: '{autor} advierte en {medio} un clima de fuerte decepción tras marcar apenas {cifra} al fin del plazo.',
+      },
+      {
+        titulo: 'Incertidumbre tras no superar el objetivo ({cifra})',
+        texto: 'Con el marcador en {cifra}, crecen las dudas sobre el futuro inmediato, reporta {medio}.',
+      },
+    ],
   },
 };
 

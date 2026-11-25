@@ -53,9 +53,7 @@ export interface RoleDefinition {
       | 'alimento'
       | 'tecnificacion'
       | 'seguridad'
-      | 'administracion'
       | 'comercio'
-      | 'educacion'
       | 'informacion'
       | 'salud'
       | 'infraestructura',
@@ -251,7 +249,61 @@ export interface MediaOutlet {
   };
 }
 
-export type NewsTone = 'informativo' | 'alarmista' | 'critico' | 'favorable';
+export type NewsTone = 'favorable' | 'neutral' | 'critico' | 'alarmista';
+
+export type NewsTopic =
+  | 'aviso'
+  | 'clima'
+  | 'ataque'
+  | 'salud'
+  | 'hambre'
+  | 'precio'
+  | 'impago'
+  | 'conflicto'
+  | 'empresas'
+  | 'gobierno'
+  | 'vecinos'
+  | 'objetivo';
+
+export type PressValence = 'buena' | 'mala' | 'neutra';
+
+export interface PressFactData {
+  zona?: ZoneId;
+  fenomeno?: string;
+  fenomenoId?: string;
+  dias?: number;
+  cifra?: string;
+  empresa?: string;
+  palanca?: string;
+  valorAnterior?: string;
+  valorNuevo?: string;
+  esAviso?: boolean;
+  vigenteHastaDia?: number;
+}
+
+export interface PressFact {
+  id: string;
+  dia: number;
+  tema: NewsTopic;
+  relevancia: number;
+  obligatoria?: boolean;
+  valencia: PressValence;
+  esDelGobierno: boolean;
+  zona: ZoneId;
+  origen: string;
+  causa?: string;
+  datos: PressFactData;
+}
+
+export interface ClassifierRecord {
+  dia: number;
+  npcId: string;
+  accionId: string;
+  tipo: 'espontanea' | 'condicion';
+  origen: 'motor' | 'clasificador';
+  latenciaMs?: number;
+  rechazada?: boolean;
+}
 
 export interface NewsArticle {
   id: string;
@@ -260,7 +312,7 @@ export interface NewsArticle {
   medioNombre: string;
   autorId: string;
   autorNombre: string;
-  tema: string;
+  tema: NewsTopic;
   tono: NewsTone;
   alcance: number;
   credibilidad?: number;
@@ -269,6 +321,7 @@ export interface NewsArticle {
   origen: string;
   causa?: string;
   textoOrigen: 'plantilla' | 'generativo';
+  zona?: ZoneId;
   zonaOrigen?: ZoneId;
   fenomenoId?: string;
   esAviso?: boolean;
@@ -287,16 +340,7 @@ export interface GovernorLevers {
   topeEmision: number; // 0..30 (% of period income, fiscal only)
 }
 
-export type EnterpriseResponseType = 'recortar_sueldos' | 'despedir';
-
-export interface EnterpriseActiveResponse {
-  tipo: EnterpriseResponseType;
-  diasRestantes: number;
-  duracionTotal: number;
-  factorSueldo: number; // e.g. 0.6..1.0
-  origen: string;
-  causa?: string;
-}
+export type EnterpriseTramo = 'aumento' | 'normal' | 'recorte' | 'despido';
 
 export interface FoodEnterpriseState {
   id: 'alimento';
@@ -304,25 +348,31 @@ export interface FoodEnterpriseState {
   stock: number;
   diasStock: number;
   siloDias: number;
-  ingresosAcum: number;
-  sueldosAcum: number;
-  diasPeriodo: number;
+  ventasAcum: number;
+  parteSueldos: number;
+  factor: number;
+  ultimoTramo: EnterpriseTramo;
+  despidosPendientes: number;
+  refPorEmpleado: Record<string, number>;
   ultimaGanancia: number;
   ultimoIngresoPeriodo: number;
   ultimoSueldosPeriodo: number;
-  respuesta: EnterpriseActiveResponse | null;
+  ultimaCausa?: string;
 }
 
 export interface CommercialEnterpriseState {
   id: 'comercio';
   socios: string[]; // living comerciantes
-  ingresosAcum: number;
-  sueldosAcum: number;
-  diasPeriodo: number;
+  ventasAcum: number;
+  parteSueldos: number;
+  factor: number;
+  ultimoTramo: EnterpriseTramo;
+  despidosPendientes: number;
+  refPorEmpleado: Record<string, number>;
   ultimaGanancia: number;
   ultimoIngresoPeriodo: number;
   ultimoSueldosPeriodo: number;
-  respuesta: EnterpriseActiveResponse | null;
+  ultimaCausa?: string;
 }
 
 export interface FiscalLedger {
@@ -330,6 +380,8 @@ export interface FiscalLedger {
   nomina: number;
   pensiones: number;
   garantiaAlimentaria: number;
+  garantiaImpaga: number;
+  comidaMenores: number;
   ayudaSocial: number;
   operacion: number;
   prensa: number;
@@ -351,10 +403,16 @@ export interface GovernmentState {
   acumuladoPeriodo: {
     dias: number;
     impuestos: number;
-    nomina: number;
-    pensiones: number;
+    nominaPorNpc: Record<string, number>;
+    pensionesPorNpc: Record<string, number>;
+    ayudaPorNpc: Record<string, number>;
+    periodistasPorNpc: Record<string, number>;
+    nominaDevengada: number;
+    pensionesDevengadas: number;
+    ayudaDevengada: number;
     garantiaAlimentaria: number;
-    ayudaSocial: number;
+    garantiaImpaga: number;
+    comidaMenores: number;
     operacion: number;
     operacionPorArea: Record<ServiceAreaId, number>;
     prensa: number;
@@ -642,12 +700,31 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
-      tipo: 'empresa_respuesta';
+      tipo: 'empresa_aumento';
       zona: ZoneId;
-      empresaId: string;
-      duenoId?: string | null;
-      respuesta: EnterpriseResponseType;
-      deficit: number;
+      empresaId: 'alimento' | 'comercio';
+      factor: number;
+      origen: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'empresa_recorte';
+      zona: ZoneId;
+      empresaId: 'alimento' | 'comercio';
+      factor: number;
+      origen: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'empresa_despido';
+      zona: ZoneId;
+      empresaId: 'alimento' | 'comercio';
+      cantidad: number;
+      factor: number;
       origen: string;
       causa?: string;
     }
@@ -712,8 +789,8 @@ export interface GameState {
     tick: number;
     dia: number;
     anio: number;
-    periodoFiscal: number;
-    diasEnPeriodoFiscal: number;
+    periodo: number;
+    diasEnPeriodo: number;
   };
   npcs: Npc[];
   gobierno: GovernmentState;
@@ -763,6 +840,15 @@ export interface GameState {
   ultimoEventoClimaId?: string;
   ultimoEventoEmpresaId?: string;
   hospitalSaturadoDia?: number;
+  auditEntradasDia: number;
+  auditSalidasDia: number;
+  ultimoDineroTotal?: number;
+  precioAyer: number;
+  hambreAyerPct: number;
+  ultimoSaldoCierre: number;
+  colaHechosDia: PressFact[];
+  ultimaVariantePorAccion: Record<string, number>;
+  clasificadorRegistro: ClassifierRecord[];
   metricasBaseObjetivo: {
     victoriaInicial: number;
     derrotaInicial: number;

@@ -219,7 +219,9 @@ interface BatchOpts {
   chaos: boolean;
   chaosStopDay?: number;
   drought?: { intensidad: number; inicioDia: number; duracionDias: number };
-  heur: boolean;
+  heur?: boolean;
+  mutator?: (s: GameState) => void;
+  dailyMutator?: (s: GameState, day: number) => void;
   maxDays?: number;
 }
 
@@ -233,10 +235,14 @@ function runBatch(label: string, opts: BatchOpts) {
   const scenarioId = opts.scenarioId ?? 'elecciones';
   const maxDays = opts.maxDays ?? (scenarioId === 'zombies' ? 180 : 365);
   let wins = 0;
+  let lostObjNoDefeat = 0;
+  let defeats = 0;
   let totalImpagos = 0;
   let seedsWithImpago = 0;
+  let totalNominaImpagos = 0;
   let totalEnterpriseResponses = 0;
   let minAnyRoleCount = 999;
+  let invariantViolations = 0;
 
   const prod1: number[] = [];
   const cons1: number[] = [];
@@ -252,9 +258,14 @@ function runBatch(label: string, opts: BatchOpts) {
   const popPctEnd: number[] = [];
   const reservaEnd: number[] = [];
   const minStock: number[] = [];
+  const initFoodProfit: number[] = [];
+  const initComProfit: number[] = [];
 
   for (let seed = 1; seed <= opts.n; seed++) {
     const s = makeInitState(seed, scenarioId);
+    if (opts.mutator) opts.mutator(s);
+    initFoodProfit.push(s.empresas.alimento.ultimaGanancia);
+    initComProfit.push(s.empresas.comercio.ultimaGanancia);
     const d0 = deriveCommunityStats(s);
     sat0.push(d0.satisfaccionMedia);
     let hadImp = false;
@@ -273,6 +284,9 @@ function runBatch(label: string, opts: BatchOpts) {
       }
       if (opts.heur && s.reloj.dia % PRESET.heuristicPolicy.evaluacionCadaDias === 0) {
         applyHeuristicGovernor(s);
+      }
+      if (opts.dailyMutator) {
+        opts.dailyMutator(s, s.reloj.dia);
       }
       stepHeadlessDay(s);
       if (d === 1) {
@@ -302,17 +316,40 @@ function runBatch(label: string, opts: BatchOpts) {
       }
       if (s.alimento.stock < minS) minS = s.alimento.stock;
 
-      const dsCheck = deriveCommunityStats(s);
-      for (const r of ALL_ROLES) {
-        if (dsCheck.roles[r] < minAnyRoleCount) minAnyRoleCount = dsCheck.roles[r];
+      if (d % FISCAL_PERIOD_DAYS === 0) {
+        if (s.gobierno.reserva < -0.01 || s.alimento.stock < -0.01) {
+          invariantViolations++;
+        }
+        for (const npc of s.npcs) {
+          if (
+            npc.variables.salud < 0 || npc.variables.salud > 100 ||
+            npc.variables.hambre < 0 || npc.variables.hambre > 100 ||
+            npc.variables.miedo < 0 || npc.variables.miedo > 100 ||
+            npc.variables.satisfaccion < 0 || npc.variables.satisfaccion > 100 ||
+            npc.variables.lealtad < 0 || npc.variables.lealtad > 100
+          ) {
+            invariantViolations++;
+          }
+        }
+        const dsCheck = deriveCommunityStats(s);
+        for (const r of ALL_ROLES) {
+          if (dsCheck.roles[r] < minAnyRoleCount) minAnyRoleCount = dsCheck.roles[r];
+        }
       }
 
-      if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
+      if (s.resultado.estado === 'derrota') break;
     }
 
+    totalNominaImpagos += s.eventos.filter((e) => e.tipo === 'impago' && e.alcanzaNomina).length;
     totalEnterpriseResponses += s.eventos.filter((e) => e.tipo === 'empresa_respuesta').length;
     const de = deriveCommunityStats(s);
-    if (s.resultado.victoriaCumplida || s.resultado.estado === 'victoria') wins++;
+    if (s.resultado.estado === 'derrota') {
+      defeats++;
+    } else if (s.resultado.victoriaCumplida) {
+      wins++;
+    } else if (s.eventos.some((e) => e.tipo === 'objetivo_perdido')) {
+      lostObjNoDefeat++;
+    }
     if (hadImp) seedsWithImpago++;
     satEnd.push(de.satisfaccionMedia);
     deltaSat.push(de.satisfaccionMedia - d0.satisfaccionMedia);
@@ -328,10 +365,16 @@ function runBatch(label: string, opts: BatchOpts) {
     scenarioId,
     n: opts.n,
     winPct: Number(((wins / opts.n) * 100).toFixed(2)),
+    lostObjNoDefeatPct: Number(((lostObjNoDefeat / opts.n) * 100).toFixed(2)),
+    defeatPct: Number(((defeats / opts.n) * 100).toFixed(2)),
     seedsWithImpago,
     totalImpagos,
+    totalNominaImpagos,
     totalEnterpriseResponses,
     minAnyRoleCount,
+    invariantViolations,
+    initFoodProfit: summarize(initFoodProfit),
+    initComProfit: summarize(initComProfit),
     prod1: summarize(prod1),
     cons1: summarize(cons1),
     ing7: summarize(ing7),
@@ -349,135 +392,423 @@ function runBatch(label: string, opts: BatchOpts) {
   };
 }
 
-function runSensitivity(n: number) {
-  const eval60 = (mutator?: (s: GameState) => void) => {
+function runAll10LeversSensitivity(n: number) {
+  const evalRun = (opts: {
+    days: number;
+    drought?: { intensidad: number; inicioDia: number; duracionDias: number };
+    mutator?: (s: GameState) => void;
+  }) => {
     const apoyos: number[] = [];
     const reservas: number[] = [];
+    const hambres: number[] = [];
+    const stocks: number[] = [];
+    const precios: number[] = [];
     const empResps: number[] = [];
+    const segInd: number[] = [];
+    const salInd: number[] = [];
+    const infInd: number[] = [];
+    const medAlc: number[] = [];
+    const medCred: number[] = [];
+    const medDep: number[] = [];
+    const foodProf: number[] = [];
+
     for (let seed = 1; seed <= n; seed++) {
       const s = makeInitState(seed, 'elecciones');
-      if (mutator) mutator(s);
-      for (let d = 1; d < 60; d++) {
+      if (opts.mutator) opts.mutator(s);
+      for (let d = 1; d < opts.days; d++) {
+        if (opts.drought && s.reloj.dia === opts.drought.inicioDia) {
+          s.clima.fenomenos.push({
+            id: 'seq_sens',
+            tipo: 'sequia',
+            nombre: 'Sequía sensibilidad',
+            intensidad: opts.drought.intensidad,
+            inicioDia: opts.drought.inicioDia,
+            duracionDias: opts.drought.duracionDias,
+          });
+        }
         stepHeadlessDay(s);
       }
       const ds = deriveCommunityStats(s);
       apoyos.push(ds.apoyoPct);
       reservas.push(s.gobierno.reserva);
+      hambres.push(ds.hambreCriticaPct);
+      stocks.push(s.alimento.stock);
+      precios.push(s.alimento.precio);
       empResps.push(s.eventos.filter((e) => e.tipo === 'empresa_respuesta').length);
+      segInd.push(s.gobierno.indicadores.seguridad);
+      salInd.push(s.gobierno.indicadores.salud);
+      infInd.push(s.gobierno.indicadores.infraestructura);
+      medAlc.push(s.medios[0]?.alcancePct ?? 0);
+      medCred.push(s.medios[0]?.credibilidad ?? 0);
+      medDep.push(s.medios[0]?.finanzas.dependenciaPct ?? 0);
+      foodProf.push(s.empresas.alimento.ultimaGanancia);
     }
     return {
-      apoyo: summarize(apoyos),
-      reserva: summarize(reservas),
-      empRespMean: Number((empResps.reduce((a, b) => a + b, 0) / empResps.length).toFixed(2)),
+      apoyo: summarize(apoyos).mean,
+      reserva: summarize(reservas).mean,
+      hambre: summarize(hambres).mean,
+      stock: summarize(stocks).mean,
+      precio: summarize(precios).mean,
+      empResp: Number((empResps.reduce((a, b) => a + b, 0) / empResps.length).toFixed(2)),
+      seg: summarize(segInd).mean,
+      sal: summarize(salInd).mean,
+      infra: summarize(infInd).mean,
+      medAlc: summarize(medAlc).mean,
+      medCred: summarize(medCred).mean,
+      medDep: summarize(medDep).mean,
+      foodProf: summarize(foodProf).mean,
     };
   };
 
-  const base = eval60();
-  const cases: Array<{ palanca: string; modo: string; up: (s: GameState) => void; dn: (s: GameState) => void }> = [
+  const cases: Array<{
+    palanca: string;
+    days: number;
+    drought?: { intensidad: number; inicioDia: number; duracionDias: number };
+    highLabel: string;
+    lowLabel: string;
+    high: (s: GameState) => void;
+    low: (s: GameState) => void;
+    metricKeys: Array<keyof ReturnType<typeof evalRun>>;
+  }> = [
     {
-      palanca: 'impuesto (48 vs 28)',
-      modo: '±10 pp',
-      up: (s) => { s.gobierno.palancasObjetivo.impuesto = 48; },
-      dn: (s) => { s.gobierno.palancasObjetivo.impuesto = 28; },
+      palanca: '1. impuesto',
+      days: 60,
+      highLabel: '48%',
+      lowLabel: '28%',
+      high: (s) => { s.gobierno.palancasObjetivo.impuesto = 48; },
+      low: (s) => { s.gobierno.palancasObjetivo.impuesto = 28; },
+      metricKeys: ['apoyo', 'reserva'],
     },
     {
-      palanca: 'salarioPublico (120 vs 80)',
-      modo: '±20 pp',
-      up: (s) => { s.gobierno.palancasObjetivo.salarioPublico = 120; },
-      dn: (s) => { s.gobierno.palancasObjetivo.salarioPublico = 80; },
+      palanca: '2. salario_publico',
+      days: 60,
+      highLabel: '120%',
+      lowLabel: '80%',
+      high: (s) => { s.gobierno.palancasObjetivo.salarioPublico = 120; },
+      low: (s) => { s.gobierno.palancasObjetivo.salarioPublico = 80; },
+      metricKeys: ['apoyo', 'reserva'],
     },
     {
-      palanca: 'ayudaSocial (3.0 vs 0.0)',
-      modo: 'monto diario',
-      up: (s) => { s.gobierno.palancasObjetivo.ayudaSocial = 3.0; },
-      dn: (s) => { s.gobierno.palancasObjetivo.ayudaSocial = 0.0; },
+      palanca: '3. servicios.seguridad',
+      days: 60,
+      highLabel: 'nivel 5',
+      lowLabel: 'nivel 0',
+      high: (s) => { s.gobierno.palancasObjetivo.servicios.seguridad = 5; },
+      low: (s) => { s.gobierno.palancasObjetivo.servicios.seguridad = 0; },
+      metricKeys: ['seg', 'apoyo', 'reserva'],
     },
     {
-      palanca: 'servicios.* (4 vs 1)',
-      modo: 'nivel alto vs bajo',
-      up: (s) => { s.gobierno.palancasObjetivo.servicios = { seguridad: 4, salud: 4, obras: 4 }; },
-      dn: (s) => { s.gobierno.palancasObjetivo.servicios = { seguridad: 1, salud: 1, obras: 1 }; },
+      palanca: '4. servicios.salud',
+      days: 60,
+      highLabel: 'nivel 5',
+      lowLabel: 'nivel 0',
+      high: (s) => { s.gobierno.palancasObjetivo.servicios.salud = 5; },
+      low: (s) => { s.gobierno.palancasObjetivo.servicios.salud = 0; },
+      metricKeys: ['sal', 'apoyo', 'reserva'],
     },
     {
-      palanca: 'precioMaximo (libre vs estricto)',
-      modo: 'libre vs estricto',
-      up: (s) => { s.gobierno.palancasObjetivo.precioMaximo = 'libre' as PriceCapMode; },
-      dn: (s) => { s.gobierno.palancasObjetivo.precioMaximo = 'estricto' as PriceCapMode; },
+      palanca: '5. servicios.obras',
+      days: 60,
+      highLabel: 'nivel 5',
+      lowLabel: 'nivel 0',
+      high: (s) => { s.gobierno.palancasObjetivo.servicios.obras = 5; },
+      low: (s) => { s.gobierno.palancasObjetivo.servicios.obras = 0; },
+      metricKeys: ['infra', 'stock', 'reserva'],
     },
     {
-      palanca: 'garantiaAlimentaria (100 vs 50)',
-      modo: 'garantía',
-      up: (s) => { s.gobierno.palancasObjetivo.garantiaAlimentaria = 100; },
-      dn: (s) => { s.gobierno.palancasObjetivo.garantiaAlimentaria = 50; },
+      palanca: '6. ayuda_social',
+      days: 60,
+      highLabel: '4.0 $/día',
+      lowLabel: '0.0 $/día',
+      high: (s) => { s.gobierno.palancasObjetivo.ayudaSocial = 4.0; },
+      low: (s) => { s.gobierno.palancasObjetivo.ayudaSocial = 0.0; },
+      metricKeys: ['apoyo', 'reserva'],
     },
     {
-      palanca: 'comercioExterior (+50 vs -50)',
-      modo: 'importar vs exportar',
-      up: (s) => { s.gobierno.palancasObjetivo.comercioExterior = 50; },
-      dn: (s) => { s.gobierno.palancasObjetivo.comercioExterior = -50; },
+      palanca: '7. garantia_alimentaria (liquidez baja, stock disponible)',
+      days: 90,
+      highLabel: '100%',
+      lowLabel: '0%',
+      high: (s) => {
+        s.gobierno.palancasObjetivo.garantiaAlimentaria = 100;
+        s.gobierno.palancasObjetivo.impuesto = 52;
+        s.gobierno.palancasObjetivo.ayudaSocial = 0;
+      },
+      low: (s) => {
+        s.gobierno.palancasObjetivo.garantiaAlimentaria = 0;
+        s.gobierno.palancasObjetivo.impuesto = 52;
+        s.gobierno.palancasObjetivo.ayudaSocial = 0;
+      },
+      metricKeys: ['hambre', 'apoyo', 'reserva'],
+    },
+    {
+      palanca: '8. precio_maximo (con sequía)',
+      days: 120,
+      drought: { intensidad: 85, inicioDia: 20, duracionDias: 90 },
+      highLabel: 'libre',
+      lowLabel: 'estricto',
+      high: (s) => { s.gobierno.palancasObjetivo.precioMaximo = 'libre' as PriceCapMode; },
+      low: (s) => { s.gobierno.palancasObjetivo.precioMaximo = 'estricto' as PriceCapMode; },
+      metricKeys: ['precio', 'stock', 'hambre', 'empResp', 'apoyo'],
+    },
+    {
+      palanca: '9. comercio_exterior',
+      days: 60,
+      highLabel: '+100%',
+      lowLabel: '-100%',
+      high: (s) => { s.gobierno.palancasObjetivo.comercioExterior = 100; },
+      low: (s) => { s.gobierno.palancasObjetivo.comercioExterior = -100; },
+      metricKeys: ['stock', 'reserva', 'foodProf', 'precio'],
+    },
+    {
+      palanca: '10. prensa',
+      days: 60,
+      highLabel: '45 $/per',
+      lowLabel: '0 $/per',
+      high: (s) => { s.gobierno.palancasObjetivo.prensa = 45; },
+      low: (s) => { s.gobierno.palancasObjetivo.prensa = 0; },
+      metricKeys: ['medAlc', 'medCred', 'medDep', 'reserva'],
     },
   ];
 
-  const rows = cases.map((c) => {
-    const up = eval60(c.up);
-    const dn = eval60(c.dn);
+  return cases.map((c) => {
+    const hi = evalRun({ days: c.days, drought: c.drought, mutator: c.high });
+    const lo = evalRun({ days: c.days, drought: c.drought, mutator: c.low });
+    const diffs: Record<string, { hi: number; lo: number; delta: number }> = {};
+    for (const k of c.metricKeys) {
+      diffs[k] = {
+        hi: hi[k],
+        lo: lo[k],
+        delta: Number((hi[k] - lo[k]).toFixed(2)),
+      };
+    }
     return {
       palanca: c.palanca,
-      modo: c.modo,
-      dApoyoUp: Number((up.apoyo.mean - base.apoyo.mean).toFixed(2)),
-      dApoyoDn: Number((dn.apoyo.mean - base.apoyo.mean).toFixed(2)),
-      dResUp: Number((up.reserva.mean - base.reserva.mean).toFixed(1)),
-      dResDn: Number((dn.reserva.mean - base.reserva.mean).toFixed(1)),
-      empRespUp: up.empRespMean,
-      empRespDn: dn.empRespMean,
+      comparacion: `${c.highLabel} vs ${c.lowLabel}`,
+      diffs,
     };
   });
-
-  return { n, base, rows };
 }
 
-console.log('=== 1. ELECCIONES: CRITERIO A & B (sin perturbacion, n=30) ===');
-console.log(JSON.stringify(runBatch('B_no_perturb', { n: 30, chaos: false, heur: false }), null, 2));
+function runNonDominanceSweeps(n: number) {
+  const levels: ServiceLevel[] = [0, 1, 2, 3, 4, 5];
 
-console.log('=== 2. ELECCIONES: CRITERIO C1 PASIVO CON SEQUIA + CAOS (n=30) ===');
-console.log(JSON.stringify(runBatch('C1_passive_drought', { n: 30, chaos: true, drought: PRESET.droughtPrueba, heur: false }), null, 2));
+  const sweepServiceElecciones = (lever: ServiceLeverId) =>
+    levels.map((lvl) => {
+      const b = runBatch(`elecciones_${lever}_${lvl}`, {
+        scenarioId: 'elecciones',
+        n,
+        chaos: true,
+        drought: { intensidad: 75, inicioDia: 140, duracionDias: 70 },
+        heur: false,
+        mutator: (s) => {
+          s.gobierno.palancasObjetivo.servicios[lever] = lvl;
+          s.gobierno.palancasVigentes.servicios[lever] = lvl;
+        },
+      });
+      return {
+        nivel: lvl,
+        winPct: b.winPct,
+        lostObjPct: b.lostObjNoDefeatPct,
+        defeatPct: b.defeatPct,
+        impagos: b.totalImpagos,
+        nomImpagos: b.totalNominaImpagos,
+        apoyoEnd: b.apoyoEnd.mean,
+        reservaEnd: b.reservaEnd.mean,
+        hambreEnd: b.hambreEnd.mean,
+      };
+    });
 
-console.log('=== 3. ELECCIONES: CRITERIO C2 HEURISTICO CON SEQUIA + CAOS (n=30) ===');
-console.log(JSON.stringify(runBatch('C2_heuristic_drought', { n: 30, chaos: true, drought: PRESET.droughtPrueba, heur: true }), null, 2));
+  const sweepZombiesSeguridad = () =>
+    levels.map((lvl) => {
+      const b = runBatch(`zombies_seg_${lvl}`, {
+        scenarioId: 'zombies',
+        n,
+        chaos: true,
+        mutator: (s) => {
+          s.gobierno.palancasObjetivo.servicios.seguridad = lvl;
+          s.gobierno.palancasVigentes.servicios.seguridad = lvl;
+        },
+      });
+      return {
+        nivelSeguridad: lvl,
+        winPct: b.winPct,
+        lostObjPct: b.lostObjNoDefeatPct,
+        defeatPct: b.defeatPct,
+        impagos: b.totalImpagos,
+        nomImpagos: b.totalNominaImpagos,
+        popPctEnd: b.popPctEnd.mean,
+        reservaEnd: b.reservaEnd.mean,
+        hambreEnd: b.hambreEnd.mean,
+      };
+    });
 
-console.log('=== 4. ELECCIONES: CRITERIO D SENSIBILIDAD A 60 DIAS (n=15) ===');
-console.log(JSON.stringify(runSensitivity(15), null, 2));
+  const sweepPriceModes = () =>
+    (['libre', 'moderado', 'estricto'] as PriceCapMode[]).map((mode) => {
+      const b = runBatch(`precio_${mode}`, {
+        scenarioId: 'elecciones',
+        n,
+        chaos: true,
+        drought: { intensidad: 80, inicioDia: 90, duracionDias: 90 },
+        mutator: (s) => {
+          s.gobierno.palancasObjetivo.precioMaximo = mode;
+          s.gobierno.palancasVigentes.precioMaximo = mode;
+        },
+      });
+      return {
+        modo: mode,
+        winPct: b.winPct,
+        lostObjPct: b.lostObjNoDefeatPct,
+        defeatPct: b.defeatPct,
+        apoyoEnd: b.apoyoEnd.mean,
+        hambreEnd: b.hambreEnd.mean,
+        minStock: b.minStock.mean,
+        empResponses: b.totalEnterpriseResponses,
+      };
+    });
 
-console.log('=== 5. ZOMBIES: PASIVO CON PLAGA + HORDAS + CAOS (n=20) ===');
-console.log(JSON.stringify(runBatch('Z_passive_chaos', { scenarioId: 'zombies', n: 20, chaos: true, heur: false }), null, 2));
+  const sweepTradeSteps = () =>
+    ([-100, -50, 0, 50, 100] as ForeignTradeStep[]).map((step) => {
+      const b = runBatch(`trade_${step}`, {
+        scenarioId: 'elecciones',
+        n,
+        chaos: false,
+        maxDays: 90,
+        mutator: (s) => {
+          s.gobierno.palancasObjetivo.comercioExterior = step;
+          s.gobierno.palancasVigentes.comercioExterior = step;
+        },
+      });
+      return {
+        escalon: step,
+        apoyoEnd: b.apoyoEnd.mean,
+        reservaEnd: b.reservaEnd.mean,
+        minStock: b.minStock.mean,
+        impagos: b.totalImpagos,
+      };
+    });
 
-console.log('=== 6. ZOMBIES: SEGURIDAD NIVEL 4 DESDE DIA 1 (n=20) ===');
-function runZombiesDefended(n: number) {
-  let wins = 0;
-  let totalImpagos = 0;
-  const popEnd: number[] = [];
-  const resEnd: number[] = [];
-  for (let seed = 1; seed <= n; seed++) {
-    const s = makeInitState(seed, 'zombies');
-    s.gobierno.palancasObjetivo.servicios.seguridad = 4;
-    s.gobierno.palancasObjetivo.impuesto = 43;
-    for (let d = 1; d < 180; d++) {
-      stepHeadlessDay(s);
-      runRandomDirectorDay(s);
-      if (s.gobierno.finanzas.impago && s.reloj.diasEnPeriodoFiscal === 0) totalImpagos++;
-      if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
-    }
-    const de = deriveCommunityStats(s);
-    if (s.resultado.victoriaCumplida) wins++;
-    popEnd.push(de.poblacionPct);
-    resEnd.push(s.gobierno.reserva);
-  }
   return {
-    n,
-    winPct: Number(((wins / n) * 100).toFixed(2)),
-    totalImpagos,
-    popEnd: summarize(popEnd),
-    resEnd: summarize(resEnd),
+    eleccionesSeguridad: sweepServiceElecciones('seguridad'),
+    eleccionesSalud: sweepServiceElecciones('salud'),
+    eleccionesObras: sweepServiceElecciones('obras'),
+    zombiesSeguridad: sweepZombiesSeguridad(),
+    precioMaximoConSequia: sweepPriceModes(),
+    comercioExterior90d: sweepTradeSteps(),
   };
 }
-console.log(JSON.stringify(runZombiesDefended(20), null, 2));
+
+function checkDeterminism(): boolean {
+  const runOnce = () => {
+    const s = makeInitState(42, 'elecciones');
+    for (let d = 1; d < 90; d++) {
+      stepHeadlessDay(s);
+      runRandomDirectorDay(s);
+    }
+    const ds = deriveCommunityStats(s);
+    return JSON.stringify({
+      reserva: s.gobierno.reserva,
+      stock: s.alimento.stock,
+      apoyo: ds.apoyoPct,
+      pop: ds.poblacionPct,
+      eventos: s.eventos.length,
+    });
+  };
+  return runOnce() === runOnce();
+}
+
+const compactView = (b: ReturnType<typeof runBatch>) => ({
+  label: b.label,
+  win: b.winPct,
+  lostObj: b.lostObjNoDefeatPct,
+  defeat: b.defeatPct,
+  impagos: b.totalImpagos,
+  nomImpagos: b.totalNominaImpagos,
+  empResps: b.totalEnterpriseResponses,
+  minRole: b.minAnyRoleCount,
+  invViol: b.invariantViolations,
+  initProf: [b.initFoodProfit.mean, b.initComProfit.mean],
+  prodCons1: [b.prod1.mean, b.cons1.mean],
+  ingRatio7: b.ingRatio7.mean,
+  apoyoEnd: b.apoyoEnd.mean,
+  hambreEnd: b.hambreEnd.mean,
+  popEnd: b.popPctEnd.mean,
+  resEnd: b.reservaEnd.mean,
+  minStock: b.minStock.mean,
+});
+
+console.log('=== 0. DETERMINISMO ===');
+console.log(JSON.stringify({ deterministic: checkDeterminism() }));
+
+console.log('=== 1. ELECCIONES: BASE SIN PERTURBACION (n=10) ===');
+console.log(JSON.stringify(compactView(runBatch('B_no_perturb', { n: 10, chaos: false, heur: false }))));
+
+console.log('=== 2. ELECCIONES: SEQUIA + CAOS PASIVO vs HEURISTICO vs BALANCEADO (n=10) ===');
+console.log(JSON.stringify(compactView(runBatch('C1_passive_drought', { n: 10, chaos: true, drought: PRESET.droughtPrueba, heur: false }))));
+console.log(JSON.stringify(compactView(runBatch('C2_heuristic_drought', { n: 10, chaos: true, drought: PRESET.droughtPrueba, heur: true }))));
+console.log(
+  JSON.stringify(
+    compactView(
+      runBatch('C3_active_balanced', {
+        n: 10,
+        chaos: true,
+        drought: PRESET.droughtPrueba,
+        dailyMutator: (s) => {
+          if (s.alimento.diasStock < 7) s.gobierno.palancasObjetivo.comercioExterior = 50;
+          else s.gobierno.palancasObjetivo.comercioExterior = 0;
+          if (s.alimento.precioMercado > ECON_CONSTANTS.precioBaseAlimento * 1.45) {
+            s.gobierno.palancasObjetivo.precioMaximo = 'moderado';
+          } else {
+            s.gobierno.palancasObjetivo.precioMaximo = 'libre';
+          }
+          const ds = deriveCommunityStats(s);
+          if (ds.apoyoPct < 52 && s.gobierno.reserva > 2500) {
+            s.gobierno.palancasObjetivo.impuesto = 34;
+            s.gobierno.palancasObjetivo.ayudaSocial = 1.5;
+          } else if (s.gobierno.reserva < 1500) {
+            s.gobierno.palancasObjetivo.impuesto = 42;
+            s.gobierno.palancasObjetivo.ayudaSocial = 0;
+          }
+        },
+      })
+    )
+  )
+);
+
+console.log('=== 3. SENSIBILIDAD DE LAS 10 PALANCAS (n=8) ===');
+console.log(JSON.stringify(runAll10LeversSensitivity(8)));
+
+console.log('=== 4. ZOMBIES: PASIVO vs SEG 3 vs SEG 4 (n=10) ===');
+console.log(JSON.stringify(compactView(runBatch('Z_passive', { scenarioId: 'zombies', n: 10, chaos: true }))));
+console.log(
+  JSON.stringify(
+    compactView(
+      runBatch('Z_seg3', {
+        scenarioId: 'zombies',
+        n: 10,
+        chaos: true,
+        mutator: (s) => {
+          s.gobierno.palancasObjetivo.servicios.seguridad = 3;
+        },
+      })
+    )
+  )
+);
+console.log(
+  JSON.stringify(
+    compactView(
+      runBatch('Z_seg4_tax43', {
+        scenarioId: 'zombies',
+        n: 10,
+        chaos: true,
+        mutator: (s) => {
+          s.gobierno.palancasObjetivo.servicios.seguridad = 4;
+          s.gobierno.palancasObjetivo.impuesto = 43;
+        },
+      })
+    )
+  )
+);
+
+console.log('=== 5. BARRIDO NO-DOMINANCIA (n=5 por punto) ===');
+console.log(JSON.stringify(runNonDominanceSweeps(5)));

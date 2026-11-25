@@ -44,7 +44,7 @@ Cuatro capas, de atrás hacia adelante:
 - **[propuesta]** Un gestor central abre, cierra, mueve y apila ventanas. Recuerda posición y estado, y permite varias abiertas a la vez.
 - **[decidido]** Ventanas:
   - Palancas (las 10 de GOBERNADOR §3) en tres grupos: finanzas (impuesto, salario público, ayuda social, prensa), servicios (seguridad, salud, obras, con su nivel de 0 a 5) y alimento (garantía, precio máximo, comercio exterior). Las del nivel 1.1 (`tope_emision`, `presion` y `acceso`, GOBERNADOR §9) se suman a estos grupos; su ubicación se define al cerrarlas.
-  - Economía: las empresas (ganancia, sueldos y respuesta vigente, ESTADOS §4), el precio de la comida y las despensas en resumen.
+  - Economía: las empresas (ganancia, factor de sueldos, empleados y vacantes, ECONOMIA §5), el precio de la comida y las despensas en resumen.
   - Gobierno y finanzas.
   - Comunidad (resumen derivado).
   - Ficha del NPC (la misma vista del panel lateral, desprendible).

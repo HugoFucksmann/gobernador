@@ -35,6 +35,7 @@ import {
   PersonalityTrait,
   PhenomenonType,
   PriceCapMode,
+  PrivateRoleId,
   PublicRoleId,
   RoleId,
   ServiceAreaId,
@@ -1565,6 +1566,28 @@ function estimateWorkerFloorPeriodCost(workers: Npc[], state: GameState): number
   return sumBaseDia * piso * ECON_CONSTANTS.periodoPagoDias;
 }
 
+function estimateNewWorkerPeriodRefWage(npc: Npc, role: PrivateRoleId, state: GameState): number {
+  const def = ROLE_CATALOG[role];
+  if (!def.ingreso) return 0;
+  const [minI, maxI] = def.ingreso;
+  const prod = Math.max(0.4, getNpcProductivity(npc, state));
+  return (minI + npc.economia.ingresoPos * (maxI - minI)) * prod * ECON_CONSTANTS.periodoPagoDias;
+}
+
+function pickNextLayoffTarget(pool: Npc[], isFoodEnterprise: boolean, state: GameState): Npc {
+  if (isFoodEnterprise) {
+    const tecPool = pool.filter((n) => n.rol === 'tecnico');
+    if (tecPool.length > 0) {
+      const chosen = tecPool[Math.floor(drawRand(state) * tecPool.length)];
+      const idx = pool.indexOf(chosen);
+      if (idx !== -1) pool.splice(idx, 1);
+      return chosen;
+    }
+  }
+  const idx = Math.floor(drawRand(state) * pool.length);
+  return pool.splice(idx, 1)[0];
+}
+
 function handleRolesAndAging(state: GameState): void {
   const dayOfYear = ((state.reloj.dia - 1) % 365) + 1;
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
@@ -1634,7 +1657,7 @@ function handleRolesAndAging(state: GameState): void {
     }
   }
 
-  // Enterprise gradual layoffs while respuesta === 'despedir' (ESTADOS §4)
+  // Enterprise gradual layoffs while respuesta === 'despedir' (EMPRESAS §4: tecnicos before agricultores)
   if (state.empresas.alimento.respuesta?.tipo === 'despedir') {
     const ent = state.empresas.alimento;
     const workers = state.npcs.filter(
@@ -1647,8 +1670,7 @@ function handleRolesAndAging(state: GameState): void {
       while (cutsLeft > 0 && pool.length > 0) {
         const currentCost = estimateWorkerFloorPeriodCost(pool, state);
         if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
-        const idx = Math.floor(drawRand(state) * pool.length);
-        const target = pool.splice(idx, 1)[0];
+        const target = pickNextLayoffTarget(pool, true, state);
         counts[target.rol]--;
         counts.desempleado++;
         target.rol = 'desempleado';
@@ -1680,8 +1702,7 @@ function handleRolesAndAging(state: GameState): void {
       while (cutsLeft > 0 && pool.length > 0) {
         const currentCost = estimateWorkerFloorPeriodCost(pool, state);
         if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
-        const idx = Math.floor(drawRand(state) * pool.length);
-        const target = pool.splice(idx, 1)[0];
+        const target = pickNextLayoffTarget(pool, false, state);
         counts.obrero--;
         counts.desempleado++;
         target.rol = 'desempleado';
@@ -1705,6 +1726,10 @@ function handleRolesAndAging(state: GameState): void {
 
   const foodFrozen = state.empresas.alimento.respuesta !== null;
   const comFrozen = state.empresas.comercio.respuesta !== null;
+  let foodHiresLeft = foodFrozen ? 0 : ECON_CONSTANTS.maxContratacionesPorDia;
+  let foodBudgetLeft = state.empresas.alimento.ultimaGanancia;
+  let comHiresLeft = comFrozen ? 0 : ECON_CONSTANTS.maxContratacionesPorDia;
+  let comBudgetLeft = state.empresas.comercio.ultimaGanancia;
 
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
@@ -1732,28 +1757,30 @@ function handleRolesAndAging(state: GameState): void {
       }
     }
 
-    if (npc.rol === 'desempleado' && state.reloj.dia % 3 === 0) {
-      const candidateRoles: Array<{ rol: RoleId; score: number }> = [];
+    if (npc.rol === 'desempleado') {
+      const candidateRoles: Array<{ rol: RoleId; score: number; refCost: number }> = [];
 
-      for (const pRole of PUBLIC_ROLES) {
-        const cap = getPublicRoleTargetCap(state, pRole, vivosCount);
-        const def = ROLE_CATALOG[pRole];
-        if (counts[pRole] < cap && npc.educacion.nivel >= def.educMin) {
-          const traitVal = def.afinidad ? getEffectiveTrait(npc, def.afinidad) : 50;
-          candidateRoles.push({
-            rol: pRole,
-            score: traitVal + state.gobierno.palancasVigentes.salarioPublico * 0.25,
-          });
+      if (state.reloj.dia % 3 === 0) {
+        for (const pRole of PUBLIC_ROLES) {
+          const cap = getPublicRoleTargetCap(state, pRole, vivosCount);
+          const def = ROLE_CATALOG[pRole];
+          if (counts[pRole] < cap && npc.educacion.nivel >= def.educMin) {
+            const traitVal = def.afinidad ? getEffectiveTrait(npc, def.afinidad) : 50;
+            candidateRoles.push({
+              rol: pRole,
+              score: traitVal + state.gobierno.palancasVigentes.salarioPublico * 0.25,
+              refCost: 0,
+            });
+          }
         }
       }
 
       for (const privRole of PRIVATE_ROLES) {
-        if (foodFrozen && (privRole === 'agricultor' || privRole === 'tecnico' || privRole === 'empresario')) {
-          continue;
-        }
-        if (comFrozen && (privRole === 'obrero' || privRole === 'comerciante')) {
-          continue;
-        }
+        const isFoodEmployee = privRole === 'agricultor' || privRole === 'tecnico';
+        const isComEmployee = privRole === 'obrero';
+        if (foodFrozen && (isFoodEmployee || privRole === 'empresario')) continue;
+        if (comFrozen && (isComEmployee || privRole === 'comerciante')) continue;
+
         const cap =
           privRole === 'obrero'
             ? effectiveObreroCap
@@ -1762,17 +1789,29 @@ function handleRolesAndAging(state: GameState): void {
             : Math.round(preset.topesPrivados[privRole] * popScale);
         const def = ROLE_CATALOG[privRole];
         if (counts[privRole] < cap && npc.educacion.nivel >= def.educMin) {
+          const refCost = estimateNewWorkerPeriodRefWage(npc, privRole, state);
+          if (isFoodEmployee && (foodHiresLeft <= 0 || foodBudgetLeft < refCost)) continue;
+          if (isComEmployee && (comHiresLeft <= 0 || comBudgetLeft < refCost)) continue;
+
           const traitVal = def.afinidad ? getEffectiveTrait(npc, def.afinidad) : 50;
-          candidateRoles.push({ rol: privRole, score: traitVal });
+          candidateRoles.push({ rol: privRole, score: traitVal, refCost });
         }
       }
 
       if (candidateRoles.length > 0) {
         candidateRoles.sort((a, b) => b.score - a.score);
-        const chosen = candidateRoles[0].rol;
+        const picked = candidateRoles[0];
+        const chosen = picked.rol;
         counts.desempleado--;
         counts[chosen]++;
         npc.rol = chosen;
+        if (chosen === 'agricultor' || chosen === 'tecnico') {
+          foodHiresLeft--;
+          foodBudgetLeft -= picked.refCost;
+        } else if (chosen === 'obrero') {
+          comHiresLeft--;
+          comBudgetLeft -= picked.refCost;
+        }
         const allowedZones = preset.zonaPorRol[chosen] || ['centro'];
         if (!allowedZones.includes(npc.zona)) {
           npc.zona = allowedZones[counts[chosen] % allowedZones.length];
@@ -1982,6 +2021,7 @@ function settleSingleEnterprise(
     id: string;
     ingresosAcum: number;
     sueldosAcum: number;
+    sueldosReferenciaAcum: number;
     diasPeriodo: number;
     ultimaGanancia: number;
     ultimoIngresoPeriodo: number;
@@ -1992,11 +2032,14 @@ function settleSingleEnterprise(
   vivos: Npc[],
   taxRate: number
 ): number {
-  const gananciaBruta = ent.ingresosAcum - ent.sueldosAcum;
+  const sueldosRef = ent.sueldosReferenciaAcum > 0 ? ent.sueldosReferenciaAcum : ent.sueldosAcum;
+  const alcanza = ent.ingresosAcum >= sueldosRef;
+  const gananciaBruta = Math.max(0, ent.ingresosAcum - ent.sueldosAcum);
   ent.ultimoIngresoPeriodo = Number(ent.ingresosAcum.toFixed(1));
   ent.ultimoSueldosPeriodo = Number(ent.sueldosAcum.toFixed(1));
   ent.ingresosAcum = 0;
   ent.sueldosAcum = 0;
+  ent.sueldosReferenciaAcum = 0;
   ent.diasPeriodo = 0;
 
   const duenoNpc = isFoodEnterprise
@@ -2005,8 +2048,21 @@ function settleSingleEnterprise(
       : null
     : null;
   const sociosNpcs = isFoodEnterprise ? [] : vivos.filter((n) => n.rol === 'comerciante');
+  const repNpc = duenoNpc || sociosNpcs[0] || null;
 
-  if (gananciaBruta >= 0) {
+  if (alcanza) {
+    if (ent.respuesta) {
+      const prevCausa = ent.respuesta.causa;
+      ent.respuesta = null;
+      emitSimEvent(state, {
+        id: nextSeqId(state, `ev_${state.reloj.dia}`),
+        dia: state.reloj.dia,
+        tipo: 'empresa_respuesta_fin',
+        zona: repNpc?.zona ?? 'centro',
+        empresaId: ent.id,
+        causa: prevCausa,
+      });
+    }
     ent.ultimaGanancia = Number(gananciaBruta.toFixed(1));
     const tax = gananciaBruta * (taxRate / 100);
     const netProfit = gananciaBruta - tax;
@@ -2028,60 +2084,31 @@ function settleSingleEnterprise(
     return tax;
   }
 
-  // Negative profit -> deterministic response rule (ESTADOS §4)
-  const deficit = Math.abs(gananciaBruta);
+  // Insufficient revenue for reference payroll -> deterministic response rule (EMPRESAS §4)
+  const deficit = Math.max(0, sueldosRef - ent.ultimoIngresoPeriodo);
   const employees = isFoodEnterprise
     ? vivos.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico')
     : vivos.filter((n) => n.rol === 'obrero');
 
   const piso = ECON_CONSTANTS.pisoSueldoPct / 100;
-  const neededFactor =
-    ent.ultimoSueldosPeriodo > 0.01 ? ent.ultimoIngresoPeriodo / ent.ultimoSueldosPeriodo : 0;
+  const neededFactor = sueldosRef > 0.01 ? ent.ultimoIngresoPeriodo / sueldosRef : 0;
   const chosen: EnterpriseResponseType =
     neededFactor >= piso || employees.length === 0 ? 'recortar_sueldos' : 'despedir';
-  const factorSueldo = clamp(neededFactor, piso, 1);
+  const factorSueldo = Number(clamp(neededFactor, piso, 1).toFixed(3));
 
   const origen = `empresa:${ent.id}/respuesta`;
   const causa = state.ultimaCausaPalanca || state.ultimoEventoClimaId;
   const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
   state.ultimoEventoEmpresaId = evId;
 
-  const repNpc = duenoNpc || sociosNpcs[0] || null;
-
-  emitSimEvent(state, {
-    id: evId,
-    dia: state.reloj.dia,
-    tipo: 'empresa_respuesta',
-    zona: repNpc?.zona ?? 'centro',
-    empresaId: ent.id,
-    duenoId: duenoNpc ? duenoNpc.id : sociosNpcs[0]?.id ?? null,
-    respuesta: chosen,
-    deficit: Number(deficit.toFixed(1)),
-    origen,
-    causa,
-  });
-
-  ent.ultimaGanancia = 0;
-  if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
-  for (const socio of sociosNpcs) socio.economia.ultimoIngresoNeto = 0;
-
-  if (chosen === 'recortar_sueldos') {
-    ent.respuesta = {
-      tipo: 'recortar_sueldos',
-      diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
-      duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
-      factorSueldo: Number(factorSueldo.toFixed(3)),
-      origen,
-      causa: evId,
-    };
-  } else {
+  let despidos = 0;
+  if (chosen === 'despedir') {
     const pool = [...employees];
     let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
     while (cutsLeft > 0 && pool.length > 0) {
       const currentCost = estimateWorkerFloorPeriodCost(pool, state);
       if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
-      const idx = Math.floor(drawRand(state) * pool.length);
-      const target = pool.splice(idx, 1)[0];
+      const target = pickNextLayoffTarget(pool, isFoodEnterprise, state);
       target.rol = 'desempleado';
       target.mapa.accion = 'buscando trabajo';
       target.mapa.destino = getDistrictPosition('desempleado', state);
@@ -2097,23 +2124,44 @@ function settleSingleEnterprise(
         state
       );
       cutsLeft--;
+      despidos++;
     }
-    ent.respuesta = {
-      tipo: 'despedir',
-      diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
-      duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
-      factorSueldo: piso,
-      origen,
-      causa: evId,
-    };
   }
+
+  emitSimEvent(state, {
+    id: evId,
+    dia: state.reloj.dia,
+    tipo: 'empresa_respuesta',
+    zona: repNpc?.zona ?? 'centro',
+    empresaId: ent.id,
+    duenoId: duenoNpc ? duenoNpc.id : sociosNpcs[0]?.id ?? null,
+    respuesta: chosen,
+    factor: factorSueldo,
+    despidos,
+    deficit: Number(deficit.toFixed(1)),
+    origen,
+    causa,
+  });
+
+  ent.ultimaGanancia = 0;
+  if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
+  for (const socio of sociosNpcs) socio.economia.ultimoIngresoNeto = 0;
+
+  ent.respuesta = {
+    tipo: chosen,
+    diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
+    duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
+    factorSueldo,
+    origen,
+    causa: evId,
+  };
 
   addLog(
     state,
     'economia',
     origen,
     `Empresa ${ent.id}: ${chosen.replace('_', ' ')}`,
-    `Déficit de $${deficit.toFixed(1)} en el cierre semanal; responde con ${chosen.replace('_', ' ')}.`,
+    `Déficit de $${deficit.toFixed(1)} en el cierre semanal; responde con ${chosen.replace('_', ' ')} (factor ${Math.round(factorSueldo * 100)}%).`,
     causa,
     evId
   );
@@ -2125,31 +2173,35 @@ function settleEnterprises(state: GameState): void {
   const vivos = state.npcs.filter((n) => n.vivo);
   const taxRate = state.gobierno.palancasVigentes.impuesto;
 
-  const foodEnt = state.empresas.alimento;
-  foodEnt.diasPeriodo += 1;
-  if (foodEnt.respuesta) {
-    foodEnt.respuesta.diasRestantes -= 1;
-    if (foodEnt.respuesta.diasRestantes <= 0) {
-      foodEnt.respuesta = null;
+  const tickEnterprise = (
+    ent: GameState['empresas']['alimento'] | GameState['empresas']['comercio'],
+    isFood: boolean
+  ) => {
+    ent.diasPeriodo += 1;
+    const isSettlementDay = ent.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias;
+    if (ent.respuesta && !isSettlementDay) {
+      ent.respuesta.diasRestantes -= 1;
+      if (ent.respuesta.diasRestantes <= 0) {
+        const prevCausa = ent.respuesta.causa;
+        ent.respuesta = null;
+        emitSimEvent(state, {
+          id: nextSeqId(state, `ev_${state.reloj.dia}`),
+          dia: state.reloj.dia,
+          tipo: 'empresa_respuesta_fin',
+          zona: 'centro',
+          empresaId: ent.id,
+          causa: prevCausa,
+        });
+      }
     }
-  }
-  if (foodEnt.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias) {
-    const netTax = settleSingleEnterprise(state, foodEnt, true, vivos, taxRate);
-    state.gobierno.acumuladoPeriodo.impuestos += netTax;
-  }
+    if (isSettlementDay) {
+      const netTax = settleSingleEnterprise(state, ent, isFood, vivos, taxRate);
+      state.gobierno.acumuladoPeriodo.impuestos += netTax;
+    }
+  };
 
-  const comEnt = state.empresas.comercio;
-  comEnt.diasPeriodo += 1;
-  if (comEnt.respuesta) {
-    comEnt.respuesta.diasRestantes -= 1;
-    if (comEnt.respuesta.diasRestantes <= 0) {
-      comEnt.respuesta = null;
-    }
-  }
-  if (comEnt.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias) {
-    const netTax = settleSingleEnterprise(state, comEnt, false, vivos, taxRate);
-    state.gobierno.acumuladoPeriodo.impuestos += netTax;
-  }
+  tickEnterprise(state.empresas.alimento, true);
+  tickEnterprise(state.empresas.comercio, false);
 }
 
 function runDailyEconomyAndNeeds(state: GameState): void {
@@ -2307,10 +2359,12 @@ function runDailyEconomyAndNeeds(state: GameState): void {
         }
       }
     }
+    const cheapBonusDias = cheapFoodBoost ? 2.5 : 0;
     const objetivo = clamp(
       ECON_CONSTANTS.objetivoBaseDias *
         (1 + ECON_CONSTANTS.kPrudenciaDespensa * (1 - valNorm) + ECON_CONSTANTS.kMiedoDespensa * miedoNorm) +
-        acaparaExtra,
+        acaparaExtra +
+        cheapBonusDias,
       1,
       ECON_CONSTANTS.despensaMaxDias
     );
@@ -2484,9 +2538,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       const baseWage = (minI + npc.economia.ingresoPos * (maxI - minI)) * prod;
 
       if (npc.rol === 'agricultor' || npc.rol === 'tecnico') {
+        state.empresas.alimento.sueldosReferenciaAcum += baseWage;
         bruto = baseWage * foodWageFactor;
         state.empresas.alimento.sueldosAcum += bruto;
       } else if (npc.rol === 'obrero') {
+        state.empresas.comercio.sueldosReferenciaAcum += baseWage;
         bruto = baseWage * comWageFactor;
         state.empresas.comercio.sueldosAcum += bruto;
       } else {
@@ -2541,10 +2597,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     state.empresas.comercio.ingresosAcum += livingPoolDomestico;
   }
 
+  const opScale = pop / 100;
   const areaOpDia: Record<ServiceAreaId, number> = {
-    seguridad: SERVICE_LEVEL_TABLE.seguridad[pal.servicios.seguridad].operacionPeriodo / FISCAL_PERIOD_DAYS,
-    salud: SERVICE_LEVEL_TABLE.salud[pal.servicios.salud].operacionPeriodo / FISCAL_PERIOD_DAYS,
-    infraestructura: SERVICE_LEVEL_TABLE.obras[pal.servicios.obras].operacionPeriodo / FISCAL_PERIOD_DAYS,
+    seguridad: (SERVICE_LEVEL_TABLE.seguridad[pal.servicios.seguridad].operacionPeriodo * opScale) / FISCAL_PERIOD_DAYS,
+    salud: (SERVICE_LEVEL_TABLE.salud[pal.servicios.salud].operacionPeriodo * opScale) / FISCAL_PERIOD_DAYS,
+    infraestructura: (SERVICE_LEVEL_TABLE.obras[pal.servicios.obras].operacionPeriodo * opScale) / FISCAL_PERIOD_DAYS,
   };
   const operacionDia = areaOpDia.seguridad + areaOpDia.salud + areaOpDia.infraestructura;
   const prensaDia = pal.prensa / FISCAL_PERIOD_DAYS;
@@ -3960,7 +4017,16 @@ function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         zona: ev.zona,
         npcId: ev.duenoId ?? undefined,
         titulo: `Empresa ${ev.empresaId}: ${ev.respuesta.replace('_', ' ')}`,
-        detalle: `Déficit de $${ev.deficit} al cierre semanal.`,
+        detalle: `Déficit de $${ev.deficit} al cierre semanal${typeof ev.factor === 'number' ? ` · factor ${Math.round(ev.factor * 100)}%` : ''}${ev.despidos ? ` · ${ev.despidos} despido(s)` : ''}.`,
+      };
+    case 'empresa_respuesta_fin':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Empresa ${ev.empresaId}: fin de respuesta`,
+        detalle: 'La empresa recuperó ingresos para cubrir los sueldos de referencia.',
       };
     case 'noticia':
       return {

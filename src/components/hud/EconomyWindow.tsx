@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, TrendingUp } from 'lucide-react';
-import { FISCAL_PERIOD_DAYS } from '../../data/catalogs';
+import { FISCAL_PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
 import { CommunityDerived, GameState, HistoryPoint } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
@@ -11,6 +11,7 @@ interface EconomyWindowProps {
   onFocus: () => void;
   onClose: () => void;
   onOpenPalancas: () => void;
+  onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
 const SparklineCard: React.FC<{
@@ -68,6 +69,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
   onFocus,
   onClose,
   onOpenPalancas,
+  onInspectCausal,
 }) => {
   const [tab, setTab] = useState<'resumen' | 'curvas'>('resumen');
   const fin = state.gobierno.finanzas;
@@ -96,6 +98,16 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
   const liveSociosCount = state.empresas.comercio.socios.filter((id) =>
     state.npcs.some((n) => n.id === id && n.vivo)
   ).length;
+  const preset = SCENARIO_PRESETS[state.config.escenarioId];
+  const popScale = Math.max(0.6, derived.poblacion / 100);
+  const foodEmployees = derived.roles.agricultor + derived.roles.tecnico;
+  const foodCap =
+    Math.round(preset.topesPrivados.agricultor * popScale) +
+    Math.round(preset.topesPrivados.tecnico * popScale);
+  const foodVacancies = Math.max(0, foodCap - foodEmployees);
+  const comEmployees = derived.roles.obrero;
+  const comCap = Math.round(preset.topesPrivados.obrero * popScale);
+  const comVacancies = Math.max(0, comCap - comEmployees);
 
   return (
     <div className="pointer-events-none fixed top-14 left-3 md:left-[555px]" style={{ zIndex }}>
@@ -275,26 +287,49 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                     key: 'alimento',
                     label: 'Productora de Alimento',
                     ownerLabel: foodOwner,
+                    employees: foodEmployees,
+                    vacancies: foodVacancies,
                     ent: state.empresas.alimento,
                   },
                   {
                     key: 'comercio',
                     label: 'Empresa de Comercio',
                     ownerLabel: `${liveSociosCount} socio(s)`,
+                    employees: comEmployees,
+                    vacancies: comVacancies,
                     ent: state.empresas.comercio,
                   },
-                ].map(({ key, label, ownerLabel, ent }) => (
+                ].map(({ key, label, ownerLabel, employees, vacancies, ent }) => (
                   <div
                     key={key}
                     className="flex items-center justify-between gap-2 bg-slate-800/45 border border-slate-800 rounded px-2.5 py-1.5 text-[11px]"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 space-y-0.5">
                       <div className="font-semibold text-slate-100 truncate">
                         {label} <span className="font-normal text-slate-400">({ownerLabel})</span>
                       </div>
+                      <div className="text-[10px] text-slate-400 font-mono tabular-nums">
+                        Empleados: {employees} · Vacantes: {vacancies}
+                      </div>
                       {ent.respuesta && (
-                        <div className="text-[10px] text-amber-300">
-                          Respuesta: {ent.respuesta.tipo.replace('_', ' ')} ({ent.respuesta.diasRestantes}d)
+                        <div className="flex items-center gap-1.5 text-[10px] text-amber-300 flex-wrap">
+                          <span>
+                            Respuesta: {ent.respuesta.tipo.replace('_', ' ')} (sueldos{' '}
+                            {Math.round(ent.respuesta.factorSueldo * 100)}% · {ent.respuesta.diasRestantes}d)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onInspectCausal(
+                                `${label}: ${ent.respuesta!.tipo.replace('_', ' ')}`,
+                                ent.respuesta!.causa || ent.respuesta!.origen,
+                                `Los ingresos del período no alcanzaron a cubrir los sueldos de referencia de ${label}.`
+                              )
+                            }
+                            className="px-1.5 py-0.5 text-[9px] font-semibold bg-teal-700 hover:bg-teal-600 text-white rounded-sm"
+                          >
+                            ¿Por qué?
+                          </button>
                         </div>
                       )}
                     </div>

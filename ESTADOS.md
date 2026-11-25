@@ -1,4 +1,4 @@
-# Estados internos (borrador v0.39)
+# Estados internos (borrador v0.40)
 
 > Lo marcado **[cerrado]** está decidido; el resto es lo acordado hasta ahora, salvo lo listado en la sección 15. Los valores que se ajustan probando (constantes, coeficientes, umbrales, topes, plazos y valores iniciales) no viven acá: están en CALIBRACION.md y en el preset de cada escenario. Los números que aparecen en los ejemplos solo ilustran la forma de los datos. Escala 0-100 salvo donde se indique. Ejemplos escalados a unos 100 NPCs. Las palancas del gobernador están en GOBERNADOR.md; acá solo sus efectos sobre los estados. La economía es modular (sección 3.1).
 
@@ -128,7 +128,7 @@
 - `indicadores`: se acumulan con inversión y personal, y decaen con el tiempo. `seguridad` es el total de la ciudad; la defensa de cada zona se deriva de dónde están los policías y de su `integridad`, que se guarda acá (sección 14).
 - `palancas`: valores vigentes de las palancas del gobernador (estructura en GOBERNADOR.md), incluida `prensa`, que se reparte parejo entre los medios (sección 6).
 - `impago` (estado, se guarda): se evalúa en cada liquidación, porque el saldo solo existe ahí (sección 3.1). Queda activo desde una liquidación con faltante hasta la primera liquidación sin faltante (evento `impago_fin`, sección 14). Reglas: sección 12.
-- También son estado y se guardan, porque no se recalculan (sección 13): los **acumuladores del período fiscal** (ingresos y gastos que se liquidan cada `periodo_fiscal_dias`) y los **cambios de palanca pendientes** (los que entran en vigencia al día siguiente, GOBERNADOR §4).
+- También son estado y se guardan, porque no se recalculan (sección 13): los **acumuladores del período** (ingresos y gastos que se liquidan cada `periodo_dias`, ECONOMIA §3) y los **cambios de palanca pendientes** (los que entran en vigencia al día siguiente, GOBERNADOR §4).
 
 ### 3.1 Economía (esquema cerrado, extensión abierta)
 
@@ -150,7 +150,7 @@ interface SalidaEconomica {
 
 Se calcula una vez por día.
 
-- **Período fiscal:** ingresos y gastos se acumulan a diario con las palancas vigentes y se liquidan cada `periodo_fiscal_dias`. Es independiente del período del caos (sección 9).
+- **Período [cerrado]:** hay un solo día de pago cada `periodo_dias` para empresas, estado y medios. Ingresos y gastos se acumulan a diario con las palancas vigentes y se liquidan ese día. El calendario completo está en ECONOMIA §3. Es independiente del período del caos (sección 9).
 - **Extensión `fiscal`:** solo se activa sobre `base`. Agrega la emisión hasta el tope autorizado y la inflación dinámica (sección 12).
 - **Preset inicial:** elecciones y zombies arrancan en `base`. En elecciones, sin emisión: el límite del gasto es la reserva y el impago.
 - **Circuito del dinero [cerrado]:**
@@ -181,8 +181,8 @@ El alimento es parte de la economía y no depende directo del gobernador: lo pro
 ```json
 {
   "empresas": {
-    "alimento": { "dueno": "npc_44", "stock": 1500, "dias_stock": 15, "silo_dias": 25, "respuesta": null },
-    "comercio": { "socios": ["npc_12", "npc_19", "npc_23", "npc_30"], "respuesta": null }
+    "alimento": { "dueno": "npc_44", "stock": 1500, "dias_stock": 15, "silo_dias": 25, "factor": 1.0 },
+    "comercio": { "socios": ["npc_12", "npc_19", "npc_23", "npc_30"], "factor": 1.0 }
   },
   "alimento": { "consumo_por_npc": 1, "precio": 1.0 },
   "precio_base": 1.0
@@ -194,7 +194,7 @@ El alimento es parte de la economía y no depende directo del gobernador: lo pro
 - **Alimento:** emplea a los agricultores y a los técnicos. Es dueña del `stock`. Dueño: el empresario (`dueno`, o `null` si el puesto está vacante).
 - **Comercio:** vende la comida y los otros bienes, y emplea a los obreros. Socios: los comerciantes vivos (`socios`, puede quedar vacía), que se reparten la ganancia en partes iguales.
 - **Medios:** son privados simplificados (sección 6) y no entran en este circuito en el nivel 1.
-- `respuesta` (estado, se guarda): `null` o `{ "tipo": "recortar_sueldos", "dias_restantes": 4 }` (tipos: `recortar_sueldos` o `despedir`) con su `origen` y `causa` (sección 8). Los acumuladores de ingresos y sueldos del período de pago (`periodo_pago_dias`) también son estado de cada empresa y se guardan.
+- `factor` (estado, se guarda): el último factor de sueldos (ECONOMIA §5). Las ventas acumuladas del período y los despidos pendientes también son estado de cada empresa y se guardan.
 
 **Producción y stock.** La producción de los agricultores, multiplicada por la tecnificación de los técnicos (sección 2), va al `stock` de la empresa de alimento. `dias_stock` y `precio` se derivan. **Silo:** el `stock` tiene un tope de `silo_dias` días de consumo y lo que excede se pierde. Sin tope, un superávit chico se acumula sin límite y las sequías no tienen efecto.
 
@@ -204,14 +204,7 @@ El alimento es parte de la economía y no depende directo del gobernador: lo pro
 
 **Precio.** `precio` = min(precio de mercado, tope), con precio de mercado = `precio_base` × escasez (según `dias_stock`) × clima × (1 + inflación / 100), y tope = `precio_base` × el factor del modo de `precio_maximo` (palanca, GOBERNADOR §4; en modo `libre` no hay tope). Sube cuando el stock baja.
 
-**Sueldos y ganancia.** Cada empresa paga los sueldos de sus empleados (sección 12, Ingreso) y lo que le queda de las ventas (más, en la de alimento, lo cobrado por exportación) es ganancia de los dueños. La empresa no guarda caja: toda la ganancia pasa a los dueños y nunca es negativa, porque los sueldos se ajustan (respuesta, abajo). Los dueños solo pagan impuesto sobre una ganancia positiva. Se liquida cada `periodo_pago_dias` (CALIBRACION), con los ingresos y sueldos acumulados del período, para que un día flojo no dispare nada. Sin dueño ni socios, la ganancia sale del sistema.
-
-**Cuando una empresa no puede pagar los sueldos [decidido: regla fija].** El motor lo detecta en la liquidación (ingresos del período menores a los sueldos) y responde siempre igual, sin sorteo:
-
-1. `recortar_sueldos`: todos cobran menos, lo justo para cubrir la diferencia, con un piso (`piso_sueldo_pct`), durante `dias_respuesta`.
-2. `despedir`: si con el piso no alcanza, los empleados que sobran pasan a desempleados al ritmo `max_pase_desempleo_por_dia`, elegidos al azar con semilla.
-
-Mientras dura la respuesta, la empresa no cubre vacantes. Cada respuesta emite `empresa_respuesta` con origen `empresa:<id>/respuesta` y su `causa` (sección 8), así se puede explicar.
+**Sueldos, ganancia y empleo [cerrado].** Cada empresa reparte lo que vende en el período: una parte fija (`parte_sueldos`) va a sueldos, repartida según el sueldo de referencia de cada empleado, y el resto es ganancia de los dueños. Los sueldos suben y bajan con las ventas; con un recorte bajo el piso, la empresa despide, y con un fondo de sueldos holgado, contrata. La empresa no guarda caja y la ganancia nunca es negativa. Sin dueño ni socios, la ganancia sale del sistema. Regla completa: ECONOMIA §5.
 
 **Gasto de vida [decidido].** Los gastos fijos de un NPC son el impuesto y la comida. Lo que gasta de más (gasto de vida) varía por NPC: cada uno tiene su propia propensión al gasto, asignada al generar el mundo a partir de su personalidad y la semilla. Va a la empresa de comercio como ventas de otros bienes (se modela la plata, no los bienes). Así, cuando la gente gasta menos por miedo, impuestos o inflación, la empresa de comercio gana menos y responde, lo que baja aún más el gasto.
 
@@ -449,7 +442,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 }
 ```
 
-- `apoyo_pct`: % de electores con lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: % de electores que no pueden pagar su comida. `poblacion_pct`: NPCs vivos ÷ población inicial × 100 (la población inicial se fija al generar el mundo y se guarda, sección 13). **Denominadores [cerrado]:** `descontentos_pct`, `hambre_critica_pct` y el resto de los porcentajes se calculan sobre los NPCs vivos; `apoyo_pct` y `sin_dinero_pct`, sobre los **electores**: los NPCs vivos de 18 años o más, jubilados incluidos (los menores no votan y su comida la paga el estado). Si no hay electores, `apoyo_pct` vale 0. "Elector" no es lo mismo que "adulto" (18-64, sección 1). `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC. Para el gobernador también se resume el estado de las empresas: ganancia y respuesta vigente (sección 4).
+- `apoyo_pct`: % de electores con lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: % de electores que no pueden pagar su comida. `poblacion_pct`: NPCs vivos ÷ población inicial × 100 (la población inicial se fija al generar el mundo y se guarda, sección 13). **Denominadores [cerrado]:** `descontentos_pct`, `hambre_critica_pct` y el resto de los porcentajes se calculan sobre los NPCs vivos; `apoyo_pct` y `sin_dinero_pct`, sobre los **electores**: los NPCs vivos de 18 años o más, jubilados incluidos (los menores no votan y su comida la paga el estado). Si no hay electores, `apoyo_pct` vale 0. "Elector" no es lo mismo que "adulto" (18-64, sección 1). `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías de la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC. Para el gobernador también se resume el estado de las empresas: ganancia, factor de sueldos y empleo (ECONOMIA §5).
 
 - **Historial [cerrado]:** excepción acotada a "lo derivado no se guarda". El motor agrega cada día un punto a una serie por indicador clave (`reserva`, `inflacion`, `satisfaccion_media`, `hambre_critica_pct`, `apoyo_pct`, `poblacion_pct`) y la UI solo la lee (UI §5). Es un registro de lectura: ninguna regla lo usa y no es estado de simulación, pero entra en el guardado para recuperarlo al cargar la partida. Rendimiento: se escribe un valor por indicador por día, sin recalcular nada. Pasado el tope `historial_max_dias` (CALIBRACION), los días más viejos se compactan por promedio semanal. El registro de hechos del historial son los eventos (sección 14), que también se guardan.
 
@@ -483,7 +476,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 - **Impuestos:** recaudación = Σ (ingreso del grupo × tasa del grupo). Pagan todos los grupos con ingreso, incluido el público (sobre su salario) y los dueños (sobre su ganancia); los `sin_ingreso` no pagan. Las empresas no pagan impuesto propio. La pérdida por falta de estatales está en Servicios. El NPC cobra su **ingreso neto** = ingreso − impuesto, y su gasto diario sale del neto.
 - **Nómina:** empleados públicos × `salario_publico`.
 - **Pensiones:** jubilados × `pension_base`. Gasto obligatorio.
-- **Gasto diario del NPC:** primero la comida (recompra de despensa, sección 4), después un gasto de vida (% del ingreso neto propio de cada NPC, menor con codicia alta). Lo que sobra va a `dinero`. El gasto de vida va a la empresa de comercio (sección 4).
+- **Gasto diario del NPC:** primero la comida (recompra de despensa, sección 4), después un gasto de vida: una parte de su ingreso neto (según `propension_gasto`) más una parte de lo que tiene por encima de su colchón, para que lo ahorrado vuelva a circular (ECONOMIA §4). Lo que sobra va a `dinero`. El gasto de vida va a la empresa de comercio (sección 4).
 - **Ayuda social:** monto diario por persona (palanca) que reciben los desempleados y jubilados. Subsidiar servicios queda para el nivel 2 (HOJA_DE_RUTA §4).
 - **Operación de servicios:** cada nivel de seguridad, salud y obras tiene un costo de operación por período (CALIBRACION), aparte de la nómina de sus puestos.
 - **Saldo** = ingresos − (nómina + pensiones + garantía alimentaria + ayuda social + operación de servicios + prensa). Si es positivo, va a la `reserva`. Las importaciones de alimento no entran en el saldo: se pagan de la `reserva` en el momento. Si la reserva no alcanza, la compra se reduce a lo que la reserva cubre.
@@ -528,7 +521,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 
 - **Economía:** el módulo `base` es el del nivel 1 y la extensión `fiscal` llega en el nivel 1.1 (HOJA_DE_RUTA §3) (ver 3.1). Son lógica del núcleo. Los dos comparten la misma salida (sección 3.1): sumar la extensión no cambia lo ya construido.
 - **Calibración:** los valores que se ajustan probando, los criterios de arranque de un mundo y el plan de pruebas están en CALIBRACION.md. Los valores calibrados de cada escenario viven en su preset (`presets/*.json`) y el historial de rondas, en el informe de calibración.
-- **Guardado [cerrado]:** cada guardado es un archivo, en un formato independiente del lenguaje (JSON versionado y comprimido), para que cualquier implementación del motor lo lea igual (UI §11). Contiene: `version_formato`, la semilla, la población inicial (base de `poblacion_pct`), la configuración efectiva del mundo (con los valores del preset ya aplicados, para que un cambio futuro del preset no altere una partida guardada, y con las marcas de "configuración de prueba"), el estado completo del último día cerrado, es decir, todo lo que es estado y no se recalcula: NPCs (incluidos `internado`, `propension_gasto` y `cumple_dia`), gobierno (con el estado de impago, los acumuladores del período fiscal y los cambios de palanca pendientes), clima, medios, integridad y empresas (con su respuesta vigente, los días que le quedan y los acumuladores del período de pago), con el estado del generador de azar, las elecciones guardadas del clasificador y los textos generativos (sección 9), el registro de eventos y el historial (sección 10). El resultado del objetivo (`victoria` u `objetivo_perdido`) sale del registro de eventos y no se guarda aparte. Se retoma desde esa foto y no reproduciendo la partida desde el día 1, así que cargar cuesta lo mismo en el día 10 que en el 300. La foto se toma en memoria al cierre de un día y se escribe en segundo plano: no pausa ni frena la simulación. Escritura segura: se escribe a un archivo temporal y se renombra al terminar, así un corte no deja un guardado roto. Cada partida tiene un guardado manual y un autoguardado periódico (UI §13; período en CALIBRACION). Un guardado de otra versión de formato se migra si hay migración y, si no, se rechaza con un aviso claro.
+- **Guardado [cerrado]:** cada guardado es un archivo, en un formato independiente del lenguaje (JSON versionado y comprimido), para que cualquier implementación del motor lo lea igual (UI §11). Contiene: `version_formato`, la semilla, la población inicial (base de `poblacion_pct`), la configuración efectiva del mundo (con los valores del preset ya aplicados, para que un cambio futuro del preset no altere una partida guardada, y con las marcas de "configuración de prueba"), el estado completo del último día cerrado, es decir, todo lo que es estado y no se recalcula: NPCs (incluidos `internado`, `propension_gasto` y `cumple_dia`), gobierno (con el estado de impago, los acumuladores del período y los cambios de palanca pendientes), clima, medios, integridad y empresas (con su último `factor`, las ventas acumuladas del período y los despidos pendientes), con el estado del generador de azar, las elecciones guardadas del clasificador y los textos generativos (sección 9), el registro de eventos y el historial (sección 10). El resultado del objetivo (`victoria` u `objetivo_perdido`) sale del registro de eventos y no se guarda aparte. Se retoma desde esa foto y no reproduciendo la partida desde el día 1, así que cargar cuesta lo mismo en el día 10 que en el 300. La foto se toma en memoria al cierre de un día y se escribe en segundo plano: no pausa ni frena la simulación. Escritura segura: se escribe a un archivo temporal y se renombra al terminar, así un corte no deja un guardado roto. Cada partida tiene un guardado manual y un autoguardado periódico (UI §13; período en CALIBRACION). Un guardado de otra versión de formato se migra si hay migración y, si no, se rechaza con un aviso claro.
 - **Edad en el nivel 1:** los NPCs envejecen sin morir por vejez ni nacer. La población baja solo por salud 0.
 - **Fuera del nivel 1 y a futuro:** ver HOJA_DE_RUTA §3 a §7. Lo preparado desde el nivel 1 para no volver atrás está en HOJA_DE_RUTA §6.
 
@@ -601,7 +594,9 @@ impago      {faltante, alcanza_nomina}
 impago_fin  {}   // primera liquidación sin faltante
 hospital_saturado {ocupacion_pct}
 noticia     {noticia, medio, tema}
-empresa_respuesta {empresa, respuesta}   // una empresa que no puede pagar responde; lleva origen y causa
+empresa_aumento  {empresa, factor}     // sueldos sobre la referencia; lleva origen y causa
+empresa_recorte  {empresa, factor}     // sueldos bajo la referencia
+empresa_despido  {empresa, cantidad}   // factor bajo el piso (ECONOMIA §5)
 palanca     {palanca, valor_anterior, valor_nuevo}   // cuando el cambio entra en vigencia; hecho raíz
 victoria    {metrica, valor}   // hito: la partida sigue
 objetivo_perdido {metrica, valor}   // hito: la partida sigue (perder el objetivo no es derrota)

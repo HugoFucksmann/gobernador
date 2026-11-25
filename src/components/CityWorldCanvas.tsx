@@ -158,7 +158,7 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'clinica',
     label: 'Clínica y Comisaría',
-    hint: 'Salud, seguridad y cupos (Palancas)',
+    hint: 'Salud, seguridad y obras (Palancas)',
     section: 'palancas',
     wx: 380,
     wy: 366,

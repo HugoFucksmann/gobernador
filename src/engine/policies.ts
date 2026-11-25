@@ -1,6 +1,6 @@
 import {
   ECON_CONSTANTS,
-  FISCAL_PERIOD_DAYS,
+  PERIOD_DAYS,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
   SERVICE_LEVEL_TABLE,
@@ -30,6 +30,7 @@ export interface PeriodBudgetEstimate {
   nominaEst: number;
   pensionesEst: number;
   garantiaEst: number;
+  comidaMenoresEst: number;
   ayudaSocialEst: number;
   operacionEst: number;
   prensaEst: number;
@@ -42,7 +43,7 @@ export interface PeriodBudgetEstimate {
 }
 
 export function daysToSettlement(state: GameState): number {
-  return Math.max(1, FISCAL_PERIOD_DAYS - state.reloj.diasEnPeriodoFiscal);
+  return Math.max(1, PERIOD_DAYS - state.reloj.diasEnPeriodo);
 }
 
 export function getServiceTargetJobs(
@@ -64,9 +65,11 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
   let jubilados = 0;
   let desempleados = 0;
   let comerciantes = 0;
+  let minorsCount = 0;
   let baseTaxableGrossDia = 0;
 
   for (const n of vivos) {
+    if (n.edad < 18) minorsCount++;
     if (n.rol === 'jubilado') jubilados++;
     if (n.rol === 'desempleado') desempleados++;
     if (n.rol === 'comerciante') comerciantes++;
@@ -75,9 +78,20 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
       if (def.publico) {
         baseTaxableGrossDia += ECON_CONSTANTS.salarioBasePublico * (levers.salarioPublico / 100);
       } else if (def.ingreso) {
-        baseTaxableGrossDia += (def.ingreso[0] + n.economia.ingresoPos * (def.ingreso[1] - def.ingreso[0])) * 0.78;
-      } else if (n.rol === 'empresario' || n.rol === 'comerciante') {
-        baseTaxableGrossDia += 14;
+        const factor =
+          n.rol === 'agricultor' || n.rol === 'tecnico'
+            ? state.empresas.alimento.factor
+            : n.rol === 'obrero'
+            ? state.empresas.comercio.factor
+            : 1;
+        baseTaxableGrossDia +=
+          (def.ingreso[0] + n.economia.ingresoPos * (def.ingreso[1] - def.ingreso[0])) * 0.65 * factor;
+      } else if (n.rol === 'empresario') {
+        baseTaxableGrossDia += Math.max(0, state.empresas.alimento.ultimaGanancia) / PERIOD_DAYS;
+      } else if (n.rol === 'comerciante') {
+        const livePartners = Math.max(1, state.empresas.comercio.socios.length);
+        baseTaxableGrossDia +=
+          Math.max(0, state.empresas.comercio.ultimaGanancia) / livePartners / PERIOD_DAYS;
       }
     }
   }
@@ -92,33 +106,36 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
   const totalPublicJobs = targetJobs.policia + targetJobs.medico + targetJobs.ingeniero + fixedJobs;
 
   const salarioDia = ECON_CONSTANTS.salarioBasePublico * (levers.salarioPublico / 100);
-  const nominaEst = totalPublicJobs * salarioDia * FISCAL_PERIOD_DAYS;
-  const pensionesEst = jubilados * ECON_CONSTANTS.pensionBase * FISCAL_PERIOD_DAYS;
-  const ayudaSocialEst = (desempleados + jubilados) * levers.ayudaSocial * FISCAL_PERIOD_DAYS;
+  const nominaEst = totalPublicJobs * salarioDia * PERIOD_DAYS;
+  const pensionesEst = jubilados * ECON_CONSTANTS.pensionBase * PERIOD_DAYS;
+  const ayudaSocialEst = (desempleados + jubilados) * levers.ayudaSocial * PERIOD_DAYS;
 
   const opSeg = (SERVICE_LEVEL_TABLE.seguridad[levers.servicios.seguridad].operacionPeriodo * pop) / 100;
   const opSal = (SERVICE_LEVEL_TABLE.salud[levers.servicios.salud].operacionPeriodo * pop) / 100;
   const opObr = (SERVICE_LEVEL_TABLE.obras[levers.servicios.obras].operacionPeriodo * pop) / 100;
   const operacionEst = opSeg + opSal + opObr;
 
+  const comidaMenoresEst =
+    acum.dias > 0
+      ? (acum.comidaMenores / acum.dias) * PERIOD_DAYS
+      : fin.comidaMenores > 0
+      ? fin.comidaMenores
+      : minorsCount * state.alimento.precio * ECON_CONSTANTS.consumoPorNpc * PERIOD_DAYS;
+
   let garantiaEst = 0;
-  if (acum.dias > 0) {
-    const baseGar = (acum.garantiaAlimentaria / acum.dias) * FISCAL_PERIOD_DAYS;
+  if (acum.dias > 0 && acum.garantiaAlimentaria > 0) {
+    const baseGar = (acum.garantiaAlimentaria / acum.dias) * PERIOD_DAYS;
     if (vig.garantiaAlimentaria > 0) {
       garantiaEst = baseGar * (levers.garantiaAlimentaria / vig.garantiaAlimentaria);
     } else {
-      garantiaEst = baseGar * (0.3 + (levers.garantiaAlimentaria / 100) * 0.7);
+      garantiaEst = baseGar * (levers.garantiaAlimentaria / 100);
     }
   } else if (fin.garantiaAlimentaria > 0) {
     if (vig.garantiaAlimentaria > 0) {
       garantiaEst = fin.garantiaAlimentaria * (levers.garantiaAlimentaria / vig.garantiaAlimentaria);
     } else {
-      garantiaEst = fin.garantiaAlimentaria;
+      garantiaEst = fin.garantiaAlimentaria * (levers.garantiaAlimentaria / 100);
     }
-  } else {
-    // Day 1 preview fallback before first tick accumulates
-    const minorsCount = vivos.filter((n) => n.edad < 18).length;
-    garantiaEst = minorsCount * state.alimento.precio * FISCAL_PERIOD_DAYS * 0.8;
   }
 
   const prensaEst = levers.prensa;
@@ -126,20 +143,30 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
   let ingresosEst = 0;
   const taxScale = vig.impuesto > 0 ? levers.impuesto / vig.impuesto : 0;
   if (fin.ingresos > 0) {
-    ingresosEst = vig.impuesto > 0 ? fin.ingresos * taxScale : baseTaxableGrossDia * (levers.impuesto / 100) * FISCAL_PERIOD_DAYS;
+    ingresosEst =
+      vig.impuesto > 0
+        ? fin.ingresos * taxScale
+        : baseTaxableGrossDia * (levers.impuesto / 100) * PERIOD_DAYS;
   } else if (acum.dias > 0 && acum.impuestos > 0) {
-    ingresosEst = vig.impuesto > 0 ? (acum.impuestos / acum.dias) * FISCAL_PERIOD_DAYS * taxScale : baseTaxableGrossDia * (levers.impuesto / 100) * FISCAL_PERIOD_DAYS;
+    ingresosEst =
+      vig.impuesto > 0
+        ? (acum.impuestos / acum.dias) * PERIOD_DAYS * taxScale
+        : baseTaxableGrossDia * (levers.impuesto / 100) * PERIOD_DAYS;
   } else {
-    ingresosEst = baseTaxableGrossDia * (levers.impuesto / 100) * FISCAL_PERIOD_DAYS;
+    ingresosEst = baseTaxableGrossDia * (levers.impuesto / 100) * PERIOD_DAYS;
   }
 
-  const gastosEst = nominaEst + pensionesEst + garantiaEst + ayudaSocialEst + operacionEst + prensaEst;
+  const gastosEst =
+    nominaEst + pensionesEst + comidaMenoresEst + garantiaEst + ayudaSocialEst + operacionEst + prensaEst;
   const saldoEst = ingresosEst - gastosEst;
 
   let importCostDiaEst = 0;
   if (levers.comercioExterior > 0 && comerciantes > 0) {
     const capacity = comerciantes * ECON_CONSTANTS.intercambioPorComerciante * (levers.comercioExterior / 100);
-    const extPrice = ECON_CONSTANTS.precioBaseAlimento * (1 + state.gobierno.inflacion / 100) * ECON_CONSTANTS.diferencialImportacion;
+    const extPrice =
+      ECON_CONSTANTS.precioBaseAlimento *
+      (1 + state.gobierno.inflacion / 100) *
+      ECON_CONSTANTS.diferencialImportacion;
     importCostDiaEst = capacity * extPrice;
   }
 
@@ -148,6 +175,7 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     nominaEst: Number(nominaEst.toFixed(1)),
     pensionesEst: Number(pensionesEst.toFixed(1)),
     garantiaEst: Number(garantiaEst.toFixed(1)),
+    comidaMenoresEst: Number(comidaMenoresEst.toFixed(1)),
     ayudaSocialEst: Number(ayudaSocialEst.toFixed(1)),
     operacionEst: Number(operacionEst.toFixed(1)),
     prensaEst: Number(prensaEst.toFixed(1)),

@@ -4,6 +4,7 @@ export type WindowId = 'palancas' | 'economia' | 'ciudad' | 'gaceta';
 export type CityTab = 'alertas' | 'vecinos' | 'bitacora';
 export type MapFilter = 'todos' | 'acciones' | 'descontentos' | 'hambre';
 export type MapLens =
+  | 'ninguna'
   | 'roles'
   | 'acciones'
   | 'satisfaccion'

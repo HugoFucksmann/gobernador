@@ -8,15 +8,27 @@
   "ECON_CONSTANTS": {
     "salarioBasePublico": 3.15,
     "pensionBase": 1.95,
+    "maxPaseDesempleoPorDia": 2,
+    "maxContratacionesPorDia": 2,
     "precioBaseAlimento": 2.55,
     "consumoPorNpc": 1.0,
-    "produccionBaseAgricultor": 5.35,
+    "siloDias": 25,
+    "despensaMaxDias": 14,
     "objetivoBaseDias": 3.4,
     "umbralRecompraDias": 3.6,
     "margenComercialPct": 26,
+    "periodoPagoDias": 7,
+    "pisoSueldoPct": 70,
+    "diasRespuestaEmpresa": 7,
     "propensionGastoBase": 0.85,
     "propensionGastoMin": 0.55,
     "propensionGastoMax": 0.95,
+    "produccionBaseAgricultor": 5.35,
+    "tecnicosPorAgricultor": 0.2,
+    "kTecnificacion": 1.5,
+    "intercambioPorComerciante": 10,
+    "diferencialImportacion": 1.3,
+    "stockMinExportarDias": 5,
     "costoBaseServicioPorPoblacion": 0.032,
     "fiscalUmbral": 40,
     "fiscalPendiente": 0.01
@@ -49,11 +61,6 @@
       "seguridad": 2,
       "salud": 3,
       "obras": 2
-    },
-    "rolesSinIngreso": {
-      "estudiante": 12,
-      "desempleado": 2,
-      "jubilado": 10
     },
     "caosDefault": {
       "maxAccionesPorPeriodo": 3,

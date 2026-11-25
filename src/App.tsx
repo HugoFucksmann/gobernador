@@ -95,6 +95,9 @@ export default function App() {
           onFocus={() => session.focusWindow('economia')}
           onClose={() => session.closeWindow('economia')}
           onOpenPalancas={() => session.openWindow('palancas')}
+          onInspectCausal={(title, ref, fallbackText) =>
+            session.openCausalInspect({ title, ref, fallbackText })
+          }
         />
       )}
 

@@ -191,12 +191,12 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
     {
       mode: 'moderado',
       label: 'Moderado',
-      capLabel: `Máx $${(state.alimento.precioBase * (PRICE_CAP_FACTORS.moderado ?? 1.4)).toFixed(2)}`,
+      capLabel: `Máx $${(state.alimento.precioBase * (PRICE_CAP_FACTORS.moderado ?? 1.25)).toFixed(2)}`,
     },
     {
       mode: 'estricto',
       label: 'Estricto',
-      capLabel: `Máx $${(state.alimento.precioBase * (PRICE_CAP_FACTORS.estricto ?? 1.05)).toFixed(2)}`,
+      capLabel: `Máx $${(state.alimento.precioBase * (PRICE_CAP_FACTORS.estricto ?? 0.6)).toFixed(2)}`,
     },
   ];
 

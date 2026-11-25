@@ -468,6 +468,39 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const inflacionInicial = preset.inflacionInicial;
   const diasStockInicial = Number((stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(1));
 
+  const foodWorkers = npcs.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico');
+  const foodWageEstPeriodo = Number(
+    (
+      foodWorkers.reduce((acc, w) => {
+        const range = ROLE_CATALOG[w.rol].ingreso!;
+        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * 0.72;
+      }, 0) * ECON_CONSTANTS.periodoPagoDias
+    ).toFixed(1)
+  );
+  const foodRevEstPeriodo = Number(
+    Math.max(
+      foodWageEstPeriodo * 1.18,
+      pop * ECON_CONSTANTS.consumoPorNpc * ECON_CONSTANTS.precioBaseAlimento * (1 - ECON_CONSTANTS.margenComercialPct / 100) * ECON_CONSTANTS.periodoPagoDias
+    ).toFixed(1)
+  );
+
+  const comWorkers = npcs.filter((n) => n.rol === 'obrero');
+  const comWageEstPeriodo = Number(
+    (
+      comWorkers.reduce((acc, w) => {
+        const range = ROLE_CATALOG[w.rol].ingreso!;
+        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * 0.72;
+      }, 0) * ECON_CONSTANTS.periodoPagoDias
+    ).toFixed(1)
+  );
+  const comRevEstPeriodo = Number(
+    Math.max(
+      comWageEstPeriodo * 1.2,
+      pop * ECON_CONSTANTS.consumoPorNpc * ECON_CONSTANTS.precioBaseAlimento * (ECON_CONSTANTS.margenComercialPct / 100) * ECON_CONSTANTS.periodoPagoDias +
+        pop * 4.5 * ECON_CONSTANTS.periodoPagoDias
+    ).toFixed(1)
+  );
+
   return {
     versionFormato: SAVE_FORMAT_VERSION,
     semilla,
@@ -547,10 +580,11 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         siloDias: ECON_CONSTANTS.siloDias,
         ingresosAcum: 0,
         sueldosAcum: 0,
+        sueldosReferenciaAcum: 0,
         diasPeriodo: 0,
-        ultimaGanancia: 0,
-        ultimoIngresoPeriodo: 0,
-        ultimoSueldosPeriodo: 0,
+        ultimaGanancia: Number(Math.max(0, foodRevEstPeriodo - foodWageEstPeriodo).toFixed(1)),
+        ultimoIngresoPeriodo: foodRevEstPeriodo,
+        ultimoSueldosPeriodo: foodWageEstPeriodo,
         respuesta: null,
       },
       comercio: {
@@ -558,10 +592,11 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         socios: comerciantesNpcs.map((c) => c.id),
         ingresosAcum: 0,
         sueldosAcum: 0,
+        sueldosReferenciaAcum: 0,
         diasPeriodo: 0,
-        ultimaGanancia: 0,
-        ultimoIngresoPeriodo: 0,
-        ultimoSueldosPeriodo: 0,
+        ultimaGanancia: Number(Math.max(0, comRevEstPeriodo - comWageEstPeriodo).toFixed(1)),
+        ultimoIngresoPeriodo: comRevEstPeriodo,
+        ultimoSueldosPeriodo: comWageEstPeriodo,
         respuesta: null,
       },
     },

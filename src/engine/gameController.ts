@@ -548,6 +548,7 @@ export class GameController {
           siloDias: loaded.alimento.siloDias,
           ingresosAcum: 0,
           sueldosAcum: 0,
+          sueldosReferenciaAcum: 0,
           diasPeriodo: 0,
           ultimaGanancia: 0,
           ultimoIngresoPeriodo: 0,
@@ -559,6 +560,7 @@ export class GameController {
           socios: liveComerciantes,
           ingresosAcum: 0,
           sueldosAcum: 0,
+          sueldosReferenciaAcum: 0,
           diasPeriodo: 0,
           ultimaGanancia: 0,
           ultimoIngresoPeriodo: 0,
@@ -568,6 +570,8 @@ export class GameController {
       };
     } else {
       loaded.empresas.comercio.socios = liveComerciantes;
+      loaded.empresas.alimento.sueldosReferenciaAcum = loaded.empresas.alimento.sueldosReferenciaAcum ?? 0;
+      loaded.empresas.comercio.sueldosReferenciaAcum = loaded.empresas.comercio.sueldosReferenciaAcum ?? 0;
     }
 
     this.state = loaded;
