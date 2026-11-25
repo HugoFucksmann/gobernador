@@ -1,4 +1,4 @@
-# Estados internos (borrador v0.35)
+# Estados internos (borrador v0.38)
 
 > Lo marcado **[cerrado]** está decidido; el resto es lo acordado hasta ahora, salvo lo listado en la sección 15. Los valores que se ajustan probando (constantes, coeficientes, umbrales, topes, plazos y valores iniciales) no viven acá: están en CALIBRACION.md y en el preset de cada escenario. Los números que aparecen en los ejemplos solo ilustran la forma de los datos. Escala 0-100 salvo donde se indique. Ejemplos escalados a unos 100 NPCs. Las palancas del gobernador están en GOBERNADOR.md; acá solo sus efectos sobre los estados. La economía es modular (sección 3.1).
 
@@ -11,6 +11,7 @@
   "id": "npc_07",
   "nombre": "Marta",
   "edad": 34,
+  "cumple_dia": 212,
   "educacion": { "nivel": 1, "progreso": 40 },
   "personalidad": {
     "valentia": 35,
@@ -26,30 +27,32 @@
     "satisfaccion": 65,
     "lealtad": 70
   },
-  "economia": { "ingreso_pos": 60, "dinero": 40, "despensa": 6 },
+  "economia": { "ingreso_pos": 60, "dinero": 40, "despensa": 6, "propension_gasto": 45 },
   "rol": "agricultor",
   "zona": "este",
+  "internado": false,
   "accion": null,
   "modificadores": [
     {
       "id": "mod_3",
-      "afecta": { "laboriosidad": -30 },
+      "afecta": { "miedo": 10, "rebeldia": 10 },
       "duracion_dias": 5,
       "origen": "accion:predicar/npc_12",
       "causa": "ev_88",
-      "texto": "Anda desanimada desde la discusión del pozo"
+      "texto": "Anda alterada desde que oyó predicar a Joaquín"
     }
   ]
 }
 ```
 
-- `edad`: define la **etapa** (se deriva): menor (<18) solo estudia, adulto (18-64) trabaja (en el nivel 1 solo estudian los menores), jubilado (65+) no trabaja. Cada NPC cumple años en su propio día, fijado al generar el mundo por semilla.
+- `edad`: define la **etapa** (se deriva): menor (<18) solo estudia, adulto (18-64) trabaja (en el nivel 1 solo estudian los menores), jubilado (65+) no trabaja. Cada NPC cumple años en su propio día (`cumple_dia`, día del año), fijado al generar el mundo por semilla; se guarda.
 - `educacion.nivel`: 0 sin estudios, 1 básico, 2 medio, 3 superior. Define a qué roles accede.
 - `personalidad` es el valor **base y fijo** de cada rasgo. Las reglas usan el valor **efectivo** = base + modificadores activos (temporales, con decaimiento), acotado a 0-100. `variables` cambian. Salud 0 = muere.
-- `economia` **[cerrado: cada NPC gana y gasta su dinero]**: `ingreso_pos` (0-100) es su posición fija dentro del rango de ingreso de su rol (da variedad). `dinero` es lo que tiene ahorrado. `despensa` son los días de comida que tiene en casa (sección 4). Los campos existen siempre.
+- `economia` **[cerrado: cada NPC gana y gasta su dinero]**: `ingreso_pos` (0-100) es su posición fija dentro del rango de ingreso de su rol (da variedad). `dinero` es lo que tiene ahorrado. `despensa` son los días de comida que tiene en casa (sección 4). `propension_gasto` (0-100) es su propensión al gasto de vida (sección 4): se asigna al generar el mundo a partir de su personalidad y la semilla y no cambia, como `ingreso_pos` (los efectos `gasta` y `ahorra` solo la modifican con modificadores temporales). Los campos existen siempre.
 - `accion`: acción de la tabla (sección 7) en curso, elegida por el director de caos (sección 9): el motor por afinidad y azar o, si la IA opcional está activa, con el clasificador. Si tiene el efecto `fuera_de_puesto` (sección 7.1), no produce ni cobra ingreso por su trabajo. Los empleados públicos mantienen su salario (propuesta), salvo en impago.
 - `modificadores`: canal único de efectos (sección 8), con `origen`.
-- `zona`: zona del mundo donde está el NPC (sección 14), asignada al generar el mundo según su rol. Su zona efectiva puede ser otra (acción con `zona_destino`, internación). Los policías cambian de `zona` al reubicarse.
+- `zona`: zona del mundo donde está el NPC (sección 14), asignada al generar el mundo según su rol. Su zona efectiva puede ser otra (acción con `zona_destino`, internación). Los policías cambian de `zona` al reubicarse. La zona efectiva es la que usan las reglas de lo que pasa en un lugar; la `zona` se usa solo para la asignación inicial y la reubicación de los policías (sección 14).
+- `internado` (bool): el NPC está en el hospital (sección 12, Salud). No se deriva de la salud, porque depende de las camas y del orden de espera, así que se guarda (sección 13).
 
 ## 2. Catálogo de roles y grupos (configuración, no es estado)
 
@@ -93,7 +96,7 @@
 - El gobernador fija **cupos** solo de los roles públicos. Los roles privados no tienen cupo del gobernador: se cubren por afinidad y vacantes, con un tope por escenario (`tope_privado[rol]`, parámetro del mundo en CALIBRACION, no palanca). Vacantes = tope − ocupados. Un puesto solo se cubre con NPCs que cumplan los requisitos.
 - Menores, estudiantes, desempleados y jubilados consumen y no producen ni ganan por trabajo. Estar desempleado baja la satisfacción.
 
-**Grupos** (para impuestos y subsidios). Pagan impuesto todos los grupos con ingreso, incluido el público (sobre su salario); los `sin_ingreso` no tienen ingreso gravable. Los subsidios apuntan a un grupo de roles:
+**Grupos** (para impuestos y subsidios). Pagan impuesto todos los grupos con ingreso, incluido el público (sobre su salario); los `sin_ingreso` no tienen ingreso gravable. Los subsidios apuntan a un grupo de roles, salvo `publico`, que no se subsidia (GOBERNADOR §4):
 
 ```json
 {
@@ -112,6 +115,7 @@
   "reserva": 4200,
   "inflacion": 0,
   "finanzas": { "ingresos": 0, "nomina": 0, "pensiones": 0, "garantia_alimentaria": 0, "deficit": 0, "emision": 0 },
+  "impago": false,
   "indicadores": { "seguridad": 40, "salud": 50, "educacion": 50, "infraestructura": 50 },
   "integridad": { "centro": 100, "norte": 100, "este": 100, "sur": 100, "oeste": 100 },
   "palancas": {}
@@ -120,9 +124,11 @@
 
 - `reserva`: stock de fondos. Lo no asignado del presupuesto va acá. También paga las compras de alimento (sección 12).
 - `inflacion` **[cerrado]**: variable del gobierno, no del escenario. Sube con la emisión y decae sin ella. Solo cambia con la extensión `fiscal`; sin ella vale el valor del preset. Se expresa en % (15 = precios ×1,15).
-- `finanzas`: resultado del último período (se recalcula, no se decide). `deficit` y `emision` se usan desde `fiscal`.
+- `finanzas`: resultado del último período (se recalcula, no se decide). `deficit` se usa también en `base` (con él se evalúa el impago, sección 12); `emision` solo se usa con `fiscal`.
 - `indicadores`: se acumulan con inversión y personal, y decaen con el tiempo. `seguridad` es el total de la ciudad; la defensa de cada zona se deriva de dónde están los policías y de su `integridad`, que se guarda acá (sección 14).
-- `palancas`: valores vigentes de las palancas del gobernador (estructura en GOBERNADOR.md). Las de prensa se guardan en cada medio (sección 6).
+- `palancas`: valores vigentes de las palancas del gobernador (estructura en GOBERNADOR.md), incluido `gasto_prensa`, que se reparte parejo entre los medios (sección 6).
+- `impago` (estado, se guarda): se evalúa en cada liquidación, porque el déficit solo existe ahí (sección 3.1). Queda activo desde una liquidación con faltante hasta la primera liquidación sin faltante (evento `impago_fin`, sección 14). Reglas: sección 12.
+- También son estado y se guardan, porque no se recalculan (sección 13): los **acumuladores del período fiscal** (ingresos y gastos que se liquidan cada `periodo_fiscal_dias`) y los **cambios de palanca pendientes** (los que entran en vigencia al día siguiente, GOBERNADOR §4).
 
 ### 3.1 Economía (esquema cerrado, extensión abierta)
 
@@ -188,6 +194,7 @@ El alimento es parte de la economía y no depende directo del gobernador: lo pro
 - **Alimento** (una por mundo): emplea a los agricultores y a los técnicos. Es dueña del `stock`. Dueño: el empresario.
 - **Comerciales** (una por comerciante): emplean a los obreros. Dueño: el comerciante.
 - **Medios:** son privados simplificados (sección 6) y no entran en este circuito en el nivel 1.
+- `respuesta` (estado, se guarda): `null` o `{ "tipo": "recortar_sueldos", "dias_restantes": 4 }` con su `origen` y `causa` (sección 8). Los acumuladores de ingresos y sueldos del período de pago (`periodo_pago_dias`) también son estado de cada empresa y se guardan.
 
 **Producción y stock.** La producción de los agricultores, multiplicada por la tecnificación de los técnicos (sección 2), va al `stock` de la empresa de alimento. `dias_stock` y `precio` se derivan. **Silo:** el `stock` tiene un tope de `silo_dias` días de consumo y lo que excede se pierde. Sin tope, un superávit chico se acumula sin límite y las sequías no tienen efecto.
 
@@ -236,7 +243,7 @@ El alimento es parte de la economía y no depende directo del gobernador: lo pro
 - **Preset zombies:** una plaga con `origen` en la zona de entrada del preset, que crece con el tiempo hasta llegar al máximo hacia el final del plazo (valores en CALIBRACION). Las hordas son fenómenos `plaga_zombie` adicionales, cortos y de intensidad alta, con su propio `origen` y `aviso_dias`.
 - **Escala de tiempo [cerrado]:** el día de juego es la unidad: la lógica económica y social corre una vez por día y la UI interpola entre ticks. Los segundos reales por día, los ticks por día y las velocidades están en CALIBRACION.
 
-**Fenómenos con daño individual:** `pandemia` y `plaga_zombie` **atacan** a NPCs individuales. No existe una salud de la comunidad que reduzcan: cada NPC se enferma o muere por separado. Cada día, cada fenómeno activo hace una tirada de ataque por cada NPC vivo que no esté internado, con probabilidad `exposicion_max` × intensidad/100 × `atenuacion`^distancia (distancia entre el `origen` y la zona efectiva del NPC; sin `origen`, 0). Si el tipo tiene protección, el ataque debe pasar las defensas de las zonas del camino más corto desde el `origen` hasta la zona del NPC, incluida la suya: cada zona lo repele con probabilidad `proteccion_max` × `defensa`/100, con `proteccion_max` (valor en CALIBRACION). Si alguna zona lo repele, el resultado es *repelido* en esa zona. Si pasa todas, es un **golpe**: resta a la salud un valor al azar dentro de `dano`. Si el tipo tiene protección, el golpe también daña la integridad de la zona (sección 14). Ambos resultados son eventos (sección 14). Una horda suma ataques a los de la plaga: cada fenómeno activo tira por separado. En el nivel 1 la exposición es pareja entre los NPCs de una misma zona. Qué pasa después del golpe: sección 12, Salud.
+**Fenómenos con daño individual:** `pandemia` y `plaga_zombie` **atacan** a NPCs individuales. No existe una salud de la comunidad que reduzcan: cada NPC se enferma o muere por separado. Cada día, cada fenómeno activo hace una tirada de ataque por cada NPC vivo que no esté internado, con probabilidad `exposicion_max` × intensidad/100 × `atenuacion`^distancia (distancia entre el `origen` y la zona efectiva del NPC; sin `origen`, 0). En la `pandemia` la probabilidad se multiplica además por (1 + `k_saneamiento` × (1 − `infraestructura`/100)): con poca infraestructura (saneamiento) se contagia más gente **[propuesta]**. Si el tipo tiene protección, el ataque debe pasar las defensas de las zonas del camino más corto desde el `origen` hasta la zona del NPC, incluida la suya: cada zona lo repele con probabilidad `proteccion_max` × `defensa`/100, con `proteccion_max` (valor en CALIBRACION). Si alguna zona lo repele, el resultado es *repelido* en esa zona. Si pasa todas, es un **golpe**: resta a la salud un valor al azar dentro de `dano`, multiplicado por la vulnerabilidad de su edad (sección 12, Salud). Si el tipo tiene protección, el golpe también daña la integridad de la zona (sección 14). Ambos resultados son eventos (sección 14). Una horda suma ataques a los de la plaga: cada fenómeno activo tira por separado. En el nivel 1 la exposición es pareja entre los NPCs de una misma zona. Qué pasa después del golpe: sección 12, Salud.
 
 | Tipo | Protección |
 |---|---|
@@ -247,7 +254,7 @@ La `exposicion_max`, el rango de `dano` y la `atenuacion` de cada tipo están en
 
 ## 6. Estado de los Medios
 
-**[cerrado]** Un medio es una entidad con parámetros. Un monopolio es el caso de un solo medio. Se elige en el panel. Por defecto, 1 a 3 medios. **No hay medio estatal:** todos los medios son privados y el estado puede ponerles plata (palanca de financiamiento). En el nivel 1 son privados simplificados: no tienen dueño NPC ni entran al circuito de empresas (sección 4).
+**[cerrado]** Un medio es una entidad con parámetros. Un monopolio es el caso de un solo medio. Se elige en el panel. Por defecto, 1 a 3 medios. **No hay medio estatal:** todos los medios son privados y el estado puede ponerles plata (palanca `gasto_prensa`). En el nivel 1 son privados simplificados: no tienen dueño NPC ni entran al circuito de empresas (sección 4).
 
 ```json
 [
@@ -258,15 +265,14 @@ La `exposicion_max`, el rango de `dano` y la `atenuacion` de cada tipo están en
     "credibilidad": 65,
     "alcance_pct": 80,
     "columnistas": ["npc_31", "npc_58"],
-    "finanzas": { "ingresos_propios": 30, "fondos_estado": 20, "dependencia_pct": 40 },
-    "intervencion": { "financiamiento": 100, "regulacion": 20 }
+    "finanzas": { "ingresos_propios": 30, "fondos_estado": 20, "dependencia_pct": 40 }
   }
 ]
 ```
 
-- `dependencia_pct` = `fondos_estado` / (`ingresos_propios` + `fondos_estado`). Con más dependencia, `afinidad_gobierno` sube sola y, si se nota, cae la credibilidad.
+- `dependencia_pct` = `fondos_estado` / (`ingresos_propios` + `fondos_estado`). Con más dependencia, `afinidad_gobierno` sube sola. Por debajo de `umbral_dependencia_pct` (CALIBRACION) no hay costo de credibilidad; por encima, la credibilidad cae. Si la dependencia vuelve bajo el umbral, la credibilidad se recupera de a poco. `afinidad_gobierno` sesga el tono de las noticias hacia el gobierno y, con él, el efecto de las noticias sobre la lealtad (el detalle va en el doc del director y la prensa).
 - Nivel 1: `ingresos_propios` es una constante por medio (valor en CALIBRACION). No hay balance ni quiebra del medio. Que dependa de alcance y credibilidad no tiene nivel asignado (HOJA_DE_RUTA §7). `columnistas` limitan cuánto puede publicar (`informacion`).
-- `intervencion`: palancas vigentes del gobernador sobre este medio (nivel 1: `financiamiento` y `regulacion`; las del nivel 1.1, en GOBERNADOR §4). `fondos_estado` = presupuesto de prensa del período × `financiamiento` / 100. Más `fondos_estado` sube `alcance_pct` (con rendimientos decrecientes) y la dependencia. `regulacion` baja `sensacionalismo` y `credibilidad`, y sube la rebeldía efectiva (modificador) de quienes consumen el medio.
+- **Gasto de prensa:** `fondos_estado` = presupuesto de prensa del período (palanca `gasto_prensa`) ÷ cantidad de medios. El reparto es parejo: el gobernador no puede favorecer a un medio, y la diferencia entre medios la da su `ingresos_propios`. Más `fondos_estado` sube `alcance_pct` (con rendimientos decrecientes) y la dependencia. El alcance sale del gasto vigente y no se acumula. En el nivel 1 esta es la única palanca sobre la prensa: `financiamiento` y `regulacion` por medio quedaron fuera, y se agrega otra solo si la jugabilidad lo pide.
 - **Consumo:** cada NPC elige qué medios consume según personalidad y lealtad, con tope en el alcance. Da burbujas sin relaciones entre NPCs.
 - **Noticia** (dato, no solo texto):
 
@@ -299,7 +305,7 @@ La `exposicion_max`, el rango de `dano` y la `atenuacion` de cada tipo están en
 
 - `requisitos` filtra quién puede; `afinidad` pesa la probabilidad; `efectos` son del catálogo (sección 7.1), acotados y aplicados por el motor; `duracion_dias` es siempre finito; `contagio` (0 a 1) es qué tan contagiosa es la acción: cavar un pozo casi nada, predicar bastante más (sección 7.2); `textos` son las variantes de la frase que ve el jugador (el motor elige una al azar para que no se repita). Cada acción de la tabla tiene su animación en la vista (UI §9): al ser un conjunto cerrado, siempre se representa igual.
 - `contexto` (opcional): condición del mundo para que la acción sea candidata (por ejemplo, `{ "fenomeno": "plaga_zombie" }` o `{ "zona_integridad_menor_a": 100 }`). El motor la evalúa por zona o para todo el mundo. Sin `contexto`, la acción es candidata siempre.
-- `zona_destino` (opcional): la zona a la que van los participantes mientras dura la acción (`protesta` y `fiesta`: `centro`). Cuenta para su exposición y para el contagio.
+- `zona_destino` (opcional): la zona a la que van los participantes mientras dura la acción (`protesta` y `organizar_fiesta`: `centro`). Cuenta para su exposición y para el contagio.
 - **Tabla inicial:** la tabla de arranque (20 acciones espontáneas y 4 de condición) está en ACCIONES.md. Se afina con las corridas.
 
 **Acciones de condición.** Hay dos tipos de acción: `espontanea` (por defecto: el director de caos elige entre las candidatas y cuenta contra los límites del caos) y `condicion` (consecuencia de una situación del mundo). Las de condición (huelga, protesta, saqueo) funcionan así:
@@ -307,8 +313,8 @@ La `exposicion_max`, el rango de `dano` y la `atenuacion` de cada tipo están en
 - El **motor** decide si pasa y cuánto: cuando se cumple el `disparador`, abre una ventana con su intensidad (cuántos NPCs, cuáles según requisitos, `afinidad` y azar, y la duración).
 - El **director de caos** decide cómo se expresa: elige entre las acciones de condición válidas para esa situación, por afinidad y azar o, si la IA opcional está activa, con el clasificador (sección 9). Nunca puede elegir que no pase nada.
 - Sin IA, el motor elige por afinidad y azar. Con el clasificador activo, si no responde antes del plazo (sección 9), elige el motor. El origen queda registrado (`accion:huelga/clasificador` o `accion:huelga/motor`).
-- Duración siempre finita. No cuentan contra los límites del caos (sección 9). El porcentaje que resuelve el motor con el clasificador activo sirve para evaluar si el modelo responde a tiempo.
-- Disparadores: `huelga` ← impago; `protesta` ← `descontentos_pct` por encima de su umbral; `saqueo` ← `hambre_critica_pct` por encima de su umbral (umbrales en CALIBRACION).
+- Duración siempre finita. No cuentan contra `max_acciones_por_periodo` ni las frena el respiro (sección 9). Sus participantes sí cuentan para los topes de efecto (como `max_pct_rol_fuera_de_puesto`), pero el tope no los frena (sección 7.1). El porcentaje que resuelve el motor con el clasificador activo sirve para evaluar si el modelo responde a tiempo.
+- Disparadores: `huelga` ← impago (puede volver a abrirse mientras dure); `protesta` ← `descontentos_pct` por encima de su umbral; `saqueo` ← `hambre_critica_pct` por encima de su umbral; (disparador de `disturbios`: pendiente de decisión del autor). Umbrales en CALIBRACION.
 
 ```json
 {
@@ -330,25 +336,25 @@ Una acción de la tabla es un **disfraz** (textos, animación, requisitos, afini
 
 | Efecto | Qué hace | A quién | Límite |
 |---|---|---|---|
-| `fuera_de_puesto` | No produce ni cobra por su trabajo (el público mantiene su salario, salvo en impago; un dueño sigue cobrando su ganancia) | Participante | `max_pct_rol_fuera_de_puesto` (sección 9) |
+| `fuera_de_puesto` | No produce ni cobra por su trabajo (el público mantiene su salario, salvo en impago; un dueño sigue cobrando su ganancia) | Participante | `max_pct_rol_fuera_de_puesto` (sección 9); frena solo al caos espontáneo |
 | `anima` | Sube o baja la satisfacción mientras dura | Participante o zona (según la acción) | Acotado por intensidad |
-| `agita` | Sube el miedo y la rebeldía efectiva (modificadores) | NPCs de la zona | Duración de la acción |
+| `agita` | Sube el miedo y la rebeldía efectiva (modificadores) | NPCs de la zona efectiva | Duración de la acción |
 | `acapara` | Sube el objetivo de despensa del participante mientras dura la acción: compra más de lo normal (no retira stock directamente) | Participante | Tope de despensa de la casa (sección 4) |
 | `moviliza` | Los participantes pasan a la `zona_destino` de la acción | Participante | Solo cambia la zona efectiva (sección 14) |
 | `decorativa` | Sin efecto en los datos: solo texto y animación | Ninguno | Ninguno |
 | `gasta` | Sube su propensión al gasto de vida (modificador temporal; la propensión base no cambia). Más ventas para las comerciales (sección 4) | Participante | Acotado por intensidad y por su `dinero` |
 | `ahorra` | Baja su propensión al gasto de vida (modificador temporal). Menos ventas para las comerciales | Participante | Acotado por intensidad |
-| `comparte` | Cede parte de su despensa a NPCs de su zona con la despensa baja. La comida se conserva: sale de uno y entra a otros | Participante y receptores | `max_pct_despensa_cedida` por día |
-| `difunde` | Crea un rumor temático en la zona (modificador con origen `rumor`, sección 8): `miedo` (sube el miedo), `descontento` (baja la satisfacción) o `esperanza` (sube la satisfacción y baja el miedo) | NPCs de la zona | Intensidad y duración; decae |
-| `repara` | Cuenta como reparador de su zona mientras dura (sección 14), sin ser obrero ni ingeniero | Zona | Intensidad; solo si la zona tiene daño |
-| `resguarda` | Suma a los policías de su zona con peso `peso_voluntario` (menor que 1), repartidos entre defensa y orden con la misma regla (sección 14) | Zona | `max_pct_voluntarios` de los policías equivalentes de la zona |
-| `cuida` | Sube la cura natural de los NPCs de su zona con salud baja y que no estén internados | NPCs de la zona | Intensidad; no reemplaza al hospital |
+| `comparte` | Cede parte de su despensa a NPCs de su zona efectiva con la despensa baja. La comida se conserva: sale de uno y entra a otros | Participante y receptores | `max_pct_despensa_cedida` por día |
+| `difunde` | Crea un rumor temático en la zona efectiva (modificador con origen `rumor`, sección 8): `miedo` (sube el miedo), `descontento` (baja la satisfacción) o `esperanza` (sube la satisfacción y baja el miedo) | NPCs de la zona efectiva | Intensidad y duración; decae |
+| `repara` | Cuenta como reparador de su zona efectiva mientras dura (sección 14), sin ser obrero ni ingeniero | Zona | Intensidad; solo si la zona tiene daño |
+| `resguarda` | Suma a los policías de su zona efectiva con peso `peso_voluntario` (menor que 1), repartidos entre defensa y orden con la misma regla (sección 14) | Zona | `max_pct_voluntarios` de los policías equivalentes de la zona efectiva |
+| `cuida` | Sube la cura natural de los NPCs de su zona efectiva con salud baja y que no estén internados | NPCs de la zona efectiva | Intensidad; no reemplaza al hospital |
 | `toma` | Obtiene comida del `stock` de la empresa de alimento sin pagar (suma a su despensa); la empresa pierde esa venta (sección 4) | Participante | Solo acciones de condición; tope diario por intensidad |
-| `vandaliza` | Resta `dano_vandalismo` por participante y día a la integridad de su zona (sección 14) | Zona | Solo acciones de condición (opcional, desactivada por defecto) |
+| `vandaliza` | Resta `dano_vandalismo` por participante y día a la integridad de su zona efectiva (sección 14) | Zona | Solo acciones de condición (opcional, desactivada por defecto) |
 
 - El motor aplica cada efecto como modificador con `origen` (sección 8). Siempre es acotado y con la duración de la acción.
 - La intensidad (`baja`, `media`, `alta`) la define el catálogo, y los valores calibrados viven en CALIBRACION y en el preset.
-- Los límites del caos se enganchan al **efecto**, no a la acción (sección 9). Si el tope de `fuera_de_puesto` está lleno, ninguna acción con ese efecto puede sumar a nadie más, sea un foco o un contagio.
+- Los límites del caos se enganchan al **efecto**, no a la acción (sección 9). Si el tope de `fuera_de_puesto` está lleno, el caos espontáneo con ese efecto (foco o contagio) no suma a nadie más. Las acciones de condición no se frenan por el tope, pero sus participantes cuentan para él: la consecuencia ganada pasa por delante del caos decorativo y evita que una huelga y abandonos espontáneos vacíen un rol a la vez.
 - Las acciones de condición (huelga, protesta, saqueo, disturbios) usan el mismo catálogo. `toma` y `vandaliza` solo las usan ellas: el caos espontáneo nunca roba ni destruye, solo lo hace una consecuencia ganada **[propuesta]**.
 - Todos los efectos son reversibles o acotados: ninguno destruye algo de forma permanente, salvo el daño a la integridad (que se repara) y la comida tomada (que la empresa deja de vender).
 - Ejemplo de contraste: cavar un pozo saca al NPC de su puesto y casi no se contagia. Predicar no lo saca del puesto, pero se propaga y agita a la zona.
@@ -363,10 +369,10 @@ Es la misma mecánica para las acciones espontáneas y para los fenómenos con d
 
 | | Acción espontánea | Fenómeno con daño |
 |---|---|---|
-| Fuente | Una acción en curso en la zona | El fenómeno, desde su `origen` |
+| Fuente | Una acción en curso en la zona efectiva | El fenómeno, desde su `origen` |
 | Contagiosidad | `contagio` de la acción | `exposicion_max` × intensidad |
-| Exposición | % de NPCs de la zona que ya la hacen | `atenuacion`^distancia |
-| Freno | Orden y satisfacción de la zona (sección 14) | `defensa` de las zonas del camino (plaga zombie). La pandemia no tiene freno previo |
+| Exposición | % de NPCs de la zona efectiva que ya la hacen | `atenuacion`^distancia |
+| Freno | Orden y satisfacción de la zona efectiva (sección 14) | `defensa` de las zonas del camino (plaga zombie). La pandemia no tiene freno previo |
 | Quién lo agarra | NPCs que cumplen los `requisitos`; la `afinidad` con su personalidad los hace más o menos susceptibles | NPCs vivos y no internados |
 | Resultado | El NPC hace la misma acción | Un golpe de salud |
 
@@ -381,7 +387,7 @@ Es la misma mecánica para las acciones espontáneas y para los fenómenos con d
 ## 8. Canal único de efectos y registro de causas (cerrado)
 
 - Todo efecto (acción, rumor, clima, noticia, palanca) es un `modificador`: *a este conjunto de NPCs, tal variable cambia tanto, por tanto tiempo*.
-- Todo modificador guarda su `origen`. Sirve para afinar y para que la prensa cuente causas reales. El registro de causas alimenta los eventos que lee la UI (sección 14).
+- Todo modificador guarda su `origen`, con la forma `tipo:id[/detalle]` (por ejemplo `accion:predicar/npc_12`, `accion:huelga/clasificador`, `accion:<id>/contagio`, `clima:plaga_zombie`, `noticia:n_41`, `estado:comercio`, `empresa:<id>/respuesta`). Sirve para afinar y para que la prensa cuente causas reales. El registro de causas alimenta los eventos que lee la UI (sección 14).
 - **Cadena de causas.** `origen` guarda la causa directa (tipo y fuente). Cada modificador y cada evento guarda además `causa`: el id del evento o modificador que lo provocó, si lo hay (un hecho raíz, como el clima o un cambio de palanca, no tiene). Para responder "¿por qué pasó esto?" (UI §8) el motor sigue `causa` hacia atrás hasta 5 pasos y entrega esa línea a la UI. Ejemplo: sequía → precio sube → hambre → protesta. Cada cambio de palanca emite el evento `palanca` (sección 14), así la cadena puede terminar en una decisión del jugador. Si un efecto viene de un estado acumulado y no de un cambio concreto, `causa` apunta al último cambio de la palanca que más influyó; si no hay uno claro, no tiene.
 - Los modificadores pueden afectar variables y rasgos efectivos, nunca el rasgo base. Al vencer, el rasgo vuelve a su base.
 - Un modificador también puede ser **instantáneo**: cambia una `variable` una sola vez, sin duración. Lo usan los golpes de salud y las curas (sección 12, Salud).
@@ -418,7 +424,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 
 **Qué cuenta contra cada límite:** `max_acciones_por_periodo` cuenta solo los **focos**, que son las acciones que elige el director. Los contagiados (sección 7.2) no cuentan. Los topes de efecto, como `max_pct_rol_fuera_de_puesto`, se aplican al efecto (sección 7.1), sin importar la acción ni si es un foco o un contagio. `duracion_max_dias` vale para todas.
 
-**Fuera de los límites:** las acciones de `condicion` (sección 7) y los efectos mecánicos del impago (sección 12) no pasan por estos topes ni por el respiro, que regulan solo el caos espontáneo.
+**Fuera de los límites:** las acciones de `condicion` (sección 7) y los efectos mecánicos del impago (sección 12) no se frenan por estos topes ni por el respiro, que regulan solo el caos espontáneo. Sus participantes sí cuentan para los topes de efecto, así que el caos espontáneo con ese efecto se frena antes (sección 7.1).
 
 **Pruebas:** el plan de simulación y pruebas, con y sin IA, está en CALIBRACION.md.
 
@@ -427,6 +433,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 ```json
 {
   "poblacion": 100,
+  "poblacion_pct": 100,
   "satisfaccion_media": 58,
   "apoyo_pct": 54,
   "descontentos_pct": 17,
@@ -445,9 +452,9 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 }
 ```
 
-- `apoyo_pct`: lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: NPCs que no pueden pagar su comida. `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC. Para el gobernador también se resume el estado de las empresas: ganancia y respuesta vigente (sección 4).
+- `apoyo_pct`: % de electores con lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: % de electores que no pueden pagar su comida. `poblacion_pct`: NPCs vivos ÷ población inicial × 100 (la población inicial se fija al generar el mundo y se guarda, sección 13). **Denominadores [cerrado]:** `descontentos_pct`, `hambre_critica_pct` y el resto de los porcentajes se calculan sobre los NPCs vivos; `apoyo_pct` y `sin_dinero_pct`, sobre los **electores**: los NPCs vivos de 18 años o más, jubilados incluidos (los menores no votan y su comida la paga el estado). Si no hay electores, `apoyo_pct` vale 0. "Elector" no es lo mismo que "adulto" (18-64, sección 1). `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC. Para el gobernador también se resume el estado de las empresas: ganancia y respuesta vigente (sección 4).
 
-- **Historial [cerrado]:** excepción acotada a "lo derivado no se guarda". El motor agrega cada día un punto a una serie por indicador clave (`reserva`, `inflacion`, `satisfaccion_media`, `hambre_critica_pct`, `apoyo_pct`, `poblacion`) y la UI solo la lee (UI §5). Es un registro de lectura: ninguna regla lo usa y no es estado de simulación, pero entra en el guardado para recuperarlo al cargar la partida. Rendimiento: se escribe un valor por indicador por día, sin recalcular nada. Pasado el tope `historial_max_dias` (CALIBRACION), los días más viejos se compactan por promedio semanal. El registro de hechos del historial son los eventos (sección 14), que también se guardan.
+- **Historial [cerrado]:** excepción acotada a "lo derivado no se guarda". El motor agrega cada día un punto a una serie por indicador clave (`reserva`, `inflacion`, `satisfaccion_media`, `hambre_critica_pct`, `apoyo_pct`, `poblacion_pct`) y la UI solo la lee (UI §5). Es un registro de lectura: ninguna regla lo usa y no es estado de simulación, pero entra en el guardado para recuperarlo al cargar la partida. Rendimiento: se escribe un valor por indicador por día, sin recalcular nada. Pasado el tope `historial_max_dias` (CALIBRACION), los días más viejos se compactan por promedio semanal. El registro de hechos del historial son los eventos (sección 14), que también se guardan.
 
 ## 11. Objetivo (condición sobre los datos de arriba)
 
@@ -462,13 +469,13 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 **Zombies**
 ```json
 {
-  "victoria": { "metrica": "poblacion", "op": ">=", "umbral": 40, "plazo_dia": 180 },
-  "derrota": { "metrica": "poblacion", "op": "<", "umbral": 40 }
+  "victoria": { "metrica": "poblacion_pct", "op": ">=", "umbral": 40, "plazo_dia": 180 },
+  "derrota": { "metrica": "poblacion_pct", "op": "<", "umbral": 40 }
 }
 ```
 
-- La derrota se evalúa en cualquier momento y termina la partida (evento `fin_partida`). La victoria se evalúa al llegar el plazo: es un hito que emite el evento `victoria` y la partida sigue. Los umbrales son parámetros del mundo.
-- **Objetivo y progreso visibles [cerrado].** El jugador ve siempre la métrica de victoria con su meta y los días restantes, y la métrica de derrota con su límite. Una flecha indica la tendencia respecto del período anterior, sin proyección. El indicador de derrota cambia de color cuando recorrió un tramo de la distancia entre su valor inicial y su límite (el tramo está en CALIBRACION). El panel aclara que la victoria se evalúa al llegar el plazo y, una vez cumplida, la marca como cumplida. Son datos derivados (sección 10): no hay estado nuevo.
+- La derrota se evalúa en cualquier momento y termina la partida (evento `fin_partida`). La victoria se evalúa una sola vez, al llegar el plazo: si se cumple, emite el evento `victoria`; si no, emite `objetivo_perdido {metrica, valor}`. En los dos casos la partida sigue: **solo la derrota termina la partida [cerrado]**. El resultado del plazo es definitivo y no se reevalúa. Perder el objetivo no es una derrota. Los umbrales son parámetros del mundo.
+- **Objetivo y progreso visibles [cerrado].** El jugador ve siempre la métrica de victoria con su meta y los días restantes, y la métrica de derrota con su límite. Una flecha indica la tendencia respecto del período anterior, sin proyección. El indicador de derrota cambia de color cuando recorrió un tramo de la distancia entre su valor inicial y su límite (el tramo está en CALIBRACION). El panel aclara que la victoria se evalúa al llegar el plazo y, una vez resuelto, muestra el objetivo como cumplido o perdido (tres estados: pendiente, cumplido, perdido). Son datos derivados (sección 10) y del registro de eventos (`victoria` u `objetivo_perdido`): no hay estado nuevo.
 
 ## 12. Reglas (borrador)
 
@@ -479,9 +486,11 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 - **Nómina:** empleados públicos × `salario_publico`.
 - **Pensiones:** jubilados × `pension_base`. Gasto obligatorio.
 - **Gasto diario del NPC:** primero la comida (recompra de despensa, sección 4), después un gasto de vida (% del ingreso neto propio de cada NPC, menor con codicia alta). Lo que sobra va a `dinero`. El gasto de vida va a las empresas comerciales (sección 4).
-- **Subsidios:** transferencia de dinero a los NPCs del grupo. Los decide el gobernador y apuntan a un grupo de roles (inyección directa). Subsidiar servicios queda para el nivel 2 (HOJA_DE_RUTA §4).
+- **Subsidios:** transferencia de dinero a los NPCs del grupo. Los decide el gobernador y apuntan a un grupo de roles (inyección directa), salvo el público, que no se subsidia (GOBERNADOR §4). Subsidiar servicios queda para el nivel 2 (HOJA_DE_RUTA §4).
 - **Disponible** = ingresos − nómina − pensiones − garantía alimentaria. Se reparte en presupuesto, subsidios y prensa. Lo no asignado va a `reserva`. Las compras de alimento (intercambio) no restan del disponible: se pagan de la `reserva`, para que importar comida no deje a los servicios sin presupuesto. Si la reserva no alcanza, la compra se reduce a lo que la reserva cubre.
 - **Déficit:** disponible < 0 → se usa la `reserva`; después, solo con la extensión `fiscal`, se emite hasta el tope autorizado (sube `inflacion`); si aún falta, hay impago. Con impago, los empleados públicos pierden satisfacción y productividad por regla del motor, y se dispara la acción de condición `huelga` (sección 7), que no depende de la IA.
+- **Impago: momento y fin [decidido].** El déficit solo existe en la liquidación (sección 3.1), así que el impago se evalúa en cada liquidación. Con faltante se emite `impago {faltante}` y queda activo hasta la primera liquidación sin faltante, cuando se emite `impago_fin`. La huelga puede volver a abrirse mientras dure.
+- **Qué se deja de pagar primero [decidido].** El faltante lo absorbe primero la nómina, prorrateada entre los empleados públicos. Si aún falta, se prorratean las pensiones y la garantía alimentaria. Así el hambre queda para una crisis mayor.
 - **Inflación:** sube con la emisión relativa a la economía y decae sin ella. Encarece el alimento, devalúa `reserva` y `dinero`. Los ingresos no se ajustan solos: la inflación les quita poder de compra y el gobernador ajusta a mano el salario público.
 - **Circulación:** el dinero circula en un circuito cerrado (sección 3.1): los NPCs pagan a las empresas, las empresas pagan sueldos y ganancias, los NPCs pagan impuestos y el estado devuelve nómina, pensiones, subsidios y garantía. Sale del sistema lo que se importa (`fraccion_gasto_exterior` y las compras de intercambio), los fondos de prensa que el estado da a los medios y la ganancia de una empresa sin dueño. Entra por las ventas de intercambio, por los `ingresos_propios` de los medios (que pagan a los periodistas, simplificación del nivel 1 **[propuesta]**) y, con `fiscal`, por la emisión. Si el total deriva (deflación o acumulación), se corrige calibrando, no con una regla nueva.
 
@@ -490,7 +499,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 - **Consumo y hambre:** cada NPC consume `consumo_por_npc` por día de su despensa (sección 4). Si la despensa llega a 0 y no pudo comprar, el hambre sube.
 - **Precio:** sección 4, incluido el tope de `precio_maximo`.
 - **Garantía alimentaria:** el estado paga un % del faltante de comida de los NPCs sin dinero suficiente. El faltante es lo que le falta pagar al NPC para comprar la recompra de su despensa. Costo = faltante × %. La comida de los menores la paga siempre el estado (100%).
-- **Intercambio:** el estado compra o vende alimento al exterior, hasta la capacidad de intercambio (comerciantes × `intercambio_por_comerciante`, CALIBRACION). Precio externo = `precio_base` × (1 + inflación / 100) × factor de sequía (sube con sequía y plaga). La compra cuesta más que la venta (el diferencial está en CALIBRACION). La compra se paga de la reserva (ver Disponible); la venta es ingreso. **Venta al exterior [propuesta]:** el estado compra el excedente a la empresa de alimento al precio interno vigente (de la `reserva`) y lo vende al exterior, así la empresa cobra lo que entrega y no se expropia stock. Sirve para sostener el precio con superávit. **Comida importada [decidido]:** lo que el estado compra al exterior se suma al `stock` de la empresa de alimento y entra al mercado como cualquier otra comida. Se compra al precio externo, sin tope. El `precio_maximo` solo limita el precio al que se vende en el mercado interno, así que importar con el tope por debajo del precio externo no genera pérdida oculta: el costo de la compra sale de la `reserva` y el faltante lo ve el gobernador. La venta al exterior es ingreso del estado (como antes).
+- **Intercambio:** el estado compra o vende alimento al exterior, hasta la capacidad de intercambio (comerciantes × `intercambio_por_comerciante`, CALIBRACION). La palanca `intercambio`, de -100 a 100, es el % de esa capacidad que se usa: 100 compra toda la capacidad y -100 vende toda. Precio externo = `precio_base` × (1 + inflación / 100) × factor de sequía (sube con sequía y plaga). La compra cuesta más que la venta (el diferencial está en CALIBRACION). La compra se paga de la reserva (ver Disponible); la venta es ingreso. **Venta al exterior [propuesta]:** el estado compra el excedente a la empresa de alimento al precio interno vigente (de la `reserva`) y lo vende al exterior, así la empresa cobra lo que entrega y no se expropia stock. Sirve para sostener el precio con superávit. **Comida importada [decidido]:** lo que el estado compra al exterior se suma al `stock` de la empresa de alimento y entra al mercado como cualquier otra comida. Se compra al precio externo, sin tope. El `precio_maximo` solo limita el precio al que se vende en el mercado interno, así que importar con el tope por debajo del precio externo no genera pérdida oculta: el costo de la compra sale de la `reserva` y el faltante lo ve el gobernador. La venta al exterior es ingreso del estado (como antes).
 
 **Servicios**
 
@@ -506,6 +515,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 - **Producción:** productividad = laboriosidad × salud × satisfacción × clima × infraestructura × factor fiscal × modificadores. Las variables se normalizan a 0-1; clima, infraestructura y factor fiscal son multiplicadores cercanos a 1. El factor fiscal vale 1 hasta una tasa umbral y baja linealmente por encima (umbral y pendiente en CALIBRACION). Si tiene una `accion` con el efecto `fuera_de_puesto` o está internado, no produce.
 - **Hambre:** sube cuando el NPC se queda sin comida en la despensa (`accesoComida` < 1) y baja al comer.
 - **Educación:** el estudiante suma progreso diario (más con docentes e inversión). A 100 sube de nivel.
+- **Qué resta salud [decidido]:** hay solo tres causas, y cada una tiene una palanca que la combate. (1) Los **golpes** de la plaga zombie y la pandemia (sección 5): se combaten con seguridad y policía (zombies), con infraestructura (pandemia) y con el hospital. (2) El **hambre crítica**: daño diario mientras el hambre pasa su umbral; se combate con las palancas de comida. (3) La **vulnerabilidad por edad**: los menores y los mayores de 65 reciben más daño por golpe (`k_vulnerabilidad`, CALIBRACION) y los jubilados arrancan con menos salud **[propuesta]**. No hay otras causas en el nivel 1: sin vejez, accidentes ni estrés (la satisfacción baja la productividad, no la salud). Cuando el hospital se satura, los que esperan en su casa solo tienen la cura natural, y por eso los golpes pesan más.
 - **Salud (individual).** Cada día, en este orden: (1) golpes de los fenómenos (sección 5); (2) daño por hambre crítica (hambre por encima de su umbral); (3) internación; (4) cura; (5) si la salud llega a 0, el NPC muere. Los golpes y las muertes se registran uno por uno con su origen (`clima:plaga_zombie`, `clima:pandemia`); el daño por hambre y las curas, agregados por día (sección 8). Un golpe no mata a un NPC sano, pero sí puede matar a uno débil.
 - **Hospital.** El NPC con salud < `umbral_hospital` pide cama. Camas = médicos activos × `pacientes_por_medico`. Se interna primero a los de menor salud; el resto espera en su casa. El internado no produce ni cobra por su trabajo (el público mantiene su salario) y se cura por día `cura_base` × (0,5 + 0,5 × indicador `salud` / 100). Recibe el alta con salud ≥ `alta`. Quien no está internado se cura `cura_natural` por día si su hambre está por debajo de su umbral. Los médicos dan las camas; la inversión en salud, la rapidez de cura. El internado está en el hospital (`centro`) y no recibe ataques en el nivel 1.
 - **Muerte.** El NPC sale de la población, su puesto queda vacante y, si era columnista, sale de su medio.
@@ -518,7 +528,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 
 - **Economía:** el módulo `base` es el del nivel 1 y la extensión `fiscal` llega en el nivel 1.1 (HOJA_DE_RUTA §3) (ver 3.1). Son lógica del núcleo. Los dos comparten la misma salida (sección 3.1): sumar la extensión no cambia lo ya construido.
 - **Calibración:** los valores que se ajustan probando, los criterios de arranque de un mundo y el plan de pruebas están en CALIBRACION.md. Los valores calibrados de cada escenario viven en su preset (`presets/*.json`) y el historial de rondas, en el informe de calibración.
-- **Guardado [cerrado]:** un archivo por partida, en un formato independiente del lenguaje (JSON versionado y comprimido), para que cualquier implementación del motor lo lea igual (UI §11). Contiene: `version_formato`, la semilla, la configuración efectiva del mundo (con los valores del preset ya aplicados, para que un cambio futuro del preset no altere una partida guardada, y con las marcas de "configuración de prueba"), el estado completo del último día cerrado (NPCs, gobierno, clima, medios, integridad) con el estado del generador de azar, las elecciones guardadas del clasificador y los textos generativos (sección 9), el registro de eventos y el historial (sección 10). Se retoma desde esa foto y no reproduciendo la partida desde el día 1, así que cargar cuesta lo mismo en el día 10 que en el 300. La foto se toma en memoria al cierre de un día y se escribe en segundo plano: no pausa ni frena la simulación. Escritura segura: se escribe a un archivo temporal y se renombra al terminar, así un corte no deja un guardado roto. Cada partida tiene un guardado manual y un autoguardado periódico (UI §13; período en CALIBRACION). Un guardado de otra versión de formato se migra si hay migración y, si no, se rechaza con un aviso claro.
+- **Guardado [cerrado]:** un archivo por partida, en un formato independiente del lenguaje (JSON versionado y comprimido), para que cualquier implementación del motor lo lea igual (UI §11). Contiene: `version_formato`, la semilla, la población inicial (base de `poblacion_pct`), la configuración efectiva del mundo (con los valores del preset ya aplicados, para que un cambio futuro del preset no altere una partida guardada, y con las marcas de "configuración de prueba"), el estado completo del último día cerrado, es decir, todo lo que es estado y no se recalcula: NPCs (incluidos `internado`, `propension_gasto` y `cumple_dia`), gobierno (con el estado de impago, los acumuladores del período fiscal y los cambios de palanca pendientes), clima, medios, integridad y empresas (con su respuesta vigente, los días que le quedan y los acumuladores del período de pago), con el estado del generador de azar, las elecciones guardadas del clasificador y los textos generativos (sección 9), el registro de eventos y el historial (sección 10). El resultado del objetivo (`victoria` u `objetivo_perdido`) sale del registro de eventos y no se guarda aparte. Se retoma desde esa foto y no reproduciendo la partida desde el día 1, así que cargar cuesta lo mismo en el día 10 que en el 300. La foto se toma en memoria al cierre de un día y se escribe en segundo plano: no pausa ni frena la simulación. Escritura segura: se escribe a un archivo temporal y se renombra al terminar, así un corte no deja un guardado roto. Cada partida tiene un guardado manual y un autoguardado periódico (UI §13; período en CALIBRACION). Un guardado de otra versión de formato se migra si hay migración y, si no, se rechaza con un aviso claro.
 - **Edad en el nivel 1:** los NPCs envejecen sin morir por vejez ni nacer. La población baja solo por salud 0.
 - **Fuera del nivel 1 y a futuro:** ver HOJA_DE_RUTA §3 a §7. Lo preparado desde el nivel 1 para no volver atrás está en HOJA_DE_RUTA §6.
 
@@ -542,35 +552,36 @@ El motor conoce el espacio solo por **zonas**. Las coordenadas, el movimiento y 
 
 - Cada NPC tiene una `zona` (sección 1), asignada al generar el mundo según su rol (configuración del escenario; por ejemplo, agricultores en la periferia). Su **zona efectiva** es la `zona_destino` de su acción en curso si la tiene; si está internado, el `centro`; si no, su `zona`.
 - Los fenómenos con daño tienen `origen` (sección 5).
+- **Qué zona usa cada regla [decidido]:** todo lo que pasa en un lugar usa la zona efectiva: el contagio, el % de NPCs con acción espontánea y de descontentos para el orden, la población para el orden, y los efectos `repara`, `cuida`, `resguarda` y `vandaliza`. Así una protesta en el `centro` baja el orden del `centro`, y los disturbios dañan donde están los manifestantes. La `zona` se usa solo para la asignación inicial y la reubicación de los policías.
 - **Mapa contiguo:** el grafo de vecindad tiene que poder dibujarse como un mapa sin cruces (grafo planar), para que dos zonas vecinas sean contiguas en la vista (UI §9). Es requisito de la configuración de cada mundo; el ejemplo de arriba lo cumple.
 
-**Defensa por zona** (derivada, no se guarda). `defensa[zona]` = min(100, `seguridad` × (1 − c + c × n × parte)) × (1 − `k_integridad` × (1 − `integridad`/100)), con `parte` = policías en defensa de la zona / policías totales, n = cantidad de zonas y c = `movilidad_defensa` y `k_integridad`. Sin policías, `parte` = 1/n. Con los policías todos en defensa, repartidos parejos, y la integridad en 100, `defensa` = `seguridad`. `seguridad` sigue siendo el indicador total (sección 3); la defensa de cada zona sale de dónde están los policías y de la integridad de la zona (abajo).
+**Defensa por zona** (derivada, no se guarda). `defensa[zona]` = min(100, `seguridad` × (1 − c + c × n × parte)) × (1 − `k_integridad` × (1 − `integridad`/100)), con `parte` = policías en defensa de la zona / policías totales, n = cantidad de zonas, c = `movilidad_defensa` (una constante) y `k_integridad` (otra constante distinta). Sin policías, `parte` = 1/n. Con los policías todos en defensa, repartidos parejos, y la integridad en 100, `defensa` = `seguridad`. `seguridad` sigue siendo el indicador total (sección 3); la defensa de cada zona sale de dónde están los policías y de la integridad de la zona (abajo).
 
 **Integridad por zona** (estado, se guarda; 0-100, arranca en 100). Mide cuánto aguanta la zona frente a los ataques.
 
 - **Daño:** cada golpe de un fenómeno con protección (`plaga_zombie`) resta `dano_integridad` a la integridad de la zona donde cae. La pandemia no la daña.
 - **Efecto:** una integridad baja reduce la `defensa` de la zona (fórmula de arriba), así que los ataques pasan más fácil y el daño se acumula.
-- **Reparación:** cada día suma a la integridad de la zona `rep_por_npc` × reparadores de esa zona × (0,5 + 0,5 × indicador `infraestructura` / 100), con tope 100. Reparadores: obreros e ingenieros de la zona que no estén internados ni con una `accion` con el efecto `fuera_de_puesto`. Reparar no reemplaza su producción.
+- **Reparación:** cada día suma a la integridad de la zona `rep_por_npc` × reparadores de esa zona × (0,5 + 0,5 × indicador `infraestructura` / 100), con tope 100. Reparadores: obreros e ingenieros cuya zona efectiva es esa y que no estén internados ni con una `accion` con el efecto `fuera_de_puesto`. Reparar no reemplaza su producción.
 - No agrega palancas: el gobernador la influye con el presupuesto de infraestructura y con los cupos de ingenieros.
 - Se desarrolla en el nivel 2 como construcción real (HOJA_DE_RUTA §4): solo cambia de dónde sale este número.
 
-**Reubicación.** Cada día, un % de los policías (valor en CALIBRACION) cambia de `zona` hacia la zona con más necesidad total, elegida con peso proporcional a esa necesidad. La necesidad total de una zona es su necesidad de defensa más su necesidad de orden (ver Reparto policial, abajo), sumadas tal cual **[propuesta: sin peso por escenario hasta que las corridas lo pidan]**. Si la necesidad total es 0 en todas, no se mueven. En elecciones se mueven solo por orden; en zombies, por la mezcla de las dos.
+**Reubicación.** Cada día, un % de los policías (valor en CALIBRACION) cambia de `zona` hacia una zona sorteada con peso proporcional a su necesidad total. No va siempre la de mayor necesidad: con el máximo, toda la policía iría a un solo lugar. La necesidad total de una zona es su necesidad de defensa más su necesidad de orden (ver Reparto policial, abajo), sumadas tal cual **[propuesta: sin peso por escenario hasta que las corridas lo pidan]**. Si la necesidad total es 0 en todas, no se mueven. En elecciones se mueven solo por orden; en zombies, por la mezcla de las dos.
 
 **Amenaza percibida por zona** (derivada): el mayor entre estos dos valores.
 
 - Aviso: en la zona de `origen` de un fenómeno anunciado o activo, el mejor valor de alcance × credibilidad / 100 entre las noticias de aviso vigentes (sección 6). Sin noticia, vale 0.
 - Golpes recientes: crece con la cantidad de golpes en esa zona dentro de una ventana de días reciente, con tope 100 (peso y ventana en CALIBRACION).
 
-La ciudadanía percibe, no sabe: un aviso tardío o poco creíble deja la defensa mal ubicada. El gobernador ve el aviso y su origen exactos (GOBERNADOR §7). En el nivel 1 no puede hablarle directo a la gente: su palanca es la prensa (financiamiento y regulación).
+La ciudadanía percibe, no sabe: un aviso tardío o poco creíble deja la defensa mal ubicada. El gobernador ve el aviso y su origen exactos (GOBERNADOR §7). En el nivel 1 no puede hablarle directo a la gente: su palanca es la prensa (el gasto de prensa).
 
 **Reparto policial: defensa y orden** (derivado, no se guarda). Los policías de cada zona se dedican a dos usos: **defensa** contra los fenómenos con protección (solo `plaga_zombie`; la pandemia, la sequía y la plaga de cultivos no se frenan con policía) y **orden** contra el caos espontáneo. Cada día, cada zona calcula dos necesidades (0-100):
 
 - Necesidad de defensa: su amenaza percibida (arriba).
-- Necesidad de orden: min(100, % de NPCs de la zona con una acción espontánea en curso + % de descontentos de la zona).
+- Necesidad de orden: min(100, % de NPCs de la zona efectiva con una acción espontánea en curso + % de descontentos de la zona efectiva).
 
 Los policías de la zona se reparten entre los dos usos en proporción a esas necesidades. Cada uso con necesidad mayor que 0 recibe al menos `min_reparto`. Si una necesidad es 0, la otra recibe todo; si las dos son 0, todos quedan en orden. En elecciones no hay amenaza, así que toda la policía queda en orden. En zombies la amenaza atrae policías a la defensa y deja menos para el orden. La reubicación entre zonas responde a la necesidad total de cada zona, defensa más orden (Reubicación, arriba).
 
-**Orden por zona** (derivado, no se guarda). `orden[zona]` = min(100, 100 × (policías en orden de la zona / población de la zona) / `objetivo_orden`), con `objetivo_orden` (por ejemplo, un policía cada tantos habitantes). Es el freno del contagio de las acciones espontáneas de esa zona (sección 7.2): contagio efectivo = `contagio` × (1 − `k_orden` × `orden`/100) × (1 − `k_satisfaccion` × satisfacción media de la zona/100), con `k_orden` y `k_satisfaccion` (valores en CALIBRACION). Solo afecta a las acciones espontáneas: las de condición (sección 7) no se modifican. El gobernador no fija este reparto: lo influye con los cupos y el presupuesto de seguridad. Una palanca para inclinarlo queda pendiente (GOBERNADOR §8).
+**Orden por zona** (derivado, no se guarda). `orden[zona]` = min(100, 100 × (policías en orden de la zona / población de la zona) / `objetivo_orden`), con `objetivo_orden` (por ejemplo, un policía cada tantos habitantes); la población de la zona cuenta por zona efectiva. Es el freno del contagio de las acciones espontáneas de esa zona (sección 7.2): contagio efectivo = `contagio` × (1 − `k_orden` × `orden`/100) × (1 − `k_satisfaccion` × satisfacción media de la zona/100), con `k_orden` y `k_satisfaccion` (valores en CALIBRACION). Solo afecta a las acciones espontáneas: las de condición (sección 7) no se modifican. El gobernador no fija este reparto: lo influye con los cupos y el presupuesto de seguridad. Una palanca para inclinarlo queda pendiente (GOBERNADOR §8).
 
 **Eventos (contrato con la UI).** Cada evento del motor lleva `id`, día, zona, actores, `origen` y, si lo hay, `causa` (el id del evento o modificador que lo provocó, sección 8):
 
@@ -587,11 +598,13 @@ integridad  {zona, valor}   // cambio diario
 orden       {zona, valor}   // cambio diario
 fenomeno_inicio, fenomeno_fin {fenomeno, zona_origen?}
 impago      {faltante}
+impago_fin  {}   // primera liquidación sin faltante
 hospital_saturado {ocupacion_pct}
 noticia     {noticia, medio, tema}
 empresa_respuesta {empresa, respuesta}   // una empresa que no puede pagar responde; lleva origen y causa
 palanca     {palanca, valor_anterior, valor_nuevo}   // cuando el cambio entra en vigencia; hecho raíz
 victoria    {metrica, valor}   // hito: la partida sigue
+objetivo_perdido {metrica, valor}   // hito: la partida sigue (perder el objetivo no es derrota)
 fin_partida {metrica, valor}   // solo derrota; su causa es el evento que cruzó el límite
 ```
 
@@ -603,7 +616,4 @@ Reglas de la UI sobre los eventos: UI §9 y §11.
 
 Las preguntas que se resuelven midiendo (calibración de salud, zonas, contagio, clasificador, plazos de la IA, textos y memoria) están en CALIBRACION.md. Acá quedan las de diseño.
 
-1. **Roles y niveles de educación:** se dejan los 14 roles y 4 niveles y se afinan después.
-2. **Modelo de salud individual:** confirmar los golpes (sección 5) y el hospital (sección 12, Salud).
-3. **Zonas y defensa:** confirmar el modelo (sección 14) y quiénes reparan.
-4. **Catálogo de efectos y tabla de acciones:** el catálogo (sección 7.1, 15 efectos) y las 24 acciones iniciales (ACCIONES.md) son la base de arranque. Falta afinar con las corridas qué efectos sobran o faltan y qué acciones nuevas pide cada escenario.
+No quedan preguntas abiertas de diseño en el nivel 1. Confirmados: los 14 roles y los 4 niveles de educación (se suman roles cuando el juego esté más pulido), el modelo de salud (sección 12), el modelo de zonas y defensa (sección 14) y el catálogo base de 15 efectos con las 24 acciones iniciales (ACCIONES.md). Se afinan con la simulación.

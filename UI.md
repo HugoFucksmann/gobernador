@@ -1,4 +1,4 @@
-# UI del juego: estructura (BORRADOR v0.13)
+# UI del juego: estructura (BORRADOR v0.15)
 
 > Solo la estructura de la interfaz final en Godot (nivel 2, HOJA_DE_RUTA). La UI de depuración del motor (nivel 1) es del prototipo y no se define acá. Los detalles (colores, tooltips, leyendas, estilo de ventanas) se definen después. Palancas: GOBERNADOR.md. Estados y reglas: ESTADOS.md. Idea general: IDEA_JUEGO.md. **[decidido]** lo fijó el autor; **[propuesta]** es base para pulir.
 
@@ -25,7 +25,7 @@
 1. Menú principal.
 2. Selección de escenario y panel de configuración del mundo (IDEA §5, sección 15).
 3. Partida.
-4. Fin de partida, solo por derrota: un resumen con el resultado, la línea de tiempo de los hechos principales y la cadena de causas de lo que decidió el final (evento `fin_partida`, ESTADOS §14). Al cumplir el objetivo no termina la partida: sale un aviso con un resumen corto y se puede seguir en el mundo.
+4. Fin de partida, solo por derrota: un resumen con el resultado, la línea de tiempo de los hechos principales y la cadena de causas de lo que decidió el final (evento `fin_partida`, ESTADOS §14). Al llegar el plazo del objetivo no termina la partida, se cumpla o no: sale un aviso (objetivo cumplido u objetivo perdido) con un resumen corto y se puede seguir en el mundo.
 
 ## 4. Estructura de la pantalla de partida
 
@@ -36,22 +36,22 @@ Cuatro capas, de atrás hacia adelante:
    - Barra superior: datos siempre exactos (reserva, ingresos, gastos, déficit, inflación, días de stock y avisos de fenómenos con su zona de origen), el objetivo con su progreso siempre visible (ESTADOS §11), reloj, pausa y velocidad.
    - Barra inferior: accesos a ventanas y selector de capas de lectura del mapa.
    - Zona de alertas.
-3. **Panel lateral:** alterna entre noticias y ficha del NPC.
+3. **Panel lateral:** alterna entre noticias y ficha del NPC. Es la vista rápida: la ventana correspondiente es la misma vista, desprendible (sección 5).
 4. **Ventanas flotantes** de gestión.
 
 ## 5. Sistema de ventanas
 
 - **[propuesta]** Un gestor central abre, cierra, mueve y apila ventanas. Recuerda posición y estado, y permite varias abiertas a la vez.
 - **[decidido]** Ventanas:
-  - Palancas por área (recaudación, gasto, alimento, cupos, prensa).
+  - Palancas por área (recaudación, gasto, alimento, cupos). El gasto de prensa está dentro de gasto.
   - Economía: las empresas (ganancia, sueldos y respuesta vigente, ESTADOS §4), el precio de la comida y las despensas en resumen.
   - Gobierno y finanzas.
   - Comunidad (resumen derivado).
-  - Ficha del NPC.
-  - Prensa (medios y noticias).
-  - Historial: gráficos de línea de los indicadores clave (reserva, hambre, satisfacción, inflación) y registro de hechos con filtro. Las series las guarda el motor y la ventana solo las lee (ESTADOS §10).
+  - Ficha del NPC (la misma vista del panel lateral, desprendible).
+  - Prensa: noticias (la misma vista del panel lateral, desprendible) y estado de los medios (alcance, credibilidad, dependencia).
+  - Historial: gráficos de línea de las 6 series del motor (reserva, inflación, satisfacción media, hambre crítica, apoyo y población) y registro de hechos con filtro. Las series las guarda el motor y la ventana solo las lee (ESTADOS §10).
   - Clima.
-  - Objetivo, con progreso claro y condición de derrota (el HUD lo muestra siempre en resumen). Al cumplirse la victoria queda marcado como cumplido.
+  - Objetivo, con progreso claro y condición de derrota (el HUD lo muestra siempre en resumen). Al llegar el plazo queda marcado como cumplido o perdido (pendiente, cumplido, perdido).
 - Toda palanca muestra su valor, su rango, sus efectos y costos antes de confirmar, el margen de cambio que le queda y los días que faltan para la próxima liquidación (GOBERNADOR §4, §5 y §7).
 
 ## 6. Interacción con el mundo
@@ -66,6 +66,7 @@ Cuatro capas, de atrás hacia adelante:
 ## 7. Control del tiempo
 
 - Velocidades y escala de tiempo: ESTADOS §5. Acelerar acelera la simulación, no la IA (IDEA §9).
+- **[decidido]** El motor es dueño del reloj: la UI pide pausar, reanudar y cambiar la velocidad, e interpola entre sus ticks (ESTADOS §5, sección 11).
 - **[decidido]** Nada pausa el juego salvo el usuario. Ninguna alerta ni evento frena la simulación.
 - **[decidido]** Se puede mirar y operar palancas en pausa. Cuándo rige un cambio de palanca: GOBERNADOR §4.
 
@@ -74,7 +75,7 @@ Cuatro capas, de atrás hacia adelante:
 - **Alertas:** avisos de hechos del motor, siempre exactos. Con aceleración se agrupan. Cada una permite ir al hecho y ver su causa. Nunca pausan el juego.
 - **Noticias:** la voz de la prensa, con sesgo, separada de las alertas: las alertas son hechos del motor y las noticias su versión, que puede llegar después. Cada noticia llega con medio, autor, tema, tono y alcance (ESTADOS §6). El texto puede ser de plantilla o generado (si la IA opcional está activa) y la UI los muestra igual.
 - **Capas del mapa:** lectura espacial de la comunidad.
-- **"¿Por qué pasó esto?" [decidido]:** desde cualquier alerta, noticia o NPC se abre una línea de 3 a 5 pasos clicables. La arma el motor siguiendo `causa` hacia atrás, hasta 5 pasos (ESTADOS §8), y la UI solo la muestra. Ejemplo: sequía → precio sube → más gente sin plata → hambre → protesta. Si el origen fue una decisión del jugador, la cadena termina en el cambio de palanca (evento `palanca`). Cada paso abre su detalle.
+- **"¿Por qué pasó esto?" [decidido]:** desde cualquier alerta, noticia o NPC se abre una línea de hasta 5 pasos clicables. La arma el motor siguiendo `causa` hacia atrás (ESTADOS §8), y la UI solo la muestra. Ejemplo: sequía → precio sube → más gente sin plata → hambre → protesta. Si el origen fue una decisión del jugador, la cadena termina en el cambio de palanca (evento `palanca`). Cada paso abre su detalle.
 - **Eventos colectivos** (ej. protesta): el motor decide quiénes participan, desde cuándo actúa el efecto y la zona de destino (ESTADOS §7). El movimiento de los NPCs hacia esa zona solo lo muestra la vista, sin cambiar el resultado. Los que se suman por contagio llegan como `accion_inicio` con origen `contagio` (ESTADOS §7.2) y la vista los anima como un grupo que se suma.
 
 ## 9. El mundo vivo
@@ -106,9 +107,16 @@ Cómo se ven los ataques zombie, las obras y la destrucción. El motor conoce el
 ## 11. Frontera entre UI y motor
 
 - **[propuesta]** El motor no depende de ninguna escena ni de la UI.
-- La UI solo **lee** el estado del motor (incluidas las series del historial, ESTADOS §10) y le **envía** dos cosas: las órdenes de palancas y el NPC en foco (el que el jugador selecciona). El foco queda reservado para el pensamiento generado a futuro (ESTADOS §9); en la v1 solo abre su ficha. No contiene lógica de juego.
+- La UI solo **lee** el estado del motor (incluidas las series del historial, ESTADOS §10) y le **envía comandos**. No contiene lógica de juego. Los comandos son:
+  - Palancas.
+  - NPC en foco (el que el jugador selecciona). Queda reservado para el pensamiento generado a futuro (ESTADOS §9); en la v1 solo abre su ficha.
+  - Pausar, reanudar y velocidad. El motor es dueño del reloj.
+  - Partida nueva (preset, configuración y semilla).
+  - Guardar y cargar.
+  - Opciones de IA.
+  - Depuración, solo en modo desarrollador (sección 16).
 - El estado cambia por día de juego (ESTADOS §5). La vista interpola entre actualizaciones para que no haya saltos.
-- **[decidido]** Este contrato (estado de lectura, eventos de ESTADOS §14, órdenes de palancas y NPC en foco) es una interfaz independiente del lenguaje. Cualquier implementación del motor lo cumple igual, así que cambiar dónde vive el motor no cambia la UI.
+- **[decidido]** Este contrato (estado de lectura, eventos de ESTADOS §14, los comandos de arriba) es una interfaz independiente del lenguaje. Cualquier implementación del motor lo cumple igual, así que cambiar dónde vive el motor no cambia la UI.
 - **[propuesta]** Mientras el motor existe solo en TypeScript, la UI de Godot se desarrolla reproduciendo partidas grabadas: el motor exporta el estado de cada día y los eventos, y Godot los reproduce. Así se construye y se prueba la UI (incluido el rendimiento con 1.000 NPCs) sin depender de dónde viva el motor final.
 - El mundo 3D, las ventanas y el HUD leen la misma fuente de datos, así que todos muestran lo mismo.
 
@@ -143,11 +151,12 @@ Cómo se ven los ataques zombie, las obras y la destrucción. El motor conoce el
 - **[decidido]** Se muestra antes de la partida, sobre un escenario preconfigurado (IDEA §5).
 - **[decidido]** Cuatro grupos de opciones: prensa (un medio o varios), economía (base o con la extensión `fiscal`, cuando exista), límites del caos y escenario (elegir el preset; los umbrales del objetivo no se editan por ahora).
 - **[decidido]** Todo valor distinto del preset se marca como "configuración de prueba".
+- **[decidido]** La cantidad de NPCs la fija el preset (100) y no está en el panel del jugador: cambiarla desajusta el balance y el rendimiento. Solo se cambia en modo desarrollador (sección 16).
 
 ## 16. Herramientas de depuración
 
 - **[decidido]** Modo desarrollador que se activa aparte y no aparece en el juego normal.
-- **[decidido]** Incluye: contador de FPS y tiempos de simulación, velocidad muy alta y forzar fenómenos del clima.
+- **[decidido]** Incluye: contador de FPS y tiempos de simulación, velocidad muy alta, forzar fenómenos del clima y cambiar la cantidad de NPCs.
 - Sirve para medir el rendimiento y evaluar los modelos de la IA opcional.
 
 ## 17. Fuera de esta UI

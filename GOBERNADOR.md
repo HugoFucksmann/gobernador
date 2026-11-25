@@ -1,4 +1,4 @@
-# El gobernador: palancas (BORRADOR v0.21)
+# El gobernador: palancas (BORRADOR v0.24)
 
 > Solo palancas, efectos y consecuencias. Estados, economía y reglas: ESTADOS.md. Idea: IDEA_JUEGO.md §7. Decidido salvo lo listado en la sección 8. Los valores (rangos, topes, márgenes) están en CALIBRACION.md; los números de los ejemplos solo ilustran la forma.
 
@@ -22,6 +22,9 @@ Compras de alimento (intercambio): salen de la reserva, no del disponible
 Déficit: reserva → [solo con la extensión `fiscal`: emisión hasta el tope → inflación] → impago
 ```
 
+- **Venta de alimento al exterior:** lo que se cobra entra al disponible, y lo que el estado le paga a la empresa de alimento por el excedente sale de la reserva (ESTADOS §12).
+- **Impago:** el faltante lo absorbe primero la nómina (prorrateada) y después las pensiones y la garantía (ESTADOS §12).
+
 ## 3. Palancas (ejemplo del nivel 1)
 
 Presupuesto, subsidios y prensa son % del **disponible** y su suma es ≤ 100. El resto de las palancas son valores directos, cada una con su rango (sección 4). Las de la extensión `fiscal` están en la sección 4.
@@ -32,7 +35,7 @@ Presupuesto, subsidios y prensa son % del **disponible** y su suma es ≤ 100. E
   "gasto": {
     "salario_publico": 100,
     "presupuesto": { "salud": 20, "seguridad": 10, "infraestructura": 20, "educacion": 15 },
-    "prensa": 5,
+    "gasto_prensa": 5,
     "subsidios": [
       { "grupo": "sin_ingreso", "pct": 10 },
       { "grupo": "agro", "pct": 5 }
@@ -47,24 +50,46 @@ Presupuesto, subsidios y prensa son % del **disponible** y su suma es ≤ 100. E
 }
 ```
 
-`financiamiento` y `regulacion` son por medio: viven en `intervencion` de cada medio (ESTADOS §6).
+`gasto_prensa` se reparte parejo entre los medios (ESTADOS §6). `financiamiento` y `regulacion` por medio quedaron fuera del nivel 1: se suma otra palanca de prensa solo si la jugabilidad lo pide.
+
+### Resumen de las 9 palancas del nivel 1
+
+| Grupo | Palanca | Qué se fija | Efecto principal | Costo |
+|---|---|---|---|---|
+| Recaudación | `impuesto` | Una tasa por grupo (agro, industria, comercio, público) | Fondos del estado | Menos ingreso, consumo y satisfacción del grupo |
+| Gasto | `salario_publico` | % del valor normal | Satisfacción de los públicos | Más nómina y riesgo de impago |
+| Gasto | `presupuesto` | % del disponible por área (salud, seguridad, infraestructura, educación) | Sube el indicador del área | Menos para las otras áreas |
+| Gasto | `subsidios` | % del disponible por grupo (agro, industria, comercio o sin_ingreso; el público no se subsidia) | Dinero, satisfacción y menos hambre del grupo | Menos disponible |
+| Gasto | `gasto_prensa` | % del disponible | Más alcance de los medios (se reparte parejo entre ellos) | Menos disponible, más dependencia y menos credibilidad si pasa el umbral |
+| Alimento | `garantia_alimentaria` | % del faltante de comida que paga el estado | Baja el hambre de quien no puede comprar | Gasto obligatorio |
+| Alimento | `precio_maximo` | Tope al precio de la comida | Baja el hambre | Menos ganancia para las empresas |
+| Alimento | `intercambio` | % de la capacidad de intercambio, de -100 (vende) a 100 (compra) | Mueve el stock de comida (la única) | Sale de la reserva |
+| Personal | `cupos` | Puestos por rol público (policía, estatal, docente, médico, ingeniero) | Cobertura de los servicios | Más nómina y menos gente en producción |
+
+**Cómo se usa la reserva:** la reserva paga las importaciones de comida y cubre el déficit. El gasto discrecional (presupuesto, subsidios y prensa) nunca supera el disponible, así que no se puede gastar más de lo que entra: ahorrar para una crisis compite con gastar hoy.
+
+**Límites conocidos de la v1:**
+- Un cupo no garantiza personal: depende de que haya NPCs con la educación requerida (médicos e ingenieros piden nivel 3).
+- Si desaparecen los comerciantes no se puede importar comida, y ninguna palanca los repone.
+- El desempleo solo se palía (garantía, subsidios, cupos); ninguna palanca crea empleo privado.
 
 ## 4. Rangos y límites
 
-Cada palanca tiene un rango y un cambio máximo por período fiscal (`cambio_max_por_periodo_pct`). Los rangos (`impuesto`, `salario_publico`, `precio_maximo`, `garantia_alimentaria`, `intercambio`, `tope_emision`, `regulacion`, `presupuesto`, `subsidios`, `gasto_prensa`, `financiamiento`), el tope de cupos (`cupo_max_pct_poblacion`) y el cambio máximo por período están en CALIBRACION.md.
+Cada palanca tiene un rango y un cambio máximo por período fiscal (`cambio_max_por_periodo_pct`). Los rangos (`impuesto`, `salario_publico`, `precio_maximo`, `garantia_alimentaria`, `intercambio`, `tope_emision`, `presupuesto`, `subsidios`, `gasto_prensa`), el tope de cupos (`cupo_max_pct_poblacion`) y el cambio máximo por período están en CALIBRACION.md.
 
-- `intercambio`: -100 vende, 100 compra. Limitado por la capacidad de los comerciantes (ESTADOS §12). Al vender, el estado le compra el excedente a la empresa de alimento. Las compras salen de la reserva (§2), se pagan al precio externo (sin el tope de `precio_maximo`) y la comida se suma al stock de la empresa de alimento (ESTADOS §4).
+- `intercambio`: de -100 a 100, es el % de la capacidad de intercambio que se usa (-100 vende toda, 100 compra toda). La capacidad depende de los comerciantes (ESTADOS §12). Al vender, el estado le compra el excedente a la empresa de alimento (el pago sale de la reserva) y lo cobrado al exterior entra al disponible. Las compras salen de la reserva (§2), se pagan al precio externo (sin el tope de `precio_maximo`) y la comida se suma al stock de la empresa de alimento (ESTADOS §4).
 - `salario_publico`: % del valor normal (100 = normal). No se ajusta solo con la inflación: lo ajusta el gobernador.
 - `precio_maximo`: tope al precio de la comida, como % del `precio_base` (rango y valor "sin tope" en CALIBRACION). El precio efectivo es el menor entre el del mercado y el tope. No cuesta presupuesto, pero con el tope por debajo de lo que las empresas necesitan para pagar los sueldos, bajan sus ganancias y se activa su tabla de respuestas (ESTADOS §4). Además, con la comida barata la gente llena su despensa y el mercado se vacía antes.
 - `garantia_alimentaria`: % del faltante de comida a cargo del estado, para los NPCs que no pueden comprar. Solo comida. Los menores siempre los cubre el estado al 100%.
 - `tope_emision`: % de los ingresos del período que se puede cubrir imprimiendo. El gobernador autoriza el tope y el motor emite solo lo necesario.
 - `cambio_max_por_periodo_pct`: cambio máximo por período fiscal, como % del rango de la palanca.
-- Presupuesto (por área), subsidios (por grupo), `gasto.prensa` y `financiamiento` van de 0 a 100, y presupuesto + subsidios + prensa suman a lo sumo 100. Los `cupos` van de 0 a `cupo_max_pct_poblacion` % de la población; el cambio máximo por período se mide sobre ese rango.
+- Presupuesto (por área), subsidios (por grupo) y `gasto_prensa` van de 0 a 100, y presupuesto + subsidios + prensa suman a lo sumo 100. Los `cupos` van de 0 a `cupo_max_pct_poblacion` % de la población; el cambio máximo por período se mide sobre ese rango.
 - **Cuándo rige un cambio:** el valor cambia al día siguiente (si se toca en pausa, al reanudar) y se emite el evento `palanca` (ESTADOS §14). El máximo se mide contra el valor al inicio del período fiscal y el margen se reinicia en cada liquidación. Presupuesto, subsidios y prensa se reparten en cada liquidación con el valor vigente ese día (ESTADOS §3.1).
-- `gasto.prensa`: % del disponible para prensa. `financiamiento` por medio: reparto de ese monto entre medios, suma 100. Todos los medios son privados: el estado solo los financia.
+- `gasto_prensa`: % del disponible para prensa. El monto se reparte parejo entre los medios: el gobernador no puede favorecer a uno. Todos los medios son privados: el estado solo los financia.
 - `cupos`: tope de puestos de los roles públicos. El NPC elige por afinidad y requisitos. Los roles privados no tienen cupo del gobernador (ESTADOS §2).
-- `subsidios`: apuntan a un grupo de roles (inyección directa). Subsidiar servicios queda para el nivel 2 (HOJA_DE_RUTA §4).
+- `subsidios`: apuntan a un grupo de roles (inyección directa). Los grupos subsidiables son agro, industria, comercio y sin_ingreso: el público no se subsidia, se maneja con `salario_publico` y `cupos`. Subsidiar servicios queda para el nivel 2 (HOJA_DE_RUTA §4).
 - `presion` y `acceso`: fuera del nivel 1, quedan para el nivel 1.1.
+- `financiamiento` y `regulacion` (por medio): fuera del nivel 1. Si `gasto_prensa` no alcanza, se agrega otra palanca de prensa según cómo resulte la jugabilidad.
 
 **Palancas según la economía (ESTADOS §3.1):**
 
@@ -102,7 +127,7 @@ Los efectos sobre el dinero pasan por las empresas y las despensas de los NPCs (
   },
   "subsidios": {
     "sube": ["dinero(grupo)+", "satisfaccion(grupo)+", "hambre(grupo)-"],
-    "costo": ["disponible-", "inflacion+ si hay deficit (con `fiscal`)"]
+    "costo": ["disponible-", "menos sobrante para la reserva (gastar hoy o ahorrar para cubrir un deficit)"]
   },
   "precio_maximo": {
     "sube": ["acceso a comida (precio-)", "hambre-", "satisfaccion+"],
@@ -124,9 +149,9 @@ Los efectos sobre el dinero pasan por las empresas y las despensas de los NPCs (
     "sube": ["cobertura del servicio+"],
     "costo": ["nomina+ (publicos)", "menos gente en produccion", "desempleo si se baja"]
   },
-  "prensa": {
-    "financiamiento": { "sube": ["alcance del medio+"], "costo": ["dependencia+ -> credibilidad- si se nota"] },
-    "regulacion": { "sube": ["sensacionalismo-"], "costo": ["credibilidad-", "rebeldia+"] }
+  "gasto_prensa": {
+    "sube": ["alcance de los medios+ (rendimientos decrecientes)"],
+    "costo": ["disponible-", "dependencia+ (afinidad_gobierno+ y, sobre umbral_dependencia_pct, credibilidad-)"]
   }
 }
 ```
@@ -134,17 +159,17 @@ Los efectos sobre el dinero pasan por las empresas y las despensas de los NPCs (
 ## 6. Cruces clave
 
 - **Nómina vs operación:** más cupos públicos → más nómina → menos disponible para operar los servicios.
-- **Impuesto ↔ grupo:** gravar un grupo baja su plata, humor y producción. Un subsidio al mismo grupo lo compensa.
+- **Impuesto ↔ grupo:** gravar un grupo baja su plata, humor y producción. Un subsidio al mismo grupo lo compensa (al público se lo compensa con `salario_publico`).
 - **Comida ↔ finanzas:** sequía → precio sube → más gente sin plata → garantía cuesta más → déficit → impago (con `fiscal`, antes: emisión → inflación → precio sube).
 - **Hambre y descontento:** si suben, se disparan acciones de condición (protesta, saqueo).
 - **Plaga zombie o pandemia ↔ hospital:** los golpes llenan el hospital. Sin médicos suficientes (cupo) y sin inversión en salud, los heridos no se curan y mueren. La seguridad reduce los golpes de la plaga zombie, no los de la pandemia.
 - **Plaga zombie ↔ integridad:** los golpes que pasan la defensa dañan la zona y bajan su defensa. La reparan obreros e ingenieros, más rápido con inversión en infraestructura. Hay que repartir entre más policía y más infraestructura.
 - **Policía ↔ orden y defensa:** los policías se reparten solos entre defender la zona y frenar el contagio de las acciones espontáneas (ESTADOS §14). Más cupos ayudan a las dos cosas pero suben la nómina, y en una plaga zombie lo que se dedica a defensa deja menos para el orden.
-- **Prensa ↔ amenaza:** la ciudadanía se entera del aviso por la prensa. Con más alcance y credibilidad, los policías se reubican antes hacia la zona de origen; con un medio desacreditado, la defensa queda mal ubicada. La necesidad de orden, en cambio, no depende de la prensa (ESTADOS §14).
+- **Prensa ↔ amenaza:** la ciudadanía se entera del aviso por la prensa. Con más alcance y credibilidad, los policías se reubican antes hacia la zona de origen; con un medio desacreditado, la defensa queda mal ubicada. La necesidad de orden, en cambio, no depende directamente de la prensa (ESTADOS §14).
 - **Precio máximo ↔ empresas:** bajar el tope baja el hambre hoy, pero reduce la ganancia de las empresas. Si no alcanzan a pagar sueldos, responden (recortan, despiden) y la gente tiene menos plata. Además la comida barata llena las despensas y vacía el stock antes.
 - **Impuesto ↔ consumo:** gravar de más baja el gasto de vida de los NPCs, y con él las ventas y las ganancias de las comerciales (ESTADOS §4).
-- **Prensa ↔ crisis:** inflar un medio da control hoy y le quita credibilidad mañana.
-- **Nómina impaga → huelga:** los públicos pierden satisfacción y productividad (regla del motor) y se dispara la huelga (acción de condición, fuera de los límites del caos). Los servicios caen.
+- **Prensa ↔ crisis:** gastar de más en prensa da alcance hoy y quita credibilidad mañana, cuando la dependencia de los medios pasa el umbral.
+- **Nómina impaga → huelga:** los públicos pierden satisfacción y productividad (regla del motor) y se dispara la huelga (acción de condición, fuera de los límites del caos). Los servicios caen. El impago se evalúa en cada liquidación y dura hasta la primera liquidación sin faltante (ESTADOS §12).
 
 ## 7. Qué ve el gobernador
 

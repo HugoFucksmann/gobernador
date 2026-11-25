@@ -1,4 +1,4 @@
-# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.13)
+# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.15)
 
 > Estado del documento: idea en definición. El detalle del gobernador está en GOBERNADOR.md. El detalle técnico (estados, tabla de acciones, medios) vive en ESTADOS.md. La interfaz final está en UI.md y los niveles del juego en HOJA_DE_RUTA.md.
 
@@ -31,6 +31,8 @@ Estados que sabemos que existen:
 - **Estado del clima.** Los fenómenos naturales (sequías, plagas, pandemias) alteran recursos y NPCs.
 - **Estado de los medios.** Cada medio de prensa tiene su propia identidad y alcance.
 - **Estado de cada NPC:** personalidad y rasgos únicos de cada personaje.
+- **Estado de las empresas:** la de alimento y las comerciales, con su respuesta cuando no pueden pagar los sueldos (ESTADOS §4).
+- **Integridad de cada zona:** cuánto aguanta frente a los ataques (ESTADOS §14).
 
 Además:
 
@@ -51,10 +53,10 @@ Antes de arrancar una partida hay un **panel de configuración del mundo**, dond
   - Los **límites del caos**. Los valores por defecto son los de balance, y cualquier cambio queda marcado como "configuración de prueba".
   - La **economía** (el módulo base o, en el nivel 1.1, con la extensión `fiscal`).
 - **Mundos iniciales (2):**
-  - *Elecciones:* el objetivo es gobernar y ganar elecciones, manteniendo a la comunidad a gusto. En el nivel 1 el dilema es dar subsidios contra cuidar la reserva. Si la reserva se agota hay impago: los empleados públicos se declaran en huelga y los servicios caen.
+  - *Elecciones:* el objetivo es gobernar y ganar elecciones, manteniendo a la comunidad a gusto. En el nivel 1 el dilema es gastar hoy (subsidios) contra ahorrar la reserva para cubrir el déficit. Si la reserva se agota hay impago: los empleados públicos se declaran en huelga y los servicios caen.
   - *Apocalipsis zombie:* el objetivo es que la comunidad sobreviva. Hay que administrar más seguridad (policía), con el riesgo de quedarse sin recursos para la garantía alimentaria y los subsidios. Los NPCs pueden sumarse a la policía. Los policías se reubican hacia la zona por donde vienen los zombies, según lo que la ciudadanía se entere por la prensa. Los zombis dañan la integridad de las zonas y los NPCs la reparan.
 - **Orden de implementación:** primero *elecciones*, después *zombies*.
-- **Escala:** mundos de **alrededor de 100 NPCs** para empezar. La cantidad es un parámetro del mundo; el techo del nivel 1 es 1.000 (UI §12). Se eligió 100 porque con más gente los roles y los porcentajes se vuelven más estables y significativos.
+- **Escala:** mundos de **alrededor de 100 NPCs** para empezar. La cantidad es un parámetro del mundo; el techo del nivel 1 es 1.000 (UI §12). La fija el preset (100) y solo se cambia en modo desarrollador, no desde el panel del jugador (UI §15). Se eligió 100 porque con más gente los roles y los porcentajes se vuelven más estables y significativos.
 
 ### Escalabilidad
 
@@ -63,7 +65,7 @@ La primera versión es simple, pero se diseña desde el inicio para escalar a m�
 ### Alcance del nivel 1
 
 - Cada escenario tiene **un objetivo y una condición de derrota**. Más de un objetivo queda para después.
-- La **victoria** es un hito que se evalúa al llegar el plazo (ej. elecciones): avisa y la partida sigue. Solo la **derrota** (ej. perder por una amenaza, colapso) termina la partida y se evalúa en cualquier momento.
+- La **victoria** es un hito que se evalúa una sola vez, al llegar el plazo (ej. elecciones): avisa y la partida sigue. Si no se cumple, avisa que el objetivo se perdió y la partida sigue igual: perderlo no es una derrota. Solo la **derrota** (ej. perder por una amenaza, colapso) termina la partida y se evalúa en cualquier momento.
 - **El objetivo y su progreso son visibles para el jugador** (decidido; detalle en ESTADOS §11).
 - **Al generar el mundo, todo debe encajar para que inicialmente funcione, y después se desajusta.** Lo que lo desajusta es el clima (la plaga zombie cuenta como clima) y el director de caos, que altera a los NPCs.
 - La **historia de cada escenario se escribe a mano** (son presets).
@@ -90,8 +92,8 @@ Decisión: cerrado.
 - **La comunidad genera la riqueza** (los NPCs trabajan y ganan) y **el gobierno recauda y administra los fondos.**
 - **La mecánica del juego son las palancas que el gobernador tiene** (áreas y palancas concretas: GOBERNADOR §3 y §4). Cada palanca tiene consecuencias y trade-offs. Ejemplos rápidos:
   - Zombies: invertir más en seguridad/policía, pero te podés quedar sin recursos para sostener la garantía alimentaria y los subsidios.
-  - Elecciones: dar subsidios, pero la reserva se agota y llega el impago. Con el módulo `fiscal` (nivel 1.1), además, se puede emitir dinero y sube la inflación.
-- **Prensa como palanca (decidido):** el gobernador actúa sobre la prensa solo de forma **indirecta** (financiar y regular en el nivel 1; presionar y dar o quitar acceso en el nivel 1.1). Nunca escribe la noticia. Cada opción tiene costos (presupuesto, descontento por censura, pérdida de credibilidad si se nota la propaganda).
+  - Elecciones: gastar hoy en subsidios o ahorrar la reserva para cubrir un déficit; si se gasta de más, la reserva se agota y llega el impago. Con el módulo `fiscal` (nivel 1.1), además, se puede emitir dinero y sube la inflación.
+- **Prensa como palanca (decidido):** el gobernador actúa sobre la prensa solo de forma **indirecta** (financiar, con la palanca `gasto_prensa`, en el nivel 1; presionar y dar o quitar acceso en el nivel 1.1; regular u otras palancas de prensa se agregan solo si la jugabilidad lo pide). Nunca escribe la noticia. Financiar tiene costos (presupuesto, pérdida de credibilidad si se nota la propaganda).
 - **Sancionar leyes:** queda como **idea a futuro** (ver sección 10).
 
 ## 8. Estados internos del juego
