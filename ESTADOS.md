@@ -466,12 +466,13 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 **Zombies**
 ```json
 {
-  "victoria": { "metrica": "poblacion_pct", "op": ">=", "umbral": 40, "plazo_dia": 180 },
+  "victoria": { "metrica": "poblacion_pct", "op": ">=", "umbral": 70, "plazo_dia": 180 },
   "derrota": { "metrica": "poblacion_pct", "op": "<", "umbral": 40 }
 }
 ```
 
 - La derrota se evalúa en cualquier momento y termina la partida (evento `fin_partida`). La victoria se evalúa una sola vez, al llegar el plazo: si se cumple, emite el evento `victoria`; si no, emite `objetivo_perdido {metrica, valor}`. En los dos casos la partida sigue: **solo la derrota termina la partida [cerrado]**. El resultado del plazo es definitivo y no se reevalúa. Perder el objetivo no es una derrota. Los umbrales son parámetros del mundo.
+- **Regla de diseño [cerrado]:** la meta de victoria tiene que ser más exigente que el límite de derrota, para que entre las dos haya un tramo donde se sobrevive pero se pierde el objetivo. En zombies: llegar al día 180 con al menos el 70% de la población es el objetivo; caer debajo del 40% en cualquier momento es la derrota.
 - **Objetivo y progreso visibles [cerrado].** El jugador ve siempre la métrica de victoria con su meta y los días restantes, y la métrica de derrota con su límite. Una flecha indica la tendencia respecto del período anterior, sin proyección. El indicador de derrota cambia de color cuando recorrió un tramo de la distancia entre su valor inicial y su límite (el tramo está en CALIBRACION). El panel aclara que la victoria se evalúa al llegar el plazo y, una vez resuelto, muestra el objetivo como cumplido o perdido (tres estados: pendiente, cumplido, perdido). Son datos derivados (sección 10) y del registro de eventos (`victoria` u `objetivo_perdido`): no hay estado nuevo.
 
 ## 12. Reglas (borrador)
