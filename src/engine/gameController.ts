@@ -5,11 +5,16 @@ import {
   getAiRuntimeStatus,
   resetAiSessionError,
 } from '../services/aiDirector';
-import { ACTION_TABLE } from '../data/catalogs';
+import {
+  ACTION_TABLE,
+  ECON_CONSTANTS,
+  SAVE_FORMAT_VERSION,
+} from '../data/catalogs';
 import {
   ActionEffectSpec,
   ClimatePhenomenon,
   CommunityDerived,
+  CommercialEnterpriseState,
   GameState,
   GovernorLevers,
   PhenomenonType,
@@ -21,6 +26,7 @@ import {
   DEFAULT_WORLD_CONFIG,
   rebalanceMediaIntervention,
 } from './policies';
+import { nextSeqId, normalizeSeed } from './rng';
 import {
   deriveCommunityStats,
   emitSimEvent,
@@ -102,6 +108,33 @@ function readSavedState(key: string): GameState | null {
     return parsed.state;
   } catch {
     return null;
+  }
+}
+
+function migrateLegacyLevers(levers: GovernorLevers): void {
+  const legacyRec = levers.recaudacion as unknown as {
+    impuestoUnico?: number;
+    impuestoGrupo: GovernorLevers['recaudacion']['impuestoGrupo'];
+  };
+  if (typeof legacyRec.impuestoUnico === 'number') {
+    const fallbackTax = legacyRec.impuestoUnico;
+    legacyRec.impuestoGrupo = {
+      agro: legacyRec.impuestoGrupo?.agro ?? fallbackTax,
+      industria: legacyRec.impuestoGrupo?.industria ?? fallbackTax,
+      comercio: legacyRec.impuestoGrupo?.comercio ?? fallbackTax,
+      publico: legacyRec.impuestoGrupo?.publico ?? fallbackTax,
+    };
+    delete legacyRec.impuestoUnico;
+  }
+  const legacyAlim = levers.alimento as unknown as {
+    racion?: number;
+    precioMaximo?: number;
+  };
+  if (typeof legacyAlim.precioMaximo !== 'number') {
+    legacyAlim.precioMaximo = ECON_CONSTANTS.precioMaximoSinTope;
+  }
+  if ('racion' in legacyAlim) {
+    delete legacyAlim.racion;
   }
 }
 
@@ -340,16 +373,50 @@ export class GameController {
     this.paused = false;
     resetAiSessionError();
 
+    // Migrate pre-v1 saves cleanly (ESTADOS §13)
+    loaded.versionFormato = SAVE_FORMAT_VERSION;
+    const legacyEcon = loaded.config.economiaModulo as string;
+    if (legacyEcon === 'simple' || legacyEcon === 'individual') {
+      loaded.config.economiaModulo = 'base';
+    }
+    if (typeof loaded.config.disturbiosActivos !== 'boolean') {
+      loaded.config.disturbiosActivos = false;
+    }
+    loaded.semilla = normalizeSeed(loaded.semilla ?? loaded.config.semilla ?? 1);
+    loaded.config.semilla = loaded.semilla;
+    loaded.rngState = normalizeSeed(loaded.rngState ?? loaded.semilla);
+    if (typeof loaded.idSeq !== 'number') {
+      loaded.idSeq = 0;
+    }
+
+    migrateLegacyLevers(loaded.gobierno.palancasVigentes);
+    migrateLegacyLevers(loaded.gobierno.palancasObjetivo);
+    migrateLegacyLevers(loaded.gobierno.palancasInicioPeriodo);
+
     if (!loaded.ultimaOrdenZona) {
       loaded.ultimaOrdenZona = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
     }
+    if (typeof loaded.cooldownsCondicion.disturbios !== 'number') {
+      loaded.cooldownsCondicion.disturbios = 0;
+    }
+    if (typeof loaded.alimento.precioMercado !== 'number') {
+      loaded.alimento.precioMercado = loaded.alimento.precio;
+    }
+
     for (const art of loaded.noticias) {
       if (!art.textoOrigen) {
         const legacyFuente = (art as unknown as { fuente?: string }).fuente;
         art.textoOrigen = legacyFuente === 'ia' ? 'generativo' : 'plantilla';
       }
     }
+
     for (const npc of loaded.npcs) {
+      if (typeof npc.economia.despensa !== 'number') {
+        npc.economia.despensa = ECON_CONSTANTS.objetivoBaseDias;
+      }
+      if (typeof npc.economia.propensionGasto !== 'number') {
+        npc.economia.propensionGasto = ECON_CONSTANTS.propensionGastoBase;
+      }
       if (npc.accionIa) {
         const legacy = npc.accionIa as unknown as {
           reemplazaTrabajo?: boolean;
@@ -376,6 +443,40 @@ export class GameController {
       }
     }
 
+    if (!loaded.empresas) {
+      const emp = loaded.npcs.find((n) => n.vivo && n.rol === 'empresario') || null;
+      const comerciales: CommercialEnterpriseState[] = loaded.npcs
+        .filter((n) => n.vivo && n.rol === 'comerciante')
+        .map((c, idxCom) => ({
+          id: `com_${idxCom + 1}`,
+          dueno: c.id,
+          ingresosAcum: 0,
+          sueldosAcum: 0,
+          diasPeriodo: 0,
+          ultimaGanancia: 0,
+          ultimoIngresoPeriodo: 0,
+          ultimoSueldosPeriodo: 0,
+          respuesta: null,
+        }));
+      loaded.empresas = {
+        alimento: {
+          id: 'alimento',
+          dueno: emp ? emp.id : null,
+          stock: loaded.alimento.stock,
+          diasStock: loaded.alimento.diasStock,
+          siloDias: loaded.alimento.siloDias,
+          ingresosAcum: 0,
+          sueldosAcum: 0,
+          diasPeriodo: 0,
+          ultimaGanancia: 0,
+          ultimoIngresoPeriodo: 0,
+          ultimoSueldosPeriodo: 0,
+          respuesta: null,
+        },
+        comerciales,
+      };
+    }
+
     this.state = loaded;
     this.derived = deriveCommunityStats(loaded);
     this.lastDerivedKey = this.computeDerivedKey(loaded);
@@ -394,7 +495,7 @@ export class GameController {
       plaga_zombie: 'Brote zombie forzado',
     };
     const phenomenon: ClimatePhenomenon = {
-      id: `clim_dev_${dia}_${Math.random().toString(36).slice(2, 6)}`,
+      id: nextSeqId(next, `clim_dev_${dia}`),
       tipo,
       nombre: names[tipo],
       intensidad: 65,
@@ -405,7 +506,7 @@ export class GameController {
     next.clima.fenomenos.push(phenomenon);
     next.fenomenosIniciadosIds.push(phenomenon.id);
 
-    const startEvId = `ev_${dia}_dev_${Math.random().toString(36).slice(2, 6)}`;
+    const startEvId = nextSeqId(next, `ev_${dia}_dev`);
     next.ultimoEventoClimaId = startEvId;
     emitSimEvent(next, {
       id: startEvId,
@@ -418,7 +519,7 @@ export class GameController {
       causa: `clima:${tipo}`,
     });
     next.bitacora.unshift({
-      id: `log_dev_clim_${dia}_${Math.random().toString(36).slice(2, 5)}`,
+      id: nextSeqId(next, `log_dev_clim_${dia}`),
       dia,
       categoria: 'clima',
       origen: `dev:${tipo}`,
@@ -583,4 +684,3 @@ export class GameController {
     }
   }
 }
-

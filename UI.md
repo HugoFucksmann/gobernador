@@ -1,4 +1,4 @@
-# UI del juego: estructura (BORRADOR v0.12)
+# UI del juego: estructura (BORRADOR v0.13)
 
 > Solo la estructura de la interfaz final en Godot (nivel 2, HOJA_DE_RUTA). La UI de depuración del motor (nivel 1) es del prototipo y no se define acá. Los detalles (colores, tooltips, leyendas, estilo de ventanas) se definen después. Palancas: GOBERNADOR.md. Estados y reglas: ESTADOS.md. Idea general: IDEA_JUEGO.md. **[decidido]** lo fijó el autor; **[propuesta]** es base para pulir.
 
@@ -18,7 +18,7 @@
 - El jugador responde a la comunidad, no a la IA: la UI muestra noticias y hechos, nunca "la IA hizo X" (IDEA §12).
 - Todo hecho importante puede explicarse: desde una noticia, alerta o NPC se llega a su causa (`origen` y `causa`, ESTADOS §8).
 - La información se distingue en tres niveles de confianza: exacta, resumida y con sesgo (GOBERNADOR §7).
-- Lo que no aplica al módulo de economía activo se oculta (GOBERNADOR §4).
+- Lo que no aplica a la economía activa se oculta (GOBERNADOR §4).
 
 ## 3. Flujo de pantallas
 
@@ -44,6 +44,7 @@ Cuatro capas, de atrás hacia adelante:
 - **[propuesta]** Un gestor central abre, cierra, mueve y apila ventanas. Recuerda posición y estado, y permite varias abiertas a la vez.
 - **[decidido]** Ventanas:
   - Palancas por área (recaudación, gasto, alimento, cupos, prensa).
+  - Economía: las empresas (ganancia, sueldos y respuesta vigente, ESTADOS §4), el precio de la comida y las despensas en resumen.
   - Gobierno y finanzas.
   - Comunidad (resumen derivado).
   - Ficha del NPC.
@@ -140,7 +141,7 @@ Cómo se ven los ataques zombie, las obras y la destrucción. El motor conoce el
 ## 15. Panel de configuración del mundo
 
 - **[decidido]** Se muestra antes de la partida, sobre un escenario preconfigurado (IDEA §5).
-- **[decidido]** Cuatro grupos de opciones: prensa (un medio o varios), módulo de economía, límites del caos y escenario (elegir el preset; los umbrales del objetivo no se editan por ahora).
+- **[decidido]** Cuatro grupos de opciones: prensa (un medio o varios), economía (base o con la extensión `fiscal`, cuando exista), límites del caos y escenario (elegir el preset; los umbrales del objetivo no se editan por ahora).
 - **[decidido]** Todo valor distinto del preset se marca como "configuración de prueba".
 
 ## 16. Herramientas de depuración

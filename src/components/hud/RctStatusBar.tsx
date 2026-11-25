@@ -108,6 +108,9 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
             <option value="roles" className="bg-slate-900">
               Profesiones
             </option>
+            <option value="acciones" className="bg-slate-900">
+              Acciones activas
+            </option>
             <option value="satisfaccion" className="bg-slate-900">
               Humor social
             </option>

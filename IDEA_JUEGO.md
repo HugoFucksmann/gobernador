@@ -1,4 +1,4 @@
-# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.8)
+# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.13)
 
 > Estado del documento: idea en definición. El detalle del gobernador está en GOBERNADOR.md. El detalle técnico (estados, tabla de acciones, medios) vive en ESTADOS.md. La interfaz final está en UI.md y los niveles del juego en HOJA_DE_RUTA.md.
 
@@ -18,7 +18,7 @@ La tensión entre **el orden que intenta imponer el gobernador** y **el caos cre
 2. **Caos mecánico, IA opcional.** Un director de caos elige qué hacen los NPCs entre una gran tabla de acciones predefinidas, acotadas y animables, y los textos salen de plantillas. La IA es opcional y de dos tipos: un modelo clasificador (no generativo) que elige entre las candidatas que el juego le ofrece, y un modelo generativo que escribe el texto de las noticias, que es decorativo. El modelo aporta elección y texto; las reglas, la magnitud de los efectos y cuánto caos entra los controla el juego. Con o sin IA las reglas son las mismas, y un modelo mejor mejora lo que se ve, no cambia las reglas.
 3. **Gobernador que interviene.** Influye sobre la comunidad y sus estadísticas sin mandar directamente a cada NPC. El jugador responde a la comunidad: el director de caos la altera.
 4. **Sucesos generales.** Dependen del mundo. Por ejemplo, los fenómenos naturales (sequías, plagas, pandemias) alteran los recursos y a los NPCs, y afectan a la comunidad y a sus estadísticas, condicionando la gestión del gobernador.
-5. **Economía de la comunidad.** Los NPCs trabajan, ganan y gastan. Cada grupo vive distinto y la desigualdad genera descontento. El alimento lo producen y comercian los habitantes, y el estado tiene que garantizar que todos coman.
+5. **Economía de la comunidad.** Los NPCs trabajan, ganan y gastan. Cada grupo vive distinto y la desigualdad genera descontento. Hay empresas privadas con dueño: la de alimento emplea a los agricultores y técnicos, y las comerciales venden la comida y emplean a obreros. Cada habitante compra su comida con su dinero y la guarda en casa. El estado no reparte comida: tiene que garantizar que todos puedan comer con las palancas que tiene.
 6. **Prensa.** Los medios cuentan lo que pasa en la comunidad, influyen en el humor social y en lo que los NPCs saben. Es la forma en que el jugador ve lo que hace la comunidad, y una herramienta más con la que el gobernador tiene que lidiar. Cada noticia nace de datos del motor; el texto sale de plantillas o, si la IA opcional está activa, de un modelo generativo.
 7. **Todo relacionado con todo.** Una acción de un NPC, el clima, una noticia o una decisión del gobernador pueden afectarse entre sí. Las consecuencias pueden encadenarse, y el jugador debe poder entender por qué pasó lo que pasó.
 8. **Mundos intercambiables.** Se empieza con mundos chicos para experimentar; los mundos se pueden cambiar.
@@ -36,7 +36,7 @@ Además:
 
 - **La comunidad no tiene estado propio:** se deriva de los NPCs.
 - **El espacio es por zonas:** el motor conoce 4 a 6 zonas por mundo (con vecindad) y cada NPC tiene una. Las coordenadas y el movimiento son de la UI (ESTADOS §14).
-- **La economía la mueven los NPCs:** cada uno gana y gasta su propio dinero. El gobierno recauda impuestos y administra los fondos. El alimento lo produce y comercia la sociedad, y el estado lo regula. La economía es modular, de simple a compleja (ESTADOS §3.1).
+- **La economía la mueven los NPCs:** cada uno gana y gasta su propio dinero. El gobierno recauda impuestos y administra los fondos. Las empresas pagan sueldos y los NPCs les compran comida y otros bienes (circuito cerrado), y el estado lo regula con impuestos, subsidios, garantía alimentaria, intercambio y precio máximo. La economía tiene un módulo base y una extensión `fiscal` (ESTADOS §3.1, §4).
 
 El diseño detallado de los estados está en ESTADOS.md (en borrador).
 
@@ -49,10 +49,10 @@ Antes de arrancar una partida hay un **panel de configuración del mundo**, dond
   - El **escenario** (elegir el preset).
   - La **prensa**: un único medio (monopolio) o varios.
   - Los **límites del caos**. Los valores por defecto son los de balance, y cualquier cambio queda marcado como "configuración de prueba".
-  - El **módulo de economía** (de simple a más compleja).
+  - La **economía** (el módulo base o, en el nivel 1.1, con la extensión `fiscal`).
 - **Mundos iniciales (2):**
   - *Elecciones:* el objetivo es gobernar y ganar elecciones, manteniendo a la comunidad a gusto. En el nivel 1 el dilema es dar subsidios contra cuidar la reserva. Si la reserva se agota hay impago: los empleados públicos se declaran en huelga y los servicios caen.
-  - *Apocalipsis zombie:* el objetivo es que la comunidad sobreviva. Hay que administrar más seguridad (policía), con el riesgo de quedarse sin recursos para comida. Los NPCs pueden sumarse a la policía. Los policías se reubican hacia la zona por donde vienen los zombies, según lo que la ciudadanía se entere por la prensa. Los zombis dañan la integridad de las zonas y los NPCs la reparan.
+  - *Apocalipsis zombie:* el objetivo es que la comunidad sobreviva. Hay que administrar más seguridad (policía), con el riesgo de quedarse sin recursos para la garantía alimentaria y los subsidios. Los NPCs pueden sumarse a la policía. Los policías se reubican hacia la zona por donde vienen los zombies, según lo que la ciudadanía se entere por la prensa. Los zombis dañan la integridad de las zonas y los NPCs la reparan.
 - **Orden de implementación:** primero *elecciones*, después *zombies*.
 - **Escala:** mundos de **alrededor de 100 NPCs** para empezar. La cantidad es un parámetro del mundo; el techo del nivel 1 es 1.000 (UI §12). Se eligió 100 porque con más gente los roles y los porcentajes se vuelven más estables y significativos.
 
@@ -67,15 +67,15 @@ La primera versión es simple, pero se diseña desde el inicio para escalar a m�
 - **El objetivo y su progreso son visibles para el jugador** (decidido; detalle en ESTADOS §11).
 - **Al generar el mundo, todo debe encajar para que inicialmente funcione, y después se desajusta.** Lo que lo desajusta es el clima (la plaga zombie cuenta como clima) y el director de caos, que altera a los NPCs.
 - La **historia de cada escenario se escribe a mano** (son presets).
-- **Economía por módulos:** se construye de lo simple a lo complejo y se elige en el panel. El nivel 1 usa el módulo `simple`; `individual` y `fiscal` entran en el nivel 1.1 (HOJA_DE_RUTA §3).
+- **Economía:** el nivel 1 usa el módulo `base` (empresas, mercado con precio y despensa por NPC, impuestos por grupo, pensiones y garantía alimentaria). La extensión `fiscal` (emisión e inflación dinámica) entra en el nivel 1.1 (HOJA_DE_RUTA §3). El módulo `simple` anterior ya no es parte del juego.
 - **Sin objetivo (solo historia):** no es un modo del nivel 1. Queda como prueba posterior.
 - **Oposición de la comunidad:** en el nivel 1 no hay rebelión ni golpe como mecánica explícita. El descontento se expresa a través del objetivo (por ejemplo votos en elecciones, bajas y colapso en zombies).
 
 ## 6. Núcleo común a todos los escenarios
 
-El juego es gobernar, sin importar el mundo. Todos los escenarios comparten las mismas palancas, el mismo modelo de estados, la misma economía (con su módulo elegido), el mismo director de caos (con la IA opcional) y los mismos límites del caos.
+El juego es gobernar, sin importar el mundo. Todos los escenarios comparten las mismas palancas, el mismo modelo de estados, la misma economía, el mismo director de caos (con la IA opcional) y los mismos límites del caos.
 
-Un escenario solo cambia datos: historia, objetivo y condición de derrota, fenómenos del clima, valores iniciales (población, roles, reserva, stock), módulo de economía y límites del caos. La palanca crítica sale de la situación, no de una mecánica propia del mundo.
+Un escenario solo cambia datos: historia, objetivo y condición de derrota, fenómenos del clima, valores iniciales (población, roles, reserva, stock, dinero de los NPCs), economía y límites del caos. La palanca crítica sale de la situación, no de una mecánica propia del mundo.
 
 Los mundos no agregan mecánicas ni palancas exclusivas. Si un escenario necesita algo nuevo, o se expresa con los datos existentes (clima, roles, acciones, objetivo) o se incorpora al núcleo para todos.
 
@@ -89,7 +89,7 @@ Decisión: cerrado.
 - En la primera versión hay **un único gobernante, el usuario, sin división de poderes**.
 - **La comunidad genera la riqueza** (los NPCs trabajan y ganan) y **el gobierno recauda y administra los fondos.**
 - **La mecánica del juego son las palancas que el gobernador tiene** (áreas y palancas concretas: GOBERNADOR §3 y §4). Cada palanca tiene consecuencias y trade-offs. Ejemplos rápidos:
-  - Zombies: invertir más en seguridad/policía, pero te podés quedar sin recursos para comida.
+  - Zombies: invertir más en seguridad/policía, pero te podés quedar sin recursos para sostener la garantía alimentaria y los subsidios.
   - Elecciones: dar subsidios, pero la reserva se agota y llega el impago. Con el módulo `fiscal` (nivel 1.1), además, se puede emitir dinero y sube la inflación.
 - **Prensa como palanca (decidido):** el gobernador actúa sobre la prensa solo de forma **indirecta** (financiar y regular en el nivel 1; presionar y dar o quitar acceso en el nivel 1.1). Nunca escribe la noticia. Cada opción tiene costos (presupuesto, descontento por censura, pérdida de credibilidad si se nota la propaganda).
 - **Sancionar leyes:** queda como **idea a futuro** (ver sección 10).
@@ -114,6 +114,8 @@ Los niveles de cada idea están en HOJA_DE_RUTA (niveles 1.1 a 3 y "sin nivel as
 - **Comunicado oficial:** que el gobernador hable directamente a la comunidad, probablemente a través de un medio (por definir: no hay medio estatal).
 - **Que la IA pueda proponer a quién se le ofrecen las acciones** (hoy lo decide el juego), como opción para modelos más capaces.
 - **Subsidios a servicios**, por ejemplo alimento a precio reducido.
+- **Servicios privados (sin nivel asignado):** hoy salud, educación y seguridad son solo públicas. Con clínicas, escuelas o seguridad privadas, los NPCs con más dinero pagarían alternativas y la desigualdad tendría un efecto real.
+- **Subsidio a la producción de alimento (nivel 1.1):** el estado le paga a la empresa de alimento para sostener el precio o los sueldos. Complementa al `precio_maximo`, que entra en el nivel 1.
 - **Decisiones puntuales del gobernador** (cuarentena, toque de queda, obra pública), a evaluar.
 - **Pensamiento del NPC en foco:** al seleccionar un NPC, el modelo generativo escribe lo que piensa (con caché). Fuera de la v1.
 - **Textos de acciones personalizados por NPC**, generados por el modelo generativo. Fuera de la v1.
@@ -137,7 +139,7 @@ Los niveles de cada idea están en HOJA_DE_RUTA (niveles 1.1 a 3 y "sin nivel as
 
 ## 13. Documentos
 
-Ya escritos: **ESTADOS.md** (estados y reglas), **GOBERNADOR.md** (palancas), **UI.md** (interfaz final en Godot), **HOJA_DE_RUTA.md** (niveles del juego) y **CALIBRACION.md** (valores, criterios de arranque y plan de pruebas; lo maneja el agente de prototipo), más el informe de calibración de cada escenario.
+Ya escritos: **ESTADOS.md** (estados y reglas), **GOBERNADOR.md** (palancas), **UI.md** (interfaz final en Godot), **ACCIONES.md** (tabla inicial de acciones del director de caos), **HOJA_DE_RUTA.md** (niveles del juego) y **CALIBRACION.md** (valores, criterios de arranque y plan de pruebas; lo maneja el agente de prototipo), más el informe de calibración de cada escenario.
 
 Próximos:
 

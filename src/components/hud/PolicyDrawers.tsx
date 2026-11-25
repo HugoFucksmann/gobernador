@@ -448,87 +448,52 @@ export const PolicyDrawers: React.FC<PolicyDrawersProps> = ({
                       </span>
                     </div>
 
-                    {mod === 'simple' ? (
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-200">Impuesto único</span>
-                          <span className="flex items-center gap-2 font-mono tabular-nums">
-                            <PendingHint
-                              inicio={ini.recaudacion.impuestoUnico}
-                              vigente={vig.recaudacion.impuestoUnico}
-                              objetivo={obj.recaudacion.impuestoUnico}
-                              min={0}
-                              max={60}
-                              diasEnPeriodo={diasPer}
-                            />
-                            <span className="font-semibold text-white">
-                              {obj.recaudacion.impuestoUnico}%
-                            </span>
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={60}
-                          value={obj.recaudacion.impuestoUnico}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            onUpdateLevers((p) => ({
-                              ...p,
-                              recaudacion: { ...p.recaudacion, impuestoUnico: v },
-                            }));
-                          }}
-                          className="w-full"
-                        />
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                        {(
-                          [
-                            { id: 'agro', label: 'Agro' },
-                            { id: 'industria', label: 'Industria' },
-                            { id: 'comercio', label: 'Comercio y Prensa' },
-                            { id: 'publico', label: 'Sector Público' },
-                          ] as Array<{ id: TaxableGroupId; label: string }>
-                        ).map((g) => (
-                          <div key={g.id} className="space-y-0.5">
-                            <div className="flex justify-between text-[11px]">
-                              <span className="text-slate-300">{g.label}</span>
-                              <span className="flex items-center gap-1.5 font-mono tabular-nums">
-                                <PendingHint
-                                  inicio={ini.recaudacion.impuestoGrupo[g.id]}
-                                  vigente={vig.recaudacion.impuestoGrupo[g.id]}
-                                  objetivo={obj.recaudacion.impuestoGrupo[g.id]}
-                                  min={0}
-                                  max={60}
-                                  diasEnPeriodo={diasPer}
-                                />
-                                <span className="font-semibold text-white">
-                                  {obj.recaudacion.impuestoGrupo[g.id]}%
-                                </span>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                      {(
+                        [
+                          { id: 'agro', label: 'Agro' },
+                          { id: 'industria', label: 'Industria' },
+                          { id: 'comercio', label: 'Comercio y Prensa' },
+                          { id: 'publico', label: 'Sector Público' },
+                        ] as Array<{ id: TaxableGroupId; label: string }>
+                      ).map((g) => (
+                        <div key={g.id} className="space-y-0.5">
+                          <div className="flex justify-between text-[11px]">
+                            <span className="text-slate-300">{g.label}</span>
+                            <span className="flex items-center gap-1.5 font-mono tabular-nums">
+                              <PendingHint
+                                inicio={ini.recaudacion.impuestoGrupo[g.id]}
+                                vigente={vig.recaudacion.impuestoGrupo[g.id]}
+                                objetivo={obj.recaudacion.impuestoGrupo[g.id]}
+                                min={0}
+                                max={60}
+                                diasEnPeriodo={diasPer}
+                              />
+                              <span className="font-semibold text-white">
+                                {obj.recaudacion.impuestoGrupo[g.id]}%
                               </span>
-                            </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={60}
-                              value={obj.recaudacion.impuestoGrupo[g.id]}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                onUpdateLevers((p) => ({
-                                  ...p,
-                                  recaudacion: {
-                                    ...p.recaudacion,
-                                    impuestoGrupo: { ...p.recaudacion.impuestoGrupo, [g.id]: val },
-                                  },
-                                }));
-                              }}
-                              className="w-full"
-                            />
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          <input
+                            type="range"
+                            min={0}
+                            max={60}
+                            value={obj.recaudacion.impuestoGrupo[g.id]}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              onUpdateLevers((p) => ({
+                                ...p,
+                                recaudacion: {
+                                  ...p.recaudacion,
+                                  impuestoGrupo: { ...p.recaudacion.impuestoGrupo, [g.id]: val },
+                                },
+                              }));
+                            }}
+                            className="w-full"
+                          />
+                        </div>
+                      ))}
+                    </div>
 
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
@@ -901,15 +866,13 @@ export const PolicyDrawers: React.FC<PolicyDrawersProps> = ({
                       </span>
                     </div>
                     {[
-                      { label: 'Recaudación impositiva', val: state.gobierno.finanzas.impuestos, show: true },
-                      { label: 'Ventas externas alimento', val: state.gobierno.finanzas.ventasAlimento, show: true },
-                      { label: 'Nómina empleados públicos', val: -state.gobierno.finanzas.nomina, show: true },
-                      { label: 'Pensiones (jubilados)', val: -state.gobierno.finanzas.pensiones, show: mod !== 'simple' },
-                      { label: 'Garantía alimentaria', val: -state.gobierno.finanzas.garantiaAlimentaria, show: mod !== 'simple' },
-                      { label: 'Compras externas (reserva)', val: -state.gobierno.finanzas.comprasAlimento, show: true },
-                    ]
-                      .filter((row) => row.show)
-                      .map((row) => (
+                      { label: 'Recaudación impositiva', val: state.gobierno.finanzas.impuestos },
+                      { label: 'Ventas externas alimento', val: state.gobierno.finanzas.ventasAlimento },
+                      { label: 'Nómina empleados públicos', val: -state.gobierno.finanzas.nomina },
+                      { label: 'Pensiones (jubilados)', val: -state.gobierno.finanzas.pensiones },
+                      { label: 'Garantía alimentaria', val: -state.gobierno.finanzas.garantiaAlimentaria },
+                      { label: 'Compras externas (reserva)', val: -state.gobierno.finanzas.comprasAlimento },
+                    ].map((row) => (
                         <div key={row.label} className="flex justify-between text-[11px]">
                           <span className="text-slate-300">{row.label}</span>
                           <span
@@ -953,67 +916,151 @@ export const PolicyDrawers: React.FC<PolicyDrawersProps> = ({
                 </div>
               </div>
 
-              {/* Primary Ration / Guarantee */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-white">
-                    {mod === 'simple' ? 'Ración del almacén común' : 'Garantía alimentaria estatal'}
+              {/* Price Cap & Food Guarantee */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between text-xs bg-slate-800/40 border border-slate-800 rounded px-2.5 py-1.5">
+                  <span className="text-slate-300">
+                    Precio vigente: <strong className="font-mono text-white">${state.alimento.precio.toFixed(2)}/u</strong>
                   </span>
-                  <span className="flex items-center gap-2 font-mono tabular-nums">
-                    <PendingHint
-                      inicio={mod === 'simple' ? ini.alimento.racion : ini.alimento.garantiaAlimentaria}
-                      vigente={mod === 'simple' ? vig.alimento.racion : vig.alimento.garantiaAlimentaria}
-                      objetivo={mod === 'simple' ? obj.alimento.racion : obj.alimento.garantiaAlimentaria}
-                      min={mod === 'simple' ? 50 : 0}
-                      max={mod === 'simple' ? 150 : 100}
-                      diasEnPeriodo={diasPer}
-                    />
-                    <span className="text-sm font-bold text-teal-300">
-                      {mod === 'simple' ? `${obj.alimento.racion}%` : `${obj.alimento.garantiaAlimentaria}%`}
-                    </span>
+                  <span className="font-mono text-[11px] text-slate-400">
+                    Mercado: ${state.alimento.precioMercado.toFixed(2)}
                   </span>
                 </div>
-                {mod === 'simple' ? (
-                  <>
-                    <input
-                      type="range"
-                      min={50}
-                      max={150}
-                      value={obj.alimento.racion}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        onUpdateLevers((p) => ({
-                          ...p,
-                          alimento: { ...p.alimento, racion: val },
-                        }));
-                      }}
-                      className="w-full"
-                    />
-                    <p className="text-[11px] text-slate-400">
-                      &lt;100% ahorra stock pero genera hambre; &gt;100% acelera recuperación alimentaria.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={obj.alimento.garantiaAlimentaria}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        onUpdateLevers((p) => ({
-                          ...p,
-                          alimento: { ...p.alimento, garantiaAlimentaria: val },
-                        }));
-                      }}
-                      className="w-full"
-                    />
-                    <p className="text-[11px] text-slate-400">
-                      Cubre a quienes no alcanzan a comprar alimento con su dinero, con costo para el Estado.
-                    </p>
-                  </>
-                )}
+
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white">Precio máximo del alimento</span>
+                    <span className="flex items-center gap-2 font-mono tabular-nums">
+                      <PendingHint
+                        inicio={ini.alimento.precioMaximo}
+                        vigente={vig.alimento.precioMaximo}
+                        objetivo={obj.alimento.precioMaximo}
+                        min={50}
+                        max={ECON_CONSTANTS.precioMaximoSinTope}
+                        diasEnPeriodo={diasPer}
+                      />
+                      <span className="text-sm font-bold text-amber-300">
+                        {obj.alimento.precioMaximo >= ECON_CONSTANTS.precioMaximoSinTope
+                          ? 'Sin tope'
+                          : `${obj.alimento.precioMaximo}% ($${(
+                              (state.alimento.precioBase * obj.alimento.precioMaximo) /
+                              100
+                            ).toFixed(2)})`}
+                      </span>
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={50}
+                    max={ECON_CONSTANTS.precioMaximoSinTope}
+                    step={5}
+                    value={obj.alimento.precioMaximo}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      onUpdateLevers((p) => ({
+                        ...p,
+                        alimento: { ...p.alimento, precioMaximo: val },
+                      }));
+                    }}
+                    className="w-full"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Si el tope queda por debajo del precio de mercado, la productora puede recortar sueldos, despedir o restringir margen.
+                  </p>
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white">Garantía alimentaria estatal</span>
+                    <span className="flex items-center gap-2 font-mono tabular-nums">
+                      <PendingHint
+                        inicio={ini.alimento.garantiaAlimentaria}
+                        vigente={vig.alimento.garantiaAlimentaria}
+                        objetivo={obj.alimento.garantiaAlimentaria}
+                        min={0}
+                        max={100}
+                        diasEnPeriodo={diasPer}
+                      />
+                      <span className="text-sm font-bold text-teal-300">
+                        {obj.alimento.garantiaAlimentaria}%
+                      </span>
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={obj.alimento.garantiaAlimentaria}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      onUpdateLevers((p) => ({
+                        ...p,
+                        alimento: { ...p.alimento, garantiaAlimentaria: val },
+                      }));
+                    }}
+                    className="w-full"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Cubre a quienes no alcanzan a comprar alimento con su dinero, con costo para el Estado.
+                  </p>
+                </div>
+              </div>
+
+              {/* Enterprises & Pantries */}
+              <div className="pt-3 border-t border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-white">Empresas y despensas</span>
+                  <span className="font-mono text-[11px] text-slate-300 tabular-nums">
+                    Despensa media {derived.despensaMediaDias.toFixed(1)}d · Sin liquidez {derived.sinDineroPct}%
+                  </span>
+                </div>
+                <div className="space-y-1.5 text-[11px]">
+                  {[
+                    {
+                      key: 'alimento',
+                      label: 'Productora de Alimento',
+                      ent: state.empresas.alimento,
+                    },
+                    ...state.empresas.comerciales.map((c, idx) => ({
+                      key: c.id,
+                      label: `Comercio #${idx + 1}`,
+                      ent: c,
+                    })),
+                  ].map(({ key, label, ent }) => {
+                    const owner = ent.dueno
+                      ? state.npcs.find((n) => n.id === ent.dueno && n.vivo)?.nombre || 'Sin dueño'
+                      : 'Vacante';
+                    return (
+                      <div
+                        key={key}
+                        className="flex items-center justify-between gap-2 bg-slate-800/45 border border-slate-800 rounded px-2.5 py-1.5"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-100 truncate">
+                            {label} <span className="font-normal text-slate-400">({owner})</span>
+                          </div>
+                          {ent.respuesta && (
+                            <div className="text-[10px] text-amber-300">
+                              Respuesta: {ent.respuesta.tipo.replace('_', ' ')} ({ent.respuesta.diasRestantes}d)
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right font-mono tabular-nums shrink-0">
+                          <div
+                            className={
+                              ent.ultimaGanancia >= 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'
+                            }
+                          >
+                            {ent.ultimaGanancia >= 0 ? '+' : ''}${ent.ultimaGanancia.toFixed(0)}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Sueldos ${ent.ultimoSueldosPeriodo.toFixed(0)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Trade */}

@@ -1,4 +1,4 @@
-export type EconomyModule = 'simple' | 'individual' | 'fiscal';
+export type EconomyModule = 'base' | 'fiscal';
 
 export type RoleId =
   | 'estudiante'
@@ -7,6 +7,7 @@ export type RoleId =
   | 'policia'
   | 'estatal'
   | 'comerciante'
+  | 'empresario'
   | 'tecnico'
   | 'docente'
   | 'periodista'
@@ -16,14 +17,20 @@ export type RoleId =
   | 'jubilado';
 
 export type PublicRoleId = 'policia' | 'estatal' | 'docente' | 'medico' | 'ingeniero';
-export type PrivateRoleId = 'agricultor' | 'obrero' | 'comerciante' | 'tecnico' | 'periodista';
+export type PrivateRoleId =
+  | 'agricultor'
+  | 'obrero'
+  | 'comerciante'
+  | 'empresario'
+  | 'tecnico'
+  | 'periodista';
 export type RoleGroupId = 'agro' | 'industria' | 'comercio' | 'publico' | 'sin_ingreso';
 export type TaxableGroupId = 'agro' | 'industria' | 'comercio' | 'publico';
 export type ServiceAreaId = 'salud' | 'seguridad' | 'infraestructura' | 'educacion';
 
 export type PersonalityTrait = 'valentia' | 'laboriosidad' | 'codicia' | 'rebeldia' | 'resiliencia';
 export type NpcVariable = 'salud' | 'hambre' | 'miedo' | 'satisfaccion' | 'lealtad';
-export type ModifiableKey = PersonalityTrait | NpcVariable | 'productividad';
+export type ModifiableKey = PersonalityTrait | NpcVariable | 'productividad' | 'propensionGasto';
 
 export interface RoleDefinition {
   id: RoleId;
@@ -35,7 +42,20 @@ export interface RoleDefinition {
   estudia?: boolean;
   publico?: boolean;
   afinidad?: PersonalityTrait;
-  produce: Partial<Record<'alimento' | 'seguridad' | 'administracion' | 'comercio' | 'educacion' | 'informacion' | 'salud' | 'infraestructura', number>>;
+  produce: Partial<
+    Record<
+      | 'alimento'
+      | 'tecnificacion'
+      | 'seguridad'
+      | 'administracion'
+      | 'comercio'
+      | 'educacion'
+      | 'informacion'
+      | 'salud'
+      | 'infraestructura',
+      number
+    >
+  >;
   ingreso?: [number, number];
   color: string;
   distrito: DistrictId;
@@ -49,7 +69,7 @@ export interface DistrictZone {
   id: DistrictId;
   nombre: string;
   subtitulo: string;
-  x: number; // 0..1000 map coords
+  x: number;
   y: number;
   w: number;
   h: number;
@@ -82,14 +102,26 @@ export type ActionEffectId =
   | 'agita'
   | 'acapara'
   | 'moviliza'
-  | 'decorativa';
+  | 'decorativa'
+  | 'gasta'
+  | 'ahorra'
+  | 'comparte'
+  | 'difunde'
+  | 'repara'
+  | 'resguarda'
+  | 'cuida'
+  | 'toma'
+  | 'vandaliza';
 
 export type EffectIntensity = 'baja' | 'media' | 'alta';
+export type RumorTheme = 'miedo' | 'descontento' | 'esperanza';
 
 export interface ActionEffectSpec {
   id: ActionEffectId;
   intensidad?: EffectIntensity;
   signo?: 1 | -1;
+  alcance?: 'participante' | 'zona';
+  temaRumor?: RumorTheme;
 }
 
 export interface ActiveNpcAction {
@@ -130,6 +162,9 @@ export interface Npc {
     ingresoPos: number; // 0..1
     dinero: number;
     ultimoIngresoNeto: number;
+    despensa: number; // days of food at home (0..despensaMaxDias)
+    propensionGasto: number; // fraction of net income spent on living expenses
+    noPudoPagarComida?: boolean;
   };
   rol: RoleId;
   zona: ZoneId;
@@ -147,21 +182,37 @@ export interface Npc {
   vivo: boolean;
 }
 
+export type PhenomenonType = 'sequia' | 'plaga' | 'pandemia' | 'plaga_zombie';
+
 export interface ActionDefinition {
   id: string;
   nombre: string;
   descripcion: string;
   tipo: 'espontanea' | 'condicion';
+  opcional?: boolean;
   textos: string[];
   disparador?: {
     impago?: boolean;
     descontentosPctMayorA?: number;
     hambreCriticaPctMayorA?: number;
+    protestaEnCursoYOrdenMenorA?: number;
   };
   requisitos: {
     etapa?: 'menor' | 'adulto' | 'jubilado';
     publico?: boolean;
     rolNoEn?: RoleId[];
+    conEmpleo?: boolean;
+    conDinero?: boolean;
+    conDespensa?: boolean;
+    conHambre?: boolean;
+  };
+  contexto?: {
+    fenomeno?: PhenomenonType;
+    fenomenoAnunciadoOActivo?: PhenomenonType;
+    fenomenoOOrdenMenorA?: { fenomeno: PhenomenonType; ordenMenorA: number };
+    zonaIntegridadMenorA?: number;
+    vecinoDespensaBaja?: boolean;
+    vecinoSaludBaja?: boolean;
   };
   afinidad: Partial<Record<PersonalityTrait, '+' | '-'>>;
   efectos: ActionEffectSpec[];
@@ -169,8 +220,6 @@ export interface ActionDefinition {
   duracionDias: [number, number];
   contagio: number;
 }
-
-export type PhenomenonType = 'sequia' | 'plaga' | 'pandemia' | 'plaga_zombie';
 
 export interface ClimatePhenomenon {
   id: string;
@@ -231,8 +280,7 @@ export interface NewsArticle {
 
 export interface GovernorLevers {
   recaudacion: {
-    impuestoUnico: number; // 0..60 (simple)
-    impuestoGrupo: Record<TaxableGroupId, number>; // 0..60 (individual/fiscal)
+    impuestoGrupo: Record<TaxableGroupId, number>; // 0..60
   };
   gasto: {
     salarioPublico: number; // 50..150 (%)
@@ -241,14 +289,53 @@ export interface GovernorLevers {
     subsidios: Record<RoleGroupId, number>; // % of disponible
   };
   alimento: {
-    racion: number; // 50..150 (simple)
-    garantiaAlimentaria: number; // 0..100 (individual/fiscal)
+    precioMaximo: number; // 50..250 (% of precioBase; >=250 = sin tope)
+    garantiaAlimentaria: number; // 0..100
     intercambio: number; // -100..100
   };
   finanzas: {
     topeEmision: number; // 0..30 (fiscal)
   };
   cupos: Record<PublicRoleId, number>;
+}
+
+export type EnterpriseResponseType = 'absorber' | 'recortar_sueldos' | 'despedir' | 'subir_margen';
+
+export interface EnterpriseActiveResponse {
+  tipo: EnterpriseResponseType;
+  diasRestantes: number;
+  duracionTotal: number;
+  factorSueldo?: number; // e.g. 0.72 during recortar_sueldos
+  margenExtraPct?: number; // e.g. 8 during subir_margen
+  origen: string;
+  causa?: string;
+}
+
+export interface FoodEnterpriseState {
+  id: 'alimento';
+  dueno: string | null;
+  stock: number;
+  diasStock: number;
+  siloDias: number;
+  ingresosAcum: number;
+  sueldosAcum: number;
+  diasPeriodo: number;
+  ultimaGanancia: number;
+  ultimoIngresoPeriodo: number;
+  ultimoSueldosPeriodo: number;
+  respuesta: EnterpriseActiveResponse | null;
+}
+
+export interface CommercialEnterpriseState {
+  id: string;
+  dueno: string | null;
+  ingresosAcum: number;
+  sueldosAcum: number;
+  diasPeriodo: number;
+  ultimaGanancia: number;
+  ultimoIngresoPeriodo: number;
+  ultimoSueldosPeriodo: number;
+  respuesta: EnterpriseActiveResponse | null;
 }
 
 export interface FiscalLedger {
@@ -317,6 +404,7 @@ export interface CommunityDerived {
   descontentosPct: number;
   hambreCriticaPct: number;
   sinDineroPct: number;
+  despensaMediaDias: number;
   hospitalOcupacionPct: number;
   camasHospital: number;
   internados: number;
@@ -363,12 +451,14 @@ export interface WorldConfig {
   cantidadMedios: number; // 1..3
   poblacionInicial: number;
   caos: ChaosLimits;
+  disturbiosActivos: boolean;
+  semilla: number;
   usarIaGemini: boolean;
 }
 
 export interface PendingConditionWindow {
   id: string;
-  disparador: 'impago' | 'descontento' | 'hambre';
+  disparador: 'impago' | 'descontento' | 'hambre' | 'disturbios';
   diaInicio: number;
   diaLimite: number;
   intensidadCantidad: number;
@@ -552,6 +642,18 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
+      tipo: 'empresa_respuesta';
+      zona: ZoneId;
+      empresaId: string;
+      duenoId?: string | null;
+      respuesta: EnterpriseResponseType;
+      deficit: number;
+      origen: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
       tipo: 'palanca';
       zona: ZoneId;
       palanca: string;
@@ -587,9 +689,14 @@ export interface HistoryPoint {
   hambreCritica: number;
   stockDias: number;
   poblacion: number;
+  semanal?: boolean;
 }
 
 export interface GameState {
+  versionFormato: number;
+  semilla: number;
+  rngState: number;
+  idSeq: number;
   config: WorldConfig;
   esConfigDePrueba: boolean;
   reloj: {
@@ -601,12 +708,17 @@ export interface GameState {
   };
   npcs: Npc[];
   gobierno: GovernmentState;
+  empresas: {
+    alimento: FoodEnterpriseState;
+    comerciales: CommercialEnterpriseState[];
+  };
   alimento: {
     stock: number;
     consumoPorNpc: number;
     diasStock: number;
     siloDias: number;
     precio: number;
+    precioMercado: number;
     precioBase: number;
     produccionDiaria: number;
     consumoDiario: number;
@@ -629,6 +741,7 @@ export interface GameState {
     impago: number;
     descontento: number;
     hambre: number;
+    disturbios: number;
   };
   eventos: SimEvent[];
   eventosDiaActual: SimEvent[];
@@ -640,6 +753,7 @@ export interface GameState {
   avisosEmitidos: string[];
   ultimaCausaPalanca?: string;
   ultimoEventoClimaId?: string;
+  ultimoEventoEmpresaId?: string;
   hospitalSaturadoDia?: number;
   metricasBaseObjetivo: {
     victoriaInicial: number;

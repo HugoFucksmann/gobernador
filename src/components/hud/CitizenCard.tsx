@@ -32,6 +32,15 @@ const EFFECT_LABELS: Record<ActionEffectId, string> = {
   acapara: 'Acapara',
   moviliza: 'Moviliza',
   decorativa: 'Decorativa',
+  gasta: 'Gasta',
+  ahorra: 'Ahorra',
+  comparte: 'Comparte',
+  difunde: 'Difunde rumor',
+  repara: 'Repara zona',
+  resguarda: 'Resguarda zona',
+  cuida: 'Cuida vecinos',
+  toma: 'Toma alimento',
+  vandaliza: 'Vandaliza',
 };
 
 interface CitizenCardProps {
@@ -81,6 +90,12 @@ const CitizenAvatar: React.FC<{ npc: Npc }> = ({ npc }) => {
         <path d="M14 19 L34 19 L32 12 L16 12 Z" fill="#1e3a8a" />
       ) : npc.rol === 'ingeniero' ? (
         <path d="M14 19 Q24 9 34 19 Z" fill="#facc15" />
+      ) : npc.rol === 'empresario' ? (
+        <>
+          <rect x="13" y="15" width="22" height="3" rx="1" fill="#1e293b" />
+          <rect x="17" y="9" width="14" height="6" rx="1" fill="#0f172a" />
+          <rect x="17" y="13.5" width="14" height="1.5" fill="#f59e0b" />
+        </>
       ) : (
         <path
           d="M15 22 Q24 11 33 22 Q33 14 24 14 Q15 14 15 22 Z"
@@ -373,12 +388,26 @@ export const CitizenCard: React.FC<CitizenCardProps> = ({
                     ${selectedNpc.economia.ultimoIngresoNeto.toFixed(1)}/d
                   </span>
                 </div>
-                {state.config.economiaModulo !== 'simple' && (
-                  <div className="flex justify-between">
-                    <span className="font-sans text-slate-400">Ahorros</span>
-                    <span className="font-semibold text-white">${selectedNpc.economia.dinero.toFixed(1)}</span>
-                  </div>
-                )}
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Ahorros</span>
+                  <span className="font-semibold text-white">${selectedNpc.economia.dinero.toFixed(1)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Despensa en casa</span>
+                  <span
+                    className={`font-semibold ${
+                      selectedNpc.economia.despensa < 1.5 ? 'text-rose-400' : 'text-teal-300'
+                    }`}
+                  >
+                    {selectedNpc.economia.despensa.toFixed(1)} d
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-sans text-slate-400">Propensión al gasto</span>
+                  <span className="font-semibold text-slate-200">
+                    {Math.round(selectedNpc.economia.propensionGasto * 100)}%
+                  </span>
+                </div>
                 <div className="flex justify-between">
                   <span className="font-sans text-slate-400">Acceso a alimento</span>
                   <span className="font-semibold text-teal-300">

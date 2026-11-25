@@ -1,4 +1,5 @@
 import { ACTION_TABLE } from '../data/catalogs';
+import { nextRand, nextSeqId } from '../engine/rng';
 import {
   applyActionToNpc,
   applyPressArticleEffects,
@@ -65,10 +66,10 @@ function shouldDisableAi(status: number, errMessage?: string): boolean {
   );
 }
 
-function shuffleArray<T>(items: T[]): T[] {
+function shuffleArray<T>(items: T[], rng: { rngState: number }): T[] {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(nextRand(rng) * (i + 1));
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
@@ -77,6 +78,7 @@ function shuffleArray<T>(items: T[]): T[] {
 function pickWeightedCandidate(
   candidatas: ActionDefinition[],
   npc: Npc | null,
+  rng: { rngState: number },
   probabilidades?: ClassifierProbItem[]
 ): ActionDefinition {
   if (candidatas.length === 1) return candidatas[0];
@@ -100,10 +102,10 @@ function pickWeightedCandidate(
 
   const total = weights.reduce((acc, w) => acc + w, 0);
   if (total <= 0) {
-    return candidatas[Math.floor(Math.random() * candidatas.length)];
+    return candidatas[Math.floor(nextRand(rng) * candidatas.length)];
   }
 
-  let r = Math.random() * total;
+  let r = nextRand(rng) * total;
   for (let i = 0; i < candidatas.length; i++) {
     r -= weights[i];
     if (r <= 0) return candidatas[i];
@@ -130,7 +132,8 @@ function buildTemplatePress(
   state: GameState,
   medioId: string,
   periodistaId: string,
-  topic: ReturnType<typeof pickPressTopicAndTone>
+  topic: ReturnType<typeof pickPressTopicAndTone>,
+  rng: { rngState: number; idSeq: number }
 ): NewsArticle {
   const medio = state.medios.find((m) => m.id === medioId) || state.medios[0];
   const autor = state.npcs.find((n) => n.id === periodistaId) || state.npcs[0];
@@ -211,7 +214,7 @@ function buildTemplatePress(
     'Resumen de actualidad desde el centro cívico',
   ];
   const titlePool = titlesByKey[compositeKey] || titlesByKey[`${topic.tema}:alarmista`] || fallbackTitles;
-  const titulo = titlePool[Math.floor(Math.random() * titlePool.length)];
+  const titulo = titlePool[Math.floor(nextRand(rng) * titlePool.length)];
 
   const bodyVariantsByTone: Record<string, string[]> = {
     alarmista: [
@@ -236,10 +239,10 @@ function buildTemplatePress(
   };
 
   const bodyPool = bodyVariantsByTone[topic.tono] || bodyVariantsByTone.informativo;
-  const texto = bodyPool[Math.floor(Math.random() * bodyPool.length)];
+  const texto = bodyPool[Math.floor(nextRand(rng) * bodyPool.length)];
 
   return {
-    id: `n_${state.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
+    id: nextSeqId(rng, `n_${state.reloj.dia}`),
     dia: state.reloj.dia,
     medioId: medio.id,
     medioNombre: medio.nombre,
@@ -262,7 +265,8 @@ function buildTemplatePress(
 
 export async function dispatchPressJob(state: GameState): Promise<AiDirectorResult | null> {
   if (state.medios.length === 0) return null;
-  const medio = state.medios[Math.floor(Math.random() * state.medios.length)];
+  const rng = { rngState: state.rngState, idSeq: state.idSeq };
+  const medio = state.medios[Math.floor(nextRand(rng) * state.medios.length)];
   const periodistaId = medio.columnistas[0] || state.npcs.find((n) => n.vivo)?.id;
   if (!periodistaId) return null;
   const periodista = state.npcs.find((n) => n.id === periodistaId) || state.npcs[0];
@@ -272,12 +276,16 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
 
   if (!state.config.usarIaGemini || aiDisabledForSession) {
     lastAiCallSource = 'plantilla';
-    const article = buildTemplatePress(state, medio.id, periodista.id, topic);
+    const article = buildTemplatePress(state, medio.id, periodista.id, topic, rng);
     return {
       type: 'press',
       source: 'plantilla',
       status: 'plantilla',
-      apply: (s) => applyPressArticleEffects(s, article),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        s.idSeq = Math.max(s.idSeq, rng.idSeq);
+        applyPressArticleEffects(s, article);
+      },
     };
   }
 
@@ -321,12 +329,16 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
       const errData = await res.json().catch(() => ({ error: '' }));
       if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
       const status = recordAiCallOutcome('plantilla', startedAt);
-      const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
+      const fallback = buildTemplatePress(state, medio.id, periodista.id, topic, rng);
       return {
         type: 'press',
         source: 'plantilla',
         status,
-        apply: (s) => applyPressArticleEffects(s, fallback),
+        apply: (s) => {
+          s.rngState = rng.rngState;
+          s.idSeq = Math.max(s.idSeq, rng.idSeq);
+          applyPressArticleEffects(s, fallback);
+        },
       };
     }
 
@@ -334,18 +346,22 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
     const validGen = typeof data.titulo === 'string' && data.titulo.trim() && typeof data.texto === 'string' && data.texto.trim();
     if (!validGen) {
       const status = recordAiCallOutcome('plantilla', startedAt);
-      const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
+      const fallback = buildTemplatePress(state, medio.id, periodista.id, topic, rng);
       return {
         type: 'press',
         source: 'plantilla',
         status,
-        apply: (s) => applyPressArticleEffects(s, fallback),
+        apply: (s) => {
+          s.rngState = rng.rngState;
+          s.idSeq = Math.max(s.idSeq, rng.idSeq);
+          applyPressArticleEffects(s, fallback);
+        },
       };
     }
 
     const status = recordAiCallOutcome('ia', startedAt);
     const article: NewsArticle = {
-      id: `n_${state.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
+      id: nextSeqId(rng, `n_${state.reloj.dia}`),
       dia: state.reloj.dia,
       medioId: medio.id,
       medioNombre: medio.nombre,
@@ -368,16 +384,24 @@ export async function dispatchPressJob(state: GameState): Promise<AiDirectorResu
       type: 'press',
       source: 'ia',
       status,
-      apply: (s) => applyPressArticleEffects(s, article),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        s.idSeq = Math.max(s.idSeq, rng.idSeq);
+        applyPressArticleEffects(s, article);
+      },
     };
   } catch {
     const status = recordAiCallOutcome('plantilla', startedAt);
-    const fallback = buildTemplatePress(state, medio.id, periodista.id, topic);
+    const fallback = buildTemplatePress(state, medio.id, periodista.id, topic, rng);
     return {
       type: 'press',
       source: 'plantilla',
       status,
-      apply: (s) => applyPressArticleEffects(s, fallback),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        s.idSeq = Math.max(s.idSeq, rng.idSeq);
+        applyPressArticleEffects(s, fallback);
+      },
     };
   }
 }
@@ -386,6 +410,7 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
   const gate = canTriggerSpontaneousChaos(state);
   if (!gate.allowed) return null;
 
+  const rng = { rngState: state.rngState, idSeq: state.idSeq };
   const npc = pickChaosCandidateNpc(state);
   if (!npc) return null;
 
@@ -405,11 +430,11 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
     if (!target || !target.vivo || target.hospital.internado || target.accionIa) return;
     if (!canTriggerSpontaneousChaos(s).allowed) return;
     if (chosen.tipo === 'espontanea' && hasOutOfPostEffect(chosen) && !canRoleLeavePost(s, target.rol)) return;
-    const texto = pickActionText(chosen, target.nombre);
+    const texto = pickActionText(chosen, target.nombre, s);
     applyActionToNpc(s, target, chosen, texto, fuente);
     s.caosTracker.accionesEnVentana += 1;
     s.bitacora.unshift({
-      id: `log_act_${s.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
+      id: nextSeqId(s, `log_act_${s.reloj.dia}`),
       dia: s.reloj.dia,
       categoria: 'caos',
       origen: `accion:${chosen.id}/${fuente}`,
@@ -421,17 +446,20 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
 
   if (!state.config.usarIaGemini || aiDisabledForSession) {
     lastAiCallSource = 'plantilla';
-    const chosen = pickWeightedCandidate(candidatas, npc);
+    const chosen = pickWeightedCandidate(candidatas, npc, rng);
     return {
       type: 'action',
       source: 'plantilla',
       status: 'plantilla',
-      apply: (s) => applySelectedAction(s, chosen, 'motor'),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        applySelectedAction(s, chosen, 'motor');
+      },
     };
   }
 
   // Shuffle candidates before sending to classifier (ESTADOS §9)
-  const shuffled = shuffleArray(candidatas);
+  const shuffled = shuffleArray(candidatas, rng);
   const startedAt = Date.now();
   try {
     const res = await fetchWithTimeout(
@@ -463,33 +491,42 @@ export async function dispatchSpontaneousActionJob(state: GameState): Promise<Ai
       const errData = await res.json().catch(() => ({ error: '' }));
       if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
       const status = recordAiCallOutcome('plantilla', startedAt);
-      const chosen = pickWeightedCandidate(candidatas, npc);
+      const chosen = pickWeightedCandidate(candidatas, npc, rng);
       return {
         type: 'action',
         source: 'plantilla',
         status,
-        apply: (s) => applySelectedAction(s, chosen, 'motor'),
+        apply: (s) => {
+          s.rngState = rng.rngState;
+          applySelectedAction(s, chosen, 'motor');
+        },
       };
     }
 
     const data = await res.json();
     const status = recordAiCallOutcome('ia', startedAt);
-    const chosen = pickWeightedCandidate(candidatas, npc, data.probabilidades);
+    const chosen = pickWeightedCandidate(candidatas, npc, rng, data.probabilidades);
 
     return {
       type: 'action',
       source: 'ia',
       status,
-      apply: (s) => applySelectedAction(s, chosen, 'clasificador'),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        applySelectedAction(s, chosen, 'clasificador');
+      },
     };
   } catch {
     const status = recordAiCallOutcome('plantilla', startedAt);
-    const chosen = pickWeightedCandidate(candidatas, npc);
+    const chosen = pickWeightedCandidate(candidatas, npc, rng);
     return {
       type: 'action',
       source: 'plantilla',
       status,
-      apply: (s) => applySelectedAction(s, chosen, 'motor'),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        applySelectedAction(s, chosen, 'motor');
+      },
     };
   }
 }
@@ -498,6 +535,7 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
   const pending = state.ventanasCondicion.find((w) => w.estado === 'pendiente');
   if (!pending) return null;
 
+  const rng = { rngState: state.rngState };
   const affectedNpcs = state.npcs.filter((n) => pending.npcIds.includes(n.id));
   const muestra = affectedNpcs
     .slice(0, 4)
@@ -508,17 +546,21 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
     lastAiCallSource = 'plantilla';
     const chosen = pickWeightedCandidate(
       pending.candidatas.length > 0 ? pending.candidatas : [ACTION_TABLE.find((a) => a.tipo === 'condicion')!],
-      null
+      null,
+      rng
     );
     return {
       type: 'condition',
       source: 'plantilla',
       status: 'plantilla',
-      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor'),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
+      },
     };
   }
 
-  const shuffled = shuffleArray(pending.candidatas);
+  const shuffled = shuffleArray(pending.candidatas, rng);
   const derived = deriveCommunityStats(state);
   const startedAt = Date.now();
   try {
@@ -551,18 +593,24 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
         type: 'condition',
         source: 'plantilla',
         status,
-        apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, 'motor'),
+        apply: (s) => {
+          s.rngState = rng.rngState;
+          resolveConditionWindowWithFallback(s, pending.id, undefined, 'motor');
+        },
       };
     }
 
     const data = await res.json();
     const status = recordAiCallOutcome('ia', startedAt);
-    const chosen = pickWeightedCandidate(pending.candidatas, null, data.probabilidades);
+    const chosen = pickWeightedCandidate(pending.candidatas, null, rng, data.probabilidades);
     return {
       type: 'condition',
       source: 'ia',
       status,
-      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'clasificador'),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'clasificador');
+      },
     };
   } catch {
     const status = recordAiCallOutcome('plantilla', startedAt);
@@ -570,7 +618,10 @@ export async function dispatchConditionJob(state: GameState): Promise<AiDirector
       type: 'condition',
       source: 'plantilla',
       status,
-      apply: (s) => resolveConditionWindowWithFallback(s, pending.id, undefined, 'motor'),
+      apply: (s) => {
+        s.rngState = rng.rngState;
+        resolveConditionWindowWithFallback(s, pending.id, undefined, 'motor');
+      },
     };
   }
 }

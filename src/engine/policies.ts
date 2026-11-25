@@ -38,6 +38,8 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,
   caos: { ...SCENARIO_PRESETS.elecciones.caosDefault },
+  disturbiosActivos: false,
+  semilla: 1,
   usarIaGemini: false,
 };
 
@@ -81,15 +83,12 @@ export function applyFiscalStanceToLevers(
 ): GovernorLevers {
   const next = structuredClone(prev);
   if (stance === 'austeridad') {
-    next.recaudacion.impuestoUnico = 34;
     next.recaudacion.impuestoGrupo = { agro: 30, industria: 34, comercio: 36, publico: 28 };
     next.gasto.salarioPublico = 85;
   } else if (stance === 'equilibrio') {
-    next.recaudacion.impuestoUnico = 26;
     next.recaudacion.impuestoGrupo = { agro: 24, industria: 26, comercio: 28, publico: 22 };
     next.gasto.salarioPublico = 100;
   } else {
-    next.recaudacion.impuestoUnico = 18;
     next.recaudacion.impuestoGrupo = { agro: 16, industria: 18, comercio: 22, publico: 15 };
     next.gasto.salarioPublico = 120;
   }
@@ -97,12 +96,13 @@ export function applyFiscalStanceToLevers(
 }
 
 export function detectActiveFiscalStance(levers: GovernorLevers): FiscalStance | null {
-  const tax = levers.recaudacion.impuestoUnico;
+  const g = levers.recaudacion.impuestoGrupo;
+  const tax = (g.agro + g.industria + g.comercio + g.publico) / 4;
   const wage = levers.gasto.salarioPublico;
 
-  if (tax >= 32 && wage <= 90) return 'austeridad';
+  if (tax >= 30 && wage <= 90) return 'austeridad';
   if (tax <= 20 && wage >= 115) return 'bienestar';
-  if (tax >= 23 && tax <= 29 && wage >= 95 && wage <= 105) return 'equilibrio';
+  if (tax >= 22 && tax <= 28 && wage >= 95 && wage <= 105) return 'equilibrio';
   return null;
 }
 

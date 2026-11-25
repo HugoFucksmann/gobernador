@@ -29,10 +29,17 @@ export function evaluateNpcBubbleText(npc: Npc): string {
     if (npc.accionIa.id === 'huelga') return '¡Exigimos nuestros pagos!';
     if (npc.accionIa.id === 'protesta') return '¡Queremos respuestas!';
     if (npc.accionIa.id === 'saqueo') return '¡Necesitamos comida ya!';
+    if (npc.accionIa.id === 'disturbios') return '¡Basta de atropellos!';
     if (npc.accionIa.id === 'organizar_fiesta') return '¡Que siga la música!';
+    if (npc.accionIa.id === 'organizar_asamblea') return '¡Vecinos, a debatir!';
     if (npc.accionIa.id === 'predicar') return '¡Escuchen lo que viene!';
     if (npc.accionIa.id === 'cavar_pozo') return 'Algo hay acá abajo...';
     if (npc.accionIa.id === 'acaparar_comida') return 'Mejor guardar víveres';
+    if (npc.accionIa.id === 'compartir_comida') return 'Tomá, llevate algo para comer';
+    if (npc.accionIa.id === 'cuidar_vecinos') return 'Te traigo algo para la fiebre';
+    if (npc.accionIa.id === 'reparar_barricada') return 'Reforzando estas tablas';
+    if (npc.accionIa.id === 'patrullar_vecinal') return 'Cuidando la cuadra';
+    if (npc.accionIa.id === 'sermon_apocaliptico') return '¡Se acerca el fin!';
     return npc.accionIa.nombre;
   }
   if (npc.variables.hambre > 74) return '¡Qué cara está la comida!';
@@ -44,8 +51,10 @@ export function evaluateNpcBubbleText(npc: Npc): string {
   }
   if (npc.rol === 'policia') return 'Ronda tranquila';
   if (npc.rol === 'agricultor') return 'Buena tierra hoy';
+  if (npc.rol === 'tecnico') return 'Ajustando el riego';
   if (npc.rol === 'periodista') return 'Buscando primicias';
   if (npc.rol === 'comerciante') return '¡Pasen a ver!';
+  if (npc.rol === 'empresario') return 'Revisando números del molino';
   return 'Día movido en el pueblo';
 }
 
@@ -73,6 +82,12 @@ export function evaluateNpcLensColor(
   derived?: CommunityDerived
 ): string {
   if (lens === 'roles') return ROLE_CATALOG[npc.rol].color;
+  if (lens === 'acciones') {
+    if (!npc.accionIa) return '#cbd5e1';
+    if (npc.accionIa.tipo === 'condicion') return '#ef4444';
+    if (npc.accionIa.esFoco) return '#a855f7';
+    return '#f59e0b';
+  }
   if (lens === 'satisfaccion') {
     const v = npc.variables.satisfaccion;
     return v >= 65 ? '#10b981' : v >= 40 ? '#f59e0b' : '#ef4444';
@@ -120,4 +135,3 @@ export function evaluateNpcLensColor(
 
   return ROLE_CATALOG[npc.rol].color;
 }
-

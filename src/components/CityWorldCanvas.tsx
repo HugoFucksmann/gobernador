@@ -137,7 +137,7 @@ const LANDMARKS: LandmarkDef[] = [
   {
     id: 'mercado',
     label: 'Plaza y Mercado',
-    hint: 'Raciones, stock e intercambio',
+    hint: 'Precio, empresas, stock e intercambio',
     section: 'alimento',
     wx: 408,
     wy: 74,
@@ -1546,6 +1546,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 c.beginPath();
                 c.arc(0, -14.8 - bob, 3.6, Math.PI, 0);
                 c.fill();
+              } else if (npc.rol === 'empresario') {
+                c.fillStyle = '#0f172a';
+                c.fillRect(-5, -16.3 - bob, 10, 1.5);
+                c.fillRect(-3.2, -19.2 - bob, 6.4, 3);
+                c.fillStyle = '#f59e0b';
+                c.fillRect(-3.2, -17 - bob, 6.4, 0.9);
               } else {
                 c.fillStyle = hair;
                 c.beginPath();
@@ -1567,10 +1573,22 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 const badgeText =
                   npc.accionIa.id === 'protesta' || npc.accionIa.id === 'huelga'
                     ? '!'
+                    : npc.accionIa.id === 'disturbios'
+                    ? '‼'
                     : npc.accionIa.id === 'saqueo'
                     ? '×'
                     : npc.accionIa.id === 'organizar_fiesta'
                     ? '♪'
+                    : npc.accionIa.id === 'compartir_comida'
+                    ? '♥'
+                    : npc.accionIa.id === 'cuidar_vecinos'
+                    ? '+'
+                    : npc.accionIa.id === 'reparar_barricada'
+                    ? '⚒'
+                    : npc.accionIa.id === 'patrullar_vecinal'
+                    ? '★'
+                    : npc.accionIa.id === 'organizar_asamblea'
+                    ? '⚑'
                     : '•';
                 c.fillStyle = npc.accionIa.tipo === 'condicion' ? '#dc2626' : '#d97706';
                 c.beginPath();

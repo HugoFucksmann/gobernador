@@ -5,6 +5,7 @@ export type CityTab = 'alertas' | 'gaceta' | 'objetivo' | 'vecinos' | 'bitacora'
 export type MapFilter = 'todos' | 'acciones' | 'descontentos' | 'hambre';
 export type MapLens =
   | 'roles'
+  | 'acciones'
   | 'satisfaccion'
   | 'hambre'
   | 'lealtad'

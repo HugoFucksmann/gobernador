@@ -43,6 +43,8 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
       cantidadMedios: nextPreset.mediosDefault,
       poblacionInicial: nextPreset.poblacionDefault,
       caos: { ...nextPreset.caosDefault },
+      disturbiosActivos: false,
+      semilla: config.semilla,
       usarIaGemini: config.usarIaGemini,
     });
   };
@@ -164,14 +166,13 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
 
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                Módulo de economía (preset: {preset.economiaDefault})
+                Módulo de economía (preset: {preset.economiaDefault === 'fiscal' ? 'Fiscal' : 'Base'})
               </label>
-              <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-lg">
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-lg">
                 {(
                   [
-                    { id: 'simple', label: 'Simple' },
-                    { id: 'individual', label: 'Individual' },
-                    { id: 'fiscal', label: 'Fiscal' },
+                    { id: 'base', label: 'Base (nivel 1)' },
+                    { id: 'fiscal', label: 'Extensión fiscal (nivel 1.1)' },
                   ] as Array<{ id: EconomyModule; label: string }>
                 ).map((m) => (
                   <button
@@ -189,12 +190,10 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                 ))}
               </div>
               <p className="text-[11px] text-slate-500 mt-1">
-                {config.economiaModulo === 'simple' &&
-                  'Almacén común estatal, ración global, impuesto único y subsidios directos.'}
-                {config.economiaModulo === 'individual' &&
-                  'Mercado con precio dinámico, ahorros propios, impuestos por grupo, pensiones y garantía alimentaria.'}
+                {config.economiaModulo === 'base' &&
+                  'Mercado cerrado con empresas privadas, despensa propia, tope de precio, garantía alimentaria e impuestos por grupo.'}
                 {config.economiaModulo === 'fiscal' &&
-                  'Incluye economía individual + emisión monetaria e inflación dinámica.'}
+                  'Incluye economía base + emisión monetaria e inflación dinámica.'}
               </p>
             </div>
 
@@ -233,7 +232,42 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               />
             </div>
 
-            <div className="pt-1">
+            <div>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <label htmlFor="world-seed-input" className="font-medium text-slate-700">
+                  Semilla del mundo (determinista)
+                </label>
+                <input
+                  id="world-seed-input"
+                  type="number"
+                  min={1}
+                  max={999999999}
+                  value={config.semilla}
+                  onChange={(e) => {
+                    const val = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                    setConfig({ ...config, semilla: val });
+                  }}
+                  className="w-28 px-2 py-1 text-right font-mono font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-md"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs">
+                <input
+                  type="checkbox"
+                  checked={config.disturbiosActivos}
+                  onChange={(e) => setConfig({ ...config, disturbiosActivos: e.target.checked })}
+                  className="mt-0.5 rounded border-slate-300 text-teal-700"
+                />
+                <span>
+                  <strong className="text-slate-800 block">Habilitar disturbios (condición opcional)</strong>
+                  <span className="text-slate-500">
+                    Si hay protesta activa y el orden de la zona cae bajo 35%, puede escalar a disturbios con vandalismo.
+                  </span>
+                </span>
+              </label>
+
               <label className="flex items-start gap-2.5 cursor-pointer text-xs">
                 <input
                   type="checkbox"

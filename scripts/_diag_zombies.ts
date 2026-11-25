@@ -1,4 +1,5 @@
-import { ECON_CONSTANTS, ROLE_CATALOG, SCENARIO_PRESETS } from '../src/data/catalogs';
+import { ECON_CONSTANTS, SCENARIO_PRESETS } from '../src/data/catalogs';
+import { nextRand, nextSeqId } from '../src/engine/rng';
 import {
   applyActionToNpc,
   applyPressArticleEffects,
@@ -12,39 +13,23 @@ import {
   stepHeadlessDay,
 } from '../src/engine/simulation';
 import { createInitialGameState } from '../src/engine/worldGenerator';
-import { GameState, SimEvent, WorldConfig } from '../src/types/game';
-
-function withSeed<T>(seed: number, fn: () => T): T {
-  let s = seed >>> 0;
-  const orig = Math.random;
-  Math.random = () => {
-    s += 0x6d2b79f5;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  try {
-    return fn();
-  } finally {
-    Math.random = orig;
-  }
-}
+import { GameState, SimEvent, TaxableGroupId, WorldConfig } from '../src/types/game';
 
 function runRandomDirectorDay(state: GameState, publishPress = true): void {
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente') {
-      const chosen = win.candidatas[Math.floor(Math.random() * win.candidatas.length)];
+      const chosen = win.candidatas[Math.floor(nextRand(state) * win.candidatas.length)];
       resolveConditionWindowWithFallback(state, win.id, chosen?.id, 'motor');
     }
   }
   if (publishPress && state.reloj.dia % 3 === 0 && state.medios.length > 0) {
-    const medio = state.medios[Math.floor(Math.random() * state.medios.length)];
+    const medio = state.medios[Math.floor(nextRand(state) * state.medios.length)];
     const periodistaId = medio.columnistas[0] || state.npcs.find((n) => n.vivo)?.id;
     if (periodistaId) {
       const periodista = state.npcs.find((n) => n.id === periodistaId) || state.npcs[0];
       const topic = pickPressTopicAndTone(state);
       applyPressArticleEffects(state, {
-        id: `n_${state.reloj.dia}_${Math.random().toString(36).slice(2, 6)}`,
+        id: nextSeqId(state, `n_${state.reloj.dia}`),
         dia: state.reloj.dia,
         medioId: medio.id,
         medioNombre: medio.nombre,
@@ -72,8 +57,8 @@ function runRandomDirectorDay(state: GameState, publishPress = true): void {
       if (npc) {
         const candidatas = selectCandidateActions(npc, state);
         if (candidatas.length > 0) {
-          const chosen = candidatas[Math.floor(Math.random() * candidatas.length)];
-          applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre), 'motor');
+          const chosen = candidatas[Math.floor(nextRand(state) * candidatas.length)];
+          applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre, state), 'motor');
           state.caosTracker.accionesEnVentana += 1;
         }
       }
@@ -111,54 +96,58 @@ function applyZombiesHeuristic(state: GameState, baseTax: number): void {
     lev.cupos.policia + lev.cupos.estatal + lev.cupos.docente + lev.cupos.medico + lev.cupos.ingeniero;
   const effPub = Math.max(publicHeadcount, targetPublic);
 
+  const setTax = (v: number) => {
+    (['agro', 'industria', 'comercio', 'publico'] as TaxableGroupId[]).forEach((g) => {
+      lev.recaudacion.impuestoGrupo[g] = v;
+    });
+  };
+
   if (state.gobierno.reserva < 1500 || state.ultimaSalidaEconomica.disponibleDiarioEstimado < 2) {
-    lev.gasto.salarioPublico = 82;
-    lev.recaudacion.impuestoUnico = Math.min(40, Math.max(baseTax + 13, lev.recaudacion.impuestoUnico + 5));
+    lev.gasto.salarioPublico = 84;
+    setTax(Math.min(40, baseTax + 4));
   } else if (effPub >= 30 || lev.alimento.intercambio > 40) {
-    lev.gasto.salarioPublico = 86;
-    lev.recaudacion.impuestoUnico = Math.min(38, baseTax + 12);
+    lev.gasto.salarioPublico = 90;
+    setTax(Math.min(40, baseTax + 3));
   } else if (effPub >= 25) {
-    lev.gasto.salarioPublico = 92;
-    lev.recaudacion.impuestoUnico = Math.min(34, baseTax + 8);
+    lev.gasto.salarioPublico = 94;
+    setTax(Math.min(39, baseTax + 2));
   } else {
     lev.gasto.salarioPublico = 100;
-    lev.recaudacion.impuestoUnico = baseTax;
+    setTax(baseTax);
   }
 }
 
-function makeState(tax = 23): GameState {
+function makeState(tax = 37, seed = 1): GameState {
   const cfg: WorldConfig = {
     escenarioId: 'zombies',
-    economiaModulo: 'simple',
+    economiaModulo: 'base',
     cantidadMedios: 2,
     poblacionInicial: 100,
     caos: { ...SCENARIO_PRESETS.zombies.caosDefault },
+    disturbiosActivos: false,
+    semilla: seed,
     usarIaGemini: false,
   };
   const s = createInitialGameState(cfg);
   s.clima.proximoEventoDia = 99999;
-  s.clima.fenomenos[1].intensidad = 92;
-  s.clima.fenomenos[1].duracionDias = 21;
-  s.clima.fenomenos[2].intensidad = 97;
-  s.clima.fenomenos[2].duracionDias = 21;
-  s.gobierno.palancasObjetivo.recaudacion.impuestoUnico = tax;
-  s.gobierno.palancasVigentes.recaudacion.impuestoUnico = tax;
-  s.gobierno.palancasInicioPeriodo.recaudacion.impuestoUnico = tax;
+  if (s.clima.fenomenos[1]) {
+    s.clima.fenomenos[1].intensidad = 92;
+    s.clima.fenomenos[1].duracionDias = 21;
+  }
+  if (s.clima.fenomenos[2]) {
+    s.clima.fenomenos[2].intensidad = 97;
+    s.clima.fenomenos[2].duracionDias = 21;
+  }
+  (['agro', 'industria', 'comercio', 'publico'] as TaxableGroupId[]).forEach((g) => {
+    s.gobierno.palancasObjetivo.recaudacion.impuestoGrupo[g] = tax;
+    s.gobierno.palancasVigentes.recaudacion.impuestoGrupo[g] = tax;
+    s.gobierno.palancasInicioPeriodo.recaudacion.impuestoGrupo[g] = tax;
+  });
   return s;
 }
 
-ECON_CONSTANTS.salarioBasePublico = 9.5;
-ECON_CONSTANTS.produccionBaseAgricultor = 5.45;
-ECON_CONSTANTS.costoBaseServicioPorPoblacion = 0.06;
-ROLE_CATALOG.agricultor.ingreso = [18, 28];
-ROLE_CATALOG.obrero.ingreso = [20, 30];
-ROLE_CATALOG.comerciante.ingreso = [24, 38];
-ROLE_CATALOG.tecnico.ingreso = [30, 44];
-ROLE_CATALOG.periodista.ingreso = [20, 30];
-SCENARIO_PRESETS.zombies.reservaInicial = 4000;
-
-console.log('=== Criterion E: Sweep movilidadDefensa x atenuacion (n=20 each) ===');
-for (const mob of [0, 0.2, 0.4, 0.6]) {
+console.log('=== Criterion E: Sweep movilidadDefensa x atenuacion (n=15 each) ===');
+for (const mob of [0.2, 0.4, 0.6]) {
   for (const aten of [0.5, 0.7, 0.9]) {
     ECON_CONSTANTS.movilidadDefensa = mob;
     ECON_CONSTANTS.fenomenosSalud.plaga_zombie.atenuacion = aten;
@@ -167,35 +156,33 @@ for (const mob of [0, 0.2, 0.4, 0.6]) {
     let undefHits = 0;
     let relocSum = 0;
     let relocN = 0;
-    const n = 20;
+    const n = 15;
     for (let seed = 1; seed <= n; seed++) {
-      withSeed(seed, () => {
-        const s = makeState(23);
-        const noticeStart: Record<string, number> = {};
-        const relocDone: Record<string, boolean> = {};
-        for (let d = 1; d < 180; d++) {
-          if (s.reloj.dia % 7 === 0) applyZombiesHeuristic(s, 23);
-          stepHeadlessDay(s);
-          runRandomDirectorDay(s, true);
-          const st = deriveCommunityStats(s);
-          for (const ev of s.eventosDiaActual) {
-            if (ev.tipo === 'aviso' && ev.zona !== 'este') {
-              noticeStart[ev.zona] = s.reloj.dia;
-            }
-            if (ev.tipo === 'reubicacion' && noticeStart[ev.aZona] && !relocDone[ev.aZona]) {
-              relocDone[ev.aZona] = true;
-              relocSum += s.reloj.dia - noticeStart[ev.aZona];
-              relocN++;
-            }
-            if (ev.tipo === 'golpe') {
-              totalHits++;
-              if ((st.defensa[ev.zona] ?? 0) < 35) undefHits++;
-            }
+      const s = makeState(37, seed);
+      const noticeStart: Record<string, number> = {};
+      const relocDone: Record<string, boolean> = {};
+      for (let d = 1; d < 180; d++) {
+        if (s.reloj.dia % 7 === 0) applyZombiesHeuristic(s, 37);
+        stepHeadlessDay(s);
+        runRandomDirectorDay(s, true);
+        const st = deriveCommunityStats(s);
+        for (const ev of s.eventosDiaActual) {
+          if (ev.tipo === 'aviso' && ev.zona !== 'este') {
+            noticeStart[ev.zona] = s.reloj.dia;
           }
-          if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
+          if (ev.tipo === 'reubicacion' && noticeStart[ev.aZona] && !relocDone[ev.aZona]) {
+            relocDone[ev.aZona] = true;
+            relocSum += s.reloj.dia - noticeStart[ev.aZona];
+            relocN++;
+          }
+          if (ev.tipo === 'golpe') {
+            totalHits++;
+            if ((st.defensa[ev.zona] ?? 0) < 35) undefHits++;
+          }
         }
-        if (s.resultado.victoriaCumplida || s.resultado.estado === 'victoria') wins++;
-      });
+        if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
+      }
+      if (s.resultado.victoriaCumplida || s.resultado.estado === 'victoria') wins++;
     }
     console.log({
       mob,
@@ -207,32 +194,29 @@ for (const mob of [0, 0.2, 0.4, 0.6]) {
   }
 }
 
-console.log('=== Criterion H: Peak daily events (mob=0.6, aten=0.7, n=30) ===');
-ECON_CONSTANTS.movilidadDefensa = 0.6;
+console.log('=== Criterion H: Peak daily events (mob=0.4, aten=0.7, n=20) ===');
+ECON_CONSTANTS.movilidadDefensa = 0.4;
 ECON_CONSTANTS.fenomenosSalud.plaga_zombie.atenuacion = 0.7;
 const eventTypes: SimEvent['tipo'][] = ['ataque', 'golpe', 'muerte', 'internacion', 'alta', 'accion_inicio', 'accion_fin', 'aviso', 'reubicacion', 'defensa'];
 const dailyCounts: Record<string, number[]> = Object.fromEntries(eventTypes.map((t) => [t, []]));
-const condCounts: Record<string, number> = { huelga: 0, protesta: 0, saqueo: 0 };
+const condCounts: Record<string, number> = { huelga: 0, protesta: 0, saqueo: 0, disturbios: 0 };
 
-for (let seed = 1; seed <= 30; seed++) {
-  withSeed(seed, () => {
-    const s = makeState(23);
-    for (let d = 1; d < 180; d++) {
-      if (s.reloj.dia % 7 === 0) applyZombiesHeuristic(s, 23);
-      stepHeadlessDay(s);
-      runRandomDirectorDay(s, true);
-      for (const ev of s.eventosDiaActual) {
-        if (ev.tipo === 'accion_inicio' && ev.accion in condCounts) condCounts[ev.accion]++;
-      }
-      // Plague peak window around horda 2 (days 115..135) or horda 1 (55..75)
-      if ((s.reloj.dia >= 55 && s.reloj.dia <= 75) || (s.reloj.dia >= 115 && s.reloj.dia <= 135)) {
-        const dayMap: Record<string, number> = {};
-        for (const ev of s.eventosDiaActual) dayMap[ev.tipo] = (dayMap[ev.tipo] || 0) + 1;
-        for (const t of eventTypes) dailyCounts[t].push(dayMap[t] || 0);
-      }
-      if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
+for (let seed = 1; seed <= 20; seed++) {
+  const s = makeState(37, seed);
+  for (let d = 1; d < 180; d++) {
+    if (s.reloj.dia % 7 === 0) applyZombiesHeuristic(s, 37);
+    stepHeadlessDay(s);
+    runRandomDirectorDay(s, true);
+    for (const ev of s.eventosDiaActual) {
+      if (ev.tipo === 'accion_inicio' && ev.accion in condCounts) condCounts[ev.accion]++;
     }
-  });
+    if ((s.reloj.dia >= 55 && s.reloj.dia <= 75) || (s.reloj.dia >= 115 && s.reloj.dia <= 135)) {
+      const dayMap: Record<string, number> = {};
+      for (const ev of s.eventosDiaActual) dayMap[ev.tipo] = (dayMap[ev.tipo] || 0) + 1;
+      for (const t of eventTypes) dailyCounts[t].push(dayMap[t] || 0);
+    }
+    if (s.resultado.estado !== 'jugando' || s.resultado.victoriaCumplida) break;
+  }
 }
 
 for (const t of eventTypes) {
@@ -241,4 +225,4 @@ for (const t of eventTypes) {
   const p95 = arr[Math.min(arr.length - 1, Math.floor(arr.length * 0.95))] ?? 0;
   console.log('Event', t, { mean: Number(mean.toFixed(2)), p95 });
 }
-console.log('CondTriggersTotal30Seeds', condCounts);
+console.log('CondTriggersTotal20Seeds', condCounts);

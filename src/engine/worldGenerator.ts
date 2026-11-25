@@ -4,11 +4,13 @@ import {
   MEDIA_TEMPLATES,
   PUBLIC_ROLES,
   ROLE_CATALOG,
+  SAVE_FORMAT_VERSION,
   SCENARIO_PRESETS,
   SPANISH_NAMES,
 } from '../data/catalogs';
 import {
   ClimatePhenomenon,
+  CommercialEnterpriseState,
   GameState,
   GovernorLevers,
   MediaOutlet,
@@ -17,20 +19,21 @@ import {
   WorldConfig,
   ZoneId,
 } from '../types/game';
+import { nextRand, normalizeSeed, randInt, randRange } from './rng';
 
-function randRange(min: number, max: number): number {
-  return min + Math.random() * (max - min);
-}
-
-function randInt(min: number, max: number): number {
-  return Math.floor(randRange(min, max + 1));
+interface RngHolder {
+  rngState: number;
 }
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-export function getZoneCanvasPosition(zone: ZoneId): { x: number; y: number } {
+function drawRand(rng?: RngHolder): number {
+  return rng ? nextRand(rng) : Math.random();
+}
+
+export function getZoneCanvasPosition(zone: ZoneId, rng?: RngHolder): { x: number; y: number } {
   const ranges: Record<ZoneId, { x: [number, number]; y: [number, number] }> = {
     centro: { x: [380, 640], y: [250, 535] },
     norte: { x: [45, 860], y: [45, 220] },
@@ -40,92 +43,93 @@ export function getZoneCanvasPosition(zone: ZoneId): { x: number; y: number } {
   };
   const r = ranges[zone] || ranges.centro;
   return {
-    x: r.x[0] + Math.random() * (r.x[1] - r.x[0]),
-    y: r.y[0] + Math.random() * (r.y[1] - r.y[0]),
+    x: r.x[0] + drawRand(rng) * (r.x[1] - r.x[0]),
+    y: r.y[0] + drawRand(rng) * (r.y[1] - r.y[0]),
   };
 }
 
-export function getDistrictPosition(role: RoleId): { x: number; y: number } {
+export function getDistrictPosition(role: RoleId, rng?: RngHolder): { x: number; y: number } {
   const def = ROLE_CATALOG[role];
   const zone = DISTRICTS.find((d) => d.id === def.distrito) || DISTRICTS[0];
 
   if (role === 'docente' || role === 'estudiante') {
     return {
-      x: zone.x + 34 + Math.random() * (zone.w - 68),
-      y: zone.y + 62 + Math.random() * 170,
+      x: zone.x + 34 + drawRand(rng) * (zone.w - 68),
+      y: zone.y + 62 + drawRand(rng) * 170,
     };
   }
   if (role === 'jubilado' || role === 'desempleado') {
     return {
-      x: zone.x + 34 + Math.random() * (zone.w - 68),
-      y: zone.y + 245 + Math.random() * (zone.h - 275),
+      x: zone.x + 34 + drawRand(rng) * (zone.w - 68),
+      y: zone.y + 245 + drawRand(rng) * (zone.h - 275),
     };
   }
   if (role === 'medico') {
     return {
-      x: zone.x + 28 + Math.random() * 115,
-      y: zone.y + 65 + Math.random() * (zone.h - 90),
+      x: zone.x + 28 + drawRand(rng) * 115,
+      y: zone.y + 65 + drawRand(rng) * (zone.h - 90),
     };
   }
   if (role === 'estatal' || role === 'ingeniero') {
     return {
-      x: zone.x + 145 + Math.random() * (zone.w - 175),
-      y: zone.y + 65 + Math.random() * (zone.h - 90),
+      x: zone.x + 145 + drawRand(rng) * (zone.w - 175),
+      y: zone.y + 65 + drawRand(rng) * (zone.h - 90),
     };
   }
 
   return {
-    x: zone.x + 30 + Math.random() * (zone.w - 60),
-    y: zone.y + 56 + Math.random() * (zone.h - 80),
+    x: zone.x + 30 + drawRand(rng) * (zone.w - 60),
+    y: zone.y + 56 + drawRand(rng) * (zone.h - 80),
   };
 }
 
 export function getCityErrandPosition(
   role: RoleId,
-  zone?: ZoneId
+  zone?: ZoneId,
+  rng?: RngHolder
 ): { x: number; y: number; accion: string } {
   if (role === 'policia') {
     if (zone && zone !== 'centro') {
-      const zPos = getZoneCanvasPosition(zone);
+      const zPos = getZoneCanvasPosition(zone, rng);
       return { ...zPos, accion: `patrullando zona ${zone}` };
     }
     const patrolSpots = [
-      { x: 355, y: 120 + Math.random() * 340, accion: 'patrullando avenida oeste' },
-      { x: 665, y: 120 + Math.random() * 340, accion: 'patrullando avenida este' },
-      { x: 140 + Math.random() * 480, y: 295, accion: 'patrullando bulevar central' },
-      { x: 430 + Math.random() * 160, y: 140 + Math.random() * 100, accion: 'vigilando la plaza' },
+      { x: 355, y: 120 + drawRand(rng) * 340, accion: 'patrullando avenida oeste' },
+      { x: 665, y: 120 + drawRand(rng) * 340, accion: 'patrullando avenida este' },
+      { x: 140 + drawRand(rng) * 480, y: 295, accion: 'patrullando bulevar central' },
+      { x: 430 + drawRand(rng) * 160, y: 140 + drawRand(rng) * 100, accion: 'vigilando la plaza' },
     ];
-    return patrolSpots[Math.floor(Math.random() * patrolSpots.length)];
+    return patrolSpots[Math.floor(drawRand(rng) * patrolSpots.length)];
   }
 
   if (role === 'periodista') {
     const spots = [
-      { x: 420 + Math.random() * 180, y: 100 + Math.random() * 140, accion: 'cubriendo la plaza' },
-      { x: 420 + Math.random() * 180, y: 360 + Math.random() * 150, accion: 'entrevistando en Centro Cívico' },
-      { x: 100 + Math.random() * 200, y: 100 + Math.random() * 140, accion: 'reportando en los campos' },
+      { x: 420 + drawRand(rng) * 180, y: 100 + drawRand(rng) * 140, accion: 'cubriendo la plaza' },
+      { x: 420 + drawRand(rng) * 180, y: 360 + drawRand(rng) * 150, accion: 'entrevistando en Centro Cívico' },
+      { x: 100 + drawRand(rng) * 200, y: 100 + drawRand(rng) * 140, accion: 'reportando en los campos' },
     ];
-    return spots[Math.floor(Math.random() * spots.length)];
+    return spots[Math.floor(drawRand(rng) * spots.length)];
   }
 
-  if (Math.random() < 0.28) {
+  if (drawRand(rng) < 0.28) {
     const plaza = DISTRICTS.find((d) => d.id === 'mercado')!;
     return {
-      x: plaza.x + 36 + Math.random() * (plaza.w - 72),
-      y: plaza.y + 62 + Math.random() * (plaza.h - 86),
+      x: plaza.x + 36 + drawRand(rng) * (plaza.w - 72),
+      y: plaza.y + 62 + drawRand(rng) * (plaza.h - 86),
       accion: 'en el mercado central',
     };
   }
 
-  if (Math.random() < 0.18) {
+  if (drawRand(rng) < 0.18) {
     const home = DISTRICTS.find((d) => d.id === 'residencial')!;
     return {
-      x: home.x + 36 + Math.random() * (home.w - 72),
-      y: home.y + 240 + Math.random() * (home.h - 270),
+      x: home.x + 36 + drawRand(rng) * (home.w - 72),
+      y: home.y + 240 + drawRand(rng) * (home.h - 270),
       accion: 'pasando por su barrio',
     };
   }
 
-  const workPos = getDistrictPosition(role);
+  const workPos = getDistrictPosition(role, rng);
   const workAction =
     role === 'estudiante'
       ? 'estudiando en la escuela'
@@ -135,10 +139,14 @@ export function getCityErrandPosition(
       ? 'buscando trabajo'
       : role === 'agricultor'
       ? 'trabajando en los cultivos'
+      : role === 'tecnico'
+      ? 'tecnificando los campos'
       : role === 'medico'
       ? 'atendiendo en la clínica'
       : role === 'comerciante'
-      ? 'atendiendo su puesto'
+      ? 'atendiendo su comercio'
+      : role === 'empresario'
+      ? 'gestionando su empresa'
       : 'trabajando';
 
   return { ...workPos, accion: workAction };
@@ -149,6 +157,7 @@ export function isTestConfig(config: WorldConfig): boolean {
   if (config.economiaModulo !== preset.economiaDefault) return true;
   if (config.poblacionInicial !== preset.poblacionDefault) return true;
   if (config.cantidadMedios !== preset.mediosDefault) return true;
+  if (config.disturbiosActivos) return true;
   const c = config.caos;
   const d = preset.caosDefault;
   return (
@@ -160,16 +169,25 @@ export function isTestConfig(config: WorldConfig): boolean {
   );
 }
 
-export function createInitialGameState(config: WorldConfig): GameState {
+export function createInitialGameState(rawConfig: WorldConfig): GameState {
+  const semilla = normalizeSeed(rawConfig.semilla);
+  const config: WorldConfig = {
+    ...rawConfig,
+    semilla,
+    disturbiosActivos: Boolean(rawConfig.disturbiosActivos),
+  };
+  const rng: RngHolder = { rngState: semilla };
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const pop = config.poblacionInicial;
   const scale = pop / 100;
 
+  // ESTADOS §10 exact composition across all 14 roles (100 NPCs default)
   const baseDistribution: Array<{ rol: RoleId; count: number }> = [
     { rol: 'agricultor', count: Math.round(preset.topesPrivados.agricultor * scale) },
     { rol: 'obrero', count: Math.round(preset.topesPrivados.obrero * scale) },
     { rol: 'tecnico', count: Math.max(1, Math.round(preset.topesPrivados.tecnico * scale)) },
     { rol: 'comerciante', count: Math.max(2, Math.round(preset.topesPrivados.comerciante * scale)) },
+    { rol: 'empresario', count: Math.max(1, preset.topesPrivados.empresario) },
     { rol: 'periodista', count: Math.max(config.cantidadMedios, Math.round(preset.topesPrivados.periodista * scale)) },
     { rol: 'policia', count: Math.max(1, Math.round(preset.cuposIniciales.policia * scale)) },
     { rol: 'estatal', count: Math.max(1, Math.round(preset.cuposIniciales.estatal * scale)) },
@@ -178,7 +196,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
     { rol: 'ingeniero', count: Math.max(1, Math.round(preset.cuposIniciales.ingeniero * scale)) },
     { rol: 'estudiante', count: Math.round(12 * scale) },
     { rol: 'jubilado', count: Math.round(10 * scale) },
-    { rol: 'desempleado', count: Math.max(1, Math.round(3 * scale)) },
+    { rol: 'desempleado', count: Math.max(1, Math.round(2 * scale)) },
   ];
 
   const currentTotal = baseDistribution.reduce((acc, item) => acc + item.count, 0);
@@ -199,46 +217,103 @@ export function createInitialGameState(config: WorldConfig): GameState {
       const zona: ZoneId = allowedZones[i % allowedZones.length];
 
       // ESTADOS §2: students strictly < 18 when world spawns
-      let edad = randInt(22, 58);
-      if (entry.rol === 'estudiante') edad = randInt(8, 17);
-      if (entry.rol === 'jubilado') edad = randInt(65, 84);
+      let edad = randInt(rng, 22, 58);
+      if (entry.rol === 'estudiante') edad = randInt(rng, 8, 17);
+      if (entry.rol === 'jubilado') edad = randInt(rng, 65, 84);
 
-      const educNivel = Math.max(def.educMin, entry.rol === 'estudiante' ? (edad < 13 ? 0 : 1) : randInt(def.educMin, 3));
-      const pos = getDistrictPosition(entry.rol);
-      const dest = getDistrictPosition(entry.rol);
+      const educNivel = Math.max(
+        def.educMin,
+        entry.rol === 'estudiante' ? (edad < 13 ? 0 : 1) : randInt(rng, def.educMin, 3)
+      );
+      const pos = getDistrictPosition(entry.rol, rng);
+      const dest = getDistrictPosition(entry.rol, rng);
 
       const personalidad = {
-        valentia: clamp(Math.round(randRange(20, 80) + (def.afinidad === 'valentia' ? 18 : 0)), 5, 98),
-        laboriosidad: clamp(Math.round(randRange(25, 82) + (def.afinidad === 'laboriosidad' ? 15 : 0)), 10, 98),
-        codicia: clamp(Math.round(randRange(18, 78) + (def.afinidad === 'codicia' ? 18 : 0)), 5, 98),
-        rebeldia: clamp(Math.round(randRange(12, 65) + (def.afinidad === 'rebeldia' ? 18 : 0)), 5, 95),
-        resiliencia: clamp(Math.round(randRange(30, 85)), 10, 98),
+        valentia: clamp(Math.round(randRange(rng, 20, 80) + (def.afinidad === 'valentia' ? 18 : 0)), 5, 98),
+        laboriosidad: clamp(Math.round(randRange(rng, 25, 82) + (def.afinidad === 'laboriosidad' ? 15 : 0)), 10, 98),
+        codicia: clamp(Math.round(randRange(rng, 18, 78) + (def.afinidad === 'codicia' ? 18 : 0)), 5, 98),
+        rebeldia: clamp(Math.round(randRange(rng, 12, 65) + (def.afinidad === 'rebeldia' ? 18 : 0)), 5, 95),
+        resiliencia: clamp(Math.round(randRange(rng, 30, 85)), 10, 98),
       };
 
-      // ESTADOS §13: heterogeneous initial loyalty centered around ~54
-      const lealtadInicial = clamp(Math.round(randRange(42, 66)), 25, 82);
+      const miedoInicial = config.escenarioId === 'zombies' ? randInt(rng, 18, 34) : randInt(rng, 5, 16);
+      const lealtadInicial = clamp(Math.round(randRange(rng, 42, 66)), 25, 82);
+
+      // ESTADOS §4: initial pantry starts at the NPC's target so everything aligns cleanly at startup
+      const objetivoDespensa = clamp(
+        ECON_CONSTANTS.objetivoBaseDias *
+          (1 +
+            ECON_CONSTANTS.kPrudenciaDespensa * (1 - personalidad.valentia / 100) +
+            ECON_CONSTANTS.kMiedoDespensa * (miedoInicial / 100)),
+        1,
+        ECON_CONSTANTS.despensaMaxDias
+      );
+
+      const propensionGasto = Number(
+        clamp(
+          ECON_CONSTANTS.propensionGastoBase -
+            (personalidad.codicia / 100 - 0.5) * 0.22 +
+            randRange(rng, -0.05, 0.05),
+          ECON_CONSTANTS.propensionGastoMin,
+          ECON_CONSTANTS.propensionGastoMax
+        ).toFixed(3)
+      );
+
+      const initialTaxGroup = def.grupo;
+      const initTaxRate =
+        initialTaxGroup === 'agro'
+          ? 37
+          : initialTaxGroup === 'industria'
+          ? 38
+          : initialTaxGroup === 'comercio'
+          ? 38
+          : initialTaxGroup === 'publico'
+          ? 37
+          : 0;
+      const initIncomePos = Number(nextRand(rng).toFixed(2));
+      const estNetoInicial =
+        entry.rol === 'empresario'
+          ? 10
+          : entry.rol === 'comerciante'
+          ? 8
+          : entry.rol === 'jubilado'
+          ? ECON_CONSTANTS.pensionBase
+          : def.publico
+          ? Number((ECON_CONSTANTS.salarioBasePublico * (1 - initTaxRate / 100)).toFixed(2))
+          : def.ingreso
+          ? Number(
+              (
+                (def.ingreso[0] + initIncomePos * (def.ingreso[1] - def.ingreso[0])) *
+                0.78 *
+                (1 - initTaxRate / 100)
+              ).toFixed(2)
+            )
+          : 0;
 
       npcs.push({
         id,
         nombre,
         edad,
-        cumpleanosDia: randInt(1, 365),
+        cumpleanosDia: randInt(rng, 1, 365),
         educacion: {
           nivel: educNivel,
-          progreso: randInt(10, 85),
+          progreso: randInt(rng, 10, 85),
         },
         personalidad,
         variables: {
-          salud: randInt(82, 98),
-          hambre: randInt(8, 22),
-          miedo: config.escenarioId === 'zombies' ? randInt(18, 34) : randInt(5, 16),
-          satisfaccion: randInt(52, 72),
+          salud: randInt(rng, 82, 98),
+          hambre: randInt(rng, 8, 22),
+          miedo: miedoInicial,
+          satisfaccion: randInt(rng, 52, 72),
           lealtad: lealtadInicial,
         },
         economia: {
-          ingresoPos: Number(Math.random().toFixed(2)),
-          dinero: entry.rol === 'desempleado' ? randInt(4, 12) : randInt(24, 75),
-          ultimoIngresoNeto: 0,
+          ingresoPos: initIncomePos,
+          dinero: entry.rol === 'desempleado' ? randInt(rng, 10, 20) : randInt(rng, 40, 110),
+          ultimoIngresoNeto: estNetoInicial,
+          despensa: Number(objetivoDespensa.toFixed(2)),
+          propensionGasto,
+          noPudoPagarComida: false,
         },
         rol: entry.rol,
         zona,
@@ -251,7 +326,12 @@ export function createInitialGameState(config: WorldConfig): GameState {
           x: pos.x,
           y: pos.y,
           destino: dest,
-          accion: entry.rol === 'estudiante' ? 'estudiando' : entry.rol === 'jubilado' || entry.rol === 'desempleado' ? 'paseando' : 'trabajando',
+          accion:
+            entry.rol === 'estudiante'
+              ? 'estudiando'
+              : entry.rol === 'jubilado' || entry.rol === 'desempleado'
+              ? 'paseando'
+              : 'trabajando',
         },
         accionIa: null,
         modificadores: [],
@@ -284,7 +364,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
       finanzas: {
         ingresosPropios: tpl.ingresosPropios,
         fondosEstado: Math.round(finShare * 0.15),
-        dependenciaPct: Math.round((finShare * 0.15) / (tpl.ingresosPropios + finShare * 0.15) * 100),
+        dependenciaPct: Math.round(((finShare * 0.15) / (tpl.ingresosPropios + finShare * 0.15)) * 100),
       },
       intervencion: {
         financiamiento: finShare,
@@ -311,12 +391,11 @@ export function createInitialGameState(config: WorldConfig): GameState {
 
   const initialLevers: GovernorLevers = {
     recaudacion: {
-      impuestoUnico: 26,
       impuestoGrupo: {
-        agro: 24,
-        industria: 26,
-        comercio: 28,
-        publico: 22,
+        agro: 37,
+        industria: 38,
+        comercio: 38,
+        publico: 37,
       },
     },
     gasto: {
@@ -329,7 +408,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
       },
       prensa: 5,
       subsidios: {
-        agro: 9,
+        agro: 4,
         industria: 0,
         comercio: 0,
         publico: 0,
@@ -337,7 +416,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
       },
     },
     alimento: {
-      racion: 100,
+      precioMaximo: ECON_CONSTANTS.precioMaximoSinTope,
       garantiaAlimentaria: 85,
       intercambio: 0,
     },
@@ -348,6 +427,20 @@ export function createInitialGameState(config: WorldConfig): GameState {
   };
 
   const stockInicial = Math.round(preset.stockAlimentoInicial * scale);
+  const empresarioNpc = npcs.find((n) => n.rol === 'empresario') || null;
+  const comerciantesNpcs = npcs.filter((n) => n.rol === 'comerciante');
+  const comerciales: CommercialEnterpriseState[] = comerciantesNpcs.map((c, idxCom) => ({
+    id: `com_${idxCom + 1}`,
+    dueno: c.id,
+    ingresosAcum: 0,
+    sueldosAcum: 0,
+    diasPeriodo: 0,
+    ultimaGanancia: 0,
+    ultimoIngresoPeriodo: 0,
+    ultimoSueldosPeriodo: 0,
+    respuesta: null,
+  }));
+
   const initialPhenomena: ClimatePhenomenon[] =
     config.escenarioId === 'zombies'
       ? [
@@ -385,7 +478,6 @@ export function createInitialGameState(config: WorldConfig): GameState {
         ]
       : [];
 
-  // Derive initial metrics cleanly from generated NPCs (ESTADOS §13)
   const satInicial = Number(
     (npcs.reduce((acc, n) => acc + n.variables.satisfaccion, 0) / Math.max(1, npcs.length)).toFixed(1)
   );
@@ -395,14 +487,22 @@ export function createInitialGameState(config: WorldConfig): GameState {
   const hambreInicial = Number(
     ((npcs.filter((n) => n.variables.hambre > 80).length / Math.max(1, npcs.length)) * 100).toFixed(1)
   );
+  const despensaMediaInicial = Number(
+    (npcs.reduce((acc, n) => acc + n.economia.despensa, 0) / Math.max(1, npcs.length)).toFixed(1)
+  );
 
   const getMetricValue = (m: 'apoyoPct' | 'hambreCriticaPct' | 'poblacion') =>
     m === 'apoyoPct' ? apoyoInicial : m === 'hambreCriticaPct' ? hambreInicial : pop;
 
   const initDefense = config.escenarioId === 'zombies' ? 52 : 55;
-  const inflacionInicial = config.economiaModulo === 'simple' ? 0 : preset.inflacionInicial;
+  const inflacionInicial = preset.inflacionInicial;
+  const diasStockInicial = Number((stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(1));
 
   return {
+    versionFormato: SAVE_FORMAT_VERSION,
+    semilla,
+    rngState: rng.rngState,
+    idSeq: 0,
     config,
     esConfigDePrueba: isTestConfig(config),
     reloj: {
@@ -482,7 +582,8 @@ export function createInitialGameState(config: WorldConfig): GameState {
           1
         ),
         comercio: clamp(
-          preset.topesPrivados.comerciante / Math.max(1, pop * (preset.objetivoCobertura?.comercio ?? ECON_CONSTANTS.objetivoCobertura.comercio)),
+          comerciantesNpcs.length /
+            Math.max(1, pop * (preset.objetivoCobertura?.comercio ?? ECON_CONSTANTS.objetivoCobertura.comercio)),
           0,
           1
         ),
@@ -493,14 +594,45 @@ export function createInitialGameState(config: WorldConfig): GameState {
       prensaObjetivo,
       prensaInicioPeriodo: structuredClone(prensaObjetivo),
     },
+    empresas: {
+      alimento: {
+        id: 'alimento',
+        dueno: empresarioNpc ? empresarioNpc.id : null,
+        stock: stockInicial,
+        diasStock: diasStockInicial,
+        siloDias: ECON_CONSTANTS.siloDias,
+        ingresosAcum: 0,
+        sueldosAcum: 0,
+        diasPeriodo: 0,
+        ultimaGanancia: 0,
+        ultimoIngresoPeriodo: 0,
+        ultimoSueldosPeriodo: 0,
+        respuesta: null,
+      },
+      comerciales,
+    },
     alimento: {
       stock: stockInicial,
       consumoPorNpc: ECON_CONSTANTS.consumoPorNpc,
-      diasStock: Number((stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(1)),
+      diasStock: diasStockInicial,
       siloDias: ECON_CONSTANTS.siloDias,
       precio: ECON_CONSTANTS.precioBaseAlimento,
+      precioMercado: ECON_CONSTANTS.precioBaseAlimento,
       precioBase: ECON_CONSTANTS.precioBaseAlimento,
-      produccionDiaria: Number((pop * 1.05).toFixed(1)),
+      produccionDiaria: Number(
+        (
+          baseDistribution[0].count *
+          ECON_CONSTANTS.produccionBaseAgricultor *
+          0.72 *
+          (1 +
+            (Math.min(
+              baseDistribution[2].count * 0.72,
+              baseDistribution[0].count * ECON_CONSTANTS.tecnicosPorAgricultor
+            ) /
+              Math.max(1, baseDistribution[0].count)) *
+              ECON_CONSTANTS.kTecnificacion)
+        ).toFixed(1)
+      ),
       consumoDiario: pop * ECON_CONSTANTS.consumoPorNpc,
     },
     clima: {
@@ -537,7 +669,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
       accesoComida: Object.fromEntries(npcs.map((n) => [n.id, 1])),
       poderAdquisitivo: Object.fromEntries(npcs.map((n) => [n.id, 55])),
       disponibleDiarioEstimado: 35,
-      precioAlimento: 1.0,
+      precioAlimento: ECON_CONSTANTS.precioBaseAlimento,
       inflacion: inflacionInicial,
     },
     caosTracker: {
@@ -551,6 +683,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
       impago: 0,
       descontento: 0,
       hambre: 0,
+      disturbios: 0,
     },
     eventos: [],
     eventosDiaActual: [],
@@ -601,7 +734,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
         categoria: 'sistema',
         origen: 'sistema:inicio',
         titulo: `Inicio de partida: ${preset.nombre}`,
-        detalle: `Módulo económico: ${config.economiaModulo} · ${pop} habitantes · ${medios.length} medio(s) de prensa.`,
+        detalle: `Módulo económico: ${config.economiaModulo} · Semilla ${semilla} · ${pop} habitantes (despensa media ${despensaMediaInicial}d).`,
       },
     ],
     historial: [
@@ -612,7 +745,7 @@ export function createInitialGameState(config: WorldConfig): GameState {
         satisfaccion: satInicial,
         apoyo: apoyoInicial,
         hambreCritica: hambreInicial,
-        stockDias: Number((stockInicial / pop).toFixed(1)),
+        stockDias: diasStockInicial,
         poblacion: pop,
       },
     ],

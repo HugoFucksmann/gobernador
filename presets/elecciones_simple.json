@@ -1,42 +1,45 @@
 {
   "id": "elecciones_simple",
-  "nombre": "Año Electoral — Economía Simple (Calibrado)",
+  "nombre": "Año Electoral — Economía Base (Calibrado)",
   "escenarioId": "elecciones",
-  "economiaModulo": "simple",
+  "economiaModulo": "base",
   "poblacion": 100,
   "duracionDias": 365,
   "ECON_CONSTANTS": {
-    "salarioBasePublico": 9,
-    "pensionBase": 8,
+    "salarioBasePublico": 3.85,
+    "pensionBase": 2.8,
     "empleadosPorComerciante": 4,
-    "precioBaseAlimento": 1.0,
+    "precioBaseAlimento": 2.65,
     "consumoPorNpc": 1.0,
-    "produccionBaseAgricultor": 5.42,
+    "produccionBaseAgricultor": 5.0,
+    "objetivoBaseDias": 3.4,
+    "umbralRecompraDias": 3.6,
+    "margenComercialPct": 23,
+    "propensionGastoBase": 0.85,
+    "propensionGastoMin": 0.55,
+    "propensionGastoMax": 0.95,
     "perdidaAdminMax": 0.30,
-    "costoBaseServicioPorPoblacion": 0.19,
-    "comisionComercioFactor": 0.14,
-    "coefSubsidioSimple": 11.9,
-    "coefImpuestoSimple": 1.17,
+    "costoBaseServicioPorPoblacion": 0.032,
     "fiscalUmbral": 40,
     "fiscalPendiente": 0.01
   },
   "ROLE_CATALOG_ingresos": {
-    "agricultor": [18, 28],
-    "obrero": [20, 30],
-    "comerciante": [24, 38],
-    "tecnico": [30, 44],
-    "periodista": [20, 30]
+    "agricultor": [6.0, 8.4],
+    "obrero": [8.0, 10.6],
+    "tecnico": [8.8, 12.2],
+    "periodista": [16, 22]
   },
   "SCENARIO_PRESET": {
     "poblacionDefault": 100,
     "mediosDefault": 2,
     "inflacionInicial": 10,
-    "reservaInicial": 4200,
-    "stockAlimentoInicial": 1500,
+    "reservaInicial": 4000,
+    "stockAlimentoInicial": 1600,
     "topesPrivados": {
       "agricultor": 30,
       "obrero": 14,
       "comerciante": 4,
+      "empresario": 1,
       "tecnico": 3,
       "periodista": 3
     },
@@ -49,7 +52,7 @@
     },
     "rolesSinIngreso": {
       "estudiante": 12,
-      "desempleado": 3,
+      "desempleado": 2,
       "jubilado": 10
     },
     "caosDefault": {
@@ -62,12 +65,11 @@
   },
   "initialLevers": {
     "recaudacion": {
-      "impuestoUnico": 26,
       "impuestoGrupo": {
-        "agro": 24,
-        "industria": 26,
-        "comercio": 28,
-        "publico": 22
+        "agro": 37,
+        "industria": 38,
+        "comercio": 38,
+        "publico": 37
       }
     },
     "gasto": {
@@ -80,7 +82,7 @@
       },
       "prensa": 5,
       "subsidios": {
-        "agro": 9,
+        "agro": 4,
         "industria": 0,
         "comercio": 0,
         "publico": 0,
@@ -88,7 +90,7 @@
       }
     },
     "alimento": {
-      "racion": 100,
+      "precioMaximo": 250,
       "garantiaAlimentaria": 85,
       "intercambio": 0
     },
@@ -102,7 +104,7 @@
     "intensidad": 95,
     "inicioDia": 140,
     "duracionDias": 90,
-    "nota": "El ejemplo del brief (intensidad 60, día 140, 30 días) no agota el stock acumulado con A1 en módulo simple; PUEDES AJUSTAR habilita calibrar la sequía de prueba."
+    "nota": "Secuencia calibrada para módulo base cerrado con empresas y despensas."
   },
   "heuristicPolicy": {
     "evaluacionCadaDias": 7,
@@ -110,11 +112,10 @@
     "intercambioCritico": 85,
     "stockAlertaDeficitDias": 14,
     "intercambioPreventivo": 50,
-    "racionRecuperacionSiHambreMayorA5": 115,
     "umbralReservaDiasNomina": 20,
-    "impuestoEmergenciaMax": 35,
-    "impuestoAlivioMin": 22,
-    "umbralApoyoAlivio": 48,
+    "impuestoEmergenciaMax": 42,
+    "impuestoAlivioMin": 26,
+    "umbralApoyoAlivio": 50,
     "umbralDescontentosPct": 25,
     "incrementoSubsidioGrupo": 2,
     "topeSubsidioGrupo": 12

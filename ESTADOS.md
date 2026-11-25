@@ -1,4 +1,4 @@
-# Estados internos (borrador v0.20)
+# Estados internos (borrador v0.35)
 
 > Lo marcado **[cerrado]** está decidido; el resto es lo acordado hasta ahora, salvo lo listado en la sección 15. Los valores que se ajustan probando (constantes, coeficientes, umbrales, topes, plazos y valores iniciales) no viven acá: están en CALIBRACION.md y en el preset de cada escenario. Los números que aparecen en los ejemplos solo ilustran la forma de los datos. Escala 0-100 salvo donde se indique. Ejemplos escalados a unos 100 NPCs. Las palancas del gobernador están en GOBERNADOR.md; acá solo sus efectos sobre los estados. La economía es modular (sección 3.1).
 
@@ -26,7 +26,7 @@
     "satisfaccion": 65,
     "lealtad": 70
   },
-  "economia": { "ingreso_pos": 60, "dinero": 40 },
+  "economia": { "ingreso_pos": 60, "dinero": 40, "despensa": 6 },
   "rol": "agricultor",
   "zona": "este",
   "accion": null,
@@ -46,7 +46,7 @@
 - `edad`: define la **etapa** (se deriva): menor (<18) solo estudia, adulto (18-64) trabaja (en el nivel 1 solo estudian los menores), jubilado (65+) no trabaja. Cada NPC cumple años en su propio día, fijado al generar el mundo por semilla.
 - `educacion.nivel`: 0 sin estudios, 1 básico, 2 medio, 3 superior. Define a qué roles accede.
 - `personalidad` es el valor **base y fijo** de cada rasgo. Las reglas usan el valor **efectivo** = base + modificadores activos (temporales, con decaimiento), acotado a 0-100. `variables` cambian. Salud 0 = muere.
-- `economia` **[cerrado: cada NPC gana y gasta su dinero]**: `ingreso_pos` (0-100) es su posición fija dentro del rango de ingreso de su rol (da variedad). `dinero` es lo que tiene ahorrado. Los campos existen siempre. El módulo `simple` usa `ingreso_pos` (recaudación y poder adquisitivo) y no usa `dinero`.
+- `economia` **[cerrado: cada NPC gana y gasta su dinero]**: `ingreso_pos` (0-100) es su posición fija dentro del rango de ingreso de su rol (da variedad). `dinero` es lo que tiene ahorrado. `despensa` son los días de comida que tiene en casa (sección 4). Los campos existen siempre.
 - `accion`: acción de la tabla (sección 7) en curso, elegida por el director de caos (sección 9): el motor por afinidad y azar o, si la IA opcional está activa, con el clasificador. Si tiene el efecto `fuera_de_puesto` (sección 7.1), no produce ni cobra ingreso por su trabajo. Los empleados públicos mantienen su salario (propuesta), salvo en impago.
 - `modificadores`: canal único de efectos (sección 8), con `origen`.
 - `zona`: zona del mundo donde está el NPC (sección 14), asignada al generar el mundo según su rol. Su zona efectiva puede ser otra (acción con `zona_destino`, internación). Los policías cambian de `zona` al reubicarse.
@@ -61,7 +61,8 @@
   { "id": "policia",     "edad_min": 18, "edad_max": 64,   "educ_min": 1, "afinidad": "valentia",     "publico": true, "produce": { "seguridad": 1 } },
   { "id": "estatal",     "edad_min": 18, "edad_max": 64,   "educ_min": 1, "afinidad": "laboriosidad", "publico": true, "produce": { "administracion": 1 } },
   { "id": "comerciante", "edad_min": 18, "edad_max": 64,   "educ_min": 1, "afinidad": "codicia",      "produce": { "comercio": 1 } },
-  { "id": "tecnico",     "edad_min": 18, "edad_max": 64,   "educ_min": 2, "afinidad": "laboriosidad", "produce": {} },
+  { "id": "empresario",  "edad_min": 18, "edad_max": 64,   "educ_min": 2, "afinidad": "codicia",      "produce": {} },
+  { "id": "tecnico",     "edad_min": 18, "edad_max": 64,   "educ_min": 2, "afinidad": "laboriosidad", "produce": { "tecnificacion": 1 } },
   { "id": "docente",     "edad_min": 18, "edad_max": 64,   "educ_min": 2, "afinidad": "laboriosidad", "publico": true, "produce": { "educacion": 1 } },
   { "id": "periodista",  "edad_min": 18, "edad_max": 64,   "educ_min": 2, "afinidad": "rebeldia",     "produce": { "informacion": 1 } },
   { "id": "medico",      "edad_min": 18, "edad_max": 64,   "educ_min": 3, "afinidad": "laboriosidad", "publico": true, "produce": { "salud": 1 } },
@@ -71,16 +72,18 @@
 ]
 ```
 
-- `ingreso: [min, max]` por rol (valores en CALIBRACION): lo que gana por día un NPC privado en ese rol. Real = (min + `ingreso_pos` / 100 × (max − min)) × productividad. En `simple` solo sirve para calcular la recaudación.
+- `ingreso: [min, max]` por rol (valores en CALIBRACION): lo que gana por día un NPC privado empleado en ese rol, pagado por su empresa (sección 4). Real = (min + `ingreso_pos` / 100 × (max − min)) × productividad.
 - `publico: true`: cobra el `salario_publico`, igual para todos: `salario_base_publico` × palanca / 100, con `salario_base_publico` (se calibra por escenario y puede quedar por debajo del ingreso privado). No tiene ingreso propio y forma parte de la nómina.
-- Obrero y técnico no producen un recurso físico: su aporte es el ingreso gravable.
-- **Comerciante (empleados confirmados: son los obreros; la comisión por ventas sigue como propuesta):** gana su ingreso base (el rango de `ingreso`) más una comisión sobre lo que se vende en el período. Ventas = gasto de la población en comida + volumen de intercambio con el exterior, repartidas entre los comerciantes. Es un valor derivado: no se traza quién le paga a quién (ver Circulación en la sección 12). Tiene empleados: cada comerciante sostiene hasta `empleados_por_comerciante` obreros. El tope efectivo de obreros = min(`tope_privado[obrero]`, comerciantes × `empleados_por_comerciante`). Si baja el número de comerciantes, el tope efectivo baja de inmediato, pero los obreros que quedan sin puesto no pasan todos a desempleados de golpe: pasan como máximo `max_pase_desempleo_por_dia` por día (valor en CALIBRACION), elegidos al azar con semilla entre los que exceden el tope. Mientras haya exceso no se cubren vacantes de obrero. Cada pase queda con origen `estado:comercio` y `causa` = el evento que redujo a los comerciantes (muerte, acción en curso), para poder explicar la cadena.
-- **Sin ingreso propio (desde `individual`):** los jubilados reciben una pensión fija (`pension_base`), gasto obligatorio del estado. La comida de los menores la paga el estado. Los desempleados dependen de la garantía alimentaria y de los subsidios.
+- El obrero no produce un recurso físico: su aporte es el ingreso gravable. **El técnico [decidido]** es el agrotécnico de la empresa de alimento: hasta un tope proporcional a los agricultores (`tecnicos_por_agricultor`), cada técnico sube la productividad de la empresa (`k_tecnificacion`, valores en CALIBRACION). Así la educación media tiene un efecto económico.
+- **Comerciante [decidido]:** dueño de su empresa comercial (sección 4). Su ingreso es la ganancia de la empresa: el margen sobre la comida que se vende más las ventas de otros bienes (gasto de vida de los NPCs), menos los sueldos de sus obreros. Cada comerciante sostiene hasta `empleados_por_comerciante` obreros. El tope efectivo de obreros = min(`tope_privado[obrero]`, comerciantes × `empleados_por_comerciante`). Si baja el número de comerciantes, el tope efectivo baja de inmediato, pero los obreros que quedan sin puesto no pasan todos a desempleados de golpe: pasan como máximo `max_pase_desempleo_por_dia` por día (valor en CALIBRACION), elegidos al azar con semilla entre los que exceden el tope. Mientras haya exceso no se cubren vacantes de obrero. Cada pase queda con origen `estado:comercio` y `causa` = el evento que redujo a los comerciantes (muerte, acción en curso), para poder explicar la cadena. El comerciante también da la capacidad de intercambio con el exterior.
+- **Empresario [decidido]:** dueño de las empresas que no son comerciales (por ahora, la de alimento). Su ingreso es la ganancia de la empresa. Es un rol privado, con `tope_privado[empresario]` = un puesto por empresa. Solo cobra la ganancia, así que una acción con `fuera_de_puesto` no le quita ese ingreso (es de propiedad, no de trabajo) **[propuesta]**: la empresa sigue operando aunque el puesto esté vacante (así la muerte de un NPC no corta la comida) y el puesto se cubre por afinidad (codicia) y vacantes, como cualquier rol privado. Pertenece al grupo `comercio`. Los medios no tienen empresario (sección 6). Las empresas están en la sección 4.
+- **Sin ingreso propio:** los jubilados reciben una pensión fija (`pension_base`), gasto obligatorio del estado. La comida de los menores la paga el estado. Los desempleados dependen de la garantía alimentaria y de los subsidios.
 - `policia`: rol de seguridad en el nivel 1, con dos usos: defensa y orden (sección 14). En zombies el gobernador sube el cupo y los NPCs lo cubren por afinidad (valentía), como cualquier rol. Su `zona` define dónde defiende (sección 14).
-- `medico`: da camas al hospital (sección 12, Salud).
+- `medico`: da camas al hospital público (sección 12, Salud). Salud, educación y seguridad son por ahora solo servicios públicos: no hay clínicas ni escuelas privadas (IDEA §10).
 - `periodista`: columnista de un medio, produce `informacion`. Es un rol privado: cobra su ingreso del rango, paga impuestos (grupo `comercio`) y no depende de su medio en el nivel 1.
-- `alimento` es un stock del mercado (sección 4). `seguridad`, `salud`, `educacion` e `infraestructura` son indicadores del gobierno (sección 3). Los servicios actúan según su **cobertura** (profesionales respecto de la población). El indicador `salud` es la calidad de la atención sanitaria, no la salud de la gente: no existe una salud agregada de la comunidad. No es la `salud` del NPC.
+- `alimento` es el stock de la empresa de alimento (sección 4). `seguridad`, `salud`, `educacion` e `infraestructura` son indicadores del gobierno (sección 3). Los servicios actúan según su **cobertura** (profesionales respecto de la población). El indicador `salud` es la calidad de la atención sanitaria, no la salud de la gente: no existe una salud agregada de la comunidad. No es la `salud` del NPC.
 - `administracion`: sin estatales se pierde parte de la recaudación y del presupuesto. `comercio`: capacidad de intercambio de alimento con el exterior.
+- **Estatal y privado [decidido]:** son estatales la policía, la administración, las escuelas públicas, el hospital público y la obra pública (roles con `publico: true`, con cupo del gobernador). Son privados con empresa la de alimento (agricultores y técnicos, con el empresario como dueño) y las comerciales (obreros, con el comerciante como dueño). Los medios (periodistas) son privados simplificados: sin dueño NPC y con ingresos propios constantes en el nivel 1. Estudiantes, desempleados y jubilados no tienen empleador.
 
 **Cambios de rol**
 
@@ -94,9 +97,9 @@
 
 ```json
 {
-  "agro": ["agricultor"],
-  "industria": ["obrero", "tecnico"],
-  "comercio": ["comerciante", "periodista"],
+  "agro": ["agricultor", "tecnico"],
+  "industria": ["obrero"],
+  "comercio": ["comerciante", "empresario", "periodista"],
   "publico": ["policia", "estatal", "docente", "medico", "ingeniero"],
   "sin_ingreso": ["desempleado", "jubilado", "estudiante"]
 }
@@ -116,23 +119,23 @@
 ```
 
 - `reserva`: stock de fondos. Lo no asignado del presupuesto va acá. También paga las compras de alimento (sección 12).
-- `inflacion` **[cerrado]**: variable del gobierno, no del escenario. Sube con la emisión y decae sin ella. Solo cambia desde el módulo `fiscal`. Se expresa en % (15 = precios ×1,15). En `simple` vale 0 (precio fijo); en `individual`, el valor del preset.
+- `inflacion` **[cerrado]**: variable del gobierno, no del escenario. Sube con la emisión y decae sin ella. Solo cambia con la extensión `fiscal`; sin ella vale el valor del preset. Se expresa en % (15 = precios ×1,15).
 - `finanzas`: resultado del último período (se recalcula, no se decide). `deficit` y `emision` se usan desde `fiscal`.
 - `indicadores`: se acumulan con inversión y personal, y decaen con el tiempo. `seguridad` es el total de la ciudad; la defensa de cada zona se deriva de dónde están los policías y de su `integridad`, que se guarda acá (sección 14).
 - `palancas`: valores vigentes de las palancas del gobernador (estructura en GOBERNADOR.md). Las de prensa se guardan en cada medio (sección 6).
 
-### 3.1 Módulos de economía (esquema cerrado, detalles abiertos)
+### 3.1 Economía (esquema cerrado, extensión abierta)
 
-La economía es un módulo con salidas fijas. El resto del juego (hambre, satisfacción, servicios, objetivo) solo lee esas salidas. Se elige en el panel y cada escenario trae su preset (cambiarlo se marca como "configuración de prueba").
+La economía es un módulo con salidas fijas. El resto del juego (hambre, satisfacción, servicios, objetivo) solo lee esas salidas. El nivel 1 usa el módulo `base`; la extensión `fiscal` llega en el nivel 1.1. El módulo que antes se llamaba `individual` es ahora `base`; `simple` ya no es parte del juego (el prototipo puede conservarlo para pruebas). Cada escenario trae su preset (cambiar la economía se marca como "configuración de prueba").
 
 ```json
-{ "economia": { "modulo": "simple", "extensiones": [] } }
+{ "economia": { "modulo": "base", "extensiones": [] } }
 ```
 
 ```ts
 interface SalidaEconomica {
-  accesoComida: Record<npcId, number>      // 0 a 1
-  poderAdquisitivo: Record<npcId, number>  // 0 a 100, entra en la satisfacción
+  accesoComida: Record<npcId, number>      // 0 a 1: qué parte de su consumo puede cubrir
+  poderAdquisitivo: Record<npcId, number>  // 0 a 100: deriva del dinero y del ingreso neto frente al precio de la comida; entra en la satisfacción
   disponible: number                       // fondos para presupuesto
   precioAlimento: number
   inflacion: number
@@ -142,36 +145,72 @@ interface SalidaEconomica {
 Se calcula una vez por día.
 
 - **Período fiscal:** ingresos y gastos se acumulan a diario y se liquidan cada `periodo_fiscal_dias`. Presupuesto y subsidios se reparten en cada liquidación. Es independiente del período del caos (sección 9).
-- **Combinación:** `individual` reemplaza a `simple`. `fiscal` solo se activa sobre `individual`.
-- **Preset inicial:** elecciones y zombies arrancan en `simple`. En elecciones, sin emisión: el límite del gasto es la reserva y el impago. La emisión y la inflación dinámica llegan con `fiscal`.
-- **Fórmulas de `simple`:** un coeficiente por efecto, a calibrar. `poderAdquisitivo` = 50 + `coef_subsidio` × subsidio por habitante del grupo (con rendimientos decrecientes) − `coef_impuesto` × tasa del grupo (más con codicia) + `k_salario` × (`salario_publico` − 100) solo para el grupo `publico` + un ajuste individual según `ingreso_pos` y `resiliencia` (para que un subsidio no mueva de golpe a todo un grupo), acotado a 0-100. Entra en la satisfacción igual que en los otros módulos.
+- **Extensión `fiscal`:** solo se activa sobre `base`. Agrega la emisión hasta el tope autorizado y la inflación dinámica (sección 12).
+- **Preset inicial:** elecciones y zombies arrancan en `base`. En elecciones, sin emisión: el límite del gasto es la reserva y el impago.
+- **Circuito del dinero [cerrado]:**
 
-| Elemento | `simple` | `individual` | `fiscal` |
-|---|---|---|---|
-| Alimento | Almacén común del estado (con silo) y ración global. Precio fijo. Intercambio con el exterior | Mercado con precio y garantía alimentaria | Precio afectado por la inflación |
-| Recaudación | Un impuesto único sobre el ingreso de todos los roles con ingreso | Impuestos por grupo | Igual |
-| NPC | Sin `dinero` en uso | `dinero`, gasto de vida, ingreso propio | Igual |
-| Subsidios | Suben la satisfacción del grupo directamente | Transfieren dinero al grupo | Igual |
-| Nómina | Sí | Sí | Sí |
-| Pensiones | No (los jubilados comen de la ración) | Sí | Igual |
-| Déficit | Se usa la reserva y, si no alcanza, hay impago | Igual | Igual, y antes del impago se puede emitir |
-| Inflación | Fija en 0 | Fija (valor del preset) | Dinámica: sube con la emisión |
+```
+NPC ── compra comida y gasta en otros bienes ──► empresa comercial ── resto de la venta ──► empresa de alimento
+empresa comercial ── sueldos ──► obreros · ganancia ──► comerciante (dueño)
+empresa de alimento ── sueldos ──► agricultores y técnicos · ganancia ──► empresario (dueño)
+NPC ── impuestos ──► estado ── nómina, pensiones, subsidios, garantía ──► NPC
+estado ◄──► exterior (intercambio) · NPC ──► exterior (`fraccion_gasto_exterior`)
+```
 
-## 4. Alimento: stock y mercado
+| Elemento | `base` (nivel 1) | Extensión `fiscal` (nivel 1.1) |
+|---|---|---|
+| Alimento | Empresas, mercado con precio y despensa por NPC (sección 4) | Precio afectado por la inflación |
+| Recaudación | Impuestos por grupo | Igual |
+| NPC | `dinero`, despensa, ingreso propio, gasto de vida | Igual |
+| Subsidios | Transfieren dinero al grupo | Igual |
+| Nómina | Sí | Sí |
+| Pensiones | Sí | Igual |
+| Déficit | Se usa la reserva y, si no alcanza, hay impago | Igual, y antes del impago se puede emitir |
+| Inflación | Fija (valor del preset) | Dinámica: sube con la emisión |
 
-Módulo `individual`: el alimento es un stock de mercado (estado de la economía, sin empresas como entidad) y el estado lo regula. Lo que pagan los NPCs sale del sistema; los comerciantes ganan según las ventas (sección 2, valor derivado). En `simple`, el mismo stock es el almacén común del estado, con ración global y precio fijo.
+## 4. Alimento y empresas
+
+El alimento es parte de la economía y no depende directo del gobernador: lo producen y venden empresas privadas, cada NPC lo compra con su `dinero`, lo guarda en su despensa y lo consume. El gobernador lo regula de forma indirecta con impuestos, subsidios, garantía alimentaria, intercambio y `precio_maximo` (GOBERNADOR §4).
 
 ```json
 {
-  "alimento": { "stock": 1500, "consumo_por_npc": 1, "dias_stock": 15, "precio": 1.0, "silo_dias": 25 },
+  "empresas": {
+    "alimento": { "dueno": "npc_44", "stock": 1500, "dias_stock": 15, "silo_dias": 25, "respuesta": null },
+    "comerciales": [ { "id": "com_1", "dueno": "npc_12", "respuesta": null } ]
+  },
+  "alimento": { "consumo_por_npc": 1, "precio": 1.0 },
   "precio_base": 1.0
 }
 ```
 
-- Producción de los agricultores → `stock`. Consumo diario = población × `consumo_por_npc`. `dias_stock` y `precio` se derivan. **Silo:** el `stock` tiene un tope de `silo_dias` días de consumo y lo que excede se pierde. Sin tope, un superávit chico se acumula sin límite y las sequías no tienen efecto. El gobernador puede vender el excedente (intercambio).
-- `precio` = `precio_base` × escasez (según `dias_stock`) × clima × (1 + inflación / 100). Sube cuando el stock baja.
-- Cada NPC paga su comida con su `dinero`. El faltante lo cubre en parte el estado (garantía alimentaria).
-- Si el stock no alcanza para todos, el reparto es parejo y sube el hambre general. El dinero no crea comida: el estado puede importar (intercambio).
+**Empresas** (estado, se guardan). `dueno` es el NPC dueño o `null` si el puesto está vacante.
+
+- **Alimento** (una por mundo): emplea a los agricultores y a los técnicos. Es dueña del `stock`. Dueño: el empresario.
+- **Comerciales** (una por comerciante): emplean a los obreros. Dueño: el comerciante.
+- **Medios:** son privados simplificados (sección 6) y no entran en este circuito en el nivel 1.
+
+**Producción y stock.** La producción de los agricultores, multiplicada por la tecnificación de los técnicos (sección 2), va al `stock` de la empresa de alimento. `dias_stock` y `precio` se derivan. **Silo:** el `stock` tiene un tope de `silo_dias` días de consumo y lo que excede se pierde. Sin tope, un superávit chico se acumula sin límite y las sequías no tienen efecto.
+
+**Despensa [decidido].** Cada NPC tiene una despensa (días de comida en casa) con un tope por casa, `despensa_max_dias`. Cada día consume un día de su despensa, equivalente a `consumo_por_npc` de comida. Al generar el mundo, la despensa de cada NPC arranca en su objetivo, para que inicialmente todo encaje. Su **objetivo** de días sube con su prudencia (valentía baja) y con su miedo: objetivo = `objetivo_base_dias` × (1 + `k_prudencia` × (1 − valentía/100) + `k_miedo` × miedo/100), con tope `despensa_max_dias`. La acción `acapara` suma `acapara_extra_dias` al objetivo mientras dura (sección 7.1). Cuando la despensa baja de `umbral_recompra_dias`, el NPC recompra hasta su objetivo, con su `dinero` y si hay stock. Si el stock no alcanza para todos, el reparto es parejo. Así salen corridas de compra de forma natural: noticia alarmista, miedo, compra anticipada, mercado vacío, precio sube.
+
+**Canal de venta [decidido para la v1].** La comida siempre se puede comprar. La venta pasa por las comerciales con un margen (`margen_comercial_pct`), repartido entre las que haya; el resto va a la empresa de alimento. Si no queda ninguna comercial, todo va a la empresa de alimento y la venta sigue igual. Más adelante se puede sumar una capacidad de venta por comerciante, con una alternativa directa limitada, sin cambiar el circuito: la v1 equivale a capacidad ilimitada.
+
+**Precio.** `precio` = min(precio de mercado, tope), con precio de mercado = `precio_base` × escasez (según `dias_stock`) × clima × (1 + inflación / 100), y tope = `precio_base` × `precio_maximo` / 100 (palanca, GOBERNADOR §4). Sube cuando el stock baja.
+
+**Sueldos y ganancia.** Cada empresa paga los sueldos de sus empleados (sección 12, Ingreso) y lo que le queda de las ventas es ganancia del dueño. La empresa no guarda caja: toda la ganancia pasa al dueño y solo es negativa si el dueño decide absorber una pérdida (tabla de respuestas, abajo); en cualquier otro caso los sueldos se ajustan para que la ganancia no baje de 0. El dueño solo paga impuesto sobre una ganancia positiva. Se liquida cada `periodo_pago_dias` (CALIBRACION), con los ingresos y sueldos acumulados del período, para que un día flojo no dispare nada. Con el puesto de dueño vacante la ganancia sale del sistema **[propuesta]** y no hay quien absorba pérdidas.
+
+**Cuando una empresa no puede pagar los sueldos [decidido].** El motor lo detecta con una regla fija (ingresos del período menores a los sueldos), no es azar. Entonces sortea con su semilla una respuesta de una tabla cerrada, con pesos según la personalidad del dueño y la situación. Sin dueño en el puesto, solo se sortean las que no dependen de él. Cada respuesta dura un tiempo finito, y queda con origen `empresa:<id>/respuesta` y su `causa`, así se puede explicar. Más adelante el clasificador opcional podría elegir entre las respuestas, como en las acciones de condición (sección 7).
+
+| Respuesta | Qué hace | Disponible si | Pesa más con |
+|---|---|---|---|
+| `absorber` | El dueño paga la diferencia con su `dinero` | El dueño tiene dinero | Codicia baja, resiliencia alta |
+| `recortar_sueldos` | Todos cobran menos un % durante unos días, con un piso (`piso_sueldo_pct`) | Siempre | Sin sesgo |
+| `despedir` | Los que sobran pasan a desempleados, al ritmo máximo `max_pase_desempleo_por_dia` | Tiene empleados | Codicia alta |
+| `subir_margen` | La comercial sube su % de margen y se lo quita a la empresa de alimento; el precio que paga el NPC no cambia (así no choca con `precio_maximo`) **[propuesta]** | Solo comerciales | Codicia alta |
+
+**Gasto de vida [decidido].** Los gastos fijos de un NPC son los impuestos y la comida. Lo que gasta de más (gasto de vida) varía por NPC: cada uno tiene su propia propensión al gasto, asignada al generar el mundo a partir de su personalidad y la semilla. Va a las empresas comerciales como ventas de otros bienes (se modela la plata, no los bienes). Una parte puede salir del sistema (importaciones) con `fraccion_gasto_exterior` (CALIBRACION, por defecto 0). Así, cuando la gente gasta menos por miedo, impuestos o inflación, las comerciales ganan menos y activan su respuesta, lo que baja aún más el gasto.
+
+**Quién paga la comida de quien no puede.** La comida de los menores la paga siempre el estado. Los jubilados y desempleados compran con su pensión, sus subsidios y la garantía alimentaria (sección 12). El estado puede además comprar o vender alimento al exterior (intercambio, sección 12).
 
 ## 5. Estado del Clima
 
@@ -208,7 +247,7 @@ La `exposicion_max`, el rango de `dano` y la `atenuacion` de cada tipo están en
 
 ## 6. Estado de los Medios
 
-**[cerrado]** Un medio es una entidad con parámetros. Un monopolio es el caso de un solo medio. Se elige en el panel. Por defecto, 1 a 3 medios. **No hay medio estatal:** todos los medios son privados y el estado puede ponerles plata (palanca de financiamiento).
+**[cerrado]** Un medio es una entidad con parámetros. Un monopolio es el caso de un solo medio. Se elige en el panel. Por defecto, 1 a 3 medios. **No hay medio estatal:** todos los medios son privados y el estado puede ponerles plata (palanca de financiamiento). En el nivel 1 son privados simplificados: no tienen dueño NPC ni entran al circuito de empresas (sección 4).
 
 ```json
 [
@@ -259,8 +298,9 @@ La `exposicion_max`, el rango de `dano` y la `atenuacion` de cada tipo están en
 ```
 
 - `requisitos` filtra quién puede; `afinidad` pesa la probabilidad; `efectos` son del catálogo (sección 7.1), acotados y aplicados por el motor; `duracion_dias` es siempre finito; `contagio` (0 a 1) es qué tan contagiosa es la acción: cavar un pozo casi nada, predicar bastante más (sección 7.2); `textos` son las variantes de la frase que ve el jugador (el motor elige una al azar para que no se repita). Cada acción de la tabla tiene su animación en la vista (UI §9): al ser un conjunto cerrado, siempre se representa igual.
+- `contexto` (opcional): condición del mundo para que la acción sea candidata (por ejemplo, `{ "fenomeno": "plaga_zombie" }` o `{ "zona_integridad_menor_a": 100 }`). El motor la evalúa por zona o para todo el mundo. Sin `contexto`, la acción es candidata siempre.
 - `zona_destino` (opcional): la zona a la que van los participantes mientras dura la acción (`protesta` y `fiesta`: `centro`). Cuenta para su exposición y para el contagio.
-- Ideas iniciales: cavar un pozo, predicar, acaparar comida, organizar una fiesta, abandonar el trabajo. Con la economía: protestar, hacer huelga (empleados públicos sin paga), saquear.
+- **Tabla inicial:** la tabla de arranque (20 acciones espontáneas y 4 de condición) está en ACCIONES.md. Se afina con las corridas.
 
 **Acciones de condición.** Hay dos tipos de acción: `espontanea` (por defecto: el director de caos elige entre las candidatas y cuenta contra los límites del caos) y `condicion` (consecuencia de una situación del mundo). Las de condición (huelga, protesta, saqueo) funcionan así:
 
@@ -290,17 +330,27 @@ Una acción de la tabla es un **disfraz** (textos, animación, requisitos, afini
 
 | Efecto | Qué hace | A quién | Límite |
 |---|---|---|---|
-| `fuera_de_puesto` | No produce ni cobra por su trabajo (el público mantiene su salario, salvo en impago) | Participante | `max_pct_rol_fuera_de_puesto` (sección 9) |
-| `anima` | Sube o baja la satisfacción mientras dura | Participante | Acotado por intensidad |
+| `fuera_de_puesto` | No produce ni cobra por su trabajo (el público mantiene su salario, salvo en impago; un dueño sigue cobrando su ganancia) | Participante | `max_pct_rol_fuera_de_puesto` (sección 9) |
+| `anima` | Sube o baja la satisfacción mientras dura | Participante o zona (según la acción) | Acotado por intensidad |
 | `agita` | Sube el miedo y la rebeldía efectiva (modificadores) | NPCs de la zona | Duración de la acción |
-| `acapara` | Retira comida del almacén o del mercado | Participante | Acotado por intensidad (tope propio a definir) |
+| `acapara` | Sube el objetivo de despensa del participante mientras dura la acción: compra más de lo normal (no retira stock directamente) | Participante | Tope de despensa de la casa (sección 4) |
 | `moviliza` | Los participantes pasan a la `zona_destino` de la acción | Participante | Solo cambia la zona efectiva (sección 14) |
 | `decorativa` | Sin efecto en los datos: solo texto y animación | Ninguno | Ninguno |
+| `gasta` | Sube su propensión al gasto de vida (modificador temporal; la propensión base no cambia). Más ventas para las comerciales (sección 4) | Participante | Acotado por intensidad y por su `dinero` |
+| `ahorra` | Baja su propensión al gasto de vida (modificador temporal). Menos ventas para las comerciales | Participante | Acotado por intensidad |
+| `comparte` | Cede parte de su despensa a NPCs de su zona con la despensa baja. La comida se conserva: sale de uno y entra a otros | Participante y receptores | `max_pct_despensa_cedida` por día |
+| `difunde` | Crea un rumor temático en la zona (modificador con origen `rumor`, sección 8): `miedo` (sube el miedo), `descontento` (baja la satisfacción) o `esperanza` (sube la satisfacción y baja el miedo) | NPCs de la zona | Intensidad y duración; decae |
+| `repara` | Cuenta como reparador de su zona mientras dura (sección 14), sin ser obrero ni ingeniero | Zona | Intensidad; solo si la zona tiene daño |
+| `resguarda` | Suma a los policías de su zona con peso `peso_voluntario` (menor que 1), repartidos entre defensa y orden con la misma regla (sección 14) | Zona | `max_pct_voluntarios` de los policías equivalentes de la zona |
+| `cuida` | Sube la cura natural de los NPCs de su zona con salud baja y que no estén internados | NPCs de la zona | Intensidad; no reemplaza al hospital |
+| `toma` | Obtiene comida del `stock` de la empresa de alimento sin pagar (suma a su despensa); la empresa pierde esa venta (sección 4) | Participante | Solo acciones de condición; tope diario por intensidad |
+| `vandaliza` | Resta `dano_vandalismo` por participante y día a la integridad de su zona (sección 14) | Zona | Solo acciones de condición (opcional, desactivada por defecto) |
 
 - El motor aplica cada efecto como modificador con `origen` (sección 8). Siempre es acotado y con la duración de la acción.
 - La intensidad (`baja`, `media`, `alta`) la define el catálogo, y los valores calibrados viven en CALIBRACION y en el preset.
 - Los límites del caos se enganchan al **efecto**, no a la acción (sección 9). Si el tope de `fuera_de_puesto` está lleno, ninguna acción con ese efecto puede sumar a nadie más, sea un foco o un contagio.
-- Las acciones de condición (huelga, protesta, saqueo) usan el mismo catálogo.
+- Las acciones de condición (huelga, protesta, saqueo, disturbios) usan el mismo catálogo. `toma` y `vandaliza` solo las usan ellas: el caos espontáneo nunca roba ni destruye, solo lo hace una consecuencia ganada **[propuesta]**.
+- Todos los efectos son reversibles o acotados: ninguno destruye algo de forma permanente, salvo el daño a la integridad (que se repara) y la comida tomada (que la empresa deja de vender).
 - Ejemplo de contraste: cavar un pozo saca al NPC de su puesto y casi no se contagia. Predicar no lo saca del puesto, pero se propaga y agita a la zona.
 
 ```json
@@ -390,12 +440,12 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
   "roles": {
     "estudiante": 12, "agricultor": 30, "obrero": 14, "tecnico": 3, "policia": 5,
     "estatal": 4, "comerciante": 4, "docente": 4, "periodista": 3, "medico": 5,
-    "ingeniero": 3, "desempleado": 3, "jubilado": 10
+    "ingeniero": 3, "empresario": 1, "desempleado": 2, "jubilado": 10
   }
 }
 ```
 
-- `apoyo_pct`: lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: NPCs que no pueden pagar su comida. `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC.
+- `apoyo_pct`: lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: NPCs que no pueden pagar su comida. `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC. Para el gobernador también se resume el estado de las empresas: ganancia y respuesta vigente (sección 4).
 
 - **Historial [cerrado]:** excepción acotada a "lo derivado no se guarda". El motor agrega cada día un punto a una serie por indicador clave (`reserva`, `inflacion`, `satisfaccion_media`, `hambre_critica_pct`, `apoyo_pct`, `poblacion`) y la UI solo la lee (UI §5). Es un registro de lectura: ninguna regla lo usa y no es estado de simulación, pero entra en el guardado para recuperarlo al cargar la partida. Rendimiento: se escribe un valor por indicador por día, sin recalcular nada. Pasado el tope `historial_max_dias` (CALIBRACION), los días más viejos se compactan por promedio semanal. El registro de hechos del historial son los eventos (sección 14), que también se guardan.
 
@@ -422,25 +472,25 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 
 ## 12. Reglas (borrador)
 
-**Economía** (lo individual aplica desde `individual`; déficit, emisión e inflación desde `fiscal`)
+**Economía** (la extensión `fiscal` agrega emisión e inflación dinámica)
 
-- **Ingreso:** NPC privado = (min + `ingreso_pos` / 100 × (max − min)) × productividad. Comerciante: más una comisión sobre las ventas (sección 2). Público = `salario_publico`. Jubilado = `pension_base`.
-- **Impuestos:** recaudación = Σ (ingreso del grupo × tasa del grupo). La pérdida por falta de estatales está en Servicios. Pagan todos los grupos con ingreso, incluido el público (sobre su salario); los `sin_ingreso` no pagan. El NPC cobra su **ingreso neto** = ingreso − impuesto, y su gasto diario sale del neto.
+- **Ingreso:** NPC privado empleado = sueldo = (min + `ingreso_pos` / 100 × (max − min)) × productividad, que paga su empresa (sección 4). Dueño (empresario o comerciante) = la ganancia de su empresa. Periodista = su rango (los medios son simplificados, sección 6). Público = `salario_publico`. Jubilado = `pension_base`.
+- **Impuestos:** recaudación = Σ (ingreso del grupo × tasa del grupo). Pagan todos los grupos con ingreso, incluido el público (sobre su salario) y los dueños (sobre su ganancia); los `sin_ingreso` no pagan. Las empresas no pagan impuesto propio. La pérdida por falta de estatales está en Servicios. El NPC cobra su **ingreso neto** = ingreso − impuesto, y su gasto diario sale del neto.
 - **Nómina:** empleados públicos × `salario_publico`.
-- **Pensiones:** jubilados × `pension_base`. Gasto obligatorio (desde `individual`).
-- **Gasto diario del NPC:** primero comida (precio × consumo), después un gasto de vida (% del ingreso neto, menor con codicia alta). Lo que sobra va a `dinero`. El gasto de vida sale del sistema (no se modela a quién va).
+- **Pensiones:** jubilados × `pension_base`. Gasto obligatorio.
+- **Gasto diario del NPC:** primero la comida (recompra de despensa, sección 4), después un gasto de vida (% del ingreso neto propio de cada NPC, menor con codicia alta). Lo que sobra va a `dinero`. El gasto de vida va a las empresas comerciales (sección 4).
 - **Subsidios:** transferencia de dinero a los NPCs del grupo. Los decide el gobernador y apuntan a un grupo de roles (inyección directa). Subsidiar servicios queda para el nivel 2 (HOJA_DE_RUTA §4).
 - **Disponible** = ingresos − nómina − pensiones − garantía alimentaria. Se reparte en presupuesto, subsidios y prensa. Lo no asignado va a `reserva`. Las compras de alimento (intercambio) no restan del disponible: se pagan de la `reserva`, para que importar comida no deje a los servicios sin presupuesto. Si la reserva no alcanza, la compra se reduce a lo que la reserva cubre.
-- **Déficit:** disponible < 0 → se usa la `reserva`; después, solo con `fiscal`, se emite hasta el tope autorizado (sube `inflacion`); si aún falta, hay impago. Con impago, los empleados públicos pierden satisfacción y productividad por regla del motor, y se dispara la acción de condición `huelga` (sección 7), que no depende de la IA.
+- **Déficit:** disponible < 0 → se usa la `reserva`; después, solo con la extensión `fiscal`, se emite hasta el tope autorizado (sube `inflacion`); si aún falta, hay impago. Con impago, los empleados públicos pierden satisfacción y productividad por regla del motor, y se dispara la acción de condición `huelga` (sección 7), que no depende de la IA.
 - **Inflación:** sube con la emisión relativa a la economía y decae sin ella. Encarece el alimento, devalúa `reserva` y `dinero`. Los ingresos no se ajustan solos: la inflación les quita poder de compra y el gobernador ajusta a mano el salario público.
-- **Circulación:** el dinero que gastan los NPCs sale del sistema y lo que cobran entra desde afuera. No se modela quién le paga a quién (simplificación del nivel 1).
+- **Circulación:** el dinero circula en un circuito cerrado (sección 3.1): los NPCs pagan a las empresas, las empresas pagan sueldos y ganancias, los NPCs pagan impuestos y el estado devuelve nómina, pensiones, subsidios y garantía. Sale del sistema lo que se importa (`fraccion_gasto_exterior` y las compras de intercambio), los fondos de prensa que el estado da a los medios y la ganancia de una empresa sin dueño. Entra por las ventas de intercambio, por los `ingresos_propios` de los medios (que pagan a los periodistas, simplificación del nivel 1 **[propuesta]**) y, con `fiscal`, por la emisión. Si el total deriva (deflación o acumulación), se corrige calibrando, no con una regla nueva.
 
 **Alimento**
 
-- **`simple`:** consumo = población × `consumo_por_npc` × ración / 100, desde el almacén común. Precio fijo. Si no alcanza, reparto parejo. La ración va de 50 a 100 (100 es lo normal y no se puede subir). Con ración < 100 el hambre tiende a un valor proporcional al recorte, `k_hambre` × (1 − ración / 100), acotado a 0-100, mientras el almacén cubra esa ración: no hay umbral ni salto. El almacén tiene tope (silo, sección 4).
-- **`individual`:** precio y reparto según la sección 4.
-- **Garantía alimentaria:** el estado paga un % del faltante de comida de los NPCs sin dinero suficiente. Costo = faltante × precio × %. La comida de los menores la paga siempre el estado (100%).
-- **Intercambio:** el estado compra o vende alimento al exterior, hasta la capacidad de los comerciantes. Precio externo = `precio_base` × (1 + inflación / 100) × factor de sequía (sube con sequía y plaga). La compra cuesta más que la venta (el diferencial está en CALIBRACION). La compra se paga de la reserva (ver Disponible); la venta es ingreso.
+- **Consumo y hambre:** cada NPC consume `consumo_por_npc` por día de su despensa (sección 4). Si la despensa llega a 0 y no pudo comprar, el hambre sube.
+- **Precio:** sección 4, incluido el tope de `precio_maximo`.
+- **Garantía alimentaria:** el estado paga un % del faltante de comida de los NPCs sin dinero suficiente. El faltante es lo que le falta pagar al NPC para comprar la recompra de su despensa. Costo = faltante × %. La comida de los menores la paga siempre el estado (100%).
+- **Intercambio:** el estado compra o vende alimento al exterior, hasta la capacidad de intercambio (comerciantes × `intercambio_por_comerciante`, CALIBRACION). Precio externo = `precio_base` × (1 + inflación / 100) × factor de sequía (sube con sequía y plaga). La compra cuesta más que la venta (el diferencial está en CALIBRACION). La compra se paga de la reserva (ver Disponible); la venta es ingreso. **Venta al exterior [propuesta]:** el estado compra el excedente a la empresa de alimento al precio interno vigente (de la `reserva`) y lo vende al exterior, así la empresa cobra lo que entrega y no se expropia stock. Sirve para sostener el precio con superávit. **Comida importada [decidido]:** lo que el estado compra al exterior se suma al `stock` de la empresa de alimento y entra al mercado como cualquier otra comida. Se compra al precio externo, sin tope. El `precio_maximo` solo limita el precio al que se vende en el mercado interno, así que importar con el tope por debajo del precio externo no genera pérdida oculta: el costo de la compra sale de la `reserva` y el faltante lo ve el gobernador. La venta al exterior es ingreso del estado (como antes).
 
 **Servicios**
 
@@ -454,19 +504,19 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 **NPCs**
 
 - **Producción:** productividad = laboriosidad × salud × satisfacción × clima × infraestructura × factor fiscal × modificadores. Las variables se normalizan a 0-1; clima, infraestructura y factor fiscal son multiplicadores cercanos a 1. El factor fiscal vale 1 hasta una tasa umbral y baja linealmente por encima (umbral y pendiente en CALIBRACION). Si tiene una `accion` con el efecto `fuera_de_puesto` o está internado, no produce.
-- **Hambre:** sube cuando `accesoComida` < 1 (en `simple`, cuando el almacén no alcanza para la ración) y baja al comer.
+- **Hambre:** sube cuando el NPC se queda sin comida en la despensa (`accesoComida` < 1) y baja al comer.
 - **Educación:** el estudiante suma progreso diario (más con docentes e inversión). A 100 sube de nivel.
 - **Salud (individual).** Cada día, en este orden: (1) golpes de los fenómenos (sección 5); (2) daño por hambre crítica (hambre por encima de su umbral); (3) internación; (4) cura; (5) si la salud llega a 0, el NPC muere. Los golpes y las muertes se registran uno por uno con su origen (`clima:plaga_zombie`, `clima:pandemia`); el daño por hambre y las curas, agregados por día (sección 8). Un golpe no mata a un NPC sano, pero sí puede matar a uno débil.
 - **Hospital.** El NPC con salud < `umbral_hospital` pide cama. Camas = médicos activos × `pacientes_por_medico`. Se interna primero a los de menor salud; el resto espera en su casa. El internado no produce ni cobra por su trabajo (el público mantiene su salario) y se cura por día `cura_base` × (0,5 + 0,5 × indicador `salud` / 100). Recibe el alta con salud ≥ `alta`. Quien no está internado se cura `cura_natural` por día si su hambre está por debajo de su umbral. Los médicos dan las camas; la inversión en salud, la rapidez de cura. El internado está en el hospital (`centro`) y no recibe ataques en el nivel 1.
 - **Muerte.** El NPC sale de la población, su puesto queda vacante y, si era columnista, sale de su medio.
 - **Miedo:** con la plaga zombie tiende a `intensidad` × `atenuacion`^distancia × (1 − `defensa`/100) × (1 − 0,5 × valentía/100), con la distancia y la `defensa` de su zona efectiva y el valor más alto entre los fenómenos activos. Las noticias alarmistas lo suben (modificador).
-- **Satisfacción:** baja con hambre, miedo, mala salud, desempleo, poco poder adquisitivo (dinero en `individual`), impuestos (más con codicia) e inflación. Sube con subsidios. Tiene inercia (resiliencia).
+- **Satisfacción:** baja con hambre, miedo, mala salud, desempleo, poco poder adquisitivo (dinero), impuestos (más con codicia) e inflación. Sube con subsidios. Tiene inercia (resiliencia).
 - **Lealtad:** sigue a la satisfacción con retraso. La rebeldía amplifica las caídas.
 - **Edad:** cada NPC suma un año cada 365 días, en su propio día (se fija al generar el mundo). A los 18 pasa a adulto y deja de estudiar, a los 65 se jubila.
 
 ## 13. Alcance del nivel 1 y a futuro
 
-- **Módulos de economía:** `simple` (nivel 1), `individual` y `fiscal` (nivel 1.1, HOJA_DE_RUTA §3) (ver 3.1). Son lógica del núcleo. El campo `dinero`, que usa `individual`, existe desde el nivel 1 y los tres módulos comparten la misma salida (sección 3.1): sumar un módulo no cambia lo ya construido.
+- **Economía:** el módulo `base` es el del nivel 1 y la extensión `fiscal` llega en el nivel 1.1 (HOJA_DE_RUTA §3) (ver 3.1). Son lógica del núcleo. Los dos comparten la misma salida (sección 3.1): sumar la extensión no cambia lo ya construido.
 - **Calibración:** los valores que se ajustan probando, los criterios de arranque de un mundo y el plan de pruebas están en CALIBRACION.md. Los valores calibrados de cada escenario viven en su preset (`presets/*.json`) y el historial de rondas, en el informe de calibración.
 - **Guardado [cerrado]:** un archivo por partida, en un formato independiente del lenguaje (JSON versionado y comprimido), para que cualquier implementación del motor lo lea igual (UI §11). Contiene: `version_formato`, la semilla, la configuración efectiva del mundo (con los valores del preset ya aplicados, para que un cambio futuro del preset no altere una partida guardada, y con las marcas de "configuración de prueba"), el estado completo del último día cerrado (NPCs, gobierno, clima, medios, integridad) con el estado del generador de azar, las elecciones guardadas del clasificador y los textos generativos (sección 9), el registro de eventos y el historial (sección 10). Se retoma desde esa foto y no reproduciendo la partida desde el día 1, así que cargar cuesta lo mismo en el día 10 que en el 300. La foto se toma en memoria al cierre de un día y se escribe en segundo plano: no pausa ni frena la simulación. Escritura segura: se escribe a un archivo temporal y se renombra al terminar, así un corte no deja un guardado roto. Cada partida tiene un guardado manual y un autoguardado periódico (UI §13; período en CALIBRACION). Un guardado de otra versión de formato se migra si hay migración y, si no, se rechaza con un aviso claro.
 - **Edad en el nivel 1:** los NPCs envejecen sin morir por vejez ni nacer. La población baja solo por salud 0.
@@ -539,6 +589,7 @@ fenomeno_inicio, fenomeno_fin {fenomeno, zona_origen?}
 impago      {faltante}
 hospital_saturado {ocupacion_pct}
 noticia     {noticia, medio, tema}
+empresa_respuesta {empresa, respuesta}   // una empresa que no puede pagar responde; lleva origen y causa
 palanca     {palanca, valor_anterior, valor_nuevo}   // cuando el cambio entra en vigencia; hecho raíz
 victoria    {metrica, valor}   // hito: la partida sigue
 fin_partida {metrica, valor}   // solo derrota; su causa es el evento que cruzó el límite
@@ -552,7 +603,7 @@ Reglas de la UI sobre los eventos: UI §9 y §11.
 
 Las preguntas que se resuelven midiendo (calibración de salud, zonas, contagio, clasificador, plazos de la IA, textos y memoria) están en CALIBRACION.md. Acá quedan las de diseño.
 
-1. **Roles y niveles de educación:** se dejan los 13 roles y 4 niveles y se afinan después.
+1. **Roles y niveles de educación:** se dejan los 14 roles y 4 niveles y se afinan después.
 2. **Modelo de salud individual:** confirmar los golpes (sección 5) y el hospital (sección 12, Salud).
 3. **Zonas y defensa:** confirmar el modelo (sección 14) y quiénes reparan.
-4. **Catálogo de efectos:** confirmar el conjunto inicial (`fuera_de_puesto`, `anima`, `agita`, `acapara`, `moviliza`, `decorativa`) y qué efectos nuevos pide cada escenario.
+4. **Catálogo de efectos y tabla de acciones:** el catálogo (sección 7.1, 15 efectos) y las 24 acciones iniciales (ACCIONES.md) son la base de arranque. Falta afinar con las corridas qué efectos sobran o faltan y qué acciones nuevas pide cada escenario.
