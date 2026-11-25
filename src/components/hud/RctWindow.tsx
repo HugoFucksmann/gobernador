@@ -1,22 +1,20 @@
 import React, { useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
-type RctWindowTone = 'teal' | 'amber' | 'blue' | 'rose' | 'slate';
+type RctWindowTone = 'green' | 'amber' | 'red' | 'neutral';
 
-const TONE_CLASSES: Record<RctWindowTone, string> = {
-  teal: 'bg-slate-800/95 border-teal-500/30 text-white',
-  amber: 'bg-slate-800/95 border-amber-500/30 text-white',
-  blue: 'bg-slate-800/95 border-sky-500/30 text-white',
-  rose: 'bg-slate-800/95 border-rose-500/35 text-white',
-  slate: 'bg-slate-800/95 border-slate-600/40 text-white',
+const HEADER_TONE_CLASSES: Record<RctWindowTone, string> = {
+  green: 'border-zinc-800 text-zinc-100',
+  amber: 'border-zinc-800 text-zinc-100',
+  red: 'border-rose-900/60 text-zinc-100',
+  neutral: 'border-zinc-800 text-zinc-100',
 };
 
 const ICON_TONE_CLASSES: Record<RctWindowTone, string> = {
-  teal: 'text-teal-400',
+  green: 'text-emerald-400',
   amber: 'text-amber-400',
-  blue: 'text-sky-400',
-  rose: 'text-rose-400',
-  slate: 'text-slate-300',
+  red: 'text-rose-400',
+  neutral: 'text-zinc-300',
 };
 
 interface RctWindowProps {
@@ -35,7 +33,7 @@ interface RctWindowProps {
 export const RctWindow: React.FC<RctWindowProps> = ({
   title,
   subtitle,
-  tone = 'teal',
+  tone = 'green',
   icon,
   zIndex,
   defaultOffset,
@@ -95,21 +93,21 @@ export const RctWindow: React.FC<RctWindowProps> = ({
         transform: `translate3d(${offset.x}px, ${offset.y}px, 0)`,
         zIndex,
       }}
-      className={`pointer-events-auto bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-lg shadow-2xl overflow-hidden text-slate-100 ${className}`}
+      className={`pointer-events-auto bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl shadow-2xl overflow-hidden text-zinc-100 ${className}`}
     >
       <div
         onPointerDown={onPointerDownTitle}
         onPointerMove={onPointerMoveTitle}
         onPointerUp={onPointerUpTitle}
         onPointerCancel={onPointerUpTitle}
-        className={`flex items-center justify-between gap-3 px-3.5 py-2 border-b cursor-grab active:cursor-grabbing select-none ${TONE_CLASSES[tone]}`}
+        className={`flex items-center justify-between gap-3 px-5 py-3.5 bg-zinc-900/95 border-b cursor-grab active:cursor-grabbing select-none ${HEADER_TONE_CLASSES[tone]}`}
       >
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           {icon && <span className={`shrink-0 ${ICON_TONE_CLASSES[tone]}`}>{icon}</span>}
           <div className="min-w-0">
-            <h2 className="text-xs font-bold leading-tight truncate text-white">{title}</h2>
+            <h2 className="text-base font-bold leading-tight truncate text-white">{title}</h2>
             {subtitle && (
-              <p className="text-[11px] text-slate-400 font-mono tabular-nums truncate">
+              <p className="text-xs text-zinc-400 font-mono tabular-nums truncate mt-0.5">
                 {subtitle}
               </p>
             )}
@@ -118,14 +116,14 @@ export const RctWindow: React.FC<RctWindowProps> = ({
         <button
           type="button"
           onClick={onClose}
-          title="Cerrar ventana"
-          className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700/80 shrink-0 transition-colors"
+          title="Cerrar"
+          className="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 shrink-0 transition-colors"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-4 h-4" />
         </button>
       </div>
 
-      <div className="bg-slate-900/95">{children}</div>
+      <div className="bg-zinc-900/95">{children}</div>
     </section>
   );
 };

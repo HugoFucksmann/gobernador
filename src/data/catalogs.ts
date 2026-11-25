@@ -16,7 +16,6 @@ import {
   RoleId,
   ScenarioParcelDef,
   ScenarioPreset,
-  ServiceAreaId,
   ServiceLevel,
   ServicePublicRoleId,
   ZoneId,
@@ -1997,6 +1996,10 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
         titulo: '¡Tensión por demolición de {edificio} en {zona}!',
         texto: '{autor} advierte en {medio} malestar fuerte en {zona} tras la pérdida de {edificio} en {parcela}.',
       },
+      {
+        titulo: 'Alarma vecinal por baja de {edificio} en {parcela}',
+        texto: 'Residentes de {zona} reclaman por el cierre de {edificio} en {parcela}, consigna {medio}.',
+      },
     ],
   },
   presiones: {
@@ -2004,6 +2007,10 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
       {
         titulo: 'Acuerdo con {actor}: compromiso en {demanda}',
         texto: '{autor} celebra en {medio} el entendimiento alcanzado con {actor} en torno a {demanda}.',
+      },
+      {
+        titulo: 'Distensión en la gestión tras acuerdo con {actor}',
+        texto: 'El compromiso asumido en {demanda} destraba el frente con {actor}, destaca {medio}.',
       },
     ],
     neutral: [
@@ -2030,6 +2037,10 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
       {
         titulo: '¡Ruptura con {actor}! Activan {medida}',
         texto: '{autor} alerta en {medio} que el choque con {actor} desató {medida} con impacto directo en la comunidad.',
+      },
+      {
+        titulo: 'Alerta por represalia de {actor}: {medida}',
+        texto: 'El quiebre tras {demanda} deja activa {medida} y complica la jornada, informa {medio}.',
       },
     ],
   },

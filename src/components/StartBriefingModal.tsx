@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FolderOpen, Play, Settings2, ShieldAlert, Vote } from 'lucide-react';
 import { SCENARIO_PRESETS } from '../data/catalogs';
 import { SaveSlotMeta } from '../engine/gameController';
+import { HintIcon } from './hud/UiTooltip';
 
 interface StartBriefingModalProps {
   initialScenario: 'elecciones' | 'zombies';
@@ -29,19 +30,16 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="start-briefing-title"
-      className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
     >
-      <div className="bg-slate-900 text-slate-100 border border-slate-700/90 rounded-xl max-w-3xl w-full p-6 space-y-5 shadow-2xl my-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="bg-zinc-900 text-zinc-100 border border-zinc-700/80 rounded-2xl max-w-2xl w-full p-7 space-y-6 shadow-2xl my-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <h1 id="start-briefing-title" className="font-display text-3xl font-bold text-white tracking-tight">
               El Gobernador
             </h1>
-            <p className="text-sm text-slate-300 max-w-xl">
-              Gobierna una ciudad viva de ciudadanos autónomos. Ajusta todas tus políticas en{' '}
-              <strong className="text-teal-300">Palancas</strong>, vigila la{' '}
-              <strong className="text-amber-300">Economía</strong> y responde a la prensa y crisis en{' '}
-              <strong className="text-sky-300">Ciudad</strong>.
+            <p className="text-sm text-zinc-400">
+              Elegí escenario para empezar.
             </p>
           </div>
           {(manualSaveMeta || autoSaveMeta) && (
@@ -50,9 +48,9 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
                 <button
                   type="button"
                   onClick={onLoadManual}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-100"
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-zinc-100"
                 >
-                  <FolderOpen className="w-3.5 h-3.5 text-teal-400" />
+                  <FolderOpen className="w-4 h-4 text-emerald-400" />
                   Continuar (D{manualSaveMeta.dia})
                 </button>
               )}
@@ -60,9 +58,9 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
                 <button
                   type="button"
                   onClick={onLoadAutoSave}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-100"
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-zinc-100"
                 >
-                  <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+                  <FolderOpen className="w-4 h-4 text-amber-400" />
                   Auto (D{autoSaveMeta.dia})
                 </button>
               )}
@@ -80,25 +78,27 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
                 key={id}
                 type="button"
                 onClick={() => setSelected(id)}
-                className={`text-left p-4 rounded-xl border transition-colors ${
+                className={`text-left p-5 rounded-2xl border transition-colors space-y-3 ${
                   isSelected
-                    ? 'border-teal-400 bg-teal-950/45'
-                    : 'border-slate-700/80 bg-slate-800/50 hover:border-slate-500'
+                    ? 'border-emerald-500 bg-emerald-950/35'
+                    : 'border-zinc-700/80 bg-zinc-800/50 hover:border-zinc-500'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-display text-lg font-bold text-white">{p.nombre}</span>
-                  <Icon className={`w-5 h-5 shrink-0 ${isSelected ? 'text-teal-300' : 'text-slate-400'}`} />
+                  <span className="font-display text-xl font-bold text-white">{p.nombre}</span>
+                  <div className="flex items-center gap-2">
+                    <HintIcon text={p.historia} placement="top" />
+                    <Icon className={`w-5 h-5 shrink-0 ${isSelected ? 'text-emerald-400' : 'text-zinc-400'}`} />
+                  </div>
                 </div>
-                <div className="text-xs font-medium text-teal-300 mt-0.5">{p.subtitulo}</div>
-                <p className="text-xs text-slate-300 mt-2 leading-relaxed">{p.historia}</p>
-                <div className="mt-3 pt-2.5 border-t border-slate-700/80 text-[11px] space-y-1">
+                <div className="text-xs font-medium text-emerald-400">{p.subtitulo}</div>
+                <div className="pt-2 border-t border-zinc-800 text-xs space-y-1.5">
                   <div className="text-emerald-300">
-                    <span className="text-slate-400">Meta: </span>
+                    <span className="text-zinc-400">Meta: </span>
                     {p.victoria.descripcion}
                   </div>
                   <div className="text-rose-300">
-                    <span className="text-slate-400">Colapso: </span>
+                    <span className="text-zinc-400">Derrota: </span>
                     {p.derrota.descripcion}
                   </div>
                 </div>
@@ -107,44 +107,23 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
           })}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-800/45 border border-slate-800 rounded-lg p-3 text-xs text-slate-300">
-          <div>
-            <div className="font-semibold text-white mb-0.5">1. Ajusta tus Palancas</div>
-            <p className="text-[11px] text-slate-400">
-              Impuestos, servicios, ayuda social y comida aplican al día siguiente, sin esperas semanales.
-            </p>
-          </div>
-          <div>
-            <div className="font-semibold text-white mb-0.5">2. Vigila Caja y Comida</div>
-            <p className="text-[11px] text-slate-400">
-              Si falta caja habrá impago y huelgas; si falta comida o sube mucho el precio habrá saqueos.
-            </p>
-          </div>
-          <div>
-            <div className="font-semibold text-white mb-0.5">3. Explora el Valle</div>
-            <p className="text-[11px] text-slate-400">
-              Haz clic en edificios o vecinos para inspeccionarlos y usa las capas del mapa abajo.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <button
             type="button"
             onClick={onOpenAdvancedConfig}
-            className="flex items-center gap-2 px-4 py-2 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg"
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl transition-colors"
           >
-            <Settings2 className="w-4 h-4 text-teal-400" />
-            Configuración avanzada
+            <Settings2 className="w-4 h-4 text-zinc-400" />
+            Opciones
           </button>
 
           <button
             type="button"
             onClick={() => onStartScenario(selected)}
-            className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-lg shadow-lg"
+            className="flex items-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg transition-colors"
           >
-            <Play className="w-4 h-4" />
-            Comenzar partida
+            <Play className="w-4 h-4 fill-current" />
+            Comenzar
           </button>
         </div>
       </div>

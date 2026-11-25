@@ -58,11 +58,7 @@
       "estatal": 4,
       "docente": 4
     },
-    "serviciosIniciales": {
-      "seguridad": 2,
-      "salud": 3,
-      "obras": 2
-    },
+    "nivelObrasInicial": 2,
     "caosDefault": {
       "maxAccionesPorPeriodo": 3,
       "periodoDias": 5,
@@ -74,11 +70,7 @@
   "initialLevers": {
     "impuesto": 38,
     "salarioPublico": 100,
-    "servicios": {
-      "seguridad": 2,
-      "salud": 3,
-      "obras": 2
-    },
+    "nivelObras": 2,
     "ayudaSocial": 0,
     "garantiaAlimentaria": 85,
     "precioMaximo": "libre",

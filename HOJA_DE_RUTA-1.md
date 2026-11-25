@@ -20,8 +20,8 @@
 Orden de construcción, cada paso calibrado antes del siguiente:
 
 1. **M0 + G0:** NPCs, roles, economía, parcelas y edificios en una zona, en piloto automático. Prueba de arranque balanceado (ECONOMIA §12).
-2. **M0 + G1:** construir servicios y 3 palancas. ¿Se entiende el dilema de construir, gastar o ahorrar? ¿Es divertido?
-3. **M1 + G2, elecciones:** zonas, salud, caos, prensa, las 8 palancas, obras de suceso, hitos, construcción privada y demandas. Primer escenario completo.
+2. **M0 + G1:** construir servicios y 3 palancas (`impuesto`, `ayuda_social`, `garantia_alimentaria`), con una pandemia forzada para que los hospitales importen. ¿Se entiende el dilema de construir, gastar o ahorrar? ¿Es divertido?
+3. **M1 + G2, elecciones:** zonas, clima, caos, prensa, las 8 palancas, obras de suceso, hitos, construcción privada y demandas. Primer escenario completo.
 4. **M1 + G2, zombies:** clima con daño, defensa, integridad y hordas.
 5. **IA opcional:** clasificador y generativo como mejora, con el juego ya balanceado sin IA.
 

@@ -1,12 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ACTION_TABLE, DISTRICT_BY_ID, DISTRICTS, ROLE_CATALOG } from '../data/catalogs';
+import {
+  ACTION_TABLE,
+  BUILDING_CATALOG,
+  DISTRICT_BY_ID,
+  DISTRICTS,
+  ROLE_CATALOG,
+} from '../data/catalogs';
 import {
   evaluateNpcBubbleText,
   evaluateNpcLensColor,
   evaluateZoneMetricColor,
 } from '../engine/npcInsights';
 import { getWorldZones, TICKS_PER_DAY } from '../engine/simulation';
-import { CommunityDerived, GameState, Npc, ZoneId } from '../types/game';
+import { CommunityDerived, GameState, Npc, Parcela, ZoneId } from '../types/game';
 import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
 
 export type { CameraTarget, MapFilter, MapLens, WindowId };
@@ -16,12 +22,14 @@ interface CityWorldCanvasProps {
   derived: CommunityDerived;
   paused: boolean;
   selectedNpcId: string | null;
+  selectedParcelaId?: string | null;
   filter: MapFilter;
   lens: MapLens;
   followSelected: boolean;
   cameraTarget: CameraTarget | null;
   zoomRequest: { delta: number; seq: number } | null;
   onSelectNpc: (npcId: string) => void;
+  onSelectParcela?: (parcelaId: string) => void;
   onOpenSection: (section: WindowId, tabHint?: CityTab) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
@@ -135,59 +143,15 @@ const LANDMARKS: LandmarkDef[] = [
     height: 26,
   },
   {
-    id: 'mercado',
-    label: 'Plaza y Mercado',
+    id: 'fuente_mercado',
+    label: 'Fuente de la Plaza',
     hint: 'Abrir Economía y Empresas',
     section: 'economia',
-    wx: 408,
-    wy: 74,
-    ww: 196,
-    wh: 120,
-    height: 18,
-  },
-  {
-    id: 'campos',
-    label: 'Campos del Valle',
-    hint: 'Abrir Economía y Abasto',
-    section: 'economia',
-    wx: 34,
-    wy: 72,
-    ww: 298,
-    wh: 198,
-    height: 22,
-  },
-  {
-    id: 'clinica',
-    label: 'Clínica y Comisaría',
-    hint: 'Salud, seguridad y obras (Palancas)',
-    section: 'palancas',
-    wx: 380,
-    wy: 366,
-    ww: 108,
-    wh: 158,
-    height: 30,
-  },
-  {
-    id: 'escuela',
-    label: 'Escuela del Valle',
-    hint: 'Docentes fijos y estudiantes (Palancas / Ciudad)',
-    section: 'palancas',
-    wx: 714,
-    wy: 78,
-    ww: 156,
-    wh: 148,
-    height: 28,
-  },
-  {
-    id: 'taller',
-    label: 'Talleres Industriales',
-    hint: 'Obras públicas e industria (Palancas)',
-    section: 'palancas',
-    wx: 42,
-    wy: 358,
-    ww: 280,
-    wh: 178,
-    height: 32,
+    wx: 486,
+    wy: 140,
+    ww: 48,
+    wh: 44,
+    height: 16,
   },
 ];
 
@@ -833,12 +797,14 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   derived,
   paused,
   selectedNpcId,
+  selectedParcelaId = null,
   filter,
   lens,
   followSelected,
   cameraTarget,
   zoomRequest,
   onSelectNpc,
+  onSelectParcela,
   onOpenSection,
   onCancelFollow,
   onHoverInfoChange,
@@ -857,6 +823,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   pausedRef.current = paused;
   const selectedIdRef = useRef(selectedNpcId);
   selectedIdRef.current = selectedNpcId;
+  const selectedParcelaIdRef = useRef(selectedParcelaId);
+  selectedParcelaIdRef.current = selectedParcelaId;
   const filterRef = useRef(filter);
   filterRef.current = filter;
   const lensRef = useRef(lens);
@@ -879,10 +847,11 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
   const keysHeldRef = useRef<Set<string>>(new Set());
   const hoveredLandmarkRef = useRef<LandmarkDef | null>(null);
+  const hoveredParcelaIdRef = useRef<string | null>(null);
   const hoveredKeyRef = useRef<string | null>(null);
 
   const [hoverTooltipData, setHoverTooltipData] = useState<{
-    kind: 'npc' | 'landmark';
+    kind: 'npc' | 'landmark' | 'parcela';
     title: string;
     subtitle: string;
     detail?: string;
@@ -1384,6 +1353,39 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ctx.restore();
           }
 
+          // Interactive Parcel Hover / Selection Footprints
+          for (const p of st.parcelas) {
+            const isSel = selectedParcelaIdRef.current === p.id;
+            const isHov = hoveredParcelaIdRef.current === p.id;
+            if (p.estado === 'libre' || p.estado === 'bloqueada' || isSel || isHov) {
+              ctx.save();
+              isoQuadPath(ctx, p.wx, p.wy, p.ww, p.wh);
+              if (p.estado === 'bloqueada') {
+                ctx.fillStyle = isHov || isSel ? 'rgba(100,116,139,0.28)' : 'rgba(15,23,42,0.16)';
+                ctx.fill();
+                ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#94a3b8' : 'rgba(100,116,139,0.55)';
+                ctx.lineWidth = isSel || isHov ? 2.2 : 1.4;
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+              } else if (p.estado === 'libre') {
+                ctx.fillStyle = isSel || isHov ? 'rgba(20,184,166,0.24)' : 'rgba(16,185,129,0.12)';
+                ctx.fill();
+                ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#38bdf8' : '#10b981';
+                ctx.lineWidth = isSel || isHov ? 2.6 : 1.6;
+                ctx.setLineDash([6, 4]);
+                ctx.stroke();
+              } else if (isSel || isHov) {
+                ctx.fillStyle = 'rgba(20,184,166,0.16)';
+                ctx.fill();
+                ctx.strokeStyle = isSel ? '#14b8a6' : '#38bdf8';
+                ctx.lineWidth = 2.6;
+                ctx.setLineDash([6, 4]);
+                ctx.stroke();
+              }
+              ctx.restore();
+            }
+          }
+
           // Interactive Landmark Hover Footprint Highlight
           if (hoveredLandmarkRef.current) {
             const lm = hoveredLandmarkRef.current;
@@ -1407,15 +1409,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             renderQueue.push({ kind: 'fn', depth: wx + wy, draw });
           };
 
-          // Barn & Silo (Campos)
-          pushItem(286, 134, (c) => {
-            drawIsoBox(c, 264, 118, 44, 32, 18, '#dc2626', '#991b1b', '#b91c1c', undefined, duskAmount);
-            drawIsoPitchedRoof(c, 262, 116, 48, 36, 18, 12, '#ef4444', '#991b1b');
-          });
-          pushItem(322, 134, (c) => {
-            drawIsoBox(c, 314, 126, 16, 16, 30, '#e2e8f0', '#94a3b8', '#cbd5e1');
-          });
-
           // Rotating Windmill
           pushItem(168, 162, (c) => {
             drawIsoBox(c, 160, 154, 16, 16, 26, '#92400e', '#78350f', '#b45309');
@@ -1435,31 +1428,153 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             c.restore();
           });
 
-          // Industrial Factories & Crates
-          pushItem(106, 396, (c) => {
-            drawIsoBox(c, 46, 362, 120, 68, 28, '#64748b', '#475569', '#94a3b8', undefined, duskAmount);
-            drawIsoBox(c, 146, 368, 14, 14, 44, '#334155', '#1e293b', '#475569');
-          });
-          pushItem(256, 393, (c) => {
-            drawIsoBox(c, 194, 362, 124, 62, 26, '#475569', '#334155', '#64748b', undefined, duskAmount);
-            drawIsoBox(c, 298, 368, 14, 14, 42, '#334155', '#1e293b', '#475569');
-          });
-          pushItem(122, 493, (c) => {
-            drawIsoBox(c, 52, 456, 140, 74, 28, '#64748b', '#475569', '#94a3b8', undefined, duskAmount);
-            drawIsoBox(c, 172, 462, 14, 14, 44, '#334155', '#1e293b', '#475569');
-          });
-          for (const cr of [
-            { x: 222, y: 462, c1: '#b45309', c2: '#d97706' },
-            { x: 244, y: 462, c1: '#92400e', c2: '#b45309' },
-            { x: 222, y: 484, c1: '#d97706', c2: '#f59e0b' },
-            { x: 266, y: 472, c1: '#b45309', c2: '#d97706' },
-          ]) {
-            pushItem(cr.x + 8, cr.y + 8, (c) => {
-              drawIsoBox(c, cr.x, cr.y, 16, 16, 10, cr.c2, cr.c1, cr.c2);
+          // Dynamic Buildings & Construction Plots from state.parcelas
+          for (const parcel of st.parcelas) {
+            const cx = parcel.wx + parcel.ww * 0.5;
+            const cy = parcel.wy + parcel.wh * 0.5;
+            pushItem(cx, cy, (c) => {
+              const center = worldToIso(cx, cy);
+              if (parcel.estado === 'bloqueada') {
+                c.fillStyle = 'rgba(15, 23, 42, 0.72)';
+                c.beginPath();
+                c.roundRect(center.ix - 28, center.iy - 9, 56, 17, 4);
+                c.fill();
+                c.fillStyle = '#94a3b8';
+                c.font = '600 8.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('BLOQUEADA', center.ix, center.iy + 2.5);
+                c.textAlign = 'start';
+                return;
+              }
+
+              if (parcel.estado === 'libre') {
+                c.fillStyle = 'rgba(6, 78, 59, 0.85)';
+                c.beginPath();
+                c.roundRect(center.ix - 24, center.iy - 9, 48, 17, 4);
+                c.fill();
+                c.strokeStyle = '#10b981';
+                c.lineWidth = 1;
+                c.stroke();
+                c.fillStyle = '#ecfdf5';
+                c.font = '700 9px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('+ SOLAR', center.ix, center.iy + 2.5);
+                c.textAlign = 'start';
+                return;
+              }
+
+              const bld = parcel.edificio;
+              if (!bld) return;
+
+              const bx = parcel.wx + 6;
+              const by = parcel.wy + 6;
+              const bw = Math.max(24, parcel.ww - 12);
+              const bh = Math.max(20, parcel.wh - 12);
+
+              if (bld.estado === 'en_obra') {
+                drawIsoBox(c, bx, by, bw, bh, 14, '#d97706', '#78350f', '#92400e');
+                c.fillStyle = 'rgba(15, 23, 42, 0.88)';
+                c.beginPath();
+                c.roundRect(center.ix - 34, center.iy - 28, 68, 16, 4);
+                c.fill();
+                c.fillStyle = '#fde68a';
+                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText(`OBRA · ${bld.diasObraRestantes}d`, center.ix, center.iy - 17);
+                c.textAlign = 'start';
+                return;
+              }
+
+              if (bld.tipo === 'hospital') {
+                drawIsoBox(c, bx, by, bw, bh, 26, '#ffffff', '#cbd5e1', '#e2e8f0', undefined, duskAmount);
+                c.fillStyle = '#dc2626';
+                c.fillRect(center.ix - 3, center.iy - 34, 6, 16);
+                c.fillRect(center.ix - 8, center.iy - 29, 16, 6);
+              } else if (bld.tipo === 'hospital_campana') {
+                drawIsoBox(c, bx + 4, by + 4, bw - 8, bh - 8, 14, '#fef2f2', '#94a3b8', '#cbd5e1');
+                drawIsoPitchedRoof(c, bx + 2, by + 2, bw - 4, bh - 4, 14, 10, '#f8fafc', '#cbd5e1');
+                c.fillStyle = '#dc2626';
+                c.fillRect(center.ix - 2.5, center.iy - 29, 5, 11);
+                c.fillRect(center.ix - 5.5, center.iy - 26, 11, 5);
+                if (bld.diasRestantesCampana !== undefined) {
+                  c.fillStyle = '#0f172a';
+                  c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                  c.textAlign = 'center';
+                  c.fillText(`${bld.diasRestantesCampana}d`, center.ix, center.iy - 4);
+                  c.textAlign = 'start';
+                }
+              } else if (bld.tipo === 'comisaria') {
+                drawIsoBox(c, bx, by, bw, bh, 24, '#1d4ed8', '#172554', '#1e3a8a', undefined, duskAmount);
+                c.fillStyle = '#dbeafe';
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('COMISARÍA', center.ix, center.iy - 24);
+                c.textAlign = 'start';
+              } else if (bld.tipo === 'escuela') {
+                drawIsoBox(c, bx, by, bw, bh, 24, '#e0e7ff', '#a5b4fc', '#c7d2fe', undefined, duskAmount);
+                drawIsoPitchedRoof(c, bx - 2, by - 2, bw + 4, bh + 4, 24, 12, '#4f46e5', '#3730a3');
+                c.fillStyle = '#ffffff';
+                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('ESCUELA', center.ix, center.iy - 22);
+                c.textAlign = 'start';
+              } else if (bld.tipo === 'oficina_publica') {
+                drawIsoBox(c, bx, by, bw, bh, 22, '#0f766e', '#475569', '#64748b', undefined, duskAmount);
+                c.fillStyle = '#ecfeff';
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('OFICINA', center.ix, center.iy - 23);
+                c.textAlign = 'start';
+              } else if (bld.tipo === 'campo') {
+                const barnW = Math.min(44, bw * 0.45);
+                const barnH = Math.min(32, bh * 0.5);
+                drawIsoBox(c, bx + 6, by + 6, barnW, barnH, 16, '#dc2626', '#991b1b', '#b91c1c', undefined, duskAmount);
+                drawIsoPitchedRoof(c, bx + 4, by + 4, barnW + 4, barnH + 4, 16, 10, '#ef4444', '#991b1b');
+                drawIsoBox(c, bx + barnW + 14, by + 10, 14, 14, 26, '#e2e8f0', '#94a3b8', '#cbd5e1');
+              } else if (bld.tipo === 'local_comercio') {
+                if (parcel.distrito === 'taller') {
+                  drawIsoBox(c, bx, by, bw, bh, 26, '#64748b', '#475569', '#94a3b8', undefined, duskAmount);
+                  drawIsoBox(c, bx + bw - 18, by + 6, 14, 14, 42, '#334155', '#1e293b', '#475569');
+                } else {
+                  drawIsoBox(c, bx, by, bw, bh, 18, '#d97706', '#92400e', '#b45309', undefined, duskAmount);
+                  c.fillStyle = '#fef3c7';
+                  c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                  c.textAlign = 'center';
+                  c.fillText('COMERCIO', center.ix, center.iy - 18);
+                  c.textAlign = 'start';
+                }
+              } else if (bld.tipo === 'muralla') {
+                drawIsoBox(c, bx, by, bw, 12, 22, '#cbd5e1', '#475569', '#64748b');
+                drawIsoBox(c, bx, by + bh - 12, bw, 12, 22, '#cbd5e1', '#475569', '#64748b');
+                drawIsoBox(c, bx, by, 12, bh, 22, '#cbd5e1', '#475569', '#64748b');
+                c.fillStyle = '#f8fafc';
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('MURALLA', center.ix, center.iy - 22);
+                c.textAlign = 'start';
+              } else if (bld.tipo === 'silo') {
+                drawIsoBox(c, bx + 8, by + 8, 20, 20, 34, '#f8fafc', '#94a3b8', '#cbd5e1');
+                drawIsoBox(c, bx + 34, by + 8, 20, 20, 34, '#f8fafc', '#94a3b8', '#cbd5e1');
+                c.fillStyle = '#0f172a';
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('SILO', center.ix, center.iy - 34);
+                c.textAlign = 'start';
+              } else if (bld.tipo === 'riego') {
+                c.fillStyle = '#0284c7';
+                isoQuadPath(c, bx, by + bh * 0.25, bw, bh * 0.5);
+                c.fill();
+                drawIsoBox(c, bx + bw * 0.35, by + bh * 0.15, 22, 22, 16, '#38bdf8', '#0369a1', '#0284c7');
+                c.fillStyle = '#e0f2fe';
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.textAlign = 'center';
+                c.fillText('RIEGO', center.ix, center.iy - 18);
+                c.textAlign = 'start';
+              }
             });
           }
 
-          // Plaza Fountain & Market Stalls
+          // Plaza Fountain & Decorative Market Stalls
           pushItem(510, 162, (c) => {
             const fp = worldToIso(510, 162);
             c.fillStyle = '#94a3b8';
@@ -1476,23 +1591,9 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             c.beginPath();
             c.ellipse(fp.ix, fp.iy - 2, ripple, ripple * 0.5, 0, 0, Math.PI * 2);
             c.stroke();
-            // Center water spout
             c.fillStyle = '#e0f2fe';
             c.fillRect(fp.ix - 1.5, fp.iy - 14, 3, 12);
           });
-
-          for (const stDef of [
-            { x: 422, y: 92, c: '#dc2626', cDark: '#991b1b' },
-            { x: 458, y: 92, c: '#0d9488', cDark: '#115e59' },
-            { x: 540, y: 92, c: '#d97706', cDark: '#92400e' },
-            { x: 576, y: 92, c: '#2563eb', cDark: '#1e40af' },
-            { x: 422, y: 214, c: '#059669', cDark: '#065f46' },
-            { x: 458, y: 214, c: '#ca8a04', cDark: '#854d0e' },
-          ]) {
-            pushItem(stDef.x + 13, stDef.y + 9, (c) => {
-              drawIsoBox(c, stDef.x, stDef.y, 26, 18, 12, stDef.c, stDef.cDark, '#e7dec8');
-            });
-          }
 
           // Press Building (Redacción)
           pushItem(571, 219, (c) => {
@@ -1504,26 +1605,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
             c.textAlign = 'center';
             c.fillText('PRENSA', roof.ix, roof.iy - 26);
-            c.textAlign = 'start';
-          });
-
-          // Clínica
-          pushItem(433, 404, (c) => {
-            drawIsoBox(c, 384, 370, 98, 68, 26, '#ffffff', '#cbd5e1', '#e2e8f0', undefined, duskAmount);
-            const roof = worldToIso(433, 404);
-            c.fillStyle = '#dc2626';
-            c.fillRect(roof.ix - 3, roof.iy - 34, 6, 16);
-            c.fillRect(roof.ix - 8, roof.iy - 29, 16, 6);
-          });
-
-          // Comisaría
-          pushItem(430, 491, (c) => {
-            drawIsoBox(c, 384, 462, 92, 58, 24, '#1d4ed8', '#172554', '#1e3a8a', undefined, duskAmount);
-            const roof = worldToIso(430, 491);
-            c.fillStyle = '#dbeafe';
-            c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-            c.textAlign = 'center';
-            c.fillText('COMISARÍA', roof.ix, roof.iy - 24);
             c.textAlign = 'start';
           });
 
@@ -1554,18 +1635,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               isoQuadPath(c, 498, 364, 138, 104);
               c.stroke();
             }
-          });
-
-          // Escuela del Valle
-          pushItem(791, 117, (c) => {
-            drawIsoBox(c, 718, 80, 146, 74, 24, '#e0e7ff', '#a5b4fc', '#c7d2fe', undefined, duskAmount);
-            drawIsoPitchedRoof(c, 716, 78, 150, 78, 24, 12, '#4f46e5', '#3730a3');
-            const top = worldToIso(791, 117);
-            c.fillStyle = '#ffffff';
-            c.font = '700 8px "Plus Jakarta Sans", sans-serif';
-            c.textAlign = 'center';
-            c.fillText('ESCUELA', top.ix, top.iy - 22);
-            c.textAlign = 'start';
           });
 
           // Residential Cottages
@@ -1867,6 +1936,27 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     return best;
   };
 
+  const findParcelaAt = (ix: number, iy: number): Parcela | null => {
+    const sorted = [...stateRef.current.parcelas].sort(
+      (a, b) => b.wx + b.wy - (a.wx + a.wy)
+    );
+    for (const p of sorted) {
+      const zOffsets = p.estado === 'ocupada' ? [14, 0] : [0];
+      for (const zOff of zOffsets) {
+        const wCoords = isoToWorld(ix, iy + zOff);
+        if (
+          wCoords.wx >= p.wx &&
+          wCoords.wx <= p.wx + p.ww &&
+          wCoords.wy >= p.wy &&
+          wCoords.wy <= p.wy + p.wh
+        ) {
+          return p;
+        }
+      }
+    }
+    return null;
+  };
+
   const findLandmarkAt = (ix: number, iy: number): LandmarkDef | null => {
     // Check front-most landmarks first (descending wx + wy)
     for (const lm of SORTED_LANDMARKS) {
@@ -1915,6 +2005,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         if (hoveredKeyRef.current !== null) {
           hoveredKeyRef.current = null;
           hoveredLandmarkRef.current = null;
+          hoveredParcelaIdRef.current = null;
           setHoverTooltipData(null);
           onHoverInfoRef.current?.(null);
         }
@@ -1938,6 +2029,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       if (hoveredKeyRef.current !== nextKey) {
         hoveredKeyRef.current = nextKey;
         hoveredLandmarkRef.current = null;
+        hoveredParcelaIdRef.current = null;
         const subtitle = npc.accionIa ? npc.accionIa.nombre : npc.mapa.accion;
         setHoverTooltipData({
           kind: 'npc',
@@ -1950,12 +2042,49 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       return;
     }
 
+    const parcela = findParcelaAt(coords.ix, coords.iy);
+    if (parcela) {
+      const b = parcela.edificio;
+      const bDef = b ? BUILDING_CATALOG[b.tipo] : null;
+      const nextKey = `parcela:${parcela.id}:${parcela.estado}:${b?.tipo ?? ''}:${b?.diasObraRestantes ?? 0}`;
+      if (hoveredKeyRef.current !== nextKey) {
+        hoveredKeyRef.current = nextKey;
+        hoveredLandmarkRef.current = null;
+        hoveredParcelaIdRef.current = parcela.id;
+        const subtitle =
+          parcela.estado === 'libre'
+            ? `Parcela libre · Zona ${parcela.zona}`
+            : parcela.estado === 'bloqueada'
+            ? `Parcela bloqueada · Zona ${parcela.zona}`
+            : parcela.estado === 'en_obra' && bDef && b
+            ? `En obra: ${bDef.nombre} (${b.diasObraRestantes}d)`
+            : bDef
+            ? `${bDef.nombre} · Zona ${parcela.zona}`
+            : `Zona ${parcela.zona}`;
+        const detail =
+          parcela.estado === 'libre'
+            ? 'Clic para construir obra'
+            : parcela.estado === 'bloqueada'
+            ? 'Clic para ver hito requerido'
+            : 'Clic para inspeccionar';
+        setHoverTooltipData({
+          kind: 'parcela',
+          title: parcela.nombre,
+          subtitle,
+          detail,
+        });
+        onHoverInfoRef.current?.(`${parcela.nombre} — ${subtitle}`);
+      }
+      return;
+    }
+
     const lm = findLandmarkAt(coords.ix, coords.iy);
     if (lm) {
       const nextKey = `lm:${lm.id}`;
       if (hoveredKeyRef.current !== nextKey) {
         hoveredKeyRef.current = nextKey;
         hoveredLandmarkRef.current = lm;
+        hoveredParcelaIdRef.current = null;
         setHoverTooltipData({
           kind: 'landmark',
           title: lm.label,
@@ -1970,6 +2099,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     if (hoveredKeyRef.current !== null) {
       hoveredKeyRef.current = null;
       hoveredLandmarkRef.current = null;
+      hoveredParcelaIdRef.current = null;
       setHoverTooltipData(null);
       onHoverInfoRef.current?.(null);
     }
@@ -1986,6 +2116,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     const npc = findNearestNpc(coords.ix, coords.iy);
     if (npc) {
       onSelectNpc(npc.id);
+      return;
+    }
+
+    const parcela = findParcelaAt(coords.ix, coords.iy);
+    if (parcela) {
+      onSelectParcela?.(parcela.id);
       return;
     }
 
@@ -2042,6 +2178,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           dragRef.current.dragging = false;
           hoveredKeyRef.current = null;
           hoveredLandmarkRef.current = null;
+          hoveredParcelaIdRef.current = null;
           setHoverTooltipData(null);
           onHoverInfoRef.current?.(null);
         }}
@@ -2052,18 +2189,18 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       {/* Zero-rerender Tooltip (transformed directly via DOM ref) */}
       <div
         ref={tooltipDivRef}
-        className={`pointer-events-none absolute top-0 left-0 z-20 bg-slate-900/95 border-t border-l border-slate-500/50 border-b border-r border-slate-950 text-white text-xs rounded px-2.5 py-1.5 shadow-xl max-w-[240px] ${
+        className={`pointer-events-none absolute top-0 left-0 z-20 bg-zinc-950/95 border border-zinc-700/90 text-white text-sm rounded-xl px-3.5 py-2.5 shadow-2xl max-w-[260px] ${
           hoverTooltipData ? 'opacity-100' : 'opacity-0'
         }`}
       >
         {hoverTooltipData && (
           <>
-            <div className="font-semibold text-white">{hoverTooltipData.title}</div>
-            <div className="text-slate-300 capitalize text-[11px]">{hoverTooltipData.subtitle}</div>
+            <div className="font-semibold text-white leading-snug">{hoverTooltipData.title}</div>
+            <div className="text-zinc-300 capitalize text-xs mt-0.5">{hoverTooltipData.subtitle}</div>
             {hoverTooltipData.detail && (
               <div
-                className={`mt-0.5 font-mono text-[10px] tabular-nums ${
-                  hoverTooltipData.kind === 'landmark' ? 'text-teal-300 font-sans font-medium' : 'text-slate-400'
+                className={`mt-1 font-mono text-xs tabular-nums ${
+                  hoverTooltipData.kind !== 'npc' ? 'text-emerald-400 font-sans font-medium' : 'text-zinc-400'
                 }`}
               >
                 {hoverTooltipData.detail}
@@ -2073,12 +2210,11 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         )}
       </div>
 
-      {/* Interactive RCT Minimap (bottom-right) */}
-      <div className="pointer-events-auto fixed bottom-10 right-3 z-20 bg-slate-800/95 border-t border-l border-slate-500/60 border-b-2 border-r-2 border-slate-950 rounded shadow-2xl overflow-hidden hidden sm:block">
-        <div className="flex items-center justify-between px-2 py-0.5 bg-slate-700/90 border-b border-slate-900 text-[10px] font-semibold text-slate-100">
-          <span>Mapa del Valle</span>
-          <span className="font-mono text-[9px] text-slate-300 tabular-nums">Clic para mover</span>
-        </div>
+      {/* Interactive Valley Minimap (bottom-right) */}
+      <div
+        title="Minimapa: clic o arrastrá para mover la cámara"
+        className="pointer-events-auto fixed bottom-4 right-4 z-20 bg-zinc-900/92 border border-zinc-700/80 rounded-2xl shadow-2xl overflow-hidden hidden lg:block"
+      >
         <canvas
           ref={minimapCanvasRef}
           width={MINIMAP_W}

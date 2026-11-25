@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, TrendingUp } from 'lucide-react';
-import { PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
-import { sumPeriodExpenses } from '../../engine/policies';
+import { PERIOD_DAYS } from '../../data/catalogs';
+import { getBuildingJobCaps, sumPeriodExpenses } from '../../engine/policies';
 import { CommunityDerived, GameState, HistoryPoint } from '../../types/game';
 import { RctWindow } from './RctWindow';
+import { UiTooltip } from './UiTooltip';
 
 interface EconomyWindowProps {
   state: GameState;
@@ -26,7 +27,7 @@ const SparklineCard: React.FC<{
   const min = 0;
   const max = Math.max(...values, 1);
   const w = 200;
-  const h = 44;
+  const h = 48;
   const pad = 4;
   const points = values
     .map((v, idx) => {
@@ -38,21 +39,21 @@ const SparklineCard: React.FC<{
   const latest = values[values.length - 1] ?? 0;
 
   return (
-    <div className="bg-slate-800/45 border border-slate-800 rounded-md p-2.5">
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="text-[11px] text-slate-400">{title}</span>
-        <span className="font-mono text-xs font-semibold text-white tabular-nums">
+    <div className="bg-zinc-800/55 border border-zinc-700/60 rounded-xl p-3.5">
+      <div className="flex items-baseline justify-between mb-2">
+        <span className="text-xs text-zinc-400">{title}</span>
+        <span className="font-mono text-sm font-bold text-white tabular-nums">
           {latest.toFixed(unit === '%' ? 1 : 0)}
           {unit}
         </span>
       </div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-10 overflow-visible">
-        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="#334155" strokeWidth="1" />
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-11 overflow-visible">
+        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="#3f3f46" strokeWidth="1" />
         {values.length > 1 && (
           <polyline
             fill="none"
             stroke={color}
-            strokeWidth="2"
+            strokeWidth="2.2"
             strokeLinejoin="round"
             strokeLinecap="round"
             points={points}
@@ -86,6 +87,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
     acum.garantiaAlimentaria +
     acum.ayudaDevengada +
     acum.operacion +
+    (acum.obras ?? 0) +
     acum.prensa;
 
   const foodOwnerId = state.empresas.alimento.dueno;
@@ -97,47 +99,47 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
     if (foodOwnerId && n.id === foodOwnerId) foodOwnerName = n.nombre;
     if (socioIds.has(n.id)) liveSociosCount++;
   }
-  const foodOwner = foodOwnerName;
-  const preset = SCENARIO_PRESETS[state.config.escenarioId];
-  const popScale = Math.max(0.6, derived.poblacion / 100);
+  const caps = getBuildingJobCaps(
+    state.parcelas,
+    derived.poblacion,
+    state.gobierno.palancasVigentes.nivelObras,
+    state.config.poblacionInicial,
+    state.gobierno.cuposFijos
+  );
   const foodEmployees = derived.roles.agricultor + derived.roles.tecnico;
-  const foodCap =
-    Math.round(preset.topesPrivados.agricultor * popScale) +
-    Math.round(preset.topesPrivados.tecnico * popScale);
-  const foodVacancies = Math.max(0, foodCap - foodEmployees);
+  const foodVacancies = Math.max(0, caps.agricultor - foodEmployees);
   const comEmployees = derived.roles.obrero;
-  const comCap = Math.round(preset.topesPrivados.obrero * popScale);
-  const comVacancies = Math.max(0, comCap - comEmployees);
+  const comVacancies = Math.max(0, caps.obrero - comEmployees);
 
   return (
-    <div className="pointer-events-none fixed top-14 left-3 md:left-[555px]" style={{ zIndex }}>
+    <div className="pointer-events-none fixed top-20 left-4 md:left-[548px]" style={{ zIndex }}>
       <RctWindow
-        title="Economía, Empresas y Abasto"
-        subtitle={`Reserva $${Math.round(state.gobierno.reserva)} · Stock ${state.alimento.diasStock.toFixed(0)}d · Precio $${state.alimento.precio.toFixed(2)}`}
+        title="Economía"
+        subtitle={`Reserva $${Math.round(state.gobierno.reserva)} · Stock ${state.alimento.diasStock.toFixed(0)}d`}
         tone="amber"
-        icon={<TrendingUp className="w-3.5 h-3.5" />}
+        icon={<TrendingUp className="w-4 h-4" />}
         zIndex={zIndex}
         onFocus={onFocus}
         onClose={onClose}
-        className="w-[450px] max-w-[calc(100vw-24px)]"
+        className="w-[460px] max-w-[calc(100vw-32px)]"
       >
-        <div className="p-3.5 max-h-[calc(100vh-115px)] overflow-y-auto space-y-3.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex flex-1 items-center gap-1 bg-slate-800/70 p-1 rounded border border-slate-700/80 text-xs">
+        <div className="p-5 max-h-[calc(100vh-195px)] overflow-y-auto space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-1 items-center gap-1.5 bg-zinc-800/80 p-1.5 rounded-xl text-xs">
               <button
                 type="button"
                 onClick={() => setTab('resumen')}
-                className={`flex-1 py-1 rounded-sm font-semibold transition-colors ${
-                  tab === 'resumen' ? 'bg-amber-700 text-white' : 'text-slate-300 hover:text-white'
+                className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+                  tab === 'resumen' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                 }`}
               >
-                Balance y Empresas
+                Balance
               </button>
               <button
                 type="button"
                 onClick={() => setTab('curvas')}
-                className={`flex-1 py-1 rounded-sm font-semibold transition-colors ${
-                  tab === 'curvas' ? 'bg-amber-700 text-white' : 'text-slate-300 hover:text-white'
+                className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+                  tab === 'curvas' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 Curvas ({state.historial.length})
@@ -146,159 +148,129 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
             <button
               type="button"
               onClick={onOpenPalancas}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 rounded shrink-0"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl shrink-0 transition-colors"
             >
-              <SlidersHorizontal className="w-3 h-3" />
+              <SlidersHorizontal className="w-3.5 h-3.5" />
               Palancas
             </button>
           </div>
 
           {tab === 'resumen' ? (
-            <div className="space-y-4">
+            <div className="space-y-5">
               {/* Fiscal KPIs */}
-              <div className="grid grid-cols-4 gap-2 bg-slate-800/50 border border-slate-800 rounded-md p-2.5 text-xs font-mono tabular-nums">
+              <div className="grid grid-cols-4 gap-3 bg-zinc-800/55 rounded-xl p-3.5 text-sm font-mono tabular-nums">
                 <div>
-                  <span className="font-sans text-[10px] text-slate-400 block">Reserva</span>
-                  <span className="font-semibold text-white">${Math.round(state.gobierno.reserva)}</span>
+                  <span className="font-sans text-xs text-zinc-400 block">Reserva</span>
+                  <span className="font-bold text-white">${Math.round(state.gobierno.reserva)}</span>
                 </div>
                 <div>
-                  <span className="font-sans text-[10px] text-slate-400 block">Flujo est.</span>
-                  <span className={`font-semibold ${estDiario >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  <span className="font-sans text-xs text-zinc-400 block">Flujo</span>
+                  <span className={`font-bold ${estDiario >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {estDiario >= 0 ? '+' : ''}${estDiario.toFixed(0)}/d
                   </span>
                 </div>
                 <div>
-                  <span className="font-sans text-[10px] text-slate-400 block">Ing. cierre</span>
-                  <span className="font-semibold text-emerald-400">+${fin.ingresos.toFixed(0)}</span>
+                  <span className="font-sans text-xs text-zinc-400 block">Ingresos</span>
+                  <span className="font-bold text-emerald-400">+${fin.ingresos.toFixed(0)}</span>
                 </div>
                 <div>
-                  <span className="font-sans text-[10px] text-slate-400 block">Gas. cierre</span>
-                  <span className="font-semibold text-slate-200">-${lastExpenses.toFixed(0)}</span>
+                  <span className="font-sans text-xs text-zinc-400 block">Gastos</span>
+                  <span className="font-bold text-zinc-200">-${lastExpenses.toFixed(0)}</span>
                 </div>
               </div>
 
-              {/* Current Period + Last Settlement */}
-              <div className="space-y-1.5 text-xs">
-                <div className="flex items-center justify-between font-semibold text-white pb-1 border-b border-slate-800">
-                  <span>Período en curso ({acum.dias}/{PERIOD_DAYS}d)</span>
-                  <span className="font-mono text-[11px] text-slate-300 tabular-nums">
-                    Ing +${curIngresos.toFixed(0)} · Gas -${curGastos.toFixed(0)}
+              {/* Settlement Breakdown */}
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between text-sm font-semibold text-white pb-2 border-b border-zinc-800">
+                  <UiTooltip
+                    text={`Período actual (${acum.dias}/${PERIOD_DAYS}d): +$${curIngresos.toFixed(0)} / -$${curGastos.toFixed(0)}`}
+                  >
+                    <span className="cursor-help">Último cierre</span>
+                  </UiTooltip>
+                  <span className={`font-mono font-bold ${fin.saldo >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {fin.saldo >= 0 ? '+' : ''}${fin.saldo.toFixed(0)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-                  <span>Desglose último cierre fiscal</span>
-                  <span className={`font-mono font-semibold ${fin.saldo >= 0 ? 'text-teal-300' : 'text-rose-400'}`}>
-                    Saldo: {fin.saldo >= 0 ? '+' : ''}${fin.saldo.toFixed(0)}
-                  </span>
-                </div>
+
                 {[
-                  { label: 'Ingresos (impuestos)', val: fin.ingresos },
-                  { label: 'Nómina empleados públicos', val: -fin.nomina },
-                  { label: 'Pensiones (jubilados)', val: -fin.pensiones },
-                  { label: 'Comida menores (escuela)', val: -fin.comidaMenores },
-                  { label: 'Garantía alimentaria', val: -fin.garantiaAlimentaria },
+                  { label: 'Impuestos', val: fin.ingresos },
+                  { label: 'Nómina', val: -fin.nomina },
+                  { label: 'Pensiones', val: -fin.pensiones },
+                  { label: 'Menores', val: -fin.comidaMenores },
+                  { label: 'Garantía', val: -fin.garantiaAlimentaria },
                   { label: 'Ayuda social', val: -fin.ayudaSocial },
-                  { label: 'Operación de servicios', val: -fin.operacion },
-                  { label: 'Prensa estatal', val: -fin.prensa },
+                  { label: 'Mantenimiento', val: -(fin.mantenimiento ?? 0) },
+                  { label: 'Obras', val: -((fin.operacionObras ?? 0) + (fin.obras ?? 0)) },
+                  { label: 'Prensa', val: -fin.prensa },
                 ].map((row) => (
-                  <div key={row.label} className="flex justify-between text-[11px]">
-                    <span className="text-slate-300">{row.label}</span>
+                  <div key={row.label} className="flex justify-between text-xs py-0.5">
+                    <span className="text-zinc-300">{row.label}</span>
                     <span
                       className={`font-mono font-semibold tabular-nums ${
-                        row.val > 0 ? 'text-emerald-400' : row.val < 0 ? 'text-slate-200' : 'text-slate-500'
+                        row.val > 0 ? 'text-emerald-400' : row.val < 0 ? 'text-zinc-200' : 'text-zinc-500'
                       }`}
                     >
-                      {row.val >= 0 ? `+$${row.val.toFixed(1)}` : `-$${Math.abs(row.val).toFixed(1)}`}
+                      {row.val >= 0 ? `+$${row.val.toFixed(0)}` : `-$${Math.abs(row.val).toFixed(0)}`}
                     </span>
                   </div>
                 ))}
 
-                {((state.config.economiaModulo === 'fiscal' && fin.emision > 0) ||
-                  fin.importaciones > 0 ||
-                  fin.exportaciones > 0) && (
-                  <div className="pt-1 border-t border-slate-800/70 space-y-0.5 text-[10px] font-mono tabular-nums text-slate-400">
-                    {state.config.economiaModulo === 'fiscal' && fin.emision > 0 && (
-                      <div className="flex justify-between text-amber-300">
-                        <span>Emisión monetaria aplicada</span>
-                        <span>+${fin.emision.toFixed(1)}</span>
-                      </div>
-                    )}
-                    {fin.importaciones > 0 && (
-                      <div className="flex justify-between">
-                        <span>Importaciones (salen de reserva)</span>
-                        <span>-${fin.importaciones.toFixed(1)}</span>
-                      </div>
-                    )}
-                    {fin.exportaciones > 0 && (
-                      <div className="flex justify-between text-emerald-300">
-                        <span>Exportaciones (directo a Productora)</span>
-                        <span>+${fin.exportaciones.toFixed(1)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {fin.impago && (
-                  <div className="bg-rose-950/40 border border-rose-700/60 rounded px-2 py-1 text-[10px] text-rose-200 font-mono">
-                    Impago vigente: discrecional {Math.round(fin.prorrateoDiscrecional * 100)}% · nómina{' '}
-                    {Math.round(fin.prorrateoNomina * 100)}% · pens./garantía{' '}
-                    {Math.round(fin.prorrateoPensionGarantia * 100)}%
-                    {fin.garantiaImpaga > 0 && ` · Garantía impaga $${fin.garantiaImpaga.toFixed(1)}`}
+                  <div className="bg-rose-950/50 border border-rose-500/50 rounded-xl px-3 py-2 text-xs text-rose-200 font-mono">
+                    Impago: nómina {Math.round(fin.prorrateoNomina * 100)}% · pens./gar. {Math.round(fin.prorrateoPensionGarantia * 100)}%
                   </div>
                 )}
               </div>
 
               {/* Food & Pantries */}
-              <div className="pt-2 border-t border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-white">Alimento y Despensas</span>
-                  <span className="font-mono text-[11px] text-slate-300 tabular-nums">
-                    Precio ${state.alimento.precio.toFixed(2)} (Mdo ${state.alimento.precioMercado.toFixed(2)})
-                  </span>
+              <div className="pt-3 border-t border-zinc-800 space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-bold text-white">Alimento</span>
+                  <UiTooltip text={`Mercado $${state.alimento.precioMercado.toFixed(2)} · Despensa media ${derived.despensaMediaDias.toFixed(1)}d · Sin liquidez ${derived.sinDineroPct}%`}>
+                    <span className="font-mono text-xs text-zinc-300 tabular-nums cursor-help">
+                      ${state.alimento.precio.toFixed(2)} · Despensa {derived.despensaMediaDias.toFixed(1)}d
+                    </span>
+                  </UiTooltip>
                 </div>
-                <div className="grid grid-cols-4 gap-2 bg-slate-800/45 border border-slate-800 rounded-md p-2 text-xs font-mono tabular-nums">
+                <div className="grid grid-cols-4 gap-2 bg-zinc-800/55 rounded-xl p-3 text-xs font-mono tabular-nums">
                   <div>
-                    <span className="font-sans text-[10px] text-slate-400 block">Stock</span>
-                    <span className="font-semibold text-white">{Math.round(state.alimento.stock)} u.</span>
+                    <span className="font-sans text-zinc-400 block">Stock</span>
+                    <span className="font-bold text-white">{Math.round(state.alimento.stock)}</span>
                   </div>
                   <div>
-                    <span className="font-sans text-[10px] text-slate-400 block">Cosecha</span>
-                    <span className="font-semibold text-emerald-400">+{state.alimento.produccionDiaria}/d</span>
+                    <span className="font-sans text-zinc-400 block">Cosecha</span>
+                    <span className="font-bold text-emerald-400">+{state.alimento.produccionDiaria}/d</span>
                   </div>
                   <div>
-                    <span className="font-sans text-[10px] text-slate-400 block">Consumo</span>
-                    <span className="font-semibold text-slate-200">-{state.alimento.consumoDiario}/d</span>
+                    <span className="font-sans text-zinc-400 block">Consumo</span>
+                    <span className="font-bold text-zinc-200">-{state.alimento.consumoDiario}/d</span>
                   </div>
                   <div>
-                    <span className="font-sans text-[10px] text-slate-400 block">Balance</span>
-                    <span className={`font-semibold ${foodBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <span className="font-sans text-zinc-400 block">Balance</span>
+                    <span className={`font-bold ${foodBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {foodBalance >= 0 ? '+' : ''}
                       {foodBalance.toFixed(0)}/d
                     </span>
                   </div>
                 </div>
-                <div className="flex justify-between text-[11px] text-slate-400 font-mono tabular-nums">
-                  <span>Despensa media hogares: {derived.despensaMediaDias.toFixed(1)}d</span>
-                  <span>Sin liquidez: {derived.sinDineroPct}%</span>
-                </div>
               </div>
 
-              {/* Two Sector Enterprises */}
-              <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                <div className="text-xs font-semibold text-white">Empresas privadas</div>
+              {/* Private Enterprises */}
+              <div className="pt-3 border-t border-zinc-800 space-y-2.5">
+                <div className="text-sm font-bold text-white">Empresas</div>
                 {[
                   {
                     key: 'alimento',
-                    label: 'Productora de Alimento',
-                    ownerLabel: foodOwner,
+                    label: 'Productora',
+                    ownerLabel: foodOwnerName,
                     employees: foodEmployees,
                     vacancies: foodVacancies,
                     ent: state.empresas.alimento,
                   },
                   {
                     key: 'comercio',
-                    label: 'Empresa de Comercio',
-                    ownerLabel: `${liveSociosCount} socio(s)`,
+                    label: 'Comercio',
+                    ownerLabel: `${liveSociosCount} socios`,
                     employees: comEmployees,
                     vacancies: comVacancies,
                     ent: state.empresas.comercio,
@@ -306,64 +278,60 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                 ].map(({ key, label, ownerLabel, employees, vacancies, ent }) => (
                   <div
                     key={key}
-                    className="flex items-center justify-between gap-2 bg-slate-800/45 border border-slate-800 rounded px-2.5 py-1.5 text-[11px]"
+                    className="flex items-center justify-between gap-3 bg-zinc-800/55 rounded-xl px-3.5 py-3 text-xs"
                   >
-                    <div className="min-w-0 space-y-0.5">
-                      <div className="font-semibold text-slate-100 truncate">
-                        {label} <span className="font-normal text-slate-400">({ownerLabel})</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                        Empleados: {employees} · Vacantes: {vacancies} · Sueldos: {Math.round(ent.factor * 100)}%
+                    <div className="min-w-0 space-y-1">
+                      <UiTooltip text={`Dueño/socios: ${ownerLabel} · Sueldos período $${ent.ultimoSueldosPeriodo.toFixed(0)}`}>
+                        <div className="text-sm font-semibold text-white truncate cursor-help">
+                          {label}
+                        </div>
+                      </UiTooltip>
+                      <div className="text-xs text-zinc-400 font-mono tabular-nums">
+                        {employees} emp. · {vacancies} vac. · Sueldo {Math.round(ent.factor * 100)}%
                       </div>
                       {ent.ultimoTramo !== 'normal' && (
                         <div
-                          className={`flex items-center gap-1.5 text-[10px] flex-wrap ${
+                          className={`flex items-center gap-2 text-xs font-semibold ${
                             ent.ultimoTramo === 'aumento'
-                              ? 'text-emerald-300'
+                              ? 'text-emerald-400'
                               : ent.ultimoTramo === 'despido'
-                              ? 'text-rose-300'
+                              ? 'text-rose-400'
                               : 'text-amber-300'
                           }`}
                         >
-                          <span>
-                            Tramo: {ent.ultimoTramo} ({Math.round(ent.factor * 100)}%)
-                            {ent.ultimoTramo === 'despido' && ent.despidosPendientes > 0
-                              ? ` · ${ent.despidosPendientes} despido(s)`
-                              : ''}
-                          </span>
+                          <span className="capitalize">{ent.ultimoTramo}</span>
                           <button
                             type="button"
                             onClick={() =>
                               onInspectCausal(
                                 `${label}: ${ent.ultimoTramo}`,
                                 ent.ultimaCausa,
-                                `Los ingresos del período ubicaron el factor salarial de ${label} en ${Math.round(ent.factor * 100)}%.`
+                                `Factor salarial de ${label} en ${Math.round(ent.factor * 100)}%.`
                               )
                             }
-                            className="px-1.5 py-0.5 text-[9px] font-semibold bg-teal-700 hover:bg-teal-600 text-white rounded-sm"
+                            className="underline text-zinc-200 hover:text-white"
                           >
                             ¿Por qué?
                           </button>
                         </div>
                       )}
                     </div>
-                    <div className="text-right font-mono tabular-nums shrink-0">
-                      <div className={ent.ultimaGanancia >= 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                    <div className="text-right font-mono tabular-nums shrink-0 text-sm">
+                      <div className={ent.ultimaGanancia >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                         {ent.ultimaGanancia >= 0 ? '+' : ''}${ent.ultimaGanancia.toFixed(0)}
                       </div>
-                      <div className="text-[10px] text-slate-500">Sueldos ${ent.ultimoSueldosPeriodo.toFixed(0)}</div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2.5">
-              <SparklineCard data={state.historial} getVal={(p) => p.reserva} title="Reserva estatal" color="#14b8a6" />
-              <SparklineCard data={state.historial} getVal={(p) => p.apoyo} title="Apoyo electoral" unit="%" color="#10b981" />
-              <SparklineCard data={state.historial} getVal={(p) => p.hambreCritica} title="Hambre crítica" unit="%" color="#ef4444" />
-              <SparklineCard data={state.historial} getVal={(p) => p.satisfaccion} title="Satisfacción media" unit="%" color="#38bdf8" />
-              <SparklineCard data={state.historial} getVal={(p) => p.poblacion} title="Población viva" color="#a78bfa" />
+            <div className="grid grid-cols-2 gap-3">
+              <SparklineCard data={state.historial} getVal={(p) => p.reserva} title="Reserva" color="#10b981" />
+              <SparklineCard data={state.historial} getVal={(p) => p.apoyo} title="Apoyo" unit="%" color="#10b981" />
+              <SparklineCard data={state.historial} getVal={(p) => p.hambreCritica} title="Hambre" unit="%" color="#f43f5e" />
+              <SparklineCard data={state.historial} getVal={(p) => p.satisfaccion} title="Ánimo" unit="%" color="#f59e0b" />
+              <SparklineCard data={state.historial} getVal={(p) => p.poblacion} title="Población" color="#e4e4e7" />
               {state.config.economiaModulo === 'fiscal' && (
                 <SparklineCard data={state.historial} getVal={(p) => p.inflacion} title="Inflación" unit="%" color="#f59e0b" />
               )}

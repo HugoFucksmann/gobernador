@@ -1,5 +1,7 @@
 import {
   ACTION_TABLE,
+  ACTOR_CONSTANTS,
+  BUILDING_CATALOG,
   DIRECTOR_CONSTANTS,
   DISTRICT_BY_ID,
   ECON_CONSTANTS,
@@ -8,23 +10,28 @@ import {
   LEVER_BOUNDS,
   LEVER_VALENCIA,
   NEWS_TEMPLATES,
+  OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
   PRESS_CONSTANTS,
   PRICE_CAP_FACTORS,
   PUBLIC_ROLES,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
-  SERVICE_LEVEL_TABLE,
-  SERVICE_LEVER_TO_ROLE,
 } from '../data/catalogs';
 import {
   ActionDefinition,
+  ActiveDemand,
+  ActorMeasure,
+  BuildingType,
   CausalStep,
   ClimatePhenomenon,
   CommunityDerived,
+  DemandId,
   EventLogEntry,
   ForeignTradeStep,
   GameState,
+  HitoMetric,
+  LeverKey,
   ModifiableKey,
   Modifier,
   NewsArticle,
@@ -33,6 +40,7 @@ import {
   Npc,
   NpcVariable,
   ObjectiveCondition,
+  Parcela,
   PersonalityTrait,
   PhenomenonType,
   PressFact,
@@ -43,11 +51,17 @@ import {
   RoleId,
   ServiceAreaId,
   ServiceLevel,
-  ServiceLeverId,
   ServicePublicRoleId,
   SimEvent,
   ZoneId,
 } from '../types/game';
+import {
+  computeMaintenanceBreakdown,
+  getActiveBuildings,
+  getBuildingJobCaps,
+  getDevPopScale,
+  getObrasTargetJobs,
+} from './policies';
 import { nextRand, nextSeqId, randInt } from './rng';
 import {
   getCityErrandPosition,
@@ -128,7 +142,7 @@ export function getWorldZones(state: GameState): ZoneId[] {
 
 export function getEffectiveZone(npc: Npc, zonesCount: number): ZoneId {
   if (zonesCount <= 1) return 'centro';
-  if (npc.hospital.internado) return 'centro';
+  if (npc.hospital.internado) return npc.hospital.zonaHospital || 'centro';
   if (npc.accionIa?.zonaDestino) return npc.accionIa.zonaDestino;
   return npc.zona || 'centro';
 }
@@ -332,6 +346,7 @@ function computePoliceSplitAndMetrics(state: GameState): {
     oeste: 0,
   };
 
+  const activeBuildings = getActiveBuildings(state.parcelas);
   for (const z of zones) {
     const popZ = popZona[z] || 0;
     satMediaZona[z] = popZ > 0 ? Number((sumSatZona[z] / popZ).toFixed(1)) : 50;
@@ -344,10 +359,18 @@ function computePoliceSplitAndMetrics(state: GameState): {
 
     const polZ = policeCounts[z] || 0;
     const parte = totalPolice > 0 ? polZ / totalPolice : 1 / nZones;
+    let buildingDefBonus = 0;
+    for (const b of activeBuildings) {
+      if (b.zona !== z) continue;
+      const bDef = BUILDING_CATALOG[b.tipo];
+      if (bDef.bonusDefensa) buildingDefBonus += bDef.bonusDefensa;
+      if (bDef.defensaMuralla) buildingDefBonus += bDef.defensaMuralla;
+    }
     const integrity = state.gobierno.integridad?.[z] ?? 100;
     const integrityFactor = 1 - ECON_CONSTANTS.kIntegridad * (1 - integrity / 100);
+    const baseZoneDef = Math.min(100, seguridad * (1 - c + c * nZones * parte));
     defensa[z] = Number(
-      clamp(seguridad * (1 - c + c * nZones * parte) * integrityFactor, 0, 100).toFixed(1)
+      clamp((baseZoneDef + buildingDefBonus) * integrityFactor, 0, 100).toFixed(1)
     );
     orden[z] =
       popZ > 0
@@ -409,6 +432,78 @@ function updateZoneIntegrity(state: GameState, zonesCount: number): void {
   }
 }
 
+interface HospitalFacilityInfo {
+  edificioId: string;
+  parcela: Parcela;
+  zona: ZoneId;
+  isCampana: boolean;
+  beds: number;
+  occupied: number;
+}
+
+function getParcelCanvasCenter(p: Parcela): { x: number; y: number } {
+  return {
+    x: Number((p.wx + p.ww / 2).toFixed(1)),
+    y: Number((p.wy + p.wh / 2).toFixed(1)),
+  };
+}
+
+function computeHospitalFacilities(
+  state: GameState,
+  medicosActivos: number
+): { facilities: HospitalFacilityInfo[]; totalBeds: number; fullCount: number } {
+  const devScale = getDevPopScale(state.config.poblacionInicial);
+  const medParcelas = [...state.parcelas]
+    .filter(
+      (p) =>
+        p.edificio &&
+        p.edificio.estado === 'ocupada' &&
+        p.edificio.activo &&
+        (p.edificio.tipo === 'hospital' || p.edificio.tipo === 'hospital_campana')
+    )
+    .sort((a, b) => a.orden - b.orden);
+
+  const regularHospCount = medParcelas.filter((p) => p.edificio?.tipo === 'hospital').length;
+  const baseDocs = regularHospCount > 0 ? Math.floor(medicosActivos / regularHospCount) : 0;
+  let remDocs = regularHospCount > 0 ? medicosActivos % regularHospCount : 0;
+
+  const facilities: HospitalFacilityInfo[] = [];
+  for (const p of medParcelas) {
+    const b = p.edificio!;
+    const def = BUILDING_CATALOG[b.tipo];
+    const maxBuildingBeds = Math.round((def.camasHospital ?? 12) * devScale);
+    let beds = 0;
+    if (b.tipo === 'hospital_campana') {
+      beds = maxBuildingBeds;
+    } else {
+      const docsHere = baseDocs + (remDocs > 0 ? 1 : 0);
+      if (remDocs > 0) remDocs--;
+      beds = Math.min(maxBuildingBeds, docsHere * ECON_CONSTANTS.pacientesPorMedico);
+    }
+    facilities.push({
+      edificioId: b.id,
+      parcela: p,
+      zona: b.zona,
+      isCampana: b.tipo === 'hospital_campana',
+      beds,
+      occupied: 0,
+    });
+  }
+
+  for (const n of state.npcs) {
+    if (!n.vivo || !n.hospital.internado) continue;
+    const fac =
+      facilities.find((f) => f.edificioId === n.hospital.edificioId) ||
+      facilities.find((f) => f.zona === (n.hospital.zonaHospital || 'centro')) ||
+      facilities[0];
+    if (fac) fac.occupied += 1;
+  }
+
+  const totalBeds = facilities.reduce((acc, f) => acc + f.beds, 0);
+  const fullCount = facilities.filter((f) => f.beds <= 0 || f.occupied >= f.beds).length;
+  return { facilities, totalBeds, fullCount };
+}
+
 export function deriveCommunityStats(state: GameState): CommunityDerived {
   const vivosList = state.npcs.filter((n) => n.vivo);
   const vivos = vivosList.length;
@@ -432,6 +527,8 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   };
 
   const { defensa, orden, amenaza: amenazaPercibida } = computePoliceSplitAndMetrics(state);
+  const edificiosActivos = getActiveBuildings(state.parcelas).length;
+  const parcelasLibres = state.parcelas.filter((p) => p.estado === 'libre').length;
 
   if (vivos === 0) {
     return {
@@ -442,13 +539,18 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
       satisfaccionMedia: 0,
       apoyoPct: 0,
       descontentosPct: 0,
+      desempleoPct: 0,
       hambreCriticaPct: 0,
       sinDineroPct: 0,
       despensaMediaDias: 0,
       hospitalOcupacionPct: 0,
       camasHospital: 1,
+      capacidadHospitalTotal: 0,
+      hospitalesLlenos: 0,
       internados: 0,
       esperandoCama: 0,
+      edificiosActivos,
+      parcelasLibres,
       defensa,
       orden,
       amenazaPercibida,
@@ -460,6 +562,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   let sumSat = 0;
   let sumDespensa = 0;
   let electoresCount = 0;
+  let adultsCount = 0;
   let apoyoCount = 0;
   let descontentosCount = 0;
   let hambreCriticaCount = 0;
@@ -473,6 +576,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     roles[npc.rol]++;
     sumSat += npc.variables.satisfaccion;
     sumDespensa += npc.economia.despensa ?? 0;
+    if (npc.edad >= 18 && npc.edad < 65) adultsCount++;
     const isElector = npc.edad >= 18;
     if (isElector) {
       electoresCount++;
@@ -496,8 +600,11 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   }
 
   const basePop = Math.max(1, state.config.poblacionInicial || state.npcs.length);
-  const camasHospital = Math.max(1, medicosActivos * ECON_CONSTANTS.pacientesPorMedico);
+  const { totalBeds, fullCount } = computeHospitalFacilities(state, medicosActivos);
+  const camasHospital = Math.max(1, totalBeds);
   const hospitalOcupacionPct = Number((((internados + esperandoCama) / camasHospital) * 100).toFixed(1));
+  const desempleoPct =
+    adultsCount > 0 ? Number(((roles.desempleado / adultsCount) * 100).toFixed(1)) : 0;
 
   return {
     poblacion: vivos,
@@ -507,13 +614,18 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     satisfaccionMedia: Number((sumSat / vivos).toFixed(1)),
     apoyoPct: electoresCount > 0 ? Number(((apoyoCount / electoresCount) * 100).toFixed(1)) : 0,
     descontentosPct: Number(((descontentosCount / vivos) * 100).toFixed(1)),
+    desempleoPct,
     hambreCriticaPct: Number(((hambreCriticaCount / vivos) * 100).toFixed(1)),
     sinDineroPct: electoresCount > 0 ? Number(((sinDineroCount / electoresCount) * 100).toFixed(1)) : 0,
     despensaMediaDias: Number((sumDespensa / vivos).toFixed(1)),
     hospitalOcupacionPct,
     camasHospital,
+    capacidadHospitalTotal: totalBeds,
+    hospitalesLlenos: fullCount,
     internados,
     esperandoCama,
+    edificiosActivos,
+    parcelasLibres,
     defensa,
     orden,
     amenazaPercibida,
@@ -601,6 +713,11 @@ function recordControlEvent(
   );
 }
 
+function isLeverLocked(state: GameState, palanca: LeverKey): boolean {
+  const dia = state.reloj.dia;
+  return state.bloqueosPalanca.some((b) => b.palanca === palanca && dia < b.hastaDia);
+}
+
 function applyLeverChanges(state: GameState): void {
   const cur = state.gobierno.palancasVigentes;
   const tgt = state.gobierno.palancasObjetivo;
@@ -608,22 +725,25 @@ function applyLeverChanges(state: GameState): void {
 
   const applyNum = (
     control: string,
-    palanca: string,
+    palancaKey: LeverKey,
+    palancaLabel: string,
     prevVal: number,
     tgtVal: number,
     min: number,
     max: number,
     setter: (v: number) => void
   ) => {
+    if (isLeverLocked(state, palancaKey)) return;
     const nextVal = Number(clamp(tgtVal, min, max).toFixed(2));
     if (Math.abs(nextVal - prevVal) >= 0.01) {
       setter(nextVal);
-      recordControlEvent(state, control, prevVal, nextVal, palanca);
+      recordControlEvent(state, control, prevVal, nextVal, palancaLabel);
     }
   };
 
   applyNum(
     'tasa_impuesto',
+    'impuesto',
     'impuesto',
     cur.impuesto,
     tgt.impuesto,
@@ -636,6 +756,7 @@ function applyLeverChanges(state: GameState): void {
 
   applyNum(
     'salario_publico',
+    'salarioPublico',
     'salario_publico',
     cur.salarioPublico,
     tgt.salarioPublico,
@@ -646,23 +767,27 @@ function applyLeverChanges(state: GameState): void {
     }
   );
 
-  (['seguridad', 'salud', 'obras'] as ServiceLeverId[]).forEach((lev) => {
-    const nextLvl = clamp(Math.round(tgt.servicios[lev]), 0, 5) as ServiceLevel;
-    const prevLvl = cur.servicios[lev];
+  if (!isLeverLocked(state, 'nivelObras')) {
+    const nextLvl = clamp(Math.round(tgt.nivelObras), 0, 5) as ServiceLevel;
+    const prevLvl = cur.nivelObras;
     if (nextLvl !== prevLvl) {
-      const role = SERVICE_LEVER_TO_ROLE[lev];
-      const prevJobs =
-        prevLvl === 0 ? 0 : Math.round((vivosCount * SERVICE_LEVEL_TABLE[lev][prevLvl].puestosPct) / 100);
-      const nextJobs =
-        nextLvl === 0 ? 0 : Math.round((vivosCount * SERVICE_LEVEL_TABLE[lev][nextLvl].puestosPct) / 100);
-      cur.servicios[lev] = nextLvl;
-      recordControlEvent(state, `puestos.${role}`, prevJobs, nextJobs, `servicios.${lev}`);
-      recordControlEvent(state, `operacion.${lev}`, prevLvl, nextLvl, `servicios.${lev}`);
+      const prevJobs = getObrasTargetJobs(vivosCount, prevLvl);
+      const nextJobs = getObrasTargetJobs(vivosCount, nextLvl);
+      cur.nivelObras = nextLvl;
+      recordControlEvent(state, 'puestos.ingeniero', prevJobs, nextJobs, 'nivel_obras');
+      recordControlEvent(
+        state,
+        'operacion.obras',
+        OBRAS_LEVEL_TABLE[prevLvl].operacionPeriodo,
+        OBRAS_LEVEL_TABLE[nextLvl].operacionPeriodo,
+        'nivel_obras'
+      );
     }
-  });
+  }
 
   applyNum(
     'ayuda_social',
+    'ayudaSocial',
     'ayuda_social',
     cur.ayudaSocial,
     tgt.ayudaSocial,
@@ -675,6 +800,7 @@ function applyLeverChanges(state: GameState): void {
 
   applyNum(
     'garantia_pct',
+    'garantiaAlimentaria',
     'garantia_alimentaria',
     cur.garantiaAlimentaria,
     tgt.garantiaAlimentaria,
@@ -685,26 +811,31 @@ function applyLeverChanges(state: GameState): void {
     }
   );
 
-  const validCap: PriceCapMode =
-    tgt.precioMaximo === 'moderado' || tgt.precioMaximo === 'estricto' ? tgt.precioMaximo : 'libre';
-  if (validCap !== cur.precioMaximo) {
-    const prev = cur.precioMaximo;
-    cur.precioMaximo = validCap;
-    recordControlEvent(state, 'tope_precio', prev, validCap, 'precio_maximo');
+  if (!isLeverLocked(state, 'precioMaximo')) {
+    const validCap: PriceCapMode =
+      tgt.precioMaximo === 'moderado' || tgt.precioMaximo === 'estricto' ? tgt.precioMaximo : 'libre';
+    if (validCap !== cur.precioMaximo) {
+      const prev = cur.precioMaximo;
+      cur.precioMaximo = validCap;
+      recordControlEvent(state, 'tope_precio', prev, validCap, 'precio_maximo');
+    }
   }
 
-  const validTradeSteps = FOREIGN_TRADE_STEPS.map((s) => s.value);
-  const nextTrade: ForeignTradeStep = validTradeSteps.includes(tgt.comercioExterior)
-    ? tgt.comercioExterior
-    : 0;
-  if (nextTrade !== cur.comercioExterior) {
-    const prev = cur.comercioExterior;
-    cur.comercioExterior = nextTrade;
-    recordControlEvent(state, 'flujo_exterior_pct', prev, nextTrade, 'comercio_exterior');
+  if (!isLeverLocked(state, 'comercioExterior')) {
+    const validTradeSteps = FOREIGN_TRADE_STEPS.map((s) => s.value);
+    const nextTrade: ForeignTradeStep = validTradeSteps.includes(tgt.comercioExterior)
+      ? tgt.comercioExterior
+      : 0;
+    if (nextTrade !== cur.comercioExterior) {
+      const prev = cur.comercioExterior;
+      cur.comercioExterior = nextTrade;
+      recordControlEvent(state, 'flujo_exterior_pct', prev, nextTrade, 'comercio_exterior');
+    }
   }
 
   applyNum(
     'fondos_prensa',
+    'prensa',
     'prensa',
     cur.prensa,
     tgt.prensa,
@@ -718,6 +849,7 @@ function applyLeverChanges(state: GameState): void {
   if (state.config.economiaModulo === 'fiscal') {
     applyNum(
       'tope_emision_pct',
+      'topeEmision',
       'tope_emision',
       cur.topeEmision,
       tgt.topeEmision,
@@ -753,6 +885,939 @@ function addLog(
   });
   if (state.bitacora.length > MAX_BITACORA_ENTRIES) {
     state.bitacora.length = MAX_BITACORA_ENTRIES;
+  }
+}
+
+function getBuildDaysForNivel(baseDays: number, nivelObras: ServiceLevel, infraIndicator: number): number {
+  const obrasFactor = OBRAS_LEVEL_TABLE[nivelObras]?.diasObraFactor ?? 1;
+  const infraAdj = 1.1 - (clamp(infraIndicator, 0, 100) / 100) * 0.2;
+  return Math.max(1, Math.round(baseDays * obrasFactor * infraAdj));
+}
+
+function relocateOrDischargePatientsFromBuilding(state: GameState, removedBuildingId: string): void {
+  const medicosActivos = state.npcs.filter(
+    (n) => n.vivo && n.rol === 'medico' && !n.hospital.internado && !n.accionIa?.fueraDePuesto
+  ).length;
+  const { facilities } = computeHospitalFacilities(state, medicosActivos);
+  const preset = SCENARIO_PRESETS[state.config.escenarioId];
+  const zonesCount = getWorldZones(state).length;
+
+  for (const npc of state.npcs) {
+    if (!npc.vivo || !npc.hospital.internado || npc.hospital.edificioId !== removedBuildingId) continue;
+    const available = facilities
+      .filter((f) => f.edificioId !== removedBuildingId && f.occupied < f.beds)
+      .sort((a, b) => {
+        const dA =
+          zonesCount > 1
+            ? shortestZonePath(npc.hospital.zonaHospital || npc.zona, a.zona, preset.zonas).length
+            : 1;
+        const dB =
+          zonesCount > 1
+            ? shortestZonePath(npc.hospital.zonaHospital || npc.zona, b.zona, preset.zonas).length
+            : 1;
+        if (dA !== dB) return dA - dB;
+        return a.parcela.orden - b.parcela.orden;
+      });
+    if (available.length > 0) {
+      const target = available[0];
+      target.occupied += 1;
+      npc.hospital.edificioId = target.edificioId;
+      npc.hospital.zonaHospital = target.zona;
+      npc.mapa.destino = getParcelCanvasCenter(target.parcela);
+    } else {
+      npc.hospital.internado = false;
+      npc.hospital.edificioId = undefined;
+      npc.hospital.zonaHospital = undefined;
+      npc.hospital.esperandoCama = npc.variables.salud < ECON_CONSTANTS.umbralHospital;
+      npc.mapa.accion =
+        npc.rol === 'estudiante' ? 'estudiando' : npc.rol === 'jubilado' || npc.rol === 'desempleado' ? 'paseando' : 'trabajando';
+      npc.mapa.destino = getDistrictPosition(npc.rol, state);
+    }
+  }
+}
+
+export function orderBuildInParcela(
+  state: GameState,
+  parcelaId: string,
+  tipo: BuildingType
+): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') {
+    return { ok: false, error: 'La partida ya finalizó.' };
+  }
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  if (govLevel === 'G0') {
+    return { ok: false, error: 'En G0 no hay órdenes del gobernador.' };
+  }
+  const def = BUILDING_CATALOG[tipo];
+  if (!def || !def.construibleGobernador) {
+    return { ok: false, error: 'Este edificio no es construible por el gobernador.' };
+  }
+  if (def.requiereG2 && govLevel === 'G1') {
+    return { ok: false, error: 'Obra de suceso disponible desde complejidad G2.' };
+  }
+  const parcela = state.parcelas.find((p) => p.id === parcelaId);
+  if (!parcela) {
+    return { ok: false, error: 'Parcela inexistente.' };
+  }
+  if (parcela.estado !== 'libre') {
+    return { ok: false, error: 'La parcela no está libre.' };
+  }
+  if (state.gobierno.reserva < def.costoObra) {
+    return { ok: false, error: `Reserva insuficiente ($${def.costoObra} requeridos).` };
+  }
+
+  const dia = state.reloj.dia;
+  const diasObra = getBuildDaysForNivel(
+    def.diasObra,
+    state.gobierno.palancasVigentes.nivelObras,
+    state.gobierno.indicadores.infraestructura
+  );
+
+  state.gobierno.reserva = Number((state.gobierno.reserva - def.costoObra).toFixed(2));
+  state.gobierno.acumuladoPeriodo.obras = Number(
+    (state.gobierno.acumuladoPeriodo.obras + def.costoObra).toFixed(2)
+  );
+  // Public construction purchase goes directly to comercio (ECONOMIA §2)
+  state.empresas.comercio.ventasAcum += def.costoObra;
+
+  parcela.estado = 'en_obra';
+  parcela.edificio = {
+    id: nextSeqId(state, `bld_${tipo}`),
+    tipo,
+    parcelaId: parcela.id,
+    dueno: 'estado',
+    estado: 'en_obra',
+    activo: false,
+    diasObraRestantes: diasObra,
+    diasObraTotal: diasObra,
+    diasRestantesCampana: def.diasCampana,
+    zona: parcela.zona,
+  };
+
+  const evId = nextSeqId(state, `ev_${dia}`);
+  state.ultimaCausaPalanca = evId;
+  emitSimEvent(state, {
+    id: evId,
+    dia,
+    tipo: 'obra_inicio',
+    zona: parcela.zona,
+    parcelaId: parcela.id,
+    edificio: tipo,
+    dueno: 'estado',
+    costo: def.costoObra,
+    diasObra,
+  });
+  addLog(
+    state,
+    'gobernador',
+    `orden:construir/${tipo}`,
+    `Inicio de obra: ${def.nombre}`,
+    `En ${parcela.nombre} (${parcela.zona}) · $${def.costoObra} · ${diasObra} días.`,
+    undefined,
+    evId
+  );
+
+  return { ok: true };
+}
+
+export function orderDemolishParcela(
+  state: GameState,
+  parcelaId: string
+): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') {
+    return { ok: false, error: 'La partida ya finalizó.' };
+  }
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  if (govLevel === 'G0') {
+    return { ok: false, error: 'En G0 no hay órdenes del gobernador.' };
+  }
+  const parcela = state.parcelas.find((p) => p.id === parcelaId);
+  if (!parcela || !parcela.edificio) {
+    return { ok: false, error: 'No hay edificio en esa parcela.' };
+  }
+  if (parcela.edificio.dueno !== 'estado') {
+    return { ok: false, error: 'Solo se pueden demoler edificios públicos u obras del Estado.' };
+  }
+
+  const removed = parcela.edificio;
+  const def = BUILDING_CATALOG[removed.tipo];
+  parcela.edificio = null;
+  parcela.estado = 'libre';
+
+  if (removed.tipo === 'hospital' || removed.tipo === 'hospital_campana') {
+    relocateOrDischargePatientsFromBuilding(state, removed.id);
+  }
+
+  const dia = state.reloj.dia;
+  const evId = nextSeqId(state, `ev_${dia}`);
+  state.ultimaCausaPalanca = evId;
+  emitSimEvent(state, {
+    id: evId,
+    dia,
+    tipo: 'demolicion',
+    zona: parcela.zona,
+    parcelaId: parcela.id,
+    edificio: removed.tipo,
+  });
+  addLog(
+    state,
+    'gobernador',
+    `orden:demoler/${removed.tipo}`,
+    `Demolición: ${def.nombre}`,
+    `Liberada la parcela ${parcela.nombre} (${parcela.zona}). Sin reembolso de obra.`,
+    undefined,
+    evId
+  );
+
+  return { ok: true };
+}
+
+function stepBuildingsDaily(state: GameState): void {
+  const dia = state.reloj.dia;
+  for (const parcela of state.parcelas) {
+    const b = parcela.edificio;
+    if (!b) continue;
+    if (parcela.estado === 'en_obra' && b.estado === 'en_obra') {
+      b.diasObraRestantes = Math.max(0, b.diasObraRestantes - 1);
+      if (b.diasObraRestantes <= 0) {
+        parcela.estado = 'ocupada';
+        b.estado = 'ocupada';
+        b.activo = true;
+        const def = BUILDING_CATALOG[b.tipo];
+        const evId = nextSeqId(state, `ev_${dia}`);
+        emitSimEvent(state, {
+          id: evId,
+          dia,
+          tipo: 'obra_fin',
+          zona: parcela.zona,
+          parcelaId: parcela.id,
+          edificio: b.tipo,
+          dueno: b.dueno,
+          causa: b.dueno === 'estado' ? state.ultimaCausaPalanca : undefined,
+        });
+        addLog(
+          state,
+          b.dueno === 'estado' ? 'gobernador' : 'economia',
+          `edificio:${b.tipo}`,
+          `Inauguración: ${def.nombre}`,
+          `Finalizó la obra en ${parcela.nombre} (${parcela.zona}).`,
+          b.dueno === 'estado' ? state.ultimaCausaPalanca : undefined,
+          evId
+        );
+      }
+    } else if (
+      parcela.estado === 'ocupada' &&
+      b.estado === 'ocupada' &&
+      b.tipo === 'hospital_campana' &&
+      typeof b.diasRestantesCampana === 'number'
+    ) {
+      b.diasRestantesCampana -= 1;
+      if (b.diasRestantesCampana <= 0) {
+        parcela.edificio = null;
+        parcela.estado = 'libre';
+        relocateOrDischargePatientsFromBuilding(state, b.id);
+        const evId = nextSeqId(state, `ev_${dia}`);
+        emitSimEvent(state, {
+          id: evId,
+          dia,
+          tipo: 'demolicion',
+          zona: parcela.zona,
+          parcelaId: parcela.id,
+          edificio: b.tipo,
+        });
+        addLog(
+          state,
+          'sistema',
+          'edificio:hospital_campana',
+          'Fin de Hospital de Campaña',
+          `Se desarmó el hospital temporal en ${parcela.nombre} (${parcela.zona}).`,
+          undefined,
+          evId
+        );
+      }
+    }
+  }
+}
+
+function runPrivateInvestmentAtPayday(state: GameState): void {
+  const dia = state.reloj.dia;
+  const freeParcelas = [...state.parcelas]
+    .filter((p) => p.estado === 'libre')
+    .sort((a, b) => a.orden - b.orden);
+  if (freeParcelas.length === 0) return;
+
+  const isNoInvestActive = (entId: 'alimento' | 'comercio') =>
+    state.medidasVigentes.some(
+      (m) => m.tipo === 'sin_inversion' && (!m.empresaId || m.empresaId === entId) && dia < m.hastaDia
+    );
+
+  // 1. Alimento -> Campo Productivo
+  if (
+    freeParcelas.length > 0 &&
+    !isNoInvestActive('alimento') &&
+    state.empresas.alimento.periodosFactorAlto >= ACTOR_CONSTANTS.periodosParaInvertirPrivado
+  ) {
+    const def = BUILDING_CATALOG.campo;
+    const owner = state.empresas.alimento.dueno
+      ? state.npcs.find((n) => n.vivo && n.id === state.empresas.alimento.dueno)
+      : null;
+    if (owner && owner.economia.dinero >= def.costoObra) {
+      const target = freeParcelas.shift()!;
+      owner.economia.dinero = Number((owner.economia.dinero - def.costoObra).toFixed(2));
+      state.empresas.comercio.ventasAcum += def.costoObra;
+      const diasObra = getBuildDaysForNivel(
+        def.diasObra,
+        state.gobierno.palancasVigentes.nivelObras,
+        state.gobierno.indicadores.infraestructura
+      );
+      target.estado = 'en_obra';
+      target.edificio = {
+        id: nextSeqId(state, `bld_campo`),
+        tipo: 'campo',
+        parcelaId: target.id,
+        dueno: 'alimento',
+        estado: 'en_obra',
+        activo: false,
+        diasObraRestantes: diasObra,
+        diasObraTotal: diasObra,
+        zona: target.zona,
+      };
+      state.empresas.alimento.periodosFactorAlto = 0;
+      const evId = nextSeqId(state, `ev_${dia}`);
+      emitSimEvent(state, {
+        id: evId,
+        dia,
+        tipo: 'obra_inicio',
+        zona: target.zona,
+        parcelaId: target.id,
+        edificio: 'campo',
+        dueno: 'alimento',
+        costo: def.costoObra,
+        diasObra,
+        causa: state.empresas.alimento.ultimaCausa,
+      });
+      addLog(
+        state,
+        'economia',
+        'empresa:alimento/inversion',
+        `Inversión privada: nuevo Campo Productivo`,
+        `${owner.nombre} invierte $${def.costoObra} en ${target.nombre} (${target.zona}).`,
+        state.empresas.alimento.ultimaCausa,
+        evId
+      );
+    }
+  }
+
+  // 2. Comercio -> Local Comercial
+  if (
+    freeParcelas.length > 0 &&
+    !isNoInvestActive('comercio') &&
+    state.empresas.comercio.periodosFactorAlto >= ACTOR_CONSTANTS.periodosParaInvertirPrivado
+  ) {
+    const def = BUILDING_CATALOG.local_comercio;
+    const socios = state.npcs.filter((n) => n.vivo && n.rol === 'comerciante');
+    const share = socios.length > 0 ? def.costoObra / socios.length : Infinity;
+    if (socios.length > 0 && socios.every((s) => s.economia.dinero >= share)) {
+      const target = freeParcelas.shift()!;
+      for (const s of socios) {
+        s.economia.dinero = Number((s.economia.dinero - share).toFixed(2));
+      }
+      state.empresas.comercio.ventasAcum += def.costoObra;
+      const diasObra = getBuildDaysForNivel(
+        def.diasObra,
+        state.gobierno.palancasVigentes.nivelObras,
+        state.gobierno.indicadores.infraestructura
+      );
+      target.estado = 'en_obra';
+      target.edificio = {
+        id: nextSeqId(state, `bld_local`),
+        tipo: 'local_comercio',
+        parcelaId: target.id,
+        dueno: 'comercio',
+        estado: 'en_obra',
+        activo: false,
+        diasObraRestantes: diasObra,
+        diasObraTotal: diasObra,
+        zona: target.zona,
+      };
+      state.empresas.comercio.periodosFactorAlto = 0;
+      const evId = nextSeqId(state, `ev_${dia}`);
+      emitSimEvent(state, {
+        id: evId,
+        dia,
+        tipo: 'obra_inicio',
+        zona: target.zona,
+        parcelaId: target.id,
+        edificio: 'local_comercio',
+        dueno: 'comercio',
+        costo: def.costoObra,
+        diasObra,
+        causa: state.empresas.comercio.ultimaCausa,
+      });
+      addLog(
+        state,
+        'economia',
+        'empresa:comercio/inversion',
+        `Inversión privada: nuevo Local Comercial`,
+        `Los socios de comercio invierten $${def.costoObra} en ${target.nombre} (${target.zona}).`,
+        state.empresas.comercio.ultimaCausa,
+        evId
+      );
+    }
+  }
+}
+
+function getHitoMetricValue(
+  metric: HitoMetric,
+  state: GameState,
+  derived: CommunityDerived
+): number {
+  switch (metric) {
+    case 'satisfaccionMedia':
+      return derived.satisfaccionMedia;
+    case 'apoyoPct':
+      return derived.apoyoPct;
+    case 'desempleoPct':
+      return derived.desempleoPct;
+    case 'hambreCriticaPct':
+      return derived.hambreCriticaPct;
+    case 'poblacionPct':
+      return derived.poblacionPct;
+    case 'ingresosEstado':
+      return state.gobierno.finanzas.ingresos;
+  }
+}
+
+function checkHitosAtPayday(state: GameState, derived: CommunityDerived): void {
+  const preset = SCENARIO_PRESETS[state.config.escenarioId];
+  const dia = state.reloj.dia;
+  for (const hito of preset.hitos) {
+    if (state.hitosCumplidos.includes(hito.id)) continue;
+    const val = getHitoMetricValue(hito.condicion.metrica, state, derived);
+    const met =
+      hito.condicion.op === '>=' ? val >= hito.condicion.umbral : val <= hito.condicion.umbral;
+    if (!met) {
+      state.hitosRacha[hito.id] = 0;
+      continue;
+    }
+    const streak = (state.hitosRacha[hito.id] || 0) + 1;
+    state.hitosRacha[hito.id] = streak;
+    if (streak >= hito.condicion.periodos) {
+      state.hitosCumplidos.push(hito.id);
+      const parcela = state.parcelas.find((p) => p.id === hito.habilita);
+      const zone: ZoneId = parcela?.zona ?? 'centro';
+      if (parcela && parcela.estado === 'bloqueada') {
+        parcela.estado = 'libre';
+        state.parcelasRecienHabilitadasDia = dia;
+      }
+      const hitoEvId = nextSeqId(state, `ev_${dia}`);
+      emitSimEvent(state, {
+        id: hitoEvId,
+        dia,
+        tipo: 'hito',
+        zona: zone,
+        hitoId: hito.id,
+        nombre: hito.nombre,
+        parcelaId: hito.habilita,
+      });
+      if (parcela) {
+        const habEvId = nextSeqId(state, `ev_${dia}`);
+        emitSimEvent(state, {
+          id: habEvId,
+          dia,
+          tipo: 'parcela_habilitada',
+          zona: parcela.zona,
+          parcelaId: parcela.id,
+          hitoId: hito.id,
+          causa: hitoEvId,
+        });
+      }
+      addLog(
+        state,
+        'gobernador',
+        `hito:${hito.id}`,
+        `Hito cumplido: ${hito.nombre}`,
+        parcela
+          ? `Se habilitó la parcela ${parcela.nombre} (${parcela.zona}) para nuevas construcciones.`
+          : hito.descripcion,
+        hitoEvId,
+        hitoEvId
+      );
+    }
+  }
+}
+
+function setLeverValueImmediate(
+  state: GameState,
+  palanca: LeverKey,
+  val: number | string
+): void {
+  const vig = state.gobierno.palancasVigentes;
+  const tgt = state.gobierno.palancasObjetivo;
+  switch (palanca) {
+    case 'impuesto': {
+      const next = clamp(Number(val), LEVER_BOUNDS.impuesto.min, LEVER_BOUNDS.impuesto.max);
+      const prev = vig.impuesto;
+      vig.impuesto = next;
+      tgt.impuesto = next;
+      recordControlEvent(state, 'tasa_impuesto', prev, next, 'impuesto');
+      break;
+    }
+    case 'salarioPublico': {
+      const next = clamp(Number(val), LEVER_BOUNDS.salarioPublico.min, LEVER_BOUNDS.salarioPublico.max);
+      const prev = vig.salarioPublico;
+      vig.salarioPublico = next;
+      tgt.salarioPublico = next;
+      recordControlEvent(state, 'salario_publico', prev, next, 'salario_publico');
+      break;
+    }
+    case 'nivelObras': {
+      const next = clamp(Math.round(Number(val)), 0, 5) as ServiceLevel;
+      const prev = vig.nivelObras;
+      const vivosCount = state.npcs.filter((n) => n.vivo).length;
+      vig.nivelObras = next;
+      tgt.nivelObras = next;
+      recordControlEvent(
+        state,
+        'puestos.ingeniero',
+        getObrasTargetJobs(vivosCount, prev),
+        getObrasTargetJobs(vivosCount, next),
+        'nivel_obras'
+      );
+      break;
+    }
+    case 'ayudaSocial': {
+      const next = clamp(Number(val), LEVER_BOUNDS.ayudaSocial.min, LEVER_BOUNDS.ayudaSocial.max);
+      const prev = vig.ayudaSocial;
+      vig.ayudaSocial = next;
+      tgt.ayudaSocial = next;
+      recordControlEvent(state, 'ayuda_social', prev, next, 'ayuda_social');
+      break;
+    }
+    case 'garantiaAlimentaria': {
+      const next = clamp(
+        Number(val),
+        LEVER_BOUNDS.garantiaAlimentaria.min,
+        LEVER_BOUNDS.garantiaAlimentaria.max
+      );
+      const prev = vig.garantiaAlimentaria;
+      vig.garantiaAlimentaria = next;
+      tgt.garantiaAlimentaria = next;
+      recordControlEvent(state, 'garantia_pct', prev, next, 'garantia_alimentaria');
+      break;
+    }
+    case 'precioMaximo': {
+      const next: PriceCapMode =
+        val === 'moderado' || val === 'estricto' ? val : 'libre';
+      const prev = vig.precioMaximo;
+      vig.precioMaximo = next;
+      tgt.precioMaximo = next;
+      recordControlEvent(state, 'tope_precio', prev, next, 'precio_maximo');
+      break;
+    }
+    case 'comercioExterior': {
+      const validSteps = FOREIGN_TRADE_STEPS.map((s) => s.value);
+      const next = validSteps.includes(Number(val) as ForeignTradeStep)
+        ? (Number(val) as ForeignTradeStep)
+        : 0;
+      const prev = vig.comercioExterior;
+      vig.comercioExterior = next;
+      tgt.comercioExterior = next;
+      recordControlEvent(state, 'flujo_exterior_pct', prev, next, 'comercio_exterior');
+      break;
+    }
+    case 'prensa': {
+      const next = clamp(Number(val), LEVER_BOUNDS.prensa.min, LEVER_BOUNDS.prensa.max);
+      const prev = vig.prensa;
+      vig.prensa = next;
+      tgt.prensa = next;
+      recordControlEvent(state, 'fondos_prensa', prev, next, 'prensa');
+      break;
+    }
+    case 'topeEmision': {
+      const next = clamp(Number(val), LEVER_BOUNDS.topeEmision.min, LEVER_BOUNDS.topeEmision.max);
+      const prev = vig.topeEmision;
+      vig.topeEmision = next;
+      tgt.topeEmision = next;
+      recordControlEvent(state, 'tope_emision_pct', prev, next, 'tope_emision');
+      break;
+    }
+  }
+}
+
+function rejectDemandInternal(
+  state: GameState,
+  demand: ActiveDemand,
+  porVencimiento: boolean
+): void {
+  const dia = state.reloj.dia;
+  const rejEvId = nextSeqId(state, `ev_${dia}`);
+  emitSimEvent(state, {
+    id: rejEvId,
+    dia,
+    tipo: 'demanda_rechazada',
+    zona: 'centro',
+    actorId: demand.actorId,
+    demandaId: demand.demandaId,
+    porVencimiento,
+    causa: demand.causaId,
+  });
+
+  const until = dia + ACTOR_CONSTANTS.diasMedida;
+  let measure: ActorMeasure;
+
+  if (demand.demandaId === 'bajen_impuestos') {
+    const worstFood = state.empresas.alimento.factor <= state.empresas.comercio.factor;
+    const entId = worstFood ? 'alimento' : 'comercio';
+    const ent = state.empresas[entId];
+    ent.despidosPendientes += ACTOR_CONSTANTS.despidosMedida;
+    measure = {
+      id: nextSeqId(state, `med_${dia}`),
+      actorId: demand.actorId,
+      actorNombre: demand.actorNombre,
+      tipo: 'despido_forzado',
+      descripcion: `${entId === 'alimento' ? 'Alimento' : 'Comercio'} despide ${ACTOR_CONSTANTS.despidosMedida} empleados por rechazo fiscal.`,
+      hastaDia: dia + 4,
+      empresaId: entId,
+      causaId: rejEvId,
+    };
+  } else if (demand.demandaId === 'liberen_precio') {
+    measure = {
+      id: nextSeqId(state, `med_${dia}`),
+      actorId: demand.actorId,
+      actorNombre: demand.actorNombre,
+      tipo: 'retencion_stock',
+      descripcion: `Alimento retiene parte del stock diario durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+      hastaDia: until,
+      empresaId: 'alimento',
+      causaId: rejEvId,
+    };
+  } else if (demand.demandaId === 'abran_exportacion') {
+    measure = {
+      id: nextSeqId(state, `med_${dia}`),
+      actorId: demand.actorId,
+      actorNombre: demand.actorNombre,
+      tipo: 'sin_inversion',
+      descripcion: `Empresarios frenan inversión en nuevas obras por ${ACTOR_CONSTANTS.diasMedida} días.`,
+      hastaDia: until,
+      causaId: rejEvId,
+    };
+  } else if (demand.demandaId === 'mas_pauta') {
+    measure = {
+      id: nextSeqId(state, `med_${dia}`),
+      actorId: demand.actorId,
+      actorNombre: demand.actorNombre,
+      tipo: 'campana',
+      descripcion: `${demand.actorNombre} sostiene campaña crítica contra la gestión (${ACTOR_CONSTANTS.diasMedida}d).`,
+      hastaDia: until,
+      medioId: demand.actorId,
+      tono: 'critico',
+      causaId: rejEvId,
+    };
+  } else {
+    measure = {
+      id: nextSeqId(state, `med_${dia}`),
+      actorId: demand.actorId,
+      actorNombre: demand.actorNombre,
+      tipo: 'campana',
+      descripcion: `${demand.actorNombre} despliega cobertura alarmista sobre el hambre (${ACTOR_CONSTANTS.diasMedida}d).`,
+      hastaDia: until,
+      medioId: demand.actorId,
+      tema: 'hambre',
+      tono: 'alarmista',
+      causaId: rejEvId,
+    };
+  }
+
+  state.medidasVigentes.push(measure);
+  const medEvId = nextSeqId(state, `ev_${dia}`);
+  emitSimEvent(state, {
+    id: medEvId,
+    dia,
+    tipo: 'medida',
+    zona: 'centro',
+    actorId: demand.actorId,
+    medida: measure.tipo,
+    hastaDia: measure.hastaDia,
+    causa: rejEvId,
+  });
+  addLog(
+    state,
+    'gobernador',
+    `actor:${demand.actorId}/medida`,
+    `${demand.actorNombre}: ${porVencimiento ? 'plazo vencido' : 'demanda rechazada'}`,
+    measure.descripcion,
+    rejEvId,
+    medEvId
+  );
+}
+
+export function respondToDemand(
+  state: GameState,
+  demandId: string,
+  accept: boolean
+): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') {
+    return { ok: false, error: 'La partida ya finalizó.' };
+  }
+  const idx = state.demandasActivas.findIndex((d) => d.id === demandId);
+  if (idx === -1) {
+    return { ok: false, error: 'La demanda ya no está activa.' };
+  }
+  const [demand] = state.demandasActivas.splice(idx, 1);
+  const dia = state.reloj.dia;
+  state.cooldownActorDemanda[demand.actorId] = dia + ACTOR_CONSTANTS.diasEntreDemandas;
+
+  if (!accept) {
+    rejectDemandInternal(state, demand, false);
+    return { ok: true };
+  }
+
+  setLeverValueImmediate(state, demand.pedido.palanca, demand.pedido.nuevoValor);
+  state.bloqueosPalanca = state.bloqueosPalanca.filter((b) => b.palanca !== demand.pedido.palanca);
+  state.bloqueosPalanca.push({
+    palanca: demand.pedido.palanca,
+    actorId: demand.actorId,
+    actorNombre: demand.actorNombre,
+    demandaId: demand.demandaId,
+    hastaDia: dia + demand.diasCompromiso,
+    motivo: `${demand.actorNombre}: ${demand.pedido.etiqueta}`,
+  });
+
+  if (demand.demandaId === 'silencio_pagado') {
+    state.medidasVigentes.push({
+      id: nextSeqId(state, `med_${dia}`),
+      actorId: demand.actorId,
+      actorNombre: demand.actorNombre,
+      tipo: 'campana',
+      descripcion: `Pauta acordada: ${demand.actorNombre} mantiene tono favorable sobre el hambre (${demand.diasCompromiso}d).`,
+      hastaDia: dia + demand.diasCompromiso,
+      medioId: demand.actorId,
+      tema: 'hambre',
+      tono: 'favorable',
+      causaId: demand.causaId,
+    });
+  }
+
+  const accEvId = nextSeqId(state, `ev_${dia}`);
+  emitSimEvent(state, {
+    id: accEvId,
+    dia,
+    tipo: 'demanda_aceptada',
+    zona: 'centro',
+    actorId: demand.actorId,
+    demandaId: demand.demandaId,
+    palanca: demand.pedido.palanca,
+    causa: demand.causaId,
+  });
+  addLog(
+    state,
+    'gobernador',
+    `actor:${demand.actorId}/aceptada`,
+    `Acuerdo con ${demand.actorNombre}: ${demand.titulo}`,
+    `${demand.pedido.etiqueta}. Palanca bloqueada por ${demand.diasCompromiso} días.`,
+    demand.causaId,
+    accEvId
+  );
+  return { ok: true };
+}
+
+function stepDemandsAndMeasuresDaily(state: GameState): void {
+  const dia = state.reloj.dia;
+  state.bloqueosPalanca = state.bloqueosPalanca.filter((b) => dia < b.hastaDia);
+  state.medidasVigentes = state.medidasVigentes.filter((m) => dia < m.hastaDia);
+
+  const expired: ActiveDemand[] = [];
+  const stillOpen: ActiveDemand[] = [];
+  for (const d of state.demandasActivas) {
+    d.diasRestantes -= 1;
+    if (d.diasRestantes <= 0) expired.push(d);
+    else stillOpen.push(d);
+  }
+  state.demandasActivas = stillOpen;
+
+  for (const d of expired) {
+    state.cooldownActorDemanda[d.actorId] = dia + ACTOR_CONSTANTS.diasEntreDemandas;
+    rejectDemandInternal(state, d, true);
+  }
+}
+
+function evaluateActorDemands(state: GameState, derived: CommunityDerived): void {
+  const dia = state.reloj.dia;
+  if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) return;
+
+  const vig = state.gobierno.palancasVigentes;
+  const pushDemand = (
+    actorId: string,
+    actorNombre: string,
+    demandaId: DemandId,
+    titulo: string,
+    razon: string,
+    amenaza: string,
+    palanca: LeverKey,
+    nuevoValor: number | string,
+    etiqueta: string,
+    causaId?: string
+  ): boolean => {
+    if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) return false;
+    if (state.demandasActivas.some((d) => d.actorId === actorId)) return false;
+    if (dia < (state.cooldownActorDemanda[actorId] ?? 0)) return false;
+    if (isLeverLocked(state, palanca)) return false;
+
+    const dObj: ActiveDemand = {
+      id: nextSeqId(state, `dem_${dia}`),
+      actorId,
+      actorNombre,
+      demandaId,
+      titulo,
+      razon,
+      amenaza,
+      pedido: { palanca, nuevoValor, etiqueta },
+      diaCreada: dia,
+      diasRestantes: ACTOR_CONSTANTS.diasRespuesta,
+      diasCompromiso: ACTOR_CONSTANTS.diasCompromiso,
+      causaId,
+    };
+    state.demandasActivas.push(dObj);
+    const evId = nextSeqId(state, `ev_${dia}`);
+    emitSimEvent(state, {
+      id: evId,
+      dia,
+      tipo: 'demanda',
+      zona: 'centro',
+      actorId,
+      demandaId,
+      diasRespuesta: dObj.diasRestantes,
+      causa: causaId,
+    });
+    addLog(
+      state,
+      'gobernador',
+      `actor:${actorId}/demanda`,
+      `Demanda de ${actorNombre}: ${titulo}`,
+      `${razon} · Pide: ${etiqueta} (${dObj.diasRestantes}d de plazo).`,
+      causaId,
+      evId
+    );
+    return true;
+  };
+
+  // 1. Empresarios
+  const canEmpresarios =
+    !state.demandasActivas.some((d) => d.actorId === 'empresarios') &&
+    dia >= (state.cooldownActorDemanda['empresarios'] ?? 0);
+
+  if (canEmpresarios) {
+    const lowFactorStreak =
+      state.empresas.alimento.periodosFactorBajo >= ACTOR_CONSTANTS.periodosBajoParaDemanda ||
+      state.empresas.comercio.periodosFactorBajo >= ACTOR_CONSTANTS.periodosBajoParaDemanda;
+    if (
+      (lowFactorStreak || vig.impuesto > ACTOR_CONSTANTS.umbralImpuestoDemanda) &&
+      vig.impuesto > LEVER_BOUNDS.impuesto.min
+    ) {
+      const nextTax = Math.max(LEVER_BOUNDS.impuesto.min, vig.impuesto - 5);
+      pushDemand(
+        'empresarios',
+        'Empresarios',
+        'bajen_impuestos',
+        'Rebaja impositiva',
+        lowFactorStreak
+          ? 'Dos períodos seguidos con factor salarial bajo 100%.'
+          : `La tasa impositiva supera el umbral de ${ACTOR_CONSTANTS.umbralImpuestoDemanda}%.`,
+        `Despido forzado de ${ACTOR_CONSTANTS.despidosMedida} empleados en la empresa más afectada.`,
+        'impuesto',
+        nextTax,
+        `Bajar impuesto a ${nextTax}%`,
+        state.ultimaCausaPalanca || state.ultimoEventoEmpresaId
+      );
+    } else if (
+      (vig.precioMaximo === 'estricto' || vig.precioMaximo === 'moderado') &&
+      state.empresas.alimento.factor < 1
+    ) {
+      const nextCap: PriceCapMode = vig.precioMaximo === 'estricto' ? 'moderado' : 'libre';
+      pushDemand(
+        'empresarios',
+        'Empresarios',
+        'liberen_precio',
+        'Flexibilizar precio máximo',
+        `El tope ${vig.precioMaximo} comprime los ingresos del sector alimento.`,
+        `Retención parcial del stock diario de comida durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'precioMaximo',
+        nextCap,
+        `Pasar tope a ${nextCap}`,
+        state.ultimaCausaPalanca || state.empresas.alimento.ultimaCausa
+      );
+    } else if (
+      state.alimento.diasStock >= Math.max(10, state.alimento.siloDias - 3) &&
+      vig.comercioExterior >= 0
+    ) {
+      pushDemand(
+        'empresarios',
+        'Empresarios',
+        'abran_exportacion',
+        'Habilitar exportación',
+        'El silo de alimentos está cerca de su capacidad máxima.',
+        `Frenan inversiones privadas en nuevos campos y locales por ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'comercioExterior',
+        -50,
+        'Pasar comercio exterior a Exportar (-50%)',
+        state.ultimaCausaPalanca
+      );
+    }
+  }
+
+  // 2. Medios
+  for (const medio of state.medios) {
+    if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) break;
+    if (state.demandasActivas.some((d) => d.actorId === medio.id)) continue;
+    if (dia < (state.cooldownActorDemanda[medio.id] ?? 0)) continue;
+
+    const recentBadNews = state.noticias.some(
+      (n) =>
+        n.medioId === medio.id &&
+        dia - n.dia <= 5 &&
+        (n.tono === 'critico' || n.tono === 'alarmista')
+    );
+
+    if (
+      medio.finanzas.dependenciaPct < ACTOR_CONSTANTS.umbralPautaPct &&
+      recentBadNews &&
+      vig.prensa < LEVER_BOUNDS.prensa.max
+    ) {
+      const nextPrensa = Math.min(LEVER_BOUNDS.prensa.max, vig.prensa + 10);
+      pushDemand(
+        medio.id,
+        medio.nombre,
+        'mas_pauta',
+        'Aumento de pauta oficial',
+        `Dependencia estatal baja (${medio.finanzas.dependenciaPct.toFixed(0)}%) tras coberturas críticas.`,
+        `Campaña sostenida en tono crítico durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'prensa',
+        nextPrensa,
+        `Subir fondos de prensa a $${nextPrensa}`,
+        state.ultimaCausaPalanca
+      );
+    } else if (
+      medio.lineaEditorial.afinidadGobierno >= 55 &&
+      derived.hambreCriticaPct >= PRESS_CONSTANTS.hambreSubaUmbralPct &&
+      vig.prensa < LEVER_BOUNDS.prensa.max
+    ) {
+      const nextPrensa = Math.min(LEVER_BOUNDS.prensa.max, vig.prensa + 10);
+      pushDemand(
+        medio.id,
+        medio.nombre,
+        'silencio_pagado',
+        'Acuerdo editorial por pauta',
+        `El hambre crítica alcanzó ${derived.hambreCriticaPct.toFixed(1)}% y piden pauta adicional.`,
+        `Campaña alarmista sobre el hambre durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'prensa',
+        nextPrensa,
+        `Subir prensa a $${nextPrensa} (tono favorable en hambre)`,
+        state.ultimoEventoClimaId || state.ultimaCausaPalanca
+      );
+    }
   }
 }
 
@@ -1799,9 +2864,8 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
 
 function updateServiceCoverage(state: GameState): void {
   const vivos = Math.max(1, state.npcs.filter((n) => n.vivo).length);
-  const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const getTargetCov = (role: ServicePublicRoleId): number =>
-    preset.objetivoCobertura?.[role] ?? ECON_CONSTANTS.objetivoCobertura[role];
+    ECON_CONSTANTS.objetivoCobertura[role];
 
   const counts: Record<ServicePublicRoleId, number> = {
     policia: 0,
@@ -1861,18 +2925,49 @@ function syncEnterprisesWithOwners(state: GameState): void {
 }
 
 function getPublicRoleTargetCap(state: GameState, role: PublicRoleId, vivosCount: number): number {
-  if (role === 'estatal') {
-    return state.gobierno.cuposFijos.estatal;
+  const caps = getBuildingJobCaps(
+    state.parcelas,
+    vivosCount,
+    state.gobierno.palancasVigentes.nivelObras,
+    state.config.poblacionInicial,
+    state.gobierno.cuposFijos
+  );
+  return caps[role];
+}
+
+function getPrivateRoleTargetCap(state: GameState, role: PrivateRoleId, vivosCount: number): number {
+  const preset = SCENARIO_PRESETS[state.config.escenarioId];
+  const popScale = Math.max(0.6, vivosCount / 100);
+  if (role === 'empresario') return 1;
+  if (role === 'periodista') return Math.round(preset.topesPrivados.periodista * popScale);
+  const caps = getBuildingJobCaps(
+    state.parcelas,
+    vivosCount,
+    state.gobierno.palancasVigentes.nivelObras,
+    state.config.poblacionInicial,
+    state.gobierno.cuposFijos
+  );
+  if (role === 'agricultor') return caps.agricultor;
+  if (role === 'obrero') return caps.obrero;
+  if (role === 'comerciante') return Math.max(1, caps.comerciante);
+  return Math.max(
+    1,
+    Math.round(caps.agricultor * ECON_CONSTANTS.tecnicosPorAgricultor)
+  );
+}
+
+function assignNewRoleZone(state: GameState, role: RoleId, ordinal: number): ZoneId {
+  if (role === 'policia') {
+    const comZones = getActiveBuildings(state.parcelas)
+      .filter((b) => b.tipo === 'comisaria')
+      .map((b) => b.zona);
+    if (comZones.length > 0) {
+      return comZones[ordinal % comZones.length];
+    }
   }
-  if (role === 'docente') {
-    return state.gobierno.cuposFijos.docente;
-  }
-  const pal = state.gobierno.palancasVigentes;
-  const lever: ServiceLeverId =
-    role === 'policia' ? 'seguridad' : role === 'medico' ? 'salud' : 'obras';
-  const level = pal.servicios[lever];
-  if (level <= 0) return 0;
-  return Math.round((vivosCount * SERVICE_LEVEL_TABLE[lever][level].puestosPct) / 100);
+  const preset = SCENARIO_PRESETS[state.config.escenarioId];
+  const allowedZones = preset.zonaPorRol[role] || ['centro'];
+  return allowedZones[ordinal % allowedZones.length];
 }
 
 function pickNextLayoffTarget(pool: Npc[], isFoodEnterprise: boolean, state: GameState): Npc {
@@ -1893,7 +2988,6 @@ function handleRolesAndAging(state: GameState): void {
   const dayOfYear = ((state.reloj.dia - 1) % 365) + 1;
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const vivosCount = state.npcs.filter((n) => n.vivo).length;
-  const popScale = Math.max(0.6, vivosCount / 100);
 
   const counts: Record<RoleId, number> = {
     estudiante: 0,
@@ -1915,7 +3009,7 @@ function handleRolesAndAging(state: GameState): void {
     if (n.vivo) counts[n.rol]++;
   }
 
-  // Gradual layoff if service level lowered below current public headcount (ESTADOS §2)
+  // Gradual layoff if building demolition or obras reduction lowered public caps
   for (const pRole of PUBLIC_ROLES) {
     const cap = getPublicRoleTargetCap(state, pRole, vivosCount);
     if (counts[pRole] > cap) {
@@ -1934,7 +3028,7 @@ function handleRolesAndAging(state: GameState): void {
             afecta: { satisfaccion: -5 },
             origen: 'estado:servicio_publico',
             causa: state.ultimaCausaPalanca,
-            texto: 'Pasó a desempleado por reducción de servicio público',
+            texto: 'Pasó a desempleado por reducción de puestos públicos',
             recordOnNpc: true,
           },
           state
@@ -1949,14 +3043,14 @@ function handleRolesAndAging(state: GameState): void {
           'economia',
           'estado:servicio_publico',
           `Ajuste de personal en ${ROLE_CATALOG[pRole].nombre} (${laidOff})`,
-          `${laidOff} trabajador(es) público(s) pasan a desempleados tras bajar el nivel del servicio.`,
+          `${laidOff} trabajador(es) público(s) pasan a desempleados tras reducirse los puestos.`,
           state.ultimaCausaPalanca
         );
       }
     }
   }
 
-  // Enterprise gradual layoffs from despidosPendientes (ECONOMIA §5: tecnicos before agricultores)
+  // Enterprise gradual layoffs from despidosPendientes (ECONOMIA §4: tecnicos before agricultores)
   if (state.empresas.alimento.despidosPendientes > 0) {
     const ent = state.empresas.alimento;
     const pool = state.npcs.filter(
@@ -1976,7 +3070,7 @@ function handleRolesAndAging(state: GameState): void {
           afecta: { satisfaccion: -8 },
           origen: 'empresa:alimento/respuesta',
           causa: ent.ultimaCausa,
-          texto: 'Despedido por recorte bajo piso salarial en alimento',
+          texto: 'Despedido por ajuste laboral en alimento',
           recordOnNpc: true,
         },
         state
@@ -2003,7 +3097,7 @@ function handleRolesAndAging(state: GameState): void {
           afecta: { satisfaccion: -8 },
           origen: 'empresa:comercio/respuesta',
           causa: ent.ultimaCausa,
-          texto: 'Despedido por recorte bajo piso salarial en comercio',
+          texto: 'Despedido por ajuste laboral en comercio',
           recordOnNpc: true,
         },
         state
@@ -2042,7 +3136,6 @@ function handleRolesAndAging(state: GameState): void {
       }
     }
 
-    // Unemployed can fill public jobs, owner seats or media seats daily; enterprise employees hire on payday (ECONOMIA §5)
     if (npc.rol === 'desempleado') {
       const candidateRoles: Array<{ rol: RoleId; score: number }> = [];
 
@@ -2064,10 +3157,7 @@ function handleRolesAndAging(state: GameState): void {
       for (const privRole of nonPayrollPrivate) {
         if (privRole === 'empresario' && foodLayoff) continue;
         if (privRole === 'comerciante' && comLayoff) continue;
-        const cap =
-          privRole === 'empresario'
-            ? Math.max(1, preset.topesPrivados.empresario)
-            : Math.round(preset.topesPrivados[privRole] * popScale);
+        const cap = getPrivateRoleTargetCap(state, privRole, vivosCount);
         const def = ROLE_CATALOG[privRole];
         if (counts[privRole] < cap && npc.educacion.nivel >= def.educMin) {
           const traitVal = def.afinidad ? getEffectiveTrait(npc, def.afinidad) : 50;
@@ -2082,8 +3172,8 @@ function handleRolesAndAging(state: GameState): void {
         counts[chosen]++;
         npc.rol = chosen;
         const allowedZones = preset.zonaPorRol[chosen] || ['centro'];
-        if (!allowedZones.includes(npc.zona)) {
-          npc.zona = allowedZones[counts[chosen] % allowedZones.length];
+        if (chosen === 'policia' || !allowedZones.includes(npc.zona)) {
+          npc.zona = assignNewRoleZone(state, chosen, counts[chosen]);
         }
         npc.mapa.destino = getDistrictPosition(chosen, state);
         npc.mapa.accion = 'trabajando';
@@ -2091,19 +3181,18 @@ function handleRolesAndAging(state: GameState): void {
     }
   }
 
-  // Adults fill vacant public roles and vacant critical empresario seat by affinity
+  // Adults fill vacant public roles and vacant empresario seat by affinity
   if (state.reloj.dia % 3 === 0) {
     let transfersLeft = 2;
+    const empCap = getPrivateRoleTargetCap(state, 'empresario', vivosCount);
     const targetRoles: RoleId[] = [
       ...PUBLIC_ROLES,
-      ...(!foodLayoff && counts.empresario < Math.max(1, preset.topesPrivados.empresario)
-        ? (['empresario'] as RoleId[])
-        : []),
+      ...(!foodLayoff && counts.empresario < empCap ? (['empresario'] as RoleId[]) : []),
     ];
     const vacantTarget = targetRoles.filter((r) => {
       const cap =
         r === 'empresario'
-          ? Math.max(1, preset.topesPrivados.empresario)
+          ? empCap
           : getPublicRoleTargetCap(state, r as PublicRoleId, vivosCount);
       return counts[r] < cap;
     });
@@ -2120,12 +3209,12 @@ function handleRolesAndAging(state: GameState): void {
           n.rol !== 'desempleado' &&
           n.rol !== 'empresario'
       );
-      const minKeep = (r: RoleId) => (r === 'agricultor' ? 25 : r === 'empresario' ? 1 : 2);
+      const minKeep = (r: RoleId) => (r === 'agricultor' ? 18 : r === 'empresario' ? 1 : 2);
 
       for (const targetRole of vacantTarget) {
         const cap =
           targetRole === 'empresario'
-            ? Math.max(1, preset.topesPrivados.empresario)
+            ? empCap
             : getPublicRoleTargetCap(state, targetRole as PublicRoleId, vivosCount);
         const def = ROLE_CATALOG[targetRole];
         while (transfersLeft > 0 && counts[targetRole] < cap) {
@@ -2148,8 +3237,7 @@ function handleRolesAndAging(state: GameState): void {
           counts[chosenNpc.rol]--;
           counts[targetRole]++;
           chosenNpc.rol = targetRole;
-          const allowedZones = preset.zonaPorRol[targetRole] || ['centro'];
-          chosenNpc.zona = allowedZones[counts[targetRole] % allowedZones.length];
+          chosenNpc.zona = assignNewRoleZone(state, targetRole, counts[targetRole]);
           chosenNpc.mapa.destino = getDistrictPosition(targetRole, state);
           chosenNpc.mapa.accion = 'trabajando';
           transfersLeft--;
@@ -2303,11 +3391,16 @@ function runDailyEconomyAndNeeds(state: GameState): void {
 
   let agroClimaFactor = 1;
   let climaPrecioFactor = 1;
+  const activeBuildings = getActiveBuildings(state.parcelas);
+  const hasRiego = activeBuildings.some((b) => b.tipo === 'riego');
+  const droughtDropFactor = hasRiego
+    ? 1 - (BUILDING_CATALOG.riego.reduccionSequiaPct ?? 50) / 100
+    : 1;
 
   for (const fen of activePhenomena) {
     const k = fen.intensidad / 100;
     if (fen.tipo === 'sequia') {
-      agroClimaFactor *= 1 - ECON_CONSTANTS.coefSequiaProduccion * k;
+      agroClimaFactor *= 1 - ECON_CONSTANTS.coefSequiaProduccion * k * droughtDropFactor;
       climaPrecioFactor *= 1 + ECON_CONSTANTS.coefSequiaPrecio * k;
     } else if (fen.tipo === 'plaga') {
       agroClimaFactor *= 1 - ECON_CONSTANTS.coefPlagaProduccion * k;
@@ -2345,12 +3438,27 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   state.alimento.stock += produccionAlimento;
   state.alimento.produccionDiaria = Number(produccionAlimento.toFixed(1));
 
-  const siloDays = state.alimento.siloDias || ECON_CONSTANTS.siloDias;
+  const extraSiloDias =
+    activeBuildings.filter((b) => b.tipo === 'silo').length *
+    (BUILDING_CATALOG.silo.siloExtraDias ?? 10);
+  const siloDays = ECON_CONSTANTS.siloDias + extraSiloDias;
+  state.alimento.siloDias = siloDays;
+  state.empresas.alimento.siloDias = siloDays;
   const maxSiloStock = pop * ECON_CONSTANTS.consumoPorNpc * siloDays;
   state.alimento.stock = Math.min(state.alimento.stock, maxSiloStock);
 
-  // Market & capped prices (ESTADOS §4)
-  const preTradeDiasStock = state.alimento.stock / Math.max(1, pop * ECON_CONSTANTS.consumoPorNpc);
+  const retencionActiva = state.medidasVigentes.some(
+    (m) =>
+      m.tipo === 'retencion_stock' &&
+      (!m.empresaId || m.empresaId === 'alimento') &&
+      state.reloj.dia < m.hastaDia
+  );
+  const availableStockForSale = retencionActiva
+    ? state.alimento.stock * ACTOR_CONSTANTS.pctVentaRetencionStock
+    : state.alimento.stock;
+
+  // Market & capped prices (ECONOMIA §6)
+  const preTradeDiasStock = availableStockForSale / Math.max(1, pop * ECON_CONSTANTS.consumoPorNpc);
   const preEscasez =
     preTradeDiasStock >= 12
       ? 1.0
@@ -2471,8 +3579,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
+  const sellableNow = retencionActiva
+    ? state.alimento.stock * ACTOR_CONSTANTS.pctVentaRetencionStock
+    : state.alimento.stock;
   const stockShareRatio =
-    totalDemanded > 0 ? Math.min(1, Math.max(0, state.alimento.stock) / totalDemanded) : 1;
+    totalDemanded > 0 ? Math.min(1, Math.max(0, sellableNow) / totalDemanded) : 1;
 
   let comidaMenoresDia = 0;
   let garantiaAlimentariaDia = 0;
@@ -2705,13 +3816,20 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     state.empresas.comercio.ventasAcum += livingPoolDomestico;
   }
 
-  const opScale = pop / 100;
+  const opBreakdown = computeMaintenanceBreakdown(
+    state.parcelas,
+    pal.nivelObras,
+    pop,
+    state.config.poblacionInicial
+  );
   const areaOpDia: Record<ServiceAreaId, number> = {
-    seguridad: (SERVICE_LEVEL_TABLE.seguridad[pal.servicios.seguridad].operacionPeriodo * opScale) / PERIOD_DAYS,
-    salud: (SERVICE_LEVEL_TABLE.salud[pal.servicios.salud].operacionPeriodo * opScale) / PERIOD_DAYS,
-    infraestructura: (SERVICE_LEVEL_TABLE.obras[pal.servicios.obras].operacionPeriodo * opScale) / PERIOD_DAYS,
+    seguridad: opBreakdown.mantenimientoPorArea.seguridad / PERIOD_DAYS,
+    salud: opBreakdown.mantenimientoPorArea.salud / PERIOD_DAYS,
+    infraestructura: opBreakdown.mantenimientoPorArea.infraestructura / PERIOD_DAYS,
   };
-  const operacionDia = areaOpDia.seguridad + areaOpDia.salud + areaOpDia.infraestructura;
+  const mantenimientoDia = opBreakdown.mantenimientoTotal / PERIOD_DAYS;
+  const operacionObrasDia = opBreakdown.operacionObras / PERIOD_DAYS;
+  const operacionDia = opBreakdown.operacionTotal / PERIOD_DAYS;
   const prensaDia = pal.prensa / PERIOD_DAYS;
 
   acum.dias += 1;
@@ -2719,6 +3837,8 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   acum.garantiaAlimentaria += garantiaAlimentariaDia;
   acum.garantiaImpaga += garantiaImpagaDia;
   acum.comidaMenores += comidaMenoresDia;
+  acum.mantenimiento += mantenimientoDia;
+  acum.operacionObras += operacionObrasDia;
   acum.operacion += operacionDia;
   acum.operacionPorArea.seguridad += areaOpDia.seguridad;
   acum.operacionPorArea.salud += areaOpDia.salud;
@@ -2906,7 +4026,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     );
   }
 
-  // Hospital admission
+  // Hospital admission across active hospitals & field hospitals (MUNDO §6, EDIFICIOS)
   let medicosActivos = 0;
   let currentInternados = 0;
   const candidatesHospital: Npc[] = [];
@@ -2927,26 +4047,66 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
-  const camas = Math.max(1, medicosActivos * ECON_CONSTANTS.pacientesPorMedico);
-  let freeBeds = Math.max(0, camas - currentInternados);
+  const { facilities, totalBeds } = computeHospitalFacilities(state, medicosActivos);
+  const campanaIds = new Set(facilities.filter((f) => f.isCampana).map((f) => f.edificioId));
+
+  // Ensure existing interned patients still have valid active facility & beds
+  for (const npc of vivos) {
+    if (!npc.vivo || !npc.hospital.internado) continue;
+    const matched = facilities.find((f) => f.edificioId === npc.hospital.edificioId && f.beds > 0);
+    if (!matched) {
+      const alt = facilities.find((f) => f.occupied < f.beds);
+      if (alt) {
+        alt.occupied += 1;
+        npc.hospital.edificioId = alt.edificioId;
+        npc.hospital.zonaHospital = alt.zona;
+        npc.mapa.destino = getParcelCanvasCenter(alt.parcela);
+      } else {
+        npc.hospital.internado = false;
+        npc.hospital.edificioId = undefined;
+        npc.hospital.zonaHospital = undefined;
+        npc.hospital.esperandoCama = npc.variables.salud < ECON_CONSTANTS.umbralHospital;
+        currentInternados = Math.max(0, currentInternados - 1);
+        if (npc.hospital.esperandoCama) candidatesHospital.push(npc);
+      }
+    }
+  }
+
   candidatesHospital.sort((a, b) => a.variables.salud - b.variables.salud);
 
   let waitingBeds = 0;
   for (const npc of candidatesHospital) {
-    if (freeBeds > 0) {
-      freeBeds--;
+    const npcZone = getEffectiveZone(npc, zonesCount);
+    const openFacs = facilities
+      .filter((f) => f.occupied < f.beds)
+      .sort((a, b) => {
+        const dA =
+          zonesCount > 1 ? shortestZonePath(npcZone, a.zona, preset.zonas).length : 1;
+        const dB =
+          zonesCount > 1 ? shortestZonePath(npcZone, b.zona, preset.zonas).length : 1;
+        if (dA !== dB) return dA - dB;
+        return a.parcela.orden - b.parcela.orden;
+      });
+
+    if (openFacs.length > 0) {
+      const targetFac = openFacs[0];
+      targetFac.occupied += 1;
       currentInternados++;
       npc.hospital.internado = true;
       npc.hospital.esperandoCama = false;
       npc.hospital.diasInternado = 0;
+      npc.hospital.edificioId = targetFac.edificioId;
+      npc.hospital.zonaHospital = targetFac.zona;
       npc.accionIa = null;
-      npc.mapa.accion = 'internado en hospital';
-      npc.mapa.destino = getZoneCanvasPosition('centro', state);
+      npc.mapa.accion = targetFac.isCampana
+        ? 'internado en hospital de campaña'
+        : 'internado en hospital';
+      npc.mapa.destino = getParcelCanvasCenter(targetFac.parcela);
       emitSimEvent(state, {
         id: nextSeqId(state, `ev_${state.reloj.dia}`),
         dia: state.reloj.dia,
         tipo: 'internacion',
-        zona: 'centro',
+        zona: targetFac.zona,
         npcId: npc.id,
         causa: npc.ultimoGolpeCausaId || npc.ultimoGolpeOrigen || 'salud:baja',
       });
@@ -2956,6 +4116,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
+  const camas = Math.max(1, totalBeds);
   const ocupacionPct = Number((((currentInternados + waitingBeds) / camas) * 100).toFixed(1));
   if (ocupacionPct > 100 && state.hospitalSaturadoDia !== state.reloj.dia) {
     state.hospitalSaturadoDia = state.reloj.dia;
@@ -2995,12 +4156,14 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   for (const npc of vivos) {
     if (!npc.vivo) continue;
     if (npc.hospital.internado) {
+      const isCampana = Boolean(npc.hospital.edificioId && campanaIds.has(npc.hospital.edificioId));
+      const curaDia = isCampana ? curaInternadoDia * 0.5 : curaInternadoDia;
       applyInstantModifierToNpc(
         npc,
         {
-          afecta: { salud: curaInternadoDia },
+          afecta: { salud: curaDia },
           origen: 'hospital:cura',
-          texto: 'Atención hospitalaria diaria',
+          texto: isCampana ? 'Atención en hospital de campaña' : 'Atención hospitalaria diaria',
           recordOnNpc: false,
         },
         state
@@ -3008,8 +4171,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       hospitalCuredCount++;
       npc.hospital.diasInternado += 1;
       if (npc.variables.salud >= ECON_CONSTANTS.altaHospital) {
+        const altZone = npc.hospital.zonaHospital || 'centro';
         npc.hospital.internado = false;
         npc.hospital.diasInternado = 0;
+        npc.hospital.edificioId = undefined;
+        npc.hospital.zonaHospital = undefined;
         npc.ultimoGolpeOrigen = undefined;
         npc.ultimoGolpeCausaId = undefined;
         npc.mapa.accion =
@@ -3019,7 +4185,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
           id: nextSeqId(state, `ev_${state.reloj.dia}`),
           dia: state.reloj.dia,
           tipo: 'alta',
-          zona: 'centro',
+          zona: altZone,
           npcId: npc.id,
           causa: 'hospital:alta',
         });
@@ -3165,7 +4331,6 @@ function settleEnterpriseAtPayday(
   vivosById: Map<string, Npc>
 ): number {
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
-  const popScale = Math.max(0.6, vivos.length / 100);
   const ventas = Math.max(0, ent.ventasAcum);
   const fondoSueldos = ventas * ent.parteSueldos;
 
@@ -3208,7 +4373,7 @@ function settleEnterpriseAtPayday(
     while (hiresLeft > 0) {
       let hiredOne = false;
       for (const r of hireRoles) {
-        const cap = Math.round(preset.topesPrivados[r] * popScale);
+        const cap = getPrivateRoleTargetCap(state, r, vivos.length);
         if (roleCounts[r] >= cap) continue;
         const def = ROLE_CATALOG[r];
         const candidates = unemployedPool.filter(
@@ -3413,6 +4578,17 @@ function settleEnterpriseAtPayday(
     ent.despidosPendientes = 0;
   }
 
+  if (factor > 1.0) {
+    ent.periodosFactorAlto = (ent.periodosFactorAlto || 0) + 1;
+    ent.periodosFactorBajo = 0;
+  } else if (factor < 1.0) {
+    ent.periodosFactorBajo = (ent.periodosFactorBajo || 0) + 1;
+    ent.periodosFactorAlto = 0;
+  } else {
+    ent.periodosFactorAlto = 0;
+    ent.periodosFactorBajo = 0;
+  }
+
   return taxesCollected;
 }
 
@@ -3527,16 +4703,18 @@ function runPaydaySettlement(state: GameState): void {
     }
   }
 
-  // 2.4 Operación de servicios -> exact paid amount goes to empresa de comercio
+  // 2.4 Mantenimiento de edificios y operación de obras -> exact paid amount goes to empresa de comercio
   const paidOp = Math.min(Math.max(0, state.gobierno.reserva), opReq);
   state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidOp);
   if (paidOp > 0) {
     state.empresas.comercio.ventasAcum += paidOp;
   }
   const opRatio = opReq > 0 ? paidOp / opReq : 1;
+  const paidMantenimiento = acum.mantenimiento * opRatio;
+  const paidOperacionObras = acum.operacionObras * opRatio;
   const opShortfall = Math.max(0, opReq - paidOp);
 
-  // Update all 3 service indicators using paid operation * coverage (ESTADOS §12)
+  // Update all 3 service indicators using paid maintenance/operation * coverage (MUNDO §7)
   const costoBase = pop * ECON_CONSTANTS.costoBaseServicioPorPoblacion * PERIOD_DAYS;
   const areaToCoverage: Record<ServiceAreaId, number> = {
     salud: state.gobierno.coberturas.medico,
@@ -3561,7 +4739,7 @@ function runPaydaySettlement(state: GameState): void {
   state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidPrensa);
   const prenShortfall = Math.max(0, prenReq - paidPrensa);
 
-  // Step 3: Media Outlets pay living columnists & retain surpluses out of world (ECONOMIA §8 & §9)
+  // Step 3: Media Outlets pay living columnists & retain surpluses out of world (ECONOMIA §7 & §8)
   const fondosPorMedio = state.medios.length > 0 ? paidPrensa / state.medios.length : 0;
   for (const medio of state.medios) {
     const propios = medio.finanzas.ingresosPropios;
@@ -3621,7 +4799,7 @@ function runPaydaySettlement(state: GameState): void {
     }
   }
 
-  // Step 4: Evaluate Impago & Fiscal Ledger (ECONOMIA §6)
+  // Step 4: Evaluate Impago & Fiscal Ledger (ECONOMIA §5)
   const wasImpago = state.gobierno.finanzas.impago;
   const totalShortfall =
     acum.garantiaImpaga + pensShortfall + nomShortfall + ayuShortfall + opShortfall + prenShortfall;
@@ -3692,6 +4870,7 @@ function runPaydaySettlement(state: GameState): void {
     acum.comidaMenores +
     paidAyu +
     paidOp +
+    acum.obras +
     paidPrensa;
   const saldo = taxesCollected - gastosPeriodo;
 
@@ -3703,7 +4882,10 @@ function runPaydaySettlement(state: GameState): void {
     garantiaImpaga: Number(acum.garantiaImpaga.toFixed(1)),
     comidaMenores: Number(acum.comidaMenores.toFixed(1)),
     ayudaSocial: Number(paidAyu.toFixed(1)),
+    mantenimiento: Number(paidMantenimiento.toFixed(1)),
+    operacionObras: Number(paidOperacionObras.toFixed(1)),
     operacion: Number(paidOp.toFixed(1)),
+    obras: Number(acum.obras.toFixed(1)),
     prensa: Number(paidPrensa.toFixed(1)),
     saldo: Number(saldo.toFixed(1)),
     emision: Number(emision.toFixed(1)),
@@ -3730,7 +4912,10 @@ function runPaydaySettlement(state: GameState): void {
     garantiaAlimentaria: 0,
     garantiaImpaga: 0,
     comidaMenores: 0,
+    mantenimiento: 0,
+    operacionObras: 0,
     operacion: 0,
+    obras: 0,
     operacionPorArea: { seguridad: 0, salud: 0, infraestructura: 0 },
     prensa: 0,
     importaciones: 0,
@@ -4129,8 +5314,14 @@ function advanceDay(state: GameState): void {
   state.auditSalidasDia = 0;
 
   const zonesCount = getWorldZones(state).length;
+  const isM0 = state.config.nivelMundo === 'M0';
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const allowGovernorComplex = govLevel === 'G2' || govLevel === 'G3';
 
+  // 1. Controls take effect, buildings advance/activate, modifiers & actions decay
   applyLeverChanges(state);
+  stepBuildingsDaily(state);
 
   const minHitKeep = state.reloj.dia - ECON_CONSTANTS.golpeAmenazaVentanaDias;
   for (const z of Object.keys(state.golpesPorZonaHistorial) as ZoneId[]) {
@@ -4171,28 +5362,41 @@ function advanceDay(state: GameState): void {
     state.caosTracker.accionesEnVentana = 0;
   }
 
-  const isM0 = state.config.nivelMundo === 'M0';
-  updateServiceCoverage(state);
-  handleRolesAndAging(state);
+  // 2. Climate
   if (!isM0) {
     updateClimate(state);
   }
-  runPoliceRelocation(state);
+
+  // 3 & 4 & 8. Daily economy, needs, health/hospital, and NPC variables
+  updateServiceCoverage(state);
   runDailyEconomyAndNeeds(state);
+
+  // 5. Security: police relocation + zone integrity repair
+  runPoliceRelocation(state);
+  updateZoneIntegrity(state, zonesCount);
+
+  // 6. Caos: contagion + expirations
   pruneOrphanedContagions(state, zonesCount);
   if (!isM0) {
     runDailyActionContagion(state, zonesCount);
   }
-  updateZoneIntegrity(state, zonesCount);
 
+  // 9. Payday settlement & private building investment
   let settledThisDay = false;
   if (state.reloj.diasEnPeriodo >= PERIOD_DAYS) {
     runPaydaySettlement(state);
+    if (!isM0) {
+      runPrivateInvestmentAtPayday(state);
+    }
     state.reloj.diasEnPeriodo = 0;
     state.reloj.periodo += 1;
     settledThisDay = true;
   }
 
+  // 10. Roles and aging
+  handleRolesAndAging(state);
+
+  // 11. Derived community stats & period snapshot
   const derived = deriveCommunityStats(state);
   if (settledThisDay) {
     state.metricasPeriodoAnterior = {
@@ -4208,8 +5412,20 @@ function advanceDay(state: GameState): void {
   if (!isM0) {
     checkConditionTriggers(state, derived);
   }
+
+  // 12. Governor layer: hitos, demands & measures, objective/defeat
+  if (allowGovernorComplex) {
+    stepDemandsAndMeasuresDaily(state);
+    if (settledThisDay) {
+      checkHitosAtPayday(state, derived);
+    }
+    if (!isM0) {
+      evaluateActorDemands(state, derived);
+    }
+  }
   evaluateObjective(state, derived);
 
+  // 7 (queue). Collect daily press facts after all events of the day are emitted
   collectDailyPressFacts(state, derived);
   state.precioAyer = state.alimento.precio;
   state.hambreAyerPct = derived.hambreCriticaPct;
@@ -4468,6 +5684,57 @@ function collectDailyPressFacts(state: GameState, preDerived?: CommunityDerived)
           cifra: String(ev.valor),
         },
       });
+    } else if (ev.tipo === 'obra_fin' || ev.tipo === 'demolicion') {
+      const parcela = state.parcelas.find((p) => p.id === ev.parcelaId);
+      const edNombre = BUILDING_CATALOG[ev.edificio].nombre;
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'obras',
+        relevancia: relMap.obras,
+        valencia: ev.tipo === 'obra_fin' ? 'buena' : 'mala',
+        esDelGobierno: ev.tipo === 'demolicion' ? true : ev.dueno === 'estado',
+        zona: ev.zona,
+        origen: ev.tipo === 'obra_fin' ? `obra:${ev.edificio}` : `demolicion:${ev.edificio}`,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          edificio: edNombre,
+          parcela: parcela?.nombre ?? ev.parcelaId,
+        },
+      });
+    } else if (
+      ev.tipo === 'demanda' ||
+      ev.tipo === 'demanda_aceptada' ||
+      ev.tipo === 'demanda_rechazada' ||
+      ev.tipo === 'medida'
+    ) {
+      const actorName =
+        ev.actorId === 'empresarios'
+          ? 'Empresarios'
+          : state.medios.find((m) => m.id === ev.actorId)?.nombre ?? ev.actorId;
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'presiones',
+        relevancia: relMap.presiones,
+        valencia:
+          ev.tipo === 'demanda_aceptada'
+            ? 'buena'
+            : ev.tipo === 'demanda'
+            ? 'neutra'
+            : 'mala',
+        esDelGobierno: ev.tipo !== 'demanda',
+        zona: ev.zona,
+        origen: `actor:${ev.actorId}`,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          actor: actorName,
+          demanda: 'demandaId' in ev ? ev.demandaId.replaceAll('_', ' ') : 'reclamo sectorial',
+          medida: 'medida' in ev ? ev.medida.replaceAll('_', ' ') : 'presión sectorial',
+        },
+      });
     }
   }
 
@@ -4688,14 +5955,37 @@ function interpolateTemplate(
     .replaceAll('{control}', d.control ?? d.palanca ?? 'medida')
     .replaceAll('{palanca}', d.control ?? d.palanca ?? 'medida')
     .replaceAll('{valor_anterior}', d.valorAnterior ?? '')
-    .replaceAll('{valor_nuevo}', d.valorNuevo ?? '');
+    .replaceAll('{valor_nuevo}', d.valorNuevo ?? '')
+    .replaceAll('{edificio}', d.edificio ?? 'obra pública')
+    .replaceAll('{parcela}', d.parcela ?? 'parcela')
+    .replaceAll('{actor}', d.actor ?? 'sector local')
+    .replaceAll('{demanda}', d.demanda ?? 'demanda')
+    .replaceAll('{medida}', d.medida ?? 'medida de presión');
 }
 
 function drawPressToneForFact(
+  state: GameState,
   medio: GameState['medios'][number],
   fact: PressFact,
   rng: { rngState: number }
 ): NewsTone {
+  const availableTemplates = NEWS_TEMPLATES[fact.tema] || {};
+  const activeCampana = state.medidasVigentes.find(
+    (m) =>
+      m.tipo === 'campana' &&
+      m.medioId === medio.id &&
+      state.reloj.dia < m.hastaDia &&
+      m.tono &&
+      (!m.tema || m.tema === fact.tema)
+  );
+  if (
+    activeCampana?.tono &&
+    availableTemplates[activeCampana.tono] &&
+    availableTemplates[activeCampana.tono]!.length > 0
+  ) {
+    return activeCampana.tono;
+  }
+
   const aff = medio.lineaEditorial.afinidadGobierno / 100;
   const sens = medio.lineaEditorial.sensacionalismo / 100;
   const base = PRESS_CONSTANTS.pesosTonoBase;
@@ -4727,7 +6017,6 @@ function drawPressToneForFact(
     },
   ];
 
-  const availableTemplates = NEWS_TEMPLATES[fact.tema] || {};
   const total = weights.reduce((acc, item) => acc + item.w, 0);
   let r = drawRand(rng) * Math.max(0.001, total);
   let chosen: NewsTone = 'neutral';
@@ -4802,7 +6091,7 @@ export function planDailyPressPublications(
 
     for (const fact of chosenFacts) {
       const autor = livingCols[Math.floor(drawRand(rng) * livingCols.length)];
-      const tono = drawPressToneForFact(medio, fact, rng);
+      const tono = drawPressToneForFact(state, medio, fact, rng);
       const variants =
         NEWS_TEMPLATES[fact.tema]?.[tono] ||
         NEWS_TEMPLATES[fact.tema]?.neutral || [
@@ -5062,6 +6351,89 @@ function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         zona: ev.zona,
         titulo: 'Fin de partida por derrota',
         detalle: `${ev.metrica} = ${ev.valor}.`,
+      };
+    case 'obra_inicio':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Inicio de obra: ${BUILDING_CATALOG[ev.edificio].nombre}`,
+        detalle: `Parcela ${ev.parcelaId} · Dueño ${ev.dueno} · $${ev.costo} (${ev.diasObra}d).`,
+      };
+    case 'obra_fin':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Obra terminada: ${BUILDING_CATALOG[ev.edificio].nombre}`,
+        detalle: `Edificio activo en parcela ${ev.parcelaId} (${ev.dueno}).`,
+      };
+    case 'demolicion':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Demolición de ${BUILDING_CATALOG[ev.edificio].nombre}`,
+        detalle: `Se liberó la parcela ${ev.parcelaId}.`,
+      };
+    case 'parcela_habilitada':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Parcela habilitada: ${ev.parcelaId}`,
+        detalle: `Desbloqueada por hito ${ev.hitoId}.`,
+      };
+    case 'hito':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Hito de prosperidad: ${ev.nombre}`,
+        detalle: `Habilita la parcela ${ev.parcelaId}.`,
+      };
+    case 'demanda':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Demanda de ${ev.actorId}: ${ev.demandaId}`,
+        detalle: `Plazo de ${ev.diasRespuesta} días para responder.`,
+      };
+    case 'demanda_aceptada':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Demanda aceptada (${ev.actorId})`,
+        detalle: `Compromiso sobre ${ev.palanca}.`,
+      };
+    case 'demanda_rechazada':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: ev.porVencimiento
+          ? `Demanda vencida (${ev.actorId})`
+          : `Demanda rechazada (${ev.actorId})`,
+        detalle: `Desencadena medida de presión por ${ev.demandaId}.`,
+      };
+    case 'medida':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Medida de ${ev.actorId}: ${ev.medida}`,
+        detalle: `Vigente hasta el día ${ev.hastaDia}.`,
       };
   }
 }

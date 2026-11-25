@@ -7,6 +7,7 @@ import {
   ROLE_CATALOG,
   SCENARIO_PRESETS,
 } from '../src/data/catalogs';
+import { getBuildingJobCaps } from '../src/engine/policies';
 import { nextRand, nextSeqId } from '../src/engine/rng';
 import {
   applyActionToNpc,
@@ -14,24 +15,31 @@ import {
   canTriggerSpontaneousChaos,
   computeTotalWorldMoney,
   deriveCommunityStats,
+  getActivePhenomena,
+  getAnnouncedPhenomena,
+  orderBuildInParcela,
+  orderDemolishParcela,
   pickActionText,
   pickChaosCandidateNpc,
   planDailyPressPublications,
   resolveConditionWindowWithFallback,
+  respondToDemand,
   selectCandidateActions,
   stepHeadlessDay,
 } from '../src/engine/simulation';
 import { createInitialGameState } from '../src/engine/worldGenerator';
 import {
+  BuildingType,
   FixedPublicRoleId,
   ForeignTradeStep,
   GameState,
+  GovernorComplexityLevel,
   GovernorLevers,
   PriceCapMode,
   PrivateRoleId,
   RoleId,
-  ServiceLeverId,
   ServiceLevel,
+  WorldComplexityLevel,
   WorldConfig,
 } from '../src/types/game';
 
@@ -47,7 +55,7 @@ interface PresetFile {
     stockAlimentoInicial: number;
     topesPrivados: Record<PrivateRoleId, number>;
     cuposFijos: Record<FixedPublicRoleId, number>;
-    serviciosIniciales: Record<ServiceLeverId, ServiceLevel>;
+    nivelObrasInicial: ServiceLevel;
     caosDefault: typeof SCENARIO_PRESETS.elecciones.caosDefault;
   };
   initialLevers: GovernorLevers;
@@ -72,6 +80,39 @@ interface PresetFile {
   };
 }
 
+type SuiteName = 'all' | 'verify' | 'm0' | 'collapse' | 'sensitivity' | 'nondom';
+type PolicyMode = 'pasivo' | 'heuristico' | 'estratega';
+
+interface CliArgs {
+  suite: SuiteName;
+  quick: boolean;
+  nOverride: number | null;
+}
+
+function parseCliArgs(): CliArgs {
+  let suite: SuiteName = 'all';
+  let quick = false;
+  let nOverride: number | null = null;
+
+  for (const arg of process.argv.slice(2)) {
+    if (arg === '--quick') {
+      quick = true;
+    } else if (arg.startsWith('--suite=')) {
+      const val = arg.split('=')[1] as SuiteName;
+      if (['all', 'verify', 'm0', 'collapse', 'sensitivity', 'nondom'].includes(val)) {
+        suite = val;
+      }
+    } else if (arg.startsWith('--n=')) {
+      const parsed = Number(arg.split('=')[1]);
+      if (Number.isFinite(parsed) && parsed >= 1) {
+        nOverride = Math.round(parsed);
+      }
+    }
+  }
+  return { suite, quick, nOverride };
+}
+
+const CLI = parseCliArgs();
 const presetPath = path.resolve(process.cwd(), 'presets/elecciones_simple.json');
 const PRESET: PresetFile = JSON.parse(fs.readFileSync(presetPath, 'utf-8'));
 
@@ -85,12 +126,25 @@ function applyPresetToRuntime(): void {
   SCENARIO_PRESETS.elecciones.stockAlimentoInicial = PRESET.SCENARIO_PRESET.stockAlimentoInicial;
   SCENARIO_PRESETS.elecciones.topesPrivados = { ...PRESET.SCENARIO_PRESET.topesPrivados };
   SCENARIO_PRESETS.elecciones.cuposFijos = { ...PRESET.SCENARIO_PRESET.cuposFijos };
-  SCENARIO_PRESETS.elecciones.serviciosIniciales = { ...PRESET.SCENARIO_PRESET.serviciosIniciales };
+  SCENARIO_PRESETS.elecciones.nivelObrasInicial = PRESET.SCENARIO_PRESET.nivelObrasInicial;
   SCENARIO_PRESETS.elecciones.initialLevers = structuredClone(PRESET.initialLevers);
   SCENARIO_PRESETS.elecciones.caosDefault = { ...PRESET.SCENARIO_PRESET.caosDefault };
 }
 
+function buildOnFreeParcels(state: GameState, tipos: BuildingType[]): number {
+  let built = 0;
+  for (const tipo of tipos) {
+    const free = state.parcelas.find((p) => p.estado === 'libre');
+    if (!free) break;
+    const res = orderBuildInParcela(state, free.id, tipo);
+    if (res.ok) built += 1;
+  }
+  return built;
+}
+
 function runRandomDirectorDay(state: GameState): void {
+  if (state.config.nivelMundo === 'M0') return;
+
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente') {
       const chosen = win.candidatas[Math.floor(nextRand(state) * win.candidatas.length)];
@@ -141,7 +195,7 @@ function runRandomDirectorDay(state: GameState): void {
 
 function applyHeuristicGovernor(state: GameState): void {
   const hp = PRESET.heuristicPolicy;
-  const baseTax = PRESET.initialLevers.impuesto;
+  const baseTax = SCENARIO_PRESETS[state.config.escenarioId].initialLevers.impuesto;
   const lev = state.gobierno.palancasObjetivo;
   const d = deriveCommunityStats(state);
   const publicCount =
@@ -155,6 +209,8 @@ function applyHeuristicGovernor(state: GameState): void {
     state.alimento.produccionDiaria < state.alimento.consumoDiario
   ) {
     lev.comercioExterior = hp.intercambioPreventivo;
+  } else if (state.alimento.diasStock >= state.alimento.siloDias - 3 && state.gobierno.reserva < dailyPayroll * 18) {
+    lev.comercioExterior = -50;
   } else {
     lev.comercioExterior = 0;
   }
@@ -164,9 +220,9 @@ function applyHeuristicGovernor(state: GameState): void {
     state.alimento.precioMercado > ECON_CONSTANTS.precioBaseAlimento * 1.45 ? 'moderado' : 'libre';
 
   if (state.gobierno.reserva < dailyPayroll * hp.umbralReservaDiasNomina || lev.comercioExterior >= hp.intercambioPreventivo) {
-    lev.impuesto = Math.min(hp.impuestoEmergenciaMax, baseTax + 8);
+    lev.impuesto = Math.min(hp.impuestoEmergenciaMax, baseTax + 6);
   } else if (lev.comercioExterior > 0) {
-    lev.impuesto = Math.min(hp.impuestoEmergenciaMax - 2, baseTax + 4);
+    lev.impuesto = Math.min(hp.impuestoEmergenciaMax - 2, baseTax + 3);
   } else if (
     (d.apoyoPct < hp.umbralApoyoAlivio || d.descontentosPct > hp.umbralDescontentosPct) &&
     state.gobierno.reserva >= dailyPayroll * hp.umbralReservaDiasNomina
@@ -188,14 +244,81 @@ function applyHeuristicGovernor(state: GameState): void {
   }
 }
 
-function makeInitState(seed: number, scenarioId: 'elecciones' | 'zombies' = 'elecciones'): GameState {
+function applyFullStrategistPolicy(state: GameState): void {
+  applyHeuristicGovernor(state);
+  const d = deriveCommunityStats(state);
+  const govLevel = state.config.nivelGobernador ?? 'G2';
+  const active = getActivePhenomena(state);
+  const announced = getAnnouncedPhenomena(state);
+  const allFen = [...active, ...announced];
+
+  // 1. Handle active actor demands selectively (G2+)
+  if (govLevel === 'G2' || govLevel === 'G3') {
+    for (const dem of [...state.demandasActivas]) {
+      const accept =
+        dem.demandaId === 'abran_exportacion' ||
+        (dem.demandaId === 'liberen_precio' && state.alimento.diasStock >= 5) ||
+        (dem.demandaId === 'bajen_impuestos' && state.gobierno.reserva > 2400 && state.gobierno.palancasVigentes.impuesto >= 40) ||
+        (dem.demandaId === 'mas_pauta' && state.gobierno.reserva > 2800 && state.gobierno.palancasVigentes.prensa <= 18);
+      respondToDemand(state, dem.id, accept);
+    }
+  }
+
+  // 2. Build services & suceso works when budget permits
+  const inConstruction = state.parcelas.filter((p) => p.estado === 'en_obra').length;
+  const freeParcela = state.parcelas.find((p) => p.estado === 'libre');
+  if (freeParcela && inConstruction === 0 && state.gobierno.reserva >= 1800) {
+    const activeTypes = new Set(
+      state.parcelas
+        .filter((p) => p.edificio && p.edificio.estado === 'ocupada')
+        .map((p) => p.edificio!.tipo)
+    );
+    const comisarias = state.parcelas.filter((p) => p.edificio?.tipo === 'comisaria').length;
+    const hospitales = state.parcelas.filter((p) => p.edificio?.tipo === 'hospital').length;
+    const hasDrought = allFen.some((f) => f.tipo === 'sequia');
+    const hasPandemic = allFen.some((f) => f.tipo === 'pandemia');
+    const hasZombie = allFen.some((f) => f.tipo === 'plaga_zombie');
+
+    if (state.config.escenarioId === 'zombies' && comisarias < 2 && state.gobierno.reserva >= 1800) {
+      orderBuildInParcela(state, freeParcela.id, 'comisaria');
+    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasDrought && !activeTypes.has('riego') && state.gobierno.reserva >= 1900) {
+      orderBuildInParcela(state, freeParcela.id, 'riego');
+    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasDrought && !activeTypes.has('silo') && state.gobierno.reserva >= 2100) {
+      orderBuildInParcela(state, freeParcela.id, 'silo');
+    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasZombie && !activeTypes.has('muralla') && state.gobierno.reserva >= 2200) {
+      orderBuildInParcela(state, freeParcela.id, 'muralla');
+    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasPandemic && !activeTypes.has('hospital_campana') && state.gobierno.reserva >= 1700) {
+      orderBuildInParcela(state, freeParcela.id, 'hospital_campana');
+    } else if ((d.hospitalOcupacionPct > 95 || d.esperandoCama > 1) && hospitales < 2 && state.gobierno.reserva >= 2400) {
+      orderBuildInParcela(state, freeParcela.id, 'hospital');
+    } else if (state.config.escenarioId === 'elecciones' && state.gobierno.indicadores.seguridad < 45 && comisarias < 2 && state.gobierno.reserva >= 2600) {
+      orderBuildInParcela(state, freeParcela.id, 'comisaria');
+    }
+  }
+}
+
+interface InitStateOpts {
+  nivelMundo?: WorldComplexityLevel;
+  nivelGobernador?: GovernorComplexityLevel;
+  disableRandomWeather?: boolean;
+}
+
+function makeInitState(
+  seed: number,
+  scenarioId: 'elecciones' | 'zombies' = 'elecciones',
+  opts: InitStateOpts = {}
+): GameState {
   if (scenarioId === 'elecciones') {
     applyPresetToRuntime();
   }
   const preset = SCENARIO_PRESETS[scenarioId];
+  const nivelMundo = opts.nivelMundo ?? 'M1';
+  const nivelGobernador = opts.nivelGobernador ?? 'G2';
   const cfg: WorldConfig = {
     escenarioId: scenarioId,
-    economiaModulo: 'base',
+    economiaModulo: nivelMundo === 'M2' ? 'fiscal' : 'base',
+    nivelMundo,
+    nivelGobernador,
     cantidadMedios: preset.mediosDefault,
     poblacionInicial: preset.poblacionDefault,
     caos: { ...preset.caosDefault },
@@ -203,17 +326,16 @@ function makeInitState(seed: number, scenarioId: 'elecciones' | 'zombies' = 'ele
     usarIaGemini: false,
   };
   const s = createInitialGameState(cfg);
-  if (scenarioId === 'elecciones') {
-    s.clima.proximoEventoDia = 99999;
-    s.gobierno.palancasObjetivo = structuredClone(PRESET.initialLevers);
-    s.gobierno.palancasVigentes = structuredClone(PRESET.initialLevers);
+  if (opts.disableRandomWeather || nivelMundo === 'M0') {
+    s.clima.proximoEventoDia = 999999;
   }
   return s;
 }
 
 function summarize(arr: number[]): { mean: number; sd: number; min: number; max: number } {
-  const mean = arr.reduce((a, b) => a + b, 0) / Math.max(1, arr.length);
-  const sd = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, arr.length));
+  if (arr.length === 0) return { mean: 0, sd: 0, min: 0, max: 0 };
+  const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+  const sd = Math.sqrt(arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length);
   return {
     mean: Number(mean.toFixed(2)),
     sd: Number(sd.toFixed(2)),
@@ -224,14 +346,41 @@ function summarize(arr: number[]): { mean: number; sd: number; min: number; max:
 
 interface BatchOpts {
   scenarioId?: 'elecciones' | 'zombies';
+  nivelMundo?: WorldComplexityLevel;
+  nivelGobernador?: GovernorComplexityLevel;
+  disableRandomWeather?: boolean;
   n: number;
   chaos: boolean;
   chaosStopDay?: number;
-  drought?: { intensidad: number; inicioDia: number; duracionDias: number };
-  heur?: boolean;
+  drought?: { intensidad: number; inicioDia: number; duracionDias: number; avisoDias?: number };
+  policy?: PolicyMode;
   mutator?: (s: GameState) => void;
   dailyMutator?: (s: GameState, day: number) => void;
   maxDays?: number;
+  checkpoints?: number[];
+}
+
+interface MilestoneRecord {
+  primerRecorteEmpresa: number | null;
+  primerImpago: number | null;
+  primerImpagoNomina: number | null;
+  primerConflicto: number | null;
+  primeraDemanda: number | null;
+  primeraMedidaActor: number | null;
+  primeraMuerte: number | null;
+  derrota: number | null;
+}
+
+interface CheckpointMetrics {
+  apoyoPct: number;
+  satisfaccion: number;
+  hambrePct: number;
+  descontentosPct: number;
+  poblacionPct: number;
+  reserva: number;
+  diasStock: number;
+  precio: number;
+  integridadMin: number;
 }
 
 const ALL_ROLES: RoleId[] = [
@@ -240,9 +389,43 @@ const ALL_ROLES: RoleId[] = [
   'desempleado', 'jubilado',
 ];
 
+function summarizeMilestones(records: MilestoneRecord[]) {
+  const keys: Array<keyof MilestoneRecord> = [
+    'primerRecorteEmpresa',
+    'primerImpago',
+    'primerImpagoNomina',
+    'primerConflicto',
+    'primeraDemanda',
+    'primeraMedidaActor',
+    'primeraMuerte',
+    'derrota',
+  ];
+  const out: Record<string, { count: number; meanDay: number | null; minDay: number | null; maxDay: number | null }> = {};
+  for (const k of keys) {
+    const vals = records.map((r) => r[k]).filter((v): v is number => v !== null);
+    if (vals.length === 0) {
+      out[k] = { count: 0, meanDay: null, minDay: null, maxDay: null };
+    } else {
+      const s = summarize(vals);
+      out[k] = { count: vals.length, meanDay: s.mean, minDay: s.min, maxDay: s.max };
+    }
+  }
+  return out;
+}
+
 function runBatch(label: string, opts: BatchOpts) {
   const scenarioId = opts.scenarioId ?? 'elecciones';
   const maxDays = opts.maxDays ?? (scenarioId === 'zombies' ? 180 : 365);
+  const checkpointsList =
+    opts.checkpoints ??
+    (maxDays <= 40
+      ? [15, maxDays]
+      : maxDays <= 100
+      ? [30, 60, maxDays]
+      : scenarioId === 'zombies'
+      ? [30, 60, 90, 120, 150, 180]
+      : [30, 60, 90, 120, 180, 270, 365]);
+
   let wins = 0;
   let lostObjNoDefeat = 0;
   let defeats = 0;
@@ -269,40 +452,80 @@ function runBatch(label: string, opts: BatchOpts) {
   const minStock: number[] = [];
   const initFoodProfit: number[] = [];
   const initComProfit: number[] = [];
+  const milestoneRecords: MilestoneRecord[] = [];
+  const checkpointBuckets = new Map<number, CheckpointMetrics[]>();
+  for (const cp of checkpointsList) checkpointBuckets.set(cp, []);
 
   for (let seed = 1; seed <= opts.n; seed++) {
-    const s = makeInitState(seed, scenarioId);
+    const s = makeInitState(seed, scenarioId, {
+      nivelMundo: opts.nivelMundo,
+      nivelGobernador: opts.nivelGobernador,
+      disableRandomWeather: opts.disableRandomWeather,
+    });
+    if (opts.drought) {
+      s.clima.fenomenos.push({
+        id: 'seq_prueba',
+        tipo: 'sequia',
+        nombre: 'Sequía de prueba',
+        intensidad: opts.drought.intensidad,
+        inicioDia: opts.drought.inicioDia,
+        duracionDias: opts.drought.duracionDias,
+        avisoDias: opts.drought.avisoDias ?? 0,
+      });
+    }
     if (opts.mutator) opts.mutator(s);
     initFoodProfit.push(s.empresas.alimento.ultimaGanancia);
     initComProfit.push(s.empresas.comercio.ultimaGanancia);
     const d0 = deriveCommunityStats(s);
     sat0.push(d0.satisfaccionMedia);
+
     let hadImp = false;
     let minS = s.alimento.stock;
+    let prevEvCount = s.eventos.length;
+    const ms: MilestoneRecord = {
+      primerRecorteEmpresa: null,
+      primerImpago: null,
+      primerImpagoNomina: null,
+      primerConflicto: null,
+      primeraDemanda: null,
+      primeraMedidaActor: null,
+      primeraMuerte: null,
+      derrota: null,
+    };
+
+    const recordCheckpoint = (day: number) => {
+      if (!checkpointBuckets.has(day)) return;
+      const ds = deriveCommunityStats(s);
+      const integVals = Object.values(s.gobierno.integridad);
+      checkpointBuckets.get(day)!.push({
+        apoyoPct: ds.apoyoPct,
+        satisfaccion: ds.satisfaccionMedia,
+        hambrePct: ds.hambreCriticaPct,
+        descontentosPct: ds.descontentosPct,
+        poblacionPct: ds.poblacionPct,
+        reserva: s.gobierno.reserva,
+        diasStock: s.alimento.diasStock,
+        precio: s.alimento.precio,
+        integridadMin: integVals.length > 0 ? Math.min(...integVals) : 100,
+      });
+    };
 
     for (let d = 1; d < maxDays; d++) {
-      if (opts.drought && s.reloj.dia === opts.drought.inicioDia) {
-        s.clima.fenomenos.push({
-          id: 'seq_prueba',
-          tipo: 'sequia',
-          nombre: 'Sequía de prueba',
-          intensidad: opts.drought.intensidad,
-          inicioDia: opts.drought.inicioDia,
-          duracionDias: opts.drought.duracionDias,
-        });
-      }
-      if (opts.heur && s.reloj.dia % PRESET.heuristicPolicy.evaluacionCadaDias === 0) {
-        applyHeuristicGovernor(s);
+      if (opts.policy && opts.policy !== 'pasivo' && s.reloj.dia % PRESET.heuristicPolicy.evaluacionCadaDias === 0) {
+        if (opts.policy === 'heuristico') applyHeuristicGovernor(s);
+        else if (opts.policy === 'estratega') applyFullStrategistPolicy(s);
       }
       if (opts.dailyMutator) {
         opts.dailyMutator(s, s.reloj.dia);
       }
+
       const prevTotalMoney = computeTotalWorldMoney(s);
       stepHeadlessDay(s);
       const curTotalMoney = computeTotalWorldMoney(s);
       if (Math.abs(curTotalMoney - (prevTotalMoney + s.auditEntradasDia - s.auditSalidasDia)) > 0.05) {
         invariantViolations++;
       }
+
       if (d === 1) {
         prod1.push(s.alimento.produccionDiaria);
         cons1.push(s.alimento.consumoDiario);
@@ -316,20 +539,49 @@ function runBatch(label: string, opts: BatchOpts) {
           fin.garantiaAlimentaria +
           fin.ayudaSocial +
           fin.operacion +
+          (fin.obras ?? 0) +
           fin.prensa;
         ing7.push(fin.ingresos);
         gastos7.push(gastos);
         saldo7.push(fin.saldo);
         ingRatio7.push(fin.ingresos / Math.max(1, gastos));
       }
+
       if (opts.chaos && (!opts.chaosStopDay || s.reloj.dia <= opts.chaosStopDay)) {
         runRandomDirectorDay(s);
       }
+
       if (s.gobierno.finanzas.impago && s.reloj.diasEnPeriodo === 0) {
         totalImpagos++;
         hadImp = true;
       }
       if (s.alimento.stock < minS) minS = s.alimento.stock;
+
+      // Scan newly emitted events (s.eventos is unshifted)
+      const newCount = Math.max(0, s.eventos.length - prevEvCount);
+      for (let idx = 0; idx < newCount; idx++) {
+        const ev = s.eventos[idx];
+        if (!ev) continue;
+        if ((ev.tipo === 'empresa_recorte' || ev.tipo === 'empresa_despido') && ms.primerRecorteEmpresa === null) {
+          ms.primerRecorteEmpresa = ev.dia;
+        } else if (ev.tipo === 'impago') {
+          if (ms.primerImpago === null) ms.primerImpago = ev.dia;
+          if (ev.alcanzaNomina && ms.primerImpagoNomina === null) ms.primerImpagoNomina = ev.dia;
+        } else if (
+          ev.tipo === 'accion_inicio' &&
+          (ev.accion === 'huelga' || ev.accion === 'protesta' || ev.accion === 'saqueo') &&
+          ms.primerConflicto === null
+        ) {
+          ms.primerConflicto = ev.dia;
+        } else if (ev.tipo === 'demanda' && ms.primeraDemanda === null) {
+          ms.primeraDemanda = ev.dia;
+        } else if (ev.tipo === 'medida' && ms.primeraMedidaActor === null) {
+          ms.primeraMedidaActor = ev.dia;
+        } else if (ev.tipo === 'muerte' && ms.primeraMuerte === null) {
+          ms.primeraMuerte = ev.dia;
+        }
+      }
+      prevEvCount = s.eventos.length;
 
       if (d % PERIOD_DAYS === 0) {
         if (s.gobierno.reserva < -0.01 || s.alimento.stock < -0.01) {
@@ -352,9 +604,15 @@ function runBatch(label: string, opts: BatchOpts) {
         }
       }
 
-      if (s.resultado.estado === 'derrota') break;
+      recordCheckpoint(s.reloj.dia);
+
+      if (s.resultado.estado === 'derrota') {
+        if (ms.derrota === null) ms.derrota = s.reloj.dia;
+        break;
+      }
     }
 
+    milestoneRecords.push(ms);
     totalNominaImpagos += s.eventos.filter((e) => e.tipo === 'impago' && e.alcanzaNomina).length;
     totalEnterpriseResponses += s.eventos.filter(
       (e) => e.tipo === 'empresa_recorte' || e.tipo === 'empresa_despido'
@@ -377,9 +635,28 @@ function runBatch(label: string, opts: BatchOpts) {
     minStock.push(minS);
   }
 
+  const timeline: Record<string, Record<string, number>> = {};
+  for (const [day, rows] of checkpointBuckets.entries()) {
+    if (rows.length === 0) continue;
+    timeline[`d${day}`] = {
+      nAlive: rows.length,
+      popPct: summarize(rows.map((r) => r.poblacionPct)).mean,
+      apoyo: summarize(rows.map((r) => r.apoyoPct)).mean,
+      sat: summarize(rows.map((r) => r.satisfaccion)).mean,
+      hambre: summarize(rows.map((r) => r.hambrePct)).mean,
+      descont: summarize(rows.map((r) => r.descontentosPct)).mean,
+      res: summarize(rows.map((r) => r.reserva)).mean,
+      stockDias: summarize(rows.map((r) => r.diasStock)).mean,
+      precio: summarize(rows.map((r) => r.precio)).mean,
+      integMin: summarize(rows.map((r) => r.integridadMin)).mean,
+    };
+  }
+
   return {
     label,
     scenarioId,
+    nivelMundo: opts.nivelMundo ?? 'M1',
+    nivelGobernador: opts.nivelGobernador ?? 'G2',
     n: opts.n,
     winPct: Number(((wins / opts.n) * 100).toFixed(2)),
     lostObjNoDefeatPct: Number(((lostObjNoDefeat / opts.n) * 100).toFixed(2)),
@@ -406,10 +683,193 @@ function runBatch(label: string, opts: BatchOpts) {
     popPctEnd: summarize(popPctEnd),
     reservaEnd: summarize(reservaEnd),
     minStock: summarize(minStock),
+    milestones: summarizeMilestones(milestoneRecords),
+    timeline,
   };
 }
 
-function runAll10LeversSensitivity(n: number) {
+function runM0AndG1Suites(n: number) {
+  const m0g0Elecciones30d = runBatch('M0_G0_elecciones_30d', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M0',
+    nivelGobernador: 'G0',
+    disableRandomWeather: true,
+    n,
+    chaos: false,
+    maxDays: 30,
+  });
+
+  const m0g0Elecciones90d = runBatch('M0_G0_elecciones_90d', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M0',
+    nivelGobernador: 'G0',
+    disableRandomWeather: true,
+    n,
+    chaos: false,
+    maxDays: 90,
+  });
+
+  const m0g0Zombies30d = runBatch('M0_G0_zombies_30d', {
+    scenarioId: 'zombies',
+    nivelMundo: 'M0',
+    nivelGobernador: 'G0',
+    disableRandomWeather: true,
+    n,
+    chaos: false,
+    maxDays: 30,
+  });
+
+  const m0g1Pasivo = runBatch('M0_G1_pasivo_90d', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M0',
+    nivelGobernador: 'G1',
+    disableRandomWeather: true,
+    n,
+    chaos: false,
+    maxDays: 90,
+  });
+
+  const m0g1Equilibrado = runBatch('M0_G1_1hosp_alivio_90d', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M0',
+    nivelGobernador: 'G1',
+    disableRandomWeather: true,
+    n,
+    chaos: false,
+    maxDays: 90,
+    mutator: (s) => {
+      buildOnFreeParcels(s, ['hospital']);
+      s.gobierno.palancasObjetivo.impuesto = 35;
+      s.gobierno.palancasObjetivo.ayudaSocial = 1.0;
+      s.gobierno.palancasObjetivo.garantiaAlimentaria = 100;
+    },
+  });
+
+  const m0g1Sobreconstruccion = runBatch('M0_G1_sobreconstruccion_90d', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M0',
+    nivelGobernador: 'G1',
+    disableRandomWeather: true,
+    n,
+    chaos: false,
+    maxDays: 90,
+    mutator: (s) => {
+      buildOnFreeParcels(s, ['hospital', 'hospital', 'comisaria', 'comisaria']);
+      s.gobierno.palancasObjetivo.impuesto = 32;
+      s.gobierno.palancasObjetivo.ayudaSocial = 3.0;
+    },
+  });
+
+  return {
+    m0g0Elecciones30d,
+    m0g0Elecciones90d,
+    m0g0Zombies30d,
+    m0g1Pasivo,
+    m0g1Equilibrado,
+    m0g1Sobreconstruccion,
+  };
+}
+
+function runCollapseAndDifficultySuite(n: number) {
+  // 1. Elecciones en M1 real (clima aleatorio + caos, sin sequia inyectada)
+  const elecRealPasivo = runBatch('E_M1_real_pasivo', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: false,
+    n,
+    chaos: true,
+    policy: 'pasivo',
+  });
+
+  const elecRealEstratega = runBatch('E_M1_real_estratega', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: false,
+    n,
+    chaos: true,
+    policy: 'estratega',
+  });
+
+  // 2. Elecciones controlado con sequia calibrada (con aviso previo de 10d)
+  const elecSequiaPasivo = runBatch('E_sequia_pasivo', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+    n,
+    chaos: true,
+    drought: { ...PRESET.droughtPrueba, avisoDias: 10 },
+    policy: 'pasivo',
+  });
+
+  const elecSequiaHeuristico = runBatch('E_sequia_heuristico', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+    n,
+    chaos: true,
+    drought: { ...PRESET.droughtPrueba, avisoDias: 10 },
+    policy: 'heuristico',
+  });
+
+  const elecSequiaEstratega = runBatch('E_sequia_estratega', {
+    scenarioId: 'elecciones',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+    n,
+    chaos: true,
+    drought: { ...PRESET.droughtPrueba, avisoDias: 10 },
+    policy: 'estratega',
+  });
+
+  // 3. Zombies en M1 real: pasivo vs heuristico (solo palancas) vs estratega (comisarias/muralla + demandas)
+  const zombRealPasivo = runBatch('Z_M1_real_pasivo', {
+    scenarioId: 'zombies',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: false,
+    n,
+    chaos: true,
+    policy: 'pasivo',
+  });
+
+  const zombRealSoloPalancas = runBatch('Z_M1_real_solo_palancas', {
+    scenarioId: 'zombies',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: false,
+    n,
+    chaos: true,
+    policy: 'heuristico',
+  });
+
+  const zombRealEstratega = runBatch('Z_M1_real_estratega', {
+    scenarioId: 'zombies',
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: false,
+    n,
+    chaos: true,
+    policy: 'estratega',
+  });
+
+  return {
+    elecRealPasivo,
+    elecRealEstratega,
+    elecSequiaPasivo,
+    elecSequiaHeuristico,
+    elecSequiaEstratega,
+    zombRealPasivo,
+    zombRealSoloPalancas,
+    zombRealEstratega,
+  };
+}
+
+function runAllLeversAndBuildingsSensitivity(n: number) {
   const evalRun = (opts: {
     days: number;
     drought?: { intensidad: number; inicioDia: number; duracionDias: number };
@@ -430,7 +890,11 @@ function runAll10LeversSensitivity(n: number) {
     const foodProf: number[] = [];
 
     for (let seed = 1; seed <= n; seed++) {
-      const s = makeInitState(seed, 'elecciones');
+      const s = makeInitState(seed, 'elecciones', {
+        nivelMundo: 'M1',
+        nivelGobernador: 'G2',
+        disableRandomWeather: true,
+      });
       if (opts.mutator) opts.mutator(s);
       for (let d = 1; d < opts.days; d++) {
         if (opts.drought && s.reloj.dia === opts.drought.inicioDia) {
@@ -508,34 +972,16 @@ function runAll10LeversSensitivity(n: number) {
       metricKeys: ['apoyo', 'reserva'],
     },
     {
-      palanca: '3. servicios.seguridad',
+      palanca: '3. nivel_obras',
       days: 60,
       highLabel: 'nivel 5',
       lowLabel: 'nivel 0',
-      high: (s) => { s.gobierno.palancasObjetivo.servicios.seguridad = 5; },
-      low: (s) => { s.gobierno.palancasObjetivo.servicios.seguridad = 0; },
-      metricKeys: ['seg', 'apoyo', 'reserva'],
-    },
-    {
-      palanca: '4. servicios.salud',
-      days: 60,
-      highLabel: 'nivel 5',
-      lowLabel: 'nivel 0',
-      high: (s) => { s.gobierno.palancasObjetivo.servicios.salud = 5; },
-      low: (s) => { s.gobierno.palancasObjetivo.servicios.salud = 0; },
-      metricKeys: ['sal', 'apoyo', 'reserva'],
-    },
-    {
-      palanca: '5. servicios.obras',
-      days: 60,
-      highLabel: 'nivel 5',
-      lowLabel: 'nivel 0',
-      high: (s) => { s.gobierno.palancasObjetivo.servicios.obras = 5; },
-      low: (s) => { s.gobierno.palancasObjetivo.servicios.obras = 0; },
+      high: (s) => { s.gobierno.palancasObjetivo.nivelObras = 5; },
+      low: (s) => { s.gobierno.palancasObjetivo.nivelObras = 0; },
       metricKeys: ['infra', 'stock', 'reserva'],
     },
     {
-      palanca: '6. ayuda_social',
+      palanca: '4. ayuda_social',
       days: 60,
       highLabel: '4.0 $/día',
       lowLabel: '0.0 $/día',
@@ -544,7 +990,7 @@ function runAll10LeversSensitivity(n: number) {
       metricKeys: ['apoyo', 'reserva'],
     },
     {
-      palanca: '7. garantia_alimentaria (liquidez baja, stock disponible)',
+      palanca: '5. garantia_alimentaria (liquidez baja)',
       days: 90,
       highLabel: '100%',
       lowLabel: '0%',
@@ -561,7 +1007,7 @@ function runAll10LeversSensitivity(n: number) {
       metricKeys: ['hambre', 'apoyo', 'reserva'],
     },
     {
-      palanca: '8. precio_maximo (con sequía)',
+      palanca: '6. precio_maximo (con sequía)',
       days: 120,
       drought: { intensidad: 85, inicioDia: 20, duracionDias: 90 },
       highLabel: 'libre',
@@ -571,7 +1017,7 @@ function runAll10LeversSensitivity(n: number) {
       metricKeys: ['precio', 'stock', 'hambre', 'empResp', 'apoyo'],
     },
     {
-      palanca: '9. comercio_exterior',
+      palanca: '7. comercio_exterior',
       days: 60,
       highLabel: '+100%',
       lowLabel: '-100%',
@@ -580,13 +1026,31 @@ function runAll10LeversSensitivity(n: number) {
       metricKeys: ['stock', 'reserva', 'foodProf', 'precio'],
     },
     {
-      palanca: '10. prensa',
+      palanca: '8. prensa',
       days: 60,
       highLabel: '45 $/per',
       lowLabel: '0 $/per',
       high: (s) => { s.gobierno.palancasObjetivo.prensa = 45; },
       low: (s) => { s.gobierno.palancasObjetivo.prensa = 0; },
       metricKeys: ['medAlc', 'medCred', 'medDep', 'reserva'],
+    },
+    {
+      palanca: '9. obra.comisaria',
+      days: 60,
+      highLabel: '+2 comisarías',
+      lowLabel: 'sin obra',
+      high: (s) => { buildOnFreeParcels(s, ['comisaria', 'comisaria']); },
+      low: () => {},
+      metricKeys: ['seg', 'apoyo', 'reserva'],
+    },
+    {
+      palanca: '10. obra.hospital',
+      days: 60,
+      highLabel: '+2 hospitales',
+      lowLabel: 'sin obra',
+      high: (s) => { buildOnFreeParcels(s, ['hospital', 'hospital']); },
+      low: () => {},
+      metricKeys: ['sal', 'apoyo', 'reserva'],
     },
   ];
 
@@ -612,17 +1076,19 @@ function runAll10LeversSensitivity(n: number) {
 function runNonDominanceSweeps(n: number) {
   const levels: ServiceLevel[] = [0, 1, 2, 3, 4, 5];
 
-  const sweepServiceElecciones = (lever: ServiceLeverId) =>
+  const sweepNivelObrasElecciones = () =>
     levels.map((lvl) => {
-      const b = runBatch(`elecciones_${lever}_${lvl}`, {
+      const b = runBatch(`elecciones_obras_${lvl}`, {
         scenarioId: 'elecciones',
+        nivelMundo: 'M1',
+        nivelGobernador: 'G2',
+        disableRandomWeather: true,
         n,
         chaos: true,
         drought: { intensidad: 75, inicioDia: 140, duracionDias: 70 },
-        heur: false,
         mutator: (s) => {
-          s.gobierno.palancasObjetivo.servicios[lever] = lvl;
-          s.gobierno.palancasVigentes.servicios[lever] = lvl;
+          s.gobierno.palancasObjetivo.nivelObras = lvl;
+          s.gobierno.palancasVigentes.nivelObras = lvl;
         },
       });
       return {
@@ -638,19 +1104,26 @@ function runNonDominanceSweeps(n: number) {
       };
     });
 
-  const sweepZombiesSeguridad = () =>
-    levels.map((lvl) => {
-      const b = runBatch(`zombies_seg_${lvl}`, {
+  const sweepZombiesDefensa = () =>
+    ([
+      { tag: 'base', builds: [] as BuildingType[] },
+      { tag: '1_comisaria', builds: ['comisaria'] as BuildingType[] },
+      { tag: '2_comisarias', builds: ['comisaria', 'comisaria'] as BuildingType[] },
+      { tag: '2_com_1_muralla', builds: ['comisaria', 'comisaria', 'muralla'] as BuildingType[] },
+    ]).map((cfg) => {
+      const b = runBatch(`zombies_${cfg.tag}`, {
         scenarioId: 'zombies',
+        nivelMundo: 'M1',
+        nivelGobernador: 'G2',
+        disableRandomWeather: false,
         n,
         chaos: true,
         mutator: (s) => {
-          s.gobierno.palancasObjetivo.servicios.seguridad = lvl;
-          s.gobierno.palancasVigentes.servicios.seguridad = lvl;
+          buildOnFreeParcels(s, cfg.builds);
         },
       });
       return {
-        nivelSeguridad: lvl,
+        despliegue: cfg.tag,
         winPct: b.winPct,
         lostObjPct: b.lostObjNoDefeatPct,
         defeatPct: b.defeatPct,
@@ -666,6 +1139,9 @@ function runNonDominanceSweeps(n: number) {
     (['libre', 'moderado', 'estricto'] as PriceCapMode[]).map((mode) => {
       const b = runBatch(`precio_${mode}`, {
         scenarioId: 'elecciones',
+        nivelMundo: 'M1',
+        nivelGobernador: 'G2',
+        disableRandomWeather: true,
         n,
         chaos: true,
         drought: { intensidad: 80, inicioDia: 90, duracionDias: 90 },
@@ -690,6 +1166,9 @@ function runNonDominanceSweeps(n: number) {
     ([-100, -50, 0, 50, 100] as ForeignTradeStep[]).map((step) => {
       const b = runBatch(`trade_${step}`, {
         scenarioId: 'elecciones',
+        nivelMundo: 'M1',
+        nivelGobernador: 'G2',
+        disableRandomWeather: true,
         n,
         chaos: false,
         maxDays: 90,
@@ -708,10 +1187,8 @@ function runNonDominanceSweeps(n: number) {
     });
 
   return {
-    eleccionesSeguridad: sweepServiceElecciones('seguridad'),
-    eleccionesSalud: sweepServiceElecciones('salud'),
-    eleccionesObras: sweepServiceElecciones('obras'),
-    zombiesSeguridad: sweepZombiesSeguridad(),
+    eleccionesNivelObras: sweepNivelObrasElecciones(),
+    zombiesDefensa: sweepZombiesDefensa(),
     precioMaximoConSequia: sweepPriceModes(),
     comercioExterior90d: sweepTradeSteps(),
   };
@@ -719,7 +1196,7 @@ function runNonDominanceSweeps(n: number) {
 
 function checkDeterminism(): boolean {
   const runOnce = () => {
-    const s = makeInitState(42, 'elecciones');
+    const s = makeInitState(42, 'elecciones', { nivelMundo: 'M1', nivelGobernador: 'G2' });
     for (let d = 1; d < 90; d++) {
       stepHeadlessDay(s);
       runRandomDirectorDay(s);
@@ -736,8 +1213,163 @@ function checkDeterminism(): boolean {
   return runOnce() === runOnce();
 }
 
+function verifyNewSystems() {
+  const failures: string[] = [];
+  const assert = (cond: boolean, msg: string) => {
+    if (!cond) failures.push(msg);
+  };
+
+  // 1. M0 + G0 isolation check (1 zone, 0 weather, 0 chaos, 0 demands, 30d money conservation)
+  const m0 = makeInitState(5, 'elecciones', { nivelMundo: 'M0', nivelGobernador: 'G0' });
+  for (let d = 1; d < 30; d++) {
+    const prevM = computeTotalWorldMoney(m0);
+    stepHeadlessDay(m0);
+    const curM = computeTotalWorldMoney(m0);
+    assert(
+      Math.abs(curM - (prevM + m0.auditEntradasDia - m0.auditSalidasDia)) <= 0.05,
+      `M0+G0 money mismatch at day ${m0.reloj.dia}`
+    );
+  }
+  assert(m0.clima.fenomenos.length === 0, 'M0 must not spawn climate phenomena');
+  assert(m0.demandasActivas.length === 0, 'G0 must not trigger actor demands');
+  assert(m0.npcs.every((n) => !n.accionIa), 'M0 must not trigger chaos actions');
+
+  // 2. G1 vs G2 building gating + build/demolish lifecycle + hospital patient relocation
+  const g1 = makeInitState(7, 'elecciones', { nivelMundo: 'M0', nivelGobernador: 'G1' });
+  const free1 = g1.parcelas.find((p) => p.estado === 'libre');
+  assert(Boolean(free1), 'Expected free parcela in G1');
+  if (free1) {
+    const blockedSuceso = orderBuildInParcela(g1, free1.id, 'muralla');
+    assert(!blockedSuceso.ok, 'Muralla (suceso) should be blocked in G1');
+    const okHosp = orderBuildInParcela(g1, free1.id, 'hospital');
+    assert(okHosp.ok, 'Hospital should be buildable in G1');
+    for (let i = 0; i < 6; i++) stepHeadlessDay(g1);
+    assert(free1.estado === 'ocupada' && free1.edificio?.activo === true, 'Hospital should finish construction');
+    assert(g1.demandasActivas.length === 0 && g1.hitosCumplidos.length === 0, 'G1 should not activate G2 demands/hitos');
+    const capsAfterBuild = getBuildingJobCaps(
+      g1.parcelas,
+      g1.npcs.filter((n) => n.vivo).length,
+      g1.gobierno.palancasVigentes.nivelObras,
+      g1.config.poblacionInicial,
+      g1.gobierno.cuposFijos
+    );
+    assert(capsAfterBuild.medico >= 8, `Expected >= 8 doctor slots after 2nd hospital, got ${capsAfterBuild.medico}`);
+    const sickNpc = g1.npcs.find((n) => n.vivo && !n.hospital.internado);
+    const removedHospitalId = free1.edificio?.id;
+    if (sickNpc && free1.edificio) {
+      sickNpc.hospital.internado = true;
+      sickNpc.hospital.edificioId = free1.edificio.id;
+      sickNpc.hospital.zonaHospital = free1.zona;
+    }
+    const dem = orderDemolishParcela(g1, free1.id);
+    assert(dem.ok && free1.estado === 'libre' && free1.edificio === null, 'Demolish should free parcela');
+    assert(
+      !sickNpc || sickNpc.hospital.edificioId !== removedHospitalId,
+      'Patient reference should be relocated or discharged on demolish'
+    );
+  }
+
+  // 3. Suceso works in G2: silo, riego, hospital_campana (25-day expiry) + drought aviso detection
+  const g2 = makeInitState(11, 'elecciones', {
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+  });
+  g2.clima.fenomenos.push({
+    id: 'fen_aviso_test',
+    tipo: 'sequia',
+    nombre: 'Sequía anunciada',
+    intensidad: 70,
+    inicioDia: 10,
+    duracionDias: 20,
+    avisoDias: 8,
+  });
+  stepHeadlessDay(g2);
+  stepHeadlessDay(g2);
+  assert(getAnnouncedPhenomena(g2).length >= 1, 'Expected announced drought to appear during aviso window');
+
+  const freeParcels = g2.parcelas.filter((p) => p.estado === 'libre');
+  assert(freeParcels.length >= 4, 'Expected at least 4 free parcels');
+  if (freeParcels.length >= 3) {
+    const pSilo = freeParcels[0];
+    const pRiego = freeParcels[1];
+    const pCamp = freeParcels[2];
+    assert(orderBuildInParcela(g2, pSilo.id, 'silo').ok, 'Silo build order should succeed in G2');
+    assert(orderBuildInParcela(g2, pRiego.id, 'riego').ok, 'Riego build order should succeed in G2');
+    assert(orderBuildInParcela(g2, pCamp.id, 'hospital_campana').ok, 'Hospital campana build should succeed in G2');
+    for (let i = 0; i < 5; i++) stepHeadlessDay(g2);
+    assert(g2.alimento.siloDias > 25, `Expected siloDias > 25 after Silo completes, got ${g2.alimento.siloDias}`);
+    assert(pCamp.estado === 'ocupada' && pCamp.edificio?.tipo === 'hospital_campana', 'Hospital de campana should be active');
+    for (let i = 0; i < 27; i++) stepHeadlessDay(g2);
+    const campDismantled = g2.eventos.some(
+      (e) => e.tipo === 'demolicion' && e.parcelaId === pCamp.id && e.edificio === 'hospital_campana'
+    );
+    assert(
+      campDismantled && pCamp.edificio?.tipo !== 'hospital_campana',
+      'Hospital de campana should auto-dismantle after 25 days'
+    );
+  }
+
+  // 4. Hito unlocking a bloqueada parcela
+  const hState = makeInitState(15, 'elecciones', {
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+  });
+  const lockedBefore = hState.parcelas.filter((p) => p.estado === 'bloqueada').length;
+  for (let i = 0; i < 28; i++) stepHeadlessDay(hState);
+  const lockedAfter = hState.parcelas.filter((p) => p.estado === 'bloqueada').length;
+  assert(
+    hState.hitosCumplidos.length >= 1 && lockedAfter < lockedBefore,
+    `Expected hito to unlock at least 1 parcela (cumplidos=${hState.hitosCumplidos.length}, lockedBefore=${lockedBefore}, lockedAfter=${lockedAfter})`
+  );
+
+  // 5. Actor demand creation + accept (lock) + reject (measure)
+  const dState = makeInitState(21, 'elecciones', {
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+  });
+  dState.gobierno.palancasObjetivo.impuesto = 52;
+  dState.gobierno.palancasVigentes.impuesto = 52;
+  for (let i = 0; i < 3; i++) stepHeadlessDay(dState);
+  const demandGenerated = dState.demandasActivas[0];
+  assert(Boolean(demandGenerated), 'Expected actor demand when tax > 42%');
+  if (demandGenerated) {
+    const resAcc = respondToDemand(dState, demandGenerated.id, true);
+    assert(resAcc.ok, 'Accepting active demand should succeed');
+    assert(
+      dState.bloqueosPalanca.some((b) => b.palanca === demandGenerated.pedido.palanca),
+      'Accepting demand should lock the negotiated lever'
+    );
+  }
+
+  const dReject = makeInitState(22, 'elecciones', {
+    nivelMundo: 'M1',
+    nivelGobernador: 'G2',
+    disableRandomWeather: true,
+  });
+  dReject.gobierno.palancasObjetivo.precioMaximo = 'estricto';
+  dReject.gobierno.palancasVigentes.precioMaximo = 'estricto';
+  dReject.empresas.alimento.factor = 0.85;
+  dReject.gobierno.palancasObjetivo.impuesto = 50;
+  dReject.gobierno.palancasVigentes.impuesto = 50;
+  for (let i = 0; i < 3; i++) stepHeadlessDay(dReject);
+  if (dReject.demandasActivas.length > 0) {
+    const first = dReject.demandasActivas[0];
+    const resRej = respondToDemand(dReject, first.id, false);
+    assert(resRej.ok && dReject.medidasVigentes.length >= 1, 'Rejecting demand should trigger active actor measure');
+  } else {
+    failures.push('Expected demand before testing rejection measure');
+  }
+
+  return { passed: failures.length === 0, failures };
+}
+
 const compactView = (b: ReturnType<typeof runBatch>) => ({
   label: b.label,
+  capa: `${b.nivelMundo}+${b.nivelGobernador}`,
+  n: b.n,
   win: b.winPct,
   lostObj: b.lostObjNoDefeatPct,
   defeat: b.defeatPct,
@@ -754,80 +1386,59 @@ const compactView = (b: ReturnType<typeof runBatch>) => ({
   popEnd: b.popPctEnd.mean,
   resEnd: b.reservaEnd.mean,
   minStock: b.minStock.mean,
+  milestones: b.milestones,
+  timeline: b.timeline,
 });
 
-console.log('=== 0. DETERMINISMO ===');
-console.log(JSON.stringify({ deterministic: checkDeterminism() }));
+function main() {
+  const nMain = CLI.nOverride ?? (CLI.quick ? 2 : 6);
+  const nSens = CLI.nOverride ?? (CLI.quick ? 2 : 5);
+  const nSweep = CLI.nOverride ?? (CLI.quick ? 2 : 4);
+  const runSuite = (target: SuiteName) => CLI.suite === 'all' || CLI.suite === target;
 
-console.log('=== 1. ELECCIONES: BASE SIN PERTURBACION (n=10) ===');
-console.log(JSON.stringify(compactView(runBatch('B_no_perturb', { n: 10, chaos: false, heur: false }))));
+  console.log(
+    JSON.stringify({
+      mode: { suite: CLI.suite, quick: CLI.quick, nMain, nSens, nSweep },
+    })
+  );
 
-console.log('=== 2. ELECCIONES: SEQUIA + CAOS PASIVO vs HEURISTICO vs BALANCEADO (n=10) ===');
-console.log(JSON.stringify(compactView(runBatch('C1_passive_drought', { n: 10, chaos: true, drought: PRESET.droughtPrueba, heur: false }))));
-console.log(JSON.stringify(compactView(runBatch('C2_heuristic_drought', { n: 10, chaos: true, drought: PRESET.droughtPrueba, heur: true }))));
-console.log(
-  JSON.stringify(
-    compactView(
-      runBatch('C3_active_balanced', {
-        n: 10,
-        chaos: true,
-        drought: PRESET.droughtPrueba,
-        dailyMutator: (s) => {
-          if (s.alimento.diasStock < 7) s.gobierno.palancasObjetivo.comercioExterior = 50;
-          else s.gobierno.palancasObjetivo.comercioExterior = 0;
-          if (s.alimento.precioMercado > ECON_CONSTANTS.precioBaseAlimento * 1.45) {
-            s.gobierno.palancasObjetivo.precioMaximo = 'moderado';
-          } else {
-            s.gobierno.palancasObjetivo.precioMaximo = 'libre';
-          }
-          const ds = deriveCommunityStats(s);
-          if (ds.apoyoPct < 52 && s.gobierno.reserva > 2500) {
-            s.gobierno.palancasObjetivo.impuesto = 34;
-            s.gobierno.palancasObjetivo.ayudaSocial = 1.5;
-          } else if (s.gobierno.reserva < 1500) {
-            s.gobierno.palancasObjetivo.impuesto = 42;
-            s.gobierno.palancasObjetivo.ayudaSocial = 0;
-          }
-        },
-      })
-    )
-  )
-);
+  if (runSuite('verify')) {
+    console.log('=== 0. DETERMINISMO Y SISTEMAS ===');
+    const det = checkDeterminism();
+    const sys = verifyNewSystems();
+    console.log(JSON.stringify({ deterministic: det, systems: sys }));
+    if (!det || !sys.passed) {
+      process.exitCode = 1;
+    }
+  }
 
-console.log('=== 3. SENSIBILIDAD DE LAS 10 PALANCAS (n=8) ===');
-console.log(JSON.stringify(runAll10LeversSensitivity(8)));
+  if (runSuite('m0')) {
+    console.log('=== 1. M0 + G0 y M0 + G1 (HOJA_DE_RUTA §2 pasos 1 y 2) ===');
+    const m0Suites = runM0AndG1Suites(nMain);
+    for (const batch of Object.values(m0Suites)) {
+      console.log(JSON.stringify(compactView(batch)));
+      if (batch.invariantViolations > 0) process.exitCode = 1;
+    }
+  }
 
-console.log('=== 4. ZOMBIES: PASIVO vs SEG 3 vs SEG 4 (n=10) ===');
-console.log(JSON.stringify(compactView(runBatch('Z_passive', { scenarioId: 'zombies', n: 10, chaos: true }))));
-console.log(
-  JSON.stringify(
-    compactView(
-      runBatch('Z_seg3', {
-        scenarioId: 'zombies',
-        n: 10,
-        chaos: true,
-        mutator: (s) => {
-          s.gobierno.palancasObjetivo.servicios.seguridad = 3;
-        },
-      })
-    )
-  )
-);
-console.log(
-  JSON.stringify(
-    compactView(
-      runBatch('Z_seg4_tax43', {
-        scenarioId: 'zombies',
-        n: 10,
-        chaos: true,
-        mutator: (s) => {
-          s.gobierno.palancasObjetivo.servicios.seguridad = 4;
-          s.gobierno.palancasObjetivo.impuesto = 43;
-        },
-      })
-    )
-  )
-);
+  if (runSuite('collapse')) {
+    console.log('=== 2. COLAPSO PASIVO, EXIGENCIA TEMPORAL Y ESTRATEGIAS (M1 + G2) ===');
+    const collapseSuites = runCollapseAndDifficultySuite(nMain);
+    for (const batch of Object.values(collapseSuites)) {
+      console.log(JSON.stringify(compactView(batch)));
+      if (batch.invariantViolations > 0) process.exitCode = 1;
+    }
+  }
 
-console.log('=== 5. BARRIDO NO-DOMINANCIA (n=5 por punto) ===');
-console.log(JSON.stringify(runNonDominanceSweeps(5)));
+  if (runSuite('sensitivity')) {
+    console.log('=== 3. SENSIBILIDAD DE PALANCAS Y EDIFICIOS ===');
+    console.log(JSON.stringify(runAllLeversAndBuildingsSensitivity(nSens)));
+  }
+
+  if (runSuite('nondom')) {
+    console.log('=== 4. BARRIDO NO-DOMINANCIA ===');
+    console.log(JSON.stringify(runNonDominanceSweeps(nSweep)));
+  }
+}
+
+main();

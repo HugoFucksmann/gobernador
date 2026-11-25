@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { GameController } from '../engine/gameController';
 import { hasActiveCrisisAlert } from '../engine/policies';
 import {
+  BuildingType,
   DistrictId,
   GovernorComplexityLevel,
   GovernorLevers,
@@ -11,7 +12,7 @@ import {
   WorldConfig,
   ZoneId,
 } from '../types/game';
-import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
+import { CameraTarget, CityTab, LandmarkId, MapFilter, MapLens, WindowId } from '../types/ui';
 
 interface CausalInspectTarget {
   title: string;
@@ -33,6 +34,9 @@ export function useGameSession() {
   const [openWindows, setOpenWindows] = useState<WindowId[]>([]);
   const [ciudadTabRequest, setCiudadTabRequest] = useState<{ tab: CityTab; seq: number } | null>(null);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
+  const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
+  const [selectedLandmark, setSelectedLandmark] = useState<LandmarkId | null>(null);
+  const [sideBuildOpen, setSideBuildOpen] = useState<boolean>(false);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
   const [mapFilter, setMapFilter] = useState<MapFilter>('todos');
   const [mapLens, setMapLens] = useState<MapLens>('ninguna');
@@ -66,6 +70,12 @@ export function useGameSession() {
         } else if (selectedNpcId) {
           setSelectedNpcId(null);
           setFollowSelected(false);
+        } else if (selectedParcelaId) {
+          setSelectedParcelaId(null);
+        } else if (selectedLandmark) {
+          setSelectedLandmark(null);
+        } else if (sideBuildOpen) {
+          setSideBuildOpen(false);
         }
       } else if (e.key === ' ' && hasStarted && !showConfigModal && !causalInspect) {
         const activeEl = document.activeElement as HTMLElement | null;
@@ -78,11 +88,26 @@ export function useGameSession() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [hasStarted, openWindows.length, selectedNpcId, showConfigModal, causalInspect, controller]);
+  }, [
+    hasStarted,
+    openWindows.length,
+    selectedNpcId,
+    selectedParcelaId,
+    selectedLandmark,
+    sideBuildOpen,
+    showConfigModal,
+    causalInspect,
+    controller,
+  ]);
 
   const selectedNpc = useMemo(
     () => snapshot.state.npcs.find((n) => n.id === selectedNpcId && n.vivo) || null,
     [snapshot.state.npcs, selectedNpcId]
+  );
+
+  const selectedParcela = useMemo(
+    () => snapshot.state.parcelas.find((p) => p.id === selectedParcelaId) || null,
+    [snapshot.state.parcelas, selectedParcelaId]
   );
 
   const hasConditionAlert = useMemo(
@@ -91,12 +116,43 @@ export function useGameSession() {
   );
 
   const selectNpc = useCallback((npcId: string) => {
+    setSelectedParcelaId(null);
+    setSelectedLandmark(null);
+    setSideBuildOpen(false);
     setSelectedNpcId(npcId);
   }, []);
 
   const clearSelectedNpc = useCallback(() => {
     setSelectedNpcId(null);
     setFollowSelected(false);
+  }, []);
+
+  const selectParcela = useCallback((parcelaId: string) => {
+    setSelectedNpcId(null);
+    setFollowSelected(false);
+    setSelectedLandmark(null);
+    setSideBuildOpen(false);
+    setSelectedParcelaId(parcelaId);
+  }, []);
+
+  const clearSelectedParcela = useCallback(() => {
+    setSelectedParcelaId(null);
+  }, []);
+
+  const clearSidePanel = useCallback(() => {
+    setSelectedNpcId(null);
+    setFollowSelected(false);
+    setSelectedParcelaId(null);
+    setSelectedLandmark(null);
+    setSideBuildOpen(false);
+  }, []);
+
+  const toggleBuildPanel = useCallback(() => {
+    setSelectedNpcId(null);
+    setFollowSelected(false);
+    setSelectedParcelaId(null);
+    setSelectedLandmark(null);
+    setSideBuildOpen((prev) => !prev);
   }, []);
 
   const selectRoleSample = useCallback(
@@ -133,6 +189,9 @@ export function useGameSession() {
     if (ok) {
       setHasStarted(true);
       setSelectedNpcId(null);
+      setSelectedParcelaId(null);
+      setSelectedLandmark(null);
+      setSideBuildOpen(false);
       setFollowSelected(false);
       setShowConfigModal(false);
       setMilestoneBannerDismissed(true);
@@ -146,6 +205,9 @@ export function useGameSession() {
     if (ok) {
       setHasStarted(true);
       setSelectedNpcId(null);
+      setSelectedParcelaId(null);
+      setSelectedLandmark(null);
+      setSideBuildOpen(false);
       setFollowSelected(false);
       setShowConfigModal(false);
       setMilestoneBannerDismissed(true);
@@ -158,6 +220,21 @@ export function useGameSession() {
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
       controller.updateLevers(updater);
     },
+    [controller]
+  );
+
+  const buildInParcela = useCallback(
+    (parcelaId: string, tipo: BuildingType) => controller.buildInParcela(parcelaId, tipo),
+    [controller]
+  );
+
+  const demolishParcela = useCallback(
+    (parcelaId: string) => controller.demolishParcela(parcelaId),
+    [controller]
+  );
+
+  const respondDemand = useCallback(
+    (demandId: string, accept: boolean) => controller.respondDemand(demandId, accept),
     [controller]
   );
 
@@ -174,6 +251,9 @@ export function useGameSession() {
         return;
       }
       setSelectedNpcId(null);
+      setSelectedParcelaId(null);
+      setSelectedLandmark(null);
+      setSideBuildOpen(false);
       setFollowSelected(false);
       setShowConfigModal(false);
       setOpenWindows([]);
@@ -191,6 +271,9 @@ export function useGameSession() {
   const startNewGame = useCallback(
     (newConfig: WorldConfig) => {
       setSelectedNpcId(null);
+      setSelectedParcelaId(null);
+      setSelectedLandmark(null);
+      setSideBuildOpen(false);
       setFollowSelected(false);
       setShowConfigModal(false);
       setOpenWindows([]);
@@ -240,14 +323,16 @@ export function useGameSession() {
   );
 
   const openLandmarkWindow = useCallback(
-    (winId: WindowId, tabHint?: CityTab) => {
-      openWindow(winId);
-      if (winId === 'ciudad' && tabHint) {
-        uiSeqRef.current += 1;
-        setCiudadTabRequest({ tab: tabHint, seq: uiSeqRef.current });
-      }
+    (winId: WindowId, _tabHint?: CityTab) => {
+      const lm: LandmarkId =
+        winId === 'gaceta' ? 'prensa' : winId === 'economia' ? 'mercado' : 'palacio';
+      setSelectedNpcId(null);
+      setFollowSelected(false);
+      setSelectedParcelaId(null);
+      setSideBuildOpen(false);
+      setSelectedLandmark(lm);
     },
-    [openWindow]
+    []
   );
 
   const requestZoom = useCallback((delta: number) => {
@@ -272,6 +357,9 @@ export function useGameSession() {
   return {
     ...snapshot,
     selectedNpc,
+    selectedParcela,
+    selectedLandmark,
+    sideBuildOpen,
     hasConditionAlert,
 
     // UI/Camera state
@@ -295,6 +383,8 @@ export function useGameSession() {
     focusWindow,
     openCiudadTab,
     openLandmarkWindow,
+    toggleBuildPanel,
+    clearSidePanel,
     setFollowSelected,
     cancelFollow,
     setMapFilter,
@@ -309,6 +399,8 @@ export function useGameSession() {
     beginQuickGame,
     selectNpc,
     clearSelectedNpc,
+    selectParcela,
+    clearSelectedParcela,
     selectRoleSample,
     togglePause,
     setSpeed,
@@ -321,6 +413,9 @@ export function useGameSession() {
     loadManual,
     loadAutoSave,
     updateLevers,
+    buildInParcela,
+    demolishParcela,
+    respondDemand,
     triggerPressManual,
     startNewGame,
     jumpToDistrict,

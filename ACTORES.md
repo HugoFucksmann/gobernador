@@ -7,7 +7,7 @@
 ## 1. Cómo funciona
 
 - **Actor:** tiene un **interés** (lo que quiere), un **recurso** (con qué presiona) y una **amenaza** (lo que hace si no lo atienden).
-- **Demanda:** cuando se cumple su disparador, el actor pide un cambio concreto de palanca, con un **plazo** en días (`dias_respuesta`). El juego no se pausa.
+- **Demanda:** cuando se cumple su disparador, el actor pide un cambio concreto de palanca, con un **plazo** en días (`dias_respuesta_demanda`). El juego no se pausa.
 - **Aceptar:** la palanca pasa al valor pedido y queda bloqueada `dias_compromiso` días. El actor queda conforme: no vuelve a pedir lo mismo por un tiempo.
 - **Rechazar** (o dejar vencer el plazo): el actor aplica su medida (sección 3). Es un hecho más del mundo, con causa en la demanda.
 - **Ritmo:** una demanda activa por actor, como máximo; entre dos demandas del mismo actor pasan al menos `dias_entre_demandas`.

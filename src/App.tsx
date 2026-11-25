@@ -1,12 +1,12 @@
 import { CityWorldCanvas } from './components/CityWorldCanvas';
+import { BottomDock } from './components/hud/BottomDock';
 import { CausalInspectModal } from './components/hud/CausalChainView';
-import { CitizenCard } from './components/hud/CitizenCard';
 import { CityWindow } from './components/hud/CityWindow';
 import { EconomyWindow } from './components/hud/EconomyWindow';
 import { GameHudTop } from './components/hud/GameHudTop';
 import { GazetteWindow } from './components/hud/GazetteWindow';
 import { LeversWindow } from './components/hud/LeversWindow';
-import { RctStatusBar } from './components/hud/RctStatusBar';
+import { SideInspectorPanel } from './components/hud/SideInspectorPanel';
 import { OutcomeBanner } from './components/OutcomeBanner';
 import { StartBriefingModal } from './components/StartBriefingModal';
 import { WorldConfigModal } from './components/WorldConfigModal';
@@ -18,25 +18,27 @@ export default function App() {
     22 + Math.max(0, session.openWindows.indexOf(id));
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#2d4726] text-slate-100">
+    <div className="relative w-screen h-screen overflow-hidden bg-[#2d4726] text-zinc-100">
       {/* 1. Full-Viewport Large Isometric City Stage */}
       <CityWorldCanvas
         state={session.state}
         derived={session.derived}
         paused={session.paused}
         selectedNpcId={session.selectedNpc?.id ?? null}
+        selectedParcelaId={session.selectedParcela?.id ?? null}
         filter={session.mapFilter}
         lens={session.mapLens}
         followSelected={session.followSelected}
         cameraTarget={session.cameraTarget}
         zoomRequest={session.zoomRequest}
         onSelectNpc={session.selectNpc}
+        onSelectParcela={session.selectParcela}
         onOpenSection={session.openLandmarkWindow}
         onCancelFollow={session.cancelFollow}
         onHoverInfoChange={session.setHoverInfo}
       />
 
-      {/* 2. Top Governance Bar */}
+      {/* 2. Floating Top Game HUD */}
       <GameHudTop
         state={session.state}
         derived={session.derived}
@@ -46,30 +48,34 @@ export default function App() {
         aiStatus={session.aiStatus}
         devMode={session.devMode}
         simStepMs={session.simStepMs}
-        openWindows={session.openWindows}
-        hasConditionAlert={session.hasConditionAlert}
         onTogglePause={session.togglePause}
         onSetSpeed={session.setSpeed}
         onStepDay={session.stepDay}
-        onToggleDevMode={() => session.setDevMode(!session.devMode)}
         onSetDevPopulation={session.setDevPopulation}
         onSetDevComplexity={session.setDevComplexity}
         onForceClimate={session.forceClimatePhenomenon}
-        onToggleWindow={session.toggleWindow}
         onOpenObjetivo={() => session.openCiudadTab('bitacora')}
-        onOpenNewGame={() => session.setShowConfigModal(true)}
       />
 
-      {/* 3. Right Citizen Inspector / Quick Pulse & News */}
-      <CitizenCard
+      {/* 3. Unified Lateral Panel (NPC, Parcela, Edificio, Landmark, Construir) */}
+      <SideInspectorPanel
         state={session.state}
         derived={session.derived}
         selectedNpc={session.selectedNpc}
+        selectedParcela={session.selectedParcela}
+        selectedLandmark={session.selectedLandmark}
+        sideBuildOpen={session.sideBuildOpen}
         followSelected={session.followSelected}
+        aiBusy={session.aiBusy}
         onToggleFollow={() => session.setFollowSelected((f) => !f)}
-        onClearSelection={session.clearSelectedNpc}
-        onOpenCommunityDrawer={() => session.openCiudadTab('vecinos')}
-        onOpenGazette={() => session.openWindow('gaceta')}
+        onClosePanel={session.clearSidePanel}
+        onSelectParcela={session.selectParcela}
+        onJumpDistrict={session.jumpToDistrict}
+        onBuildInParcela={session.buildInParcela}
+        onDemolishParcela={session.demolishParcela}
+        onRespondDemand={session.respondDemand}
+        onOpenWindow={session.openWindow}
+        onTriggerPress={session.triggerPressManual}
         onInspectCausal={(title, ref, fallbackText) =>
           session.openCausalInspect({ title, ref, fallbackText })
         }
@@ -84,6 +90,7 @@ export default function App() {
           onFocus={() => session.focusWindow('palancas')}
           onClose={() => session.closeWindow('palancas')}
           onUpdateLevers={session.updateLevers}
+          onOpenBuildPanel={session.toggleBuildPanel}
         />
       )}
 
@@ -112,6 +119,10 @@ export default function App() {
           onJumpDistrict={session.jumpToDistrict}
           onSelectRoleSample={session.selectRoleSample}
           onSelectNpc={session.selectNpc}
+          onSelectParcela={session.selectParcela}
+          onBuildInParcela={session.buildInParcela}
+          onDemolishParcela={session.demolishParcela}
+          onRespondDemand={session.respondDemand}
           onInspectCausal={(title, ref, fallbackText) =>
             session.openCausalInspect({ title, ref, fallbackText })
           }
@@ -133,17 +144,23 @@ export default function App() {
         />
       )}
 
-      {/* 5. Bottom Status & Map Controls Bar */}
-      <RctStatusBar
+      {/* 5. Centralized 4-Button Bottom Dock */}
+      <BottomDock
         state={session.state}
-        hoverInfo={session.hoverInfo}
+        sideBuildOpen={session.sideBuildOpen}
+        openWindows={session.openWindows}
         mapLens={session.mapLens}
         mapFilter={session.mapFilter}
+        devMode={session.devMode}
+        hasConditionAlert={session.hasConditionAlert}
+        onToggleBuild={session.toggleBuildPanel}
+        onToggleWindow={session.toggleWindow}
         onChangeLens={session.setMapLens}
         onChangeFilter={session.setMapFilter}
         onJumpDistrict={session.jumpToDistrict}
         onZoom={session.requestZoom}
-        onOpenPress={() => session.openWindow('gaceta')}
+        onOpenNewGame={() => session.setShowConfigModal(true)}
+        onToggleDevMode={() => session.setDevMode(!session.devMode)}
       />
 
       {/* Initial Scenario Briefing before Day 1 starts */}

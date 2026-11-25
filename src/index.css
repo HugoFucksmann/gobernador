@@ -9,8 +9,9 @@
 @layer base {
   body {
     font-family: var(--font-sans);
-    background-color: #020617;
-    color: #f1f5f9;
+    background-color: #14171a;
+    color: #f4f4f5;
+    font-size: 14px;
   }
 
   .font-display {
@@ -27,7 +28,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom subtle range slider styling */
+/* Custom game-neutral range slider with green accent */
 input[type="range"] {
-  accent-color: #14b8a6;
+  accent-color: #10b981;
 }

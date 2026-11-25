@@ -3,20 +3,18 @@ import {
   AlertTriangle,
   CheckCircle2,
   CloudRain,
-  Compass,
-  Newspaper,
+  Coins,
   Pause,
   Play,
-  Settings2,
   Skull,
-  SlidersHorizontal,
   StepForward,
   TrendingUp,
-  Wrench,
+  Users,
+  Wheat,
 } from 'lucide-react';
-import { ECON_CONSTANTS, SCENARIO_PRESETS } from '../../data/catalogs';
+import { ECON_CONSTANTS, PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
 import { sumPeriodExpenses } from '../../engine/policies';
-import { getActivePhenomena } from '../../engine/simulation';
+import { getActivePhenomena, getAnnouncedPhenomena } from '../../engine/simulation';
 import {
   CommunityDerived,
   GameState,
@@ -25,7 +23,8 @@ import {
   WorldComplexityLevel,
   ZoneId,
 } from '../../types/game';
-import { AiStatus, WindowId } from '../../types/ui';
+import { AiStatus } from '../../types/ui';
+import { UiTooltip } from './UiTooltip';
 
 interface GameHudTopProps {
   state: GameState;
@@ -36,44 +35,13 @@ interface GameHudTopProps {
   aiStatus: AiStatus;
   devMode: boolean;
   simStepMs: number;
-  openWindows: WindowId[];
-  hasConditionAlert?: boolean;
   onTogglePause: () => void;
   onSetSpeed: (speed: number) => void;
   onStepDay: () => void;
-  onToggleDevMode: () => void;
   onSetDevPopulation: (pop: number) => void;
   onSetDevComplexity: (nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel) => void;
   onForceClimate: (tipo: PhenomenonType, zona: ZoneId) => void;
-  onToggleWindow: (win: WindowId) => void;
   onOpenObjetivo: () => void;
-  onOpenNewGame: () => void;
-}
-
-const TOOL_BUTTONS: Array<{
-  id: WindowId;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent: string;
-}> = [
-  { id: 'palancas', label: 'Palancas', icon: SlidersHorizontal, accent: 'text-teal-300' },
-  { id: 'economia', label: 'Economía', icon: TrendingUp, accent: 'text-amber-300' },
-  { id: 'ciudad', label: 'Ciudad', icon: Compass, accent: 'text-sky-300' },
-  { id: 'gaceta', label: 'Gaceta', icon: Newspaper, accent: 'text-slate-300' },
-];
-
-function formatTrend(current: number, previous: number, higherIsBetter: boolean): {
-  arrow: string;
-  tone: string;
-} {
-  const diff = current - previous;
-  if (Math.abs(diff) < 0.8) return { arrow: '→', tone: 'text-slate-400' };
-  const up = diff > 0;
-  const good = higherIsBetter ? up : !up;
-  return {
-    arrow: up ? '↑' : '↓',
-    tone: good ? 'text-emerald-400' : 'text-rose-400',
-  };
 }
 
 export const GameHudTop: React.FC<GameHudTopProps> = ({
@@ -85,18 +53,13 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   aiStatus,
   devMode,
   simStepMs,
-  openWindows,
-  hasConditionAlert,
   onTogglePause,
   onSetSpeed,
   onStepDay,
-  onToggleDevMode,
   onSetDevPopulation,
   onSetDevComplexity,
   onForceClimate,
-  onToggleWindow,
   onOpenObjetivo,
-  onOpenNewGame,
 }) => {
   const [devFenom, setDevFenom] = useState<PhenomenonType>('sequia');
   const [devZona, setDevZona] = useState<ZoneId>('este');
@@ -141,30 +104,14 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       : preset.victoria.metrica === 'poblacionPct'
       ? derived.poblacionPct
       : derived.poblacion;
-  const vicPrev =
-    preset.victoria.metrica === 'apoyoPct'
-      ? state.metricasPeriodoAnterior.apoyoPct
-      : preset.victoria.metrica === 'poblacionPct'
-      ? Number(((state.metricasPeriodoAnterior.poblacion / basePop) * 100).toFixed(1))
-      : state.metricasPeriodoAnterior.poblacion;
-  const vicTrend = formatTrend(vicCurrent, vicPrev, true);
   const objectiveHealthy = vicCurrent >= preset.victoria.umbral;
 
-  const defIsPct =
-    preset.derrota.metrica === 'hambreCriticaPct' || preset.derrota.metrica === 'poblacionPct';
   const defCurrent =
     preset.derrota.metrica === 'hambreCriticaPct'
       ? derived.hambreCriticaPct
       : preset.derrota.metrica === 'poblacionPct'
       ? derived.poblacionPct
       : derived.poblacion;
-  const defPrev =
-    preset.derrota.metrica === 'hambreCriticaPct'
-      ? state.metricasPeriodoAnterior.hambreCriticaPct
-      : preset.derrota.metrica === 'poblacionPct'
-      ? Number(((state.metricasPeriodoAnterior.poblacion / basePop) * 100).toFixed(1))
-      : state.metricasPeriodoAnterior.poblacion;
-  const defTrend = formatTrend(defCurrent, defPrev, preset.derrota.op === '<');
   const defInit = state.metricasBaseObjetivo?.derrotaInicial ?? defCurrent;
   const defLimit = preset.derrota.umbral;
   const defProgress =
@@ -177,6 +124,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   const fin = state.gobierno.finanzas;
   const lastGastos = sumPeriodExpenses(fin);
   const activeFen = getActivePhenomena(state)[0];
+  const announcedFen = getAnnouncedPhenomena(state)[0];
   const normalSpeeds = devMode ? [1, 2, 4, 8] : [1, 2];
   const worldLevel: WorldComplexityLevel =
     state.config.nivelMundo ?? (state.config.economiaModulo === 'fiscal' ? 'M2' : 'M1');
@@ -187,370 +135,325 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
     aiStatus === 'activa' ? 'IA activa' : aiStatus === 'lenta' ? 'IA lenta' : 'IA plantillas';
   const aiTone =
     aiStatus === 'activa'
-      ? 'text-teal-300'
+      ? 'text-emerald-400'
       : aiStatus === 'lenta'
       ? 'text-amber-300'
-      : 'text-slate-400';
+      : 'text-zinc-400';
+
+  const daysToClose = Math.max(0, PERIOD_DAYS - state.reloj.diasEnPeriodo);
+  const reserveColor =
+    state.gobierno.reserva < 100 || fin.impago
+      ? 'text-rose-400'
+      : estDiario < 0
+      ? 'text-amber-300'
+      : 'text-zinc-100';
+  const foodColor =
+    state.alimento.diasStock < 5
+      ? 'text-rose-400'
+      : state.alimento.diasStock < 10
+      ? 'text-amber-300'
+      : 'text-zinc-100';
+  const popColor =
+    derived.poblacionPct < 75
+      ? 'text-rose-400'
+      : derived.hambreCriticaPct > 20 || derived.descontentosPct > 30
+      ? 'text-amber-300'
+      : 'text-zinc-100';
 
   return (
-    <header className="pointer-events-auto fixed top-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-700/80 shadow-lg">
-      <div className="px-3 py-1.5 flex items-center justify-between gap-2.5">
-        {/* Left: Brand + Goal + Playback */}
-        <div className="flex items-center gap-2 shrink-0 min-w-0">
-          <div className="flex items-center gap-2 pr-2 border-r border-slate-700/80">
-            <span className="font-display text-sm sm:text-base font-bold tracking-tight text-white whitespace-nowrap hidden sm:inline">
-              El Gobernador
-            </span>
-            {state.esConfigDePrueba && (
-              <span
-                title="Partida iniciada con parámetros fuera del estándar (CALIBRACION / UI §15)"
-                className="hidden md:inline px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-500/50 text-[10px] font-medium text-amber-200 whitespace-nowrap"
-              >
-                Config. prueba
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onOpenObjetivo}
-              title={`Meta (día ${plazo}): ${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion}`}
-              className="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-800/90 hover:bg-slate-800 border border-slate-700 text-[11px] font-mono tabular-nums transition-colors whitespace-nowrap"
-            >
-              {victoryCumplida || (!objetivoPerdido && objectiveHealthy) ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertTriangle
-                  className={`w-3.5 h-3.5 shrink-0 ${
-                    objetivoPerdido ? 'text-rose-400' : 'text-amber-400'
-                  }`}
-                />
-              )}
-              <span className="font-sans text-slate-400 hidden md:inline">Meta</span>
-              <span
-                className={
-                  objetivoPerdido
-                    ? 'text-rose-300 font-semibold'
-                    : objectiveHealthy || victoryCumplida
-                    ? 'text-emerald-400 font-semibold'
-                    : 'text-amber-300 font-semibold'
-                }
-              >
-                {vicIsPct ? `${vicCurrent}%` : vicCurrent}
-              </span>
-              <span className="text-slate-500">
-                /{preset.victoria.umbral}
-                {vicIsPct ? '%' : ''}
-              </span>
-              <span className={vicTrend.tone}>{vicTrend.arrow}</span>
-              <span className="text-slate-600">·</span>
-              {victoryCumplida ? (
-                <span className="text-emerald-300 font-sans font-semibold">Cumplida</span>
-              ) : objetivoPerdido ? (
-                <span className="text-rose-300 font-sans font-semibold">Perdido</span>
-              ) : (
-                <span className="text-slate-300">{daysLeft}d</span>
-              )}
-              <span className="text-slate-600 hidden sm:inline">·</span>
-              <span
-                className={`hidden sm:inline ${
-                  defeatDanger ? 'text-rose-400 font-semibold' : 'text-slate-300'
+    <header className="pointer-events-none fixed top-3 inset-x-4 z-30 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Left HUD Capsule: Day, Speed & Goal */}
+        <div className="pointer-events-auto flex items-center gap-3 bg-zinc-900/90 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-3.5 py-2 shadow-2xl">
+          <UiTooltip
+            text={`Día ${state.reloj.dia} de ${plazo} · Cierre fiscal en ${daysToClose}d (períodos de ${PERIOD_DAYS}d)`}
+          >
+            <div className="font-mono text-sm font-bold text-zinc-100 tabular-nums whitespace-nowrap px-1">
+              Día {state.reloj.dia}
+            </div>
+          </UiTooltip>
+
+          <div className="flex items-center gap-1 bg-zinc-800/90 border border-zinc-700/70 rounded-xl p-1">
+            <UiTooltip text={paused ? 'Reanudar (Espacio)' : 'Pausar (Espacio)'}>
+              <button
+                type="button"
+                onClick={onTogglePause}
+                disabled={state.resultado.estado !== 'jugando'}
+                aria-label={paused ? 'Reanudar' : 'Pausar'}
+                className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                  paused
+                    ? 'bg-amber-500 text-zinc-950 hover:bg-amber-400'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-500'
                 }`}
               >
-                <span className="font-sans text-slate-400 mr-1">
-                  {preset.derrota.metrica === 'hambreCriticaPct' ? 'Hamb' : 'Pob'}
-                </span>
-                {defIsPct ? `${defCurrent}%` : defCurrent}
-                <span className="text-slate-500">
-                  /{defLimit}
-                  {defIsPct ? '%' : ''}
-                </span>{' '}
-                <span className={defTrend.tone}>{defTrend.arrow}</span>
-              </span>
-            </button>
-          </div>
+                {paused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4" />}
+              </button>
+            </UiTooltip>
 
-          <div className="flex items-center gap-0.5 bg-slate-800/90 border border-slate-700/80 rounded p-0.5">
-            <button
-              type="button"
-              onClick={onTogglePause}
-              disabled={state.resultado.estado !== 'jugando'}
-              title={paused ? 'Reanudar (Espacio)' : 'Pausar (Espacio)'}
-              className={`flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-sm transition-colors whitespace-nowrap ${
-                paused
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-slate-700 hover:bg-slate-600 text-white'
-              }`}
-            >
-              {paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-              <span className="hidden lg:inline">{paused ? 'Pausa' : 'Activo'}</span>
-            </button>
             {normalSpeeds.map((spd) => (
               <button
                 key={spd}
                 type="button"
                 onClick={() => onSetSpeed(spd)}
-                className={`px-1.5 py-1 text-[11px] font-mono font-semibold rounded-sm transition-colors whitespace-nowrap ${
+                className={`px-2.5 h-8 text-xs font-mono font-semibold rounded-lg transition-colors whitespace-nowrap ${
                   speed === spd && !paused
-                    ? 'bg-teal-700 text-white'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-700/70'
+                    ? 'bg-zinc-700 text-white'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-700/60'
                 }`}
               >
                 {spd}×
               </button>
             ))}
+
+            <UiTooltip text="Avanzar 1 día">
+              <button
+                type="button"
+                onClick={onStepDay}
+                disabled={state.resultado.estado !== 'jugando'}
+                aria-label="Avanzar 1 día"
+                className="flex items-center gap-0.5 px-2.5 h-8 text-xs font-mono font-semibold text-zinc-300 hover:text-white hover:bg-zinc-700/60 rounded-lg whitespace-nowrap"
+              >
+                <StepForward className="w-3.5 h-3.5" />
+                +1d
+              </button>
+            </UiTooltip>
+          </div>
+
+          <div className="h-5 w-px bg-zinc-700/70" aria-hidden="true" />
+
+          <UiTooltip
+            text={`${preset.victoria.descripcion} · Riesgo derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
+          >
             <button
               type="button"
-              onClick={onStepDay}
-              disabled={state.resultado.estado !== 'jugando'}
-              title="Avanzar 1 día"
-              className="flex items-center gap-0.5 px-1.5 py-1 text-[11px] font-mono text-slate-300 hover:text-white hover:bg-slate-700/70 rounded-sm whitespace-nowrap"
+              onClick={onOpenObjetivo}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-zinc-800/90 transition-colors text-sm font-mono tabular-nums whitespace-nowrap"
             >
-              <StepForward className="w-3 h-3" />
-              +1d
+              {victoryCumplida || (!objetivoPerdido && objectiveHealthy && !defeatDanger) ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertTriangle
+                  className={`w-4 h-4 shrink-0 ${
+                    objetivoPerdido || defeatDanger ? 'text-rose-400' : 'text-amber-400'
+                  }`}
+                />
+              )}
+              <span
+                className={
+                  objetivoPerdido
+                    ? 'text-rose-400 font-bold'
+                    : objectiveHealthy || victoryCumplida
+                    ? 'text-emerald-400 font-bold'
+                    : 'text-amber-300 font-bold'
+                }
+              >
+                {vicIsPct ? `${vicCurrent}%` : vicCurrent}
+              </span>
+              <span className="text-zinc-500 text-xs">
+                /{preset.victoria.umbral}
+                {vicIsPct ? '%' : ''}
+              </span>
+              <span className="text-zinc-600">·</span>
+              <span className="text-zinc-300 text-xs">
+                {victoryCumplida ? 'OK' : objetivoPerdido ? 'Fin' : `${daysLeft}d`}
+              </span>
             </button>
-          </div>
+          </UiTooltip>
+
+          {(activeFen || announcedFen) && (
+            <>
+              <div className="h-5 w-px bg-zinc-700/70 hidden sm:block" aria-hidden="true" />
+              <UiTooltip
+                text={
+                  activeFen
+                    ? `Fenómeno activo: ${activeFen.nombre}${activeFen.origen ? ` en zona ${activeFen.origen}` : ''} (${Math.round(activeFen.intensidad)}%)`
+                    : `Aviso climático: ${announcedFen!.nombre} llega en ${Math.max(1, announcedFen!.inicioDia - state.reloj.dia)}d${announcedFen!.origen ? ` (zona ${announcedFen!.origen})` : ''}`
+                }
+              >
+                <button
+                  type="button"
+                  onClick={onOpenObjetivo}
+                  className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                    activeFen?.tipo === 'plaga_zombie' || activeFen?.tipo === 'pandemia'
+                      ? 'bg-rose-950/80 text-rose-300 border border-rose-500/40'
+                      : 'bg-amber-950/70 text-amber-300 border border-amber-500/40'
+                  }`}
+                >
+                  {(activeFen?.tipo ?? announcedFen?.tipo) === 'plaga_zombie' ? (
+                    <Skull className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <CloudRain className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>
+                    {activeFen
+                      ? activeFen.nombre
+                      : `${announcedFen!.nombre} ${Math.max(1, announcedFen!.inicioDia - state.reloj.dia)}d`}
+                  </span>
+                </button>
+              </UiTooltip>
+            </>
+          )}
         </div>
 
-        {/* Center: 4 Clean Windows */}
-        <nav aria-label="Ventanas principales" className="flex items-center gap-1.5 shrink-0">
-          {TOOL_BUTTONS.map((btn) => {
-            const Icon = btn.icon;
-            const active = openWindows.includes(btn.id);
-            const showAlertDot = btn.id === 'ciudad' && hasConditionAlert;
-            return (
-              <button
-                key={btn.id}
-                type="button"
-                onClick={() => onToggleWindow(btn.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded border transition-colors whitespace-nowrap shrink-0 ${
-                  active
-                    ? 'bg-teal-700 border-teal-400/60 text-white shadow-sm'
-                    : showAlertDot
-                    ? 'bg-rose-900/70 hover:bg-rose-800 border-rose-500/70 text-white'
-                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-100'
-                }`}
-              >
-                <Icon className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-white' : btn.accent}`} />
-                <span>{btn.label}</span>
-                {showAlertDot && <span className="text-[10px] font-mono text-rose-200">!</span>}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Right: Vital Readouts + Phenomenon Alert + Dev + Partida */}
-        <div className="flex items-center gap-2 shrink-0 text-xs">
-          <div className="hidden sm:flex items-center gap-2.5 font-mono tabular-nums bg-slate-800/80 border border-slate-700/80 rounded px-2.5 py-1">
-            <div
-              title={`Reserva $${Math.round(state.gobierno.reserva)} · Flujo est. ${estDiario >= 0 ? '+' : ''}$${estDiario.toFixed(0)}/d · Último cierre: Ing $${fin.ingresos.toFixed(0)} / Gas $${lastGastos.toFixed(0)} / Saldo ${fin.saldo >= 0 ? '+' : ''}$${fin.saldo.toFixed(0)}`}
-            >
-              <span className="font-sans text-slate-400 mr-1">Caja</span>
-              <span
-                className={
-                  state.gobierno.reserva < 100
-                    ? 'text-rose-400 font-semibold'
-                    : 'text-white font-semibold'
-                }
-              >
-                ${Math.round(state.gobierno.reserva)}
-              </span>
-              <span className={`ml-1 text-[11px] ${estDiario < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                ({estDiario >= 0 ? '+' : ''}
-                {estDiario.toFixed(0)}/d)
+        {/* Right HUD Capsule: Essential Resources Only */}
+        <div className="pointer-events-auto hidden sm:flex items-center gap-5 bg-zinc-900/90 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-4 py-2.5 shadow-2xl font-mono tabular-nums text-sm">
+          <UiTooltip
+            text={`Reserva: $${Math.round(state.gobierno.reserva)} · Flujo est.: ${estDiario >= 0 ? '+' : ''}$${estDiario.toFixed(0)}/d · Último cierre: +$${fin.ingresos.toFixed(0)} / -$${lastGastos.toFixed(0)}${fin.impago ? ' (IMPAGO ACTIVO)' : ''}`}
+          >
+            <div className="flex items-center gap-2 cursor-default whitespace-nowrap">
+              <Coins className={`w-4 h-4 shrink-0 ${reserveColor}`} />
+              <span className={`font-bold ${reserveColor}`}>${Math.round(state.gobierno.reserva)}</span>
+              <span className={`text-xs ${estDiario < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {estDiario >= 0 ? '+' : ''}
+                {estDiario.toFixed(0)}/d
               </span>
             </div>
+          </UiTooltip>
 
-            <div className="hidden 2xl:block text-[11px]" title="Ingresos y gastos del último cierre fiscal">
-              <span className="text-emerald-400">+${fin.ingresos.toFixed(0)}</span>
-              <span className="text-slate-500">/</span>
-              <span className="text-slate-300">-${lastGastos.toFixed(0)}</span>
-              {fin.saldo < 0 && (
-                <span className="text-rose-400 font-semibold ml-1">Saldo -${Math.abs(fin.saldo).toFixed(0)}</span>
-              )}
+          <UiTooltip
+            text={`Alimento: ${Math.round(state.alimento.stock)} u. (${state.alimento.diasStock.toFixed(0)} días) · Cosecha +${state.alimento.produccionDiaria}/d · Consumo -${state.alimento.consumoDiario}/d · Precio $${state.alimento.precio.toFixed(2)}`}
+          >
+            <div className="flex items-center gap-2 cursor-default whitespace-nowrap">
+              <Wheat className={`w-4 h-4 shrink-0 ${foodColor}`} />
+              <span className={`font-bold ${foodColor}`}>{state.alimento.diasStock.toFixed(0)}d</span>
             </div>
+          </UiTooltip>
 
-            <div title="Días de alimento en almacén">
-              <span className="font-sans text-slate-400 mr-1">Comida</span>
-              <span
-                className={
-                  state.alimento.diasStock < 5
-                    ? 'text-rose-400 font-semibold'
-                    : 'text-white font-semibold'
-                }
-              >
-                {state.alimento.diasStock.toFixed(0)}d
-              </span>
+          <UiTooltip
+            text={`Población: ${derived.poblacion}/${basePop} (${derived.poblacionPct}%) · Ánimo ${derived.satisfaccionMedia}% · Apoyo ${derived.apoyoPct}% · Hambre crítica ${derived.hambreCriticaPct}%`}
+          >
+            <div className="flex items-center gap-2 cursor-default whitespace-nowrap">
+              <Users className={`w-4 h-4 shrink-0 ${popColor}`} />
+              <span className={`font-bold ${popColor}`}>{derived.poblacion}</span>
             </div>
+          </UiTooltip>
 
-            <div className="hidden lg:block" title="Población viva">
-              <span className="font-sans text-slate-400 mr-1">Hab.</span>
-              <span className="text-white font-semibold">{derived.poblacion}</span>
-            </div>
-
-            {state.config.economiaModulo === 'fiscal' && (
-              <div className="hidden xl:block">
-                <span className="font-sans text-slate-400 mr-1">Infl.</span>
+          {state.config.economiaModulo === 'fiscal' && (
+            <UiTooltip text={`Inflación acumulada: ${state.gobierno.inflacion.toFixed(1)}%`}>
+              <div className="hidden md:flex items-center gap-1.5 cursor-default whitespace-nowrap">
+                <TrendingUp
+                  className={`w-4 h-4 shrink-0 ${
+                    state.gobierno.inflacion > 25 ? 'text-amber-400' : 'text-zinc-300'
+                  }`}
+                />
                 <span
-                  className={
-                    state.gobierno.inflacion > 25
-                      ? 'text-amber-400 font-semibold'
-                      : 'text-white font-semibold'
-                  }
+                  className={`font-bold ${
+                    state.gobierno.inflacion > 25 ? 'text-amber-300' : 'text-zinc-100'
+                  }`}
                 >
                   {state.gobierno.inflacion.toFixed(0)}%
                 </span>
               </div>
-            )}
+            </UiTooltip>
+          )}
 
-            {activeFen && (
-              <button
-                type="button"
-                onClick={() => onToggleWindow('ciudad')}
-                title="Ver fenómeno activo y zonas"
-                className="hidden xl:flex items-center gap-1 font-sans text-[11px] font-semibold text-rose-300 hover:text-white"
-              >
-                {activeFen.tipo === 'plaga_zombie' ? (
-                  <Skull className="w-3 h-3 text-rose-400" />
-                ) : (
-                  <CloudRain className="w-3 h-3 text-amber-400" />
-                )}
-                <span>
-                  {activeFen.nombre}
-                  {activeFen.origen ? ` (${activeFen.origen})` : ''}
-                </span>
-              </button>
-            )}
-
-            {state.config.usarIaGemini && (
-              <span
-                title={
-                  aiBusy
-                    ? 'IA procesando consulta en segundo plano'
-                    : aiStatus === 'plantilla'
-                    ? 'IA sin respuesta: decide el motor y se usan plantillas'
-                    : `Estado de IA opcional: ${aiLabel}`
-                }
-                className={`hidden 2xl:inline font-sans text-[11px] font-medium ${aiTone}`}
-              >
-                {aiBusy ? `${aiLabel}…` : aiLabel}
+          {state.config.usarIaGemini && (
+            <UiTooltip
+              text={
+                aiBusy
+                  ? 'IA generando en segundo plano'
+                  : aiStatus === 'plantilla'
+                  ? 'IA sin respuesta: usa plantillas'
+                  : `Estado: ${aiLabel}`
+              }
+            >
+              <span className={`hidden lg:inline font-sans text-xs font-semibold ${aiTone}`}>
+                {aiBusy ? 'IA…' : 'IA'}
               </span>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={onToggleDevMode}
-            title="Modo desarrollador"
-            className={`p-1.5 rounded border transition-colors ${
-              devMode
-                ? 'bg-amber-700 border-amber-400 text-white'
-                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Wrench className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenNewGame}
-            title="Partida, guardado y escenario"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded whitespace-nowrap shrink-0"
-          >
-            <Settings2 className="w-3.5 h-3.5 text-teal-300" />
-            <span className="hidden md:inline">Partida</span>
-          </button>
+            </UiTooltip>
+          )}
         </div>
       </div>
 
-      {/* Opt-in Developer Mode Strip */}
+      {/* Opt-in Developer Mode Floating Bar */}
       {devMode && (
-        <div className="px-3 py-1 bg-slate-950/95 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-          <div className="flex items-center gap-3 font-mono tabular-nums text-slate-300">
-            <span className="text-amber-300 font-sans font-semibold">Modo Desarrollador</span>
-            <span>FPS: {fps}</span>
-            <span>Sim step: {simStepMs.toFixed(2)} ms</span>
-            <span>Tick: {state.reloj.tick}</span>
+        <div className="pointer-events-auto self-start bg-zinc-950/92 backdrop-blur-md border border-amber-500/40 rounded-2xl px-4 py-2.5 flex flex-wrap items-center gap-4 text-xs shadow-2xl">
+          <div className="flex items-center gap-3 font-mono tabular-nums text-zinc-300">
+            <span className="text-amber-300 font-sans font-bold">Dev</span>
+            <span>{fps} FPS</span>
+            <span>{simStepMs.toFixed(2)} ms</span>
+            <span>T{state.reloj.tick}</span>
             <span>
-              Hosp: {derived.hospitalOcupacionPct}% ({derived.internados}/{derived.camasHospital})
+              Hosp {derived.internados}/{derived.camasHospital}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">NPCs:</span>
-              <input
-                type="number"
-                min={20}
-                max={1000}
-                step={10}
-                value={devPopInput}
-                onChange={(e) => setDevPopInput(Math.min(1000, Math.max(20, Number(e.target.value) || 20)))}
-                className="w-16 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-right font-mono text-slate-100"
-              />
-              <button
-                type="button"
-                onClick={() => onSetDevPopulation(devPopInput)}
-                className="px-2 py-0.5 font-semibold bg-teal-700 hover:bg-teal-600 text-white rounded"
-              >
-                Aplicar
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">Nivel:</span>
-              <select
-                aria-label="Nivel de mundo dev"
-                value={worldLevel}
-                onChange={(e) => onSetDevComplexity(e.target.value as WorldComplexityLevel, govLevel)}
-                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 font-mono"
-              >
-                <option value="M0">M0</option>
-                <option value="M1">M1</option>
-                <option value="M2">M2</option>
-              </select>
-              <select
-                aria-label="Nivel de gobernador dev"
-                value={govLevel}
-                onChange={(e) => onSetDevComplexity(worldLevel, e.target.value as GovernorComplexityLevel)}
-                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 font-mono"
-              >
-                <option value="G0">G0</option>
-                <option value="G1">G1</option>
-                <option value="G2">G2</option>
-                <option value="G3">G3</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">Forzar evento:</span>
-              <select
-                value={devFenom}
-                disabled={worldLevel === 'M0'}
-                onChange={(e) => setDevFenom(e.target.value as PhenomenonType)}
-                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 disabled:opacity-40"
-              >
-                <option value="sequia">Sequía</option>
-                <option value="plaga">Plaga agrícola</option>
-                <option value="pandemia">Pandemia</option>
-                <option value="plaga_zombie">Plaga zombie</option>
-              </select>
-              <select
-                value={devZona}
-                disabled={worldLevel === 'M0'}
-                onChange={(e) => setDevZona(e.target.value as ZoneId)}
-                className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 disabled:opacity-40"
-              >
-                <option value="centro">centro</option>
-                <option value="norte">norte</option>
-                <option value="este">este</option>
-                <option value="sur">sur</option>
-                <option value="oeste">oeste</option>
-              </select>
-              <button
-                type="button"
-                disabled={worldLevel === 'M0'}
-                onClick={() => onForceClimate(devFenom, devZona)}
-                className="px-2 py-0.5 font-semibold bg-amber-700 hover:bg-amber-600 text-white rounded disabled:opacity-40"
-              >
-                Lanzar
-              </button>
-            </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-zinc-400">NPCs</span>
+            <input
+              type="number"
+              min={20}
+              max={1000}
+              step={10}
+              value={devPopInput}
+              onChange={(e) => setDevPopInput(Math.min(1000, Math.max(20, Number(e.target.value) || 20)))}
+              className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-right font-mono text-zinc-100"
+            />
+            <button
+              type="button"
+              onClick={() => onSetDevPopulation(devPopInput)}
+              className="px-3 py-1 font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg"
+            >
+              OK
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              aria-label="Nivel de mundo dev"
+              value={worldLevel}
+              onChange={(e) => onSetDevComplexity(e.target.value as WorldComplexityLevel, govLevel)}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-zinc-100 font-mono"
+            >
+              <option value="M0">M0</option>
+              <option value="M1">M1</option>
+              <option value="M2">M2</option>
+            </select>
+            <select
+              aria-label="Nivel de gobernador dev"
+              value={govLevel}
+              onChange={(e) => onSetDevComplexity(worldLevel, e.target.value as GovernorComplexityLevel)}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-zinc-100 font-mono"
+            >
+              <option value="G0">G0</option>
+              <option value="G1">G1</option>
+              <option value="G2">G2</option>
+              <option value="G3">G3</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={devFenom}
+              disabled={worldLevel === 'M0'}
+              onChange={(e) => setDevFenom(e.target.value as PhenomenonType)}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-zinc-100 disabled:opacity-40"
+            >
+              <option value="sequia">Sequía</option>
+              <option value="plaga">Plaga</option>
+              <option value="pandemia">Pandemia</option>
+              <option value="plaga_zombie">Zombie</option>
+            </select>
+            <select
+              value={devZona}
+              disabled={worldLevel === 'M0'}
+              onChange={(e) => setDevZona(e.target.value as ZoneId)}
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-zinc-100 disabled:opacity-40"
+            >
+              <option value="centro">centro</option>
+              <option value="norte">norte</option>
+              <option value="este">este</option>
+              <option value="sur">sur</option>
+              <option value="oeste">oeste</option>
+            </select>
+            <button
+              type="button"
+              disabled={worldLevel === 'M0'}
+              onClick={() => onForceClimate(devFenom, devZona)}
+              className="px-3 py-1 font-semibold bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-lg disabled:opacity-40"
+            >
+              Lanzar
+            </button>
           </div>
         </div>
       )}

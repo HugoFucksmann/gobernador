@@ -205,8 +205,8 @@ Cada nivel suma sin cambiar los controles (CONTROLES.md), así se calibra el mun
 
 | Nivel | Qué tiene |
 |---|---|
-| **M0** | Una zona, sin clima ni caos: NPCs, roles, economía, parcelas y edificios. Para calibrar el circuito |
-| **M1** | + zonas, clima, caos, prensa, obras de suceso y construcción privada. Es el mundo del nivel 1 |
+| **M0** | Una zona, sin caos ni prensa: NPCs, roles, economía, parcelas, edificios y salud. El clima solo se fuerza para pruebas. Para calibrar el circuito |
+| **M1** | + zonas, clima del preset, caos, prensa y construcción privada. Es el mundo del nivel 1 |
 | **M2** | + extensión `fiscal` (emisión e inflación dinámica, ECONOMIA §9) |
 | Futuro | Zombis como agentes, edificios con integridad propia, coordenadas, combate: se promueven desde las zonas cuando una regla dependa de ellos (HOJA_DE_RUTA) |
 

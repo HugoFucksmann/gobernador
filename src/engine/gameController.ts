@@ -14,12 +14,15 @@ import {
 } from '../data/catalogs';
 import {
   ActionEffectSpec,
+  BuildingType,
   ClimatePhenomenon,
   CommunityDerived,
   GameState,
   GovernorComplexityLevel,
   GovernorLevers,
+  LeverKey,
   PhenomenonType,
+  ServiceLevel,
   SimEvent,
   WorldComplexityLevel,
   WorldConfig,
@@ -33,10 +36,18 @@ import {
   deriveCommunityStats,
   emitSimEvent,
   MAX_BITACORA_ENTRIES,
+  orderBuildInParcela,
+  orderDemolishParcela,
+  respondToDemand,
   stepSimulation,
   TICKS_PER_DAY,
 } from './simulation';
-import { createInitialGameState, isTestConfig, resolveComplexityConfig } from './worldGenerator';
+import {
+  buildInitialParcelas,
+  createInitialGameState,
+  isTestConfig,
+  resolveComplexityConfig,
+} from './worldGenerator';
 
 export interface SaveSlotMeta {
   dia: number;
@@ -138,8 +149,21 @@ function migrateLegacyLevers(rawLevers: unknown, scenarioId: 'elecciones' | 'zom
   const fallback = structuredClone(SCENARIO_PRESETS[scenarioId].initialLevers);
   if (!rawLevers || typeof rawLevers !== 'object') return fallback;
   const obj = rawLevers as Record<string, unknown>;
-  if (typeof obj.impuesto === 'number' && typeof obj.salarioPublico === 'number' && obj.servicios && typeof obj.ayudaSocial === 'number') {
-    return rawLevers as GovernorLevers;
+  if (typeof obj.impuesto === 'number' && typeof obj.salarioPublico === 'number' && typeof obj.ayudaSocial === 'number') {
+    const legacyServ = obj.servicios as { obras?: number } | undefined;
+    const nivelRaw = typeof obj.nivelObras === 'number' ? obj.nivelObras : legacyServ?.obras ?? fallback.nivelObras;
+    const clampedNivel = Math.min(5, Math.max(0, Math.round(nivelRaw))) as ServiceLevel;
+    return {
+      impuesto: Number(obj.impuesto),
+      salarioPublico: Number(obj.salarioPublico),
+      nivelObras: clampedNivel,
+      ayudaSocial: Number(obj.ayudaSocial),
+      garantiaAlimentaria: Number(obj.garantiaAlimentaria ?? fallback.garantiaAlimentaria),
+      precioMaximo: (obj.precioMaximo as GovernorLevers['precioMaximo']) ?? fallback.precioMaximo,
+      comercioExterior: (obj.comercioExterior as GovernorLevers['comercioExterior']) ?? fallback.comercioExterior,
+      prensa: Number(obj.prensa ?? fallback.prensa),
+      topeEmision: Number(obj.topeEmision ?? fallback.topeEmision),
+    };
   }
   const legacyRec = obj.recaudacion as { impuestoGrupo?: Record<string, number> } | undefined;
   const legacyGasto = obj.gasto as { salarioPublico?: number } | undefined;
@@ -204,7 +228,8 @@ export class GameController {
 
   private computeDerivedKey(s: GameState): string {
     const objetivoPerdido = s.eventos.some((e) => e.tipo === 'objetivo_perdido') ? 1 : 0;
-    return `${s.reloj.dia}|${s.noticias.length}|${s.bitacora.length}|${s.resultado.estado}|${s.resultado.victoriaCumplida ? 1 : 0}|${objetivoPerdido}|${s.gobierno.finanzas.saldo}`;
+    const parcelSig = s.parcelas.map((p) => `${p.estado}:${p.edificio?.tipo ?? '-'}:${p.edificio?.activo ? 1 : 0}`).join(',');
+    return `${s.reloj.dia}|${s.noticias.length}|${s.bitacora.length}|${s.resultado.estado}|${s.resultado.victoriaCumplida ? 1 : 0}|${objetivoPerdido}|${s.gobierno.finanzas.saldo}|${s.demandasActivas.length}|${s.bloqueosPalanca.length}|${s.medidasVigentes.length}|${parcelSig}`;
   }
 
   private buildSnapshot(): GameControllerSnapshot {
@@ -527,7 +552,10 @@ export class GameController {
       garantiaImpaga: Number(legacyFin.garantiaImpaga ?? 0),
       comidaMenores: Number(legacyFin.comidaMenores ?? 0),
       ayudaSocial: Number(legacyFin.ayudaSocial ?? 0),
+      mantenimiento: Number(legacyFin.mantenimiento ?? 0),
+      operacionObras: Number(legacyFin.operacionObras ?? 0),
       operacion: Number(legacyFin.operacion ?? legacyFin.presupuestoAsignado ?? 0),
+      obras: Number(legacyFin.obras ?? 0),
       prensa: Number(legacyFin.prensa ?? legacyFin.prensaAsignada ?? 0),
       saldo: Number(legacyFin.saldo ?? legacyFin.disponible ?? 0),
       emision: Number(legacyFin.emision ?? 0),
@@ -554,7 +582,10 @@ export class GameController {
       garantiaAlimentaria: Number(legacyAcum.garantiaAlimentaria ?? 0),
       garantiaImpaga: Number(legacyAcum.garantiaImpaga ?? 0),
       comidaMenores: Number(legacyAcum.comidaMenores ?? 0),
+      mantenimiento: Number(legacyAcum.mantenimiento ?? 0),
+      operacionObras: Number(legacyAcum.operacionObras ?? 0),
       operacion: Number(legacyAcum.operacion ?? 0),
+      obras: Number(legacyAcum.obras ?? 0),
       operacionPorArea: (legacyAcum.operacionPorArea as GameState['gobierno']['acumuladoPeriodo']['operacionPorArea']) ?? {
         seguridad: 0,
         salud: 0,
@@ -690,6 +721,8 @@ export class GameController {
         ventasAcum: Number(rawFood.ventasAcum ?? rawFood.ingresosAcum ?? 0),
         parteSueldos: Number(rawFood.parteSueldos ?? 0.78),
         factor: Number(rawFood.factor ?? legacyFoodResp?.factorSueldo ?? 1),
+        periodosFactorAlto: Number(rawFood.periodosFactorAlto ?? 0),
+        periodosFactorBajo: Number(rawFood.periodosFactorBajo ?? 0),
         ultimoTramo: (rawFood.ultimoTramo as GameState['empresas']['alimento']['ultimoTramo']) ?? 'normal',
         despidosPendientes: Number(rawFood.despidosPendientes ?? 0),
         refPorEmpleado: (rawFood.refPorEmpleado as Record<string, number>) ?? {},
@@ -704,6 +737,8 @@ export class GameController {
         ventasAcum: Number(rawCom.ventasAcum ?? rawCom.ingresosAcum ?? 0),
         parteSueldos: Number(rawCom.parteSueldos ?? 0.78),
         factor: Number(rawCom.factor ?? legacyComResp?.factorSueldo ?? 1),
+        periodosFactorAlto: Number(rawCom.periodosFactorAlto ?? 0),
+        periodosFactorBajo: Number(rawCom.periodosFactorBajo ?? 0),
         ultimoTramo: (rawCom.ultimoTramo as GameState['empresas']['comercio']['ultimoTramo']) ?? 'normal',
         despidosPendientes: Number(rawCom.despidosPendientes ?? 0),
         refPorEmpleado: (rawCom.refPorEmpleado as Record<string, number>) ?? {},
@@ -713,6 +748,31 @@ export class GameController {
         ultimaCausa: (rawCom.ultimaCausa as string | undefined) ?? legacyComResp?.causa,
       },
     };
+
+    if (!Array.isArray(loaded.parcelas) || loaded.parcelas.length === 0) {
+      loaded.parcelas = buildInitialParcelas(preset.id, resolvedComplexity.nivelMundo);
+    }
+    if (!Array.isArray(loaded.hitosCumplidos)) {
+      loaded.hitosCumplidos = [];
+    }
+    if (!loaded.hitosRacha || typeof loaded.hitosRacha !== 'object') {
+      loaded.hitosRacha = {};
+    }
+    if (!Array.isArray(loaded.demandasActivas)) {
+      loaded.demandasActivas = [];
+    }
+    if (!Array.isArray(loaded.bloqueosPalanca)) {
+      loaded.bloqueosPalanca = [];
+    }
+    if (!Array.isArray(loaded.medidasVigentes)) {
+      loaded.medidasVigentes = [];
+    }
+    if (!loaded.cooldownActorDemanda || typeof loaded.cooldownActorDemanda !== 'object') {
+      loaded.cooldownActorDemanda = {};
+    }
+    if (typeof loaded.parcelasRecienHabilitadasDia !== 'number') {
+      loaded.parcelasRecienHabilitadasDia = 0;
+    }
 
     loaded.auditEntradasDia = 0;
     loaded.auditSalidasDia = 0;
@@ -872,11 +932,7 @@ export class GameController {
       (this.state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
     if (govLevel === 'G0') return;
     const prev = this.state.gobierno.palancasObjetivo;
-    const prevClone: GovernorLevers = {
-      ...prev,
-      servicios: { ...prev.servicios },
-    };
-    const updated = updater(prevClone);
+    const updated = updater({ ...prev });
 
     let nextObjetivo: GovernorLevers;
     if (govLevel === 'G1') {
@@ -885,23 +941,25 @@ export class GameController {
         impuesto: updated.impuesto,
         ayudaSocial: updated.ayudaSocial,
         garantiaAlimentaria: updated.garantiaAlimentaria,
-        servicios: {
-          ...prev.servicios,
-          seguridad: updated.servicios.seguridad,
-          salud: updated.servicios.salud,
-        },
       };
     } else if (govLevel === 'G2' || this.state.config.economiaModulo !== 'fiscal') {
       nextObjetivo = {
         ...updated,
-        servicios: { ...updated.servicios },
         topeEmision: prev.topeEmision,
       };
     } else {
-      nextObjetivo = {
-        ...updated,
-        servicios: { ...updated.servicios },
-      };
+      nextObjetivo = { ...updated };
+    }
+
+    const dia = this.state.reloj.dia;
+    for (const lock of this.state.bloqueosPalanca) {
+      if (dia < lock.hastaDia) {
+        const key: LeverKey = lock.palanca;
+        nextObjetivo = {
+          ...nextObjetivo,
+          [key]: prev[key],
+        };
+      }
     }
 
     // palancasObjetivo only governs future day transitions; derived metrics depend solely on palancasVigentes
@@ -913,6 +971,39 @@ export class GameController {
       },
     };
     this.commit();
+  }
+
+  buildInParcela(parcelaId: string, tipo: BuildingType): { ok: boolean; error?: string } {
+    const prevGov = this.state.gobierno;
+    const next = structuredClone(this.state);
+    const res = orderBuildInParcela(next, parcelaId, tipo);
+    if (!res.ok) return res;
+    this.state = next;
+    this.syncDerivedAndGovCheck(next, prevGov);
+    this.commit();
+    return res;
+  }
+
+  demolishParcela(parcelaId: string): { ok: boolean; error?: string } {
+    const prevGov = this.state.gobierno;
+    const next = structuredClone(this.state);
+    const res = orderDemolishParcela(next, parcelaId);
+    if (!res.ok) return res;
+    this.state = next;
+    this.syncDerivedAndGovCheck(next, prevGov);
+    this.commit();
+    return res;
+  }
+
+  respondDemand(demandId: string, accept: boolean): { ok: boolean; error?: string } {
+    const prevGov = this.state.gobierno;
+    const next = structuredClone(this.state);
+    const res = respondToDemand(next, demandId, accept);
+    if (!res.ok) return res;
+    this.state = next;
+    this.syncDerivedAndGovCheck(next, prevGov);
+    this.commit();
+    return res;
   }
 
   private applyAiMutation(applyFn: (s: GameState) => boolean | void): void {

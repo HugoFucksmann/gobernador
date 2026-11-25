@@ -58,6 +58,7 @@ export function sumPeriodExpenses(fin: FiscalLedger): number {
     fin.garantiaAlimentaria +
     fin.ayudaSocial +
     fin.operacion +
+    (fin.obras ?? 0) +
     fin.prensa
   );
 }
