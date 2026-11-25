@@ -161,6 +161,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   const lastGastos =
     fin.nomina +
     fin.pensiones +
+    fin.comidaMenores +
     fin.garantiaAlimentaria +
     fin.ayudaSocial +
     fin.operacion +
@@ -186,6 +187,14 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
             <span className="font-display text-sm sm:text-base font-bold tracking-tight text-white whitespace-nowrap hidden sm:inline">
               El Gobernador
             </span>
+            {state.esConfigDePrueba && (
+              <span
+                title="Partida iniciada con parámetros fuera del estándar (CALIBRACION / UI §15)"
+                className="hidden md:inline px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-500/50 text-[10px] font-medium text-amber-200 whitespace-nowrap"
+              >
+                Config. prueba
+              </span>
+            )}
             <button
               type="button"
               onClick={onOpenObjetivo}

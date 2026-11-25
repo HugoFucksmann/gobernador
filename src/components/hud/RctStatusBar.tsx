@@ -10,7 +10,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { DISTRICTS, FISCAL_PERIOD_DAYS, ROLE_CATALOG, SCENARIO_PRESETS } from '../../data/catalogs';
+import { DISTRICTS, PERIOD_DAYS, ROLE_CATALOG, SCENARIO_PRESETS } from '../../data/catalogs';
 import { DistrictId, GameState } from '../../types/game';
 import { MapFilter, MapLens } from '../../types/ui';
 
@@ -281,7 +281,7 @@ export const RctStatusBar: React.FC<RctStatusBarProps> = ({
           </div>
 
           <div className="font-mono tabular-nums text-white font-semibold bg-slate-800 border border-slate-700 rounded px-2 py-0.5">
-            Día {state.reloj.dia}/{plazo} · {state.reloj.diasEnPeriodoFiscal}/{FISCAL_PERIOD_DAYS}d
+            Día {state.reloj.dia}/{plazo} · {state.reloj.diasEnPeriodo}/{PERIOD_DAYS}d
           </div>
         </div>
       </footer>

@@ -1,11 +1,15 @@
 import {
   ACTION_TABLE,
+  DIRECTOR_CONSTANTS,
   DISTRICTS,
   ECON_CONSTANTS,
   EFFECT_CATALOG,
-  FISCAL_PERIOD_DAYS,
   FOREIGN_TRADE_STEPS,
   LEVER_BOUNDS,
+  LEVER_VALENCIA,
+  NEWS_TEMPLATES,
+  PERIOD_DAYS,
+  PRESS_CONSTANTS,
   PRICE_CAP_FACTORS,
   PRIVATE_ROLES,
   PUBLIC_ROLES,
@@ -21,7 +25,7 @@ import {
   CausalStep,
   ClimatePhenomenon,
   CommunityDerived,
-  EnterpriseResponseType,
+  EnterpriseTramo,
   EventLogEntry,
   ForeignTradeStep,
   GameState,
@@ -29,11 +33,15 @@ import {
   Modifier,
   NewsArticle,
   NewsTone,
+  NewsTopic,
   Npc,
   NpcVariable,
   ObjectiveCondition,
   PersonalityTrait,
   PhenomenonType,
+  PressFact,
+  PressFactData,
+  PressValence,
   PriceCapMode,
   PrivateRoleId,
   PublicRoleId,
@@ -69,6 +77,17 @@ function makeSeqId(state: { idSeq: number } | undefined, prefix: string): string
 
 export function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
+}
+
+export function computeTotalWorldMoney(state: GameState): number {
+  let total =
+    state.gobierno.reserva +
+    state.empresas.alimento.ventasAcum +
+    state.empresas.comercio.ventasAcum;
+  for (const npc of state.npcs) {
+    total += npc.economia.dinero;
+  }
+  return total;
 }
 
 export function getStage(edad: number): 'menor' | 'adulto' | 'jubilado' {
@@ -766,11 +785,35 @@ export function applyInstantModifierToNpc(
 export function pickActionText(
   action: ActionDefinition,
   npcName: string,
-  state?: { rngState: number }
+  state?: GameState | { rngState: number; ultimaVariantePorAccion?: Record<string, number> },
+  roleName?: string,
+  zoneName?: string
 ): string {
   const pool = action.textos && action.textos.length > 0 ? action.textos : [`{nombre}: ${action.nombre}`];
-  const tpl = pool[Math.floor(drawRand(state) * pool.length)];
-  return tpl.replace('{nombre}', npcName);
+  const lastIdx =
+    state && 'ultimaVariantePorAccion' in state && state.ultimaVariantePorAccion
+      ? state.ultimaVariantePorAccion[action.id]
+      : undefined;
+
+  let chosenIdx = 0;
+  if (pool.length > 1 && typeof lastIdx === 'number' && lastIdx >= 0 && lastIdx < pool.length) {
+    const candidates: number[] = [];
+    for (let i = 0; i < pool.length; i++) {
+      if (i !== lastIdx) candidates.push(i);
+    }
+    chosenIdx = candidates[Math.floor(drawRand(state) * candidates.length)];
+  } else {
+    chosenIdx = Math.floor(drawRand(state) * pool.length);
+  }
+
+  if (state && 'ultimaVariantePorAccion' in state && state.ultimaVariantePorAccion) {
+    state.ultimaVariantePorAccion[action.id] = chosenIdx;
+  }
+
+  return pool[chosenIdx]
+    .replaceAll('{nombre}', npcName)
+    .replaceAll('{rol}', roleName || 'vecino')
+    .replaceAll('{zona}', zoneName || 'centro');
 }
 
 export function hasOutOfPostEffect(action: Pick<ActionDefinition, 'efectos'>): boolean {
@@ -1139,7 +1182,14 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
       const prob = clamp(action.contagio * exposure * brake * affinityFactor, 0, 0.95);
       if (drawRand(state) >= prob) continue;
 
-      const copyText = pickActionText(action, other.nombre, state);
+      const zoneName = other.zona || 'centro';
+      const copyText = pickActionText(
+        action,
+        other.nombre,
+        state,
+        ROLE_CATALOG[other.rol].nombre.toLowerCase(),
+        zoneName
+      );
       other.accionIa = {
         id: action.id,
         nombre: action.nombre,
@@ -1268,12 +1318,13 @@ export function isNpcEligibleForAction(
 }
 
 export function scoreActionAffinity(npc: Npc, action: ActionDefinition): number {
-  let score = 50;
+  let w = 1;
   for (const [trait, dir] of Object.entries(action.afinidad)) {
     const val = getEffectiveTrait(npc, trait as PersonalityTrait);
-    score += dir === '+' ? val * 0.5 : (100 - val) * 0.5;
+    const signedDelta = (dir === '+' ? 1 : -1) * ((val - 50) / 50);
+    w *= Math.max(0.05, 1 + DIRECTOR_CONSTANTS.kAfinidad * signedDelta);
   }
-  return Math.max(5, score);
+  return Math.max(1, w * 100);
 }
 
 export function selectCandidateActions(npc: Npc, state?: GameState): ActionDefinition[] {
@@ -1283,11 +1334,50 @@ export function selectCandidateActions(npc: Npc, state?: GameState): ActionDefin
     if (state && hasOutOfPostEffect(a) && !canRoleLeavePost(state, npc.rol)) return false;
     return true;
   });
-  return valid
-    .map((a) => ({ a, w: scoreActionAffinity(npc, a) + drawRand(state) * 25 }))
-    .sort((x, y) => y.w - x.w)
-    .slice(0, ECON_CONSTANTS.candidatasPorDecision)
-    .map((x) => x.a);
+  if (valid.length === 0) return [];
+
+  let filtered = valid;
+  if (state) {
+    const focusCounts = new Map<string, number>();
+    let totalFocos = 0;
+    for (const n of state.npcs) {
+      if (n.vivo && n.accionIa?.tipo === 'espontanea' && n.accionIa.esFoco) {
+        totalFocos++;
+        focusCounts.set(n.accionIa.id, (focusCounts.get(n.accionIa.id) || 0) + 1);
+      }
+    }
+    if (totalFocos >= 4) {
+      const underCap = valid.filter((a) => {
+        const c = focusCounts.get(a.id) || 0;
+        return (c / totalFocos) * 100 < DIRECTOR_CONSTANTS.maxPctAccion;
+      });
+      if (underCap.length > 0) filtered = underCap;
+    }
+  }
+
+  // Weighted sampling without replacement up to candidatasMax (DIRECTOR_PRENSA §2.3)
+  const pool = filtered.map((a) => ({ a, w: scoreActionAffinity(npc, a) }));
+  const picked: ActionDefinition[] = [];
+  const limit = Math.min(DIRECTOR_CONSTANTS.candidatasMax, pool.length);
+  for (let i = 0; i < limit && pool.length > 0; i++) {
+    const totalW = pool.reduce((acc, item) => acc + item.w, 0);
+    if (totalW <= 0) {
+      const idx = Math.floor(drawRand(state) * pool.length);
+      picked.push(pool.splice(idx, 1)[0].a);
+      continue;
+    }
+    let r = drawRand(state) * totalW;
+    let chosenIdx = pool.length - 1;
+    for (let k = 0; k < pool.length; k++) {
+      r -= pool[k].w;
+      if (r <= 0) {
+        chosenIdx = k;
+        break;
+      }
+    }
+    picked.push(pool.splice(chosenIdx, 1)[0].a);
+  }
+  return picked;
 }
 
 export function canTriggerSpontaneousChaos(state: GameState): {
@@ -1316,17 +1406,39 @@ export function pickChaosCandidateNpc(state: GameState): Npc | null {
   );
   if (eligible.length === 0) return null;
 
-  const scored = eligible.map((n) => {
+  const traits: PersonalityTrait[] = ['valentia', 'laboriosidad', 'codicia', 'rebeldia', 'resiliencia'];
+  const weighted = eligible.map((n) => {
+    let extremeTraits = 0;
+    for (const t of traits) {
+      const eff = getEffectiveTrait(n, t);
+      if (eff < 20 || eff > 80) extremeTraits++;
+    }
+    const isDiscontent = n.variables.satisfaccion < 30 ? 1 : 0;
+    const hasRecentMod = n.modificadores.some(
+      (m) =>
+        m.duracionDias > 0 &&
+        m.duracionDias - m.diasRestantes <= DIRECTOR_CONSTANTS.recienteVentanaDias
+    )
+      ? 1
+      : 0;
     const interest =
-      getEffectiveTrait(n, 'rebeldia') * 0.6 +
-      (100 - n.variables.satisfaccion) * 0.4 +
-      n.modificadores.length * 12 +
-      drawRand(state) * 35;
+      1 +
+      DIRECTOR_CONSTANTS.kExtremo * extremeTraits +
+      DIRECTOR_CONSTANTS.kDescontento * isDiscontent +
+      DIRECTOR_CONSTANTS.kReciente * hasRecentMod;
     return { n, interest };
   });
-  scored.sort((a, b) => b.interest - a.interest);
-  const topPool = scored.slice(0, Math.min(6, scored.length));
-  return topPool[Math.floor(drawRand(state) * topPool.length)].n;
+
+  const totalInterest = weighted.reduce((acc, item) => acc + item.interest, 0);
+  if (totalInterest <= 0) {
+    return weighted[Math.floor(drawRand(state) * weighted.length)].n;
+  }
+  let r = drawRand(state) * totalInterest;
+  for (const item of weighted) {
+    r -= item.interest;
+    if (r <= 0) return item.n;
+  }
+  return weighted[weighted.length - 1].n;
 }
 
 export function resolveConditionWindowWithFallback(
@@ -1346,7 +1458,13 @@ export function resolveConditionWindowWithFallback(
   const targets = state.npcs.filter((n) => n.vivo && !n.hospital.internado && win.npcIds.includes(n.id));
   const fallbackCause = win.causaId || state.ultimoEventoClimaId || state.ultimaCausaPalanca;
   for (const npc of targets) {
-    const text = pickActionText(action, npc.nombre, state);
+    const text = pickActionText(
+      action,
+      npc.nombre,
+      state,
+      ROLE_CATALOG[npc.rol].nombre.toLowerCase(),
+      npc.zona
+    );
     applyActionToNpc(state, npc, action, text, fuente, fallbackCause);
   }
 
@@ -1369,8 +1487,11 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
     article.causa ||
     (article.origen.startsWith('clima:') ? state.ultimoEventoClimaId : state.ultimaCausaPalanca);
 
+  const zonaNorm = article.zonaOrigen ?? article.zona ?? 'centro';
   const enrichedArticle: NewsArticle = {
     ...article,
+    zona: enrichedZoneOrDefault(article.zona, zonaNorm),
+    zonaOrigen: zonaNorm,
     credibilidad: article.credibilidad ?? medio.credibilidad,
     causa: inferredCause,
   };
@@ -1380,7 +1501,7 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
     id: newsEvId,
     dia: state.reloj.dia,
     tipo: 'noticia',
-    zona: enrichedArticle.zonaOrigen ?? 'centro',
+    zona: zonaNorm,
     noticiaId: enrichedArticle.id,
     medio: medio.nombre,
     tema: enrichedArticle.tema,
@@ -1388,11 +1509,14 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
     causa: inferredCause,
   });
 
-  const recentSameTopic = state.noticias.filter(
-    (n) => n.tema === enrichedArticle.tema && state.reloj.dia - n.dia <= 10
-  ).length;
-  const repetitionDamp = Math.max(0.3, 1 - recentSameTopic * 0.25);
-  const impactScale = (medio.alcancePct / 100) * (medio.credibilidad / 100) * repetitionDamp;
+  const isRepeated = state.noticias.some(
+    (n) =>
+      n.tema === enrichedArticle.tema &&
+      (n.zonaOrigen ?? n.zona ?? 'centro') === zonaNorm &&
+      state.reloj.dia - n.dia <= PRESS_CONSTANTS.ventanaRepeticionDias
+  );
+  const repFactor = isRepeated ? PRESS_CONSTANTS.factorRepeticionEfecto : 1;
+  const impactScale = (medio.alcancePct / 100) * (medio.credibilidad / 100) * repFactor;
 
   const vivos = state.npcs.filter((n) => n.vivo);
   const consumersCount = Math.max(1, Math.round(vivos.length * (medio.alcancePct / 100)));
@@ -1407,36 +1531,52 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
     .slice(0, consumersCount)
     .map((x) => x.n);
 
-  const afecta: Partial<Record<PersonalityTrait | NpcVariable, number>> = {};
-  if (enrichedArticle.tono === 'alarmista') {
-    afecta.miedo = Math.round(10 * impactScale);
-    afecta.lealtad = -Math.round(5 * impactScale);
-  } else if (enrichedArticle.tono === 'critico') {
-    afecta.lealtad = -Math.round(9 * impactScale);
-    afecta.rebeldia = Math.round(6 * impactScale);
-  } else if (enrichedArticle.tono === 'favorable') {
-    afecta.lealtad = Math.round(8 * impactScale);
-    afecta.miedo = -Math.round(4 * impactScale);
-  } else {
-    afecta.miedo = Math.round(2 * impactScale);
-  }
+  const baseToneEffect = PRESS_CONSTANTS.baseEfectoTono[enrichedArticle.tono] ?? 0;
+  const rawDelta = Math.round(baseToneEffect * impactScale);
 
-  for (const npc of sortedConsumers) {
-    applyModifierToNpc(
-      npc,
-      {
-        afecta,
-        duracionDias: 4,
-        origen: `noticia:${enrichedArticle.id}`,
-        causa: newsEvId,
-        texto: `Leyó "${enrichedArticle.titulo}" en ${medio.nombre}`,
-      },
-      state
-    );
+  if (rawDelta !== 0) {
+    for (const npc of sortedConsumers) {
+      let usedToday = 0;
+      for (const m of npc.modificadores) {
+        if (m.origen.startsWith('noticia:') && m.duracionDias > 0 && m.diasRestantes === m.duracionDias) {
+          usedToday += Math.abs(m.afecta.miedo ?? 0) + Math.abs(m.afecta.lealtad ?? 0);
+        }
+      }
+      const remainingBudget = Math.max(0, PRESS_CONSTANTS.maxEfectoNoticiasDia - usedToday);
+      if (remainingBudget <= 0) continue;
+
+      const cappedMag = Math.min(Math.abs(rawDelta), remainingBudget);
+      const afecta: Partial<Record<NpcVariable, number>> =
+        enrichedArticle.tono === 'alarmista'
+          ? { miedo: cappedMag }
+          : enrichedArticle.tono === 'critico'
+          ? { lealtad: -cappedMag }
+          : enrichedArticle.tono === 'favorable'
+          ? { lealtad: cappedMag }
+          : {};
+
+      if (Object.keys(afecta).length > 0) {
+        applyModifierToNpc(
+          npc,
+          {
+            afecta,
+            duracionDias: PRESS_CONSTANTS.duracionEfectoNoticia,
+            origen: `noticia:${enrichedArticle.id}`,
+            causa: newsEvId,
+            texto: `Leyó "${enrichedArticle.titulo}" en ${medio.nombre}`,
+          },
+          state
+        );
+      }
+    }
   }
 
   state.noticias.unshift(enrichedArticle);
   if (state.noticias.length > 50) state.noticias.length = 50;
+}
+
+function enrichedZoneOrDefault(z: ZoneId | undefined, fallback: ZoneId): ZoneId {
+  return z ?? fallback;
 }
 
 function stepNpcPositions(state: GameState, dtTicks: number): void {
@@ -1536,6 +1676,25 @@ function syncEnterprisesWithOwners(state: GameState): void {
   state.empresas.comercio.socios = state.npcs
     .filter((n) => n.vivo && n.rol === 'comerciante')
     .map((c) => c.id);
+
+  if (state.medios.length > 0) {
+    const assigned = new Set<string>();
+    for (const m of state.medios) {
+      m.columnistas = m.columnistas.filter((id) =>
+        state.npcs.some((n) => n.id === id && n.vivo && n.rol === 'periodista')
+      );
+      for (const id of m.columnistas) assigned.add(id);
+    }
+    for (const npc of state.npcs) {
+      if (npc.vivo && npc.rol === 'periodista' && !assigned.has(npc.id)) {
+        const sortedMedia = [...state.medios].sort(
+          (a, b) => a.columnistas.length - b.columnistas.length
+        );
+        sortedMedia[0].columnistas.push(npc.id);
+        assigned.add(npc.id);
+      }
+    }
+  }
 }
 
 function getPublicRoleTargetCap(state: GameState, role: PublicRoleId, vivosCount: number): number {
@@ -1551,27 +1710,6 @@ function getPublicRoleTargetCap(state: GameState, role: PublicRoleId, vivosCount
   const level = pal.servicios[lever];
   if (level <= 0) return 0;
   return Math.round((vivosCount * SERVICE_LEVEL_TABLE[lever][level].puestosPct) / 100);
-}
-
-function estimateWorkerFloorPeriodCost(workers: Npc[], state: GameState): number {
-  const piso = ECON_CONSTANTS.pisoSueldoPct / 100;
-  let sumBaseDia = 0;
-  for (const w of workers) {
-    const def = ROLE_CATALOG[w.rol];
-    if (!def.ingreso) continue;
-    const [minI, maxI] = def.ingreso;
-    const prod = Math.max(0.2, getNpcProductivity(w, state));
-    sumBaseDia += (minI + w.economia.ingresoPos * (maxI - minI)) * prod;
-  }
-  return sumBaseDia * piso * ECON_CONSTANTS.periodoPagoDias;
-}
-
-function estimateNewWorkerPeriodRefWage(npc: Npc, role: PrivateRoleId, state: GameState): number {
-  const def = ROLE_CATALOG[role];
-  if (!def.ingreso) return 0;
-  const [minI, maxI] = def.ingreso;
-  const prod = Math.max(0.4, getNpcProductivity(npc, state));
-  return (minI + npc.economia.ingresoPos * (maxI - minI)) * prod * ECON_CONSTANTS.periodoPagoDias;
 }
 
 function pickNextLayoffTarget(pool: Npc[], isFoodEnterprise: boolean, state: GameState): Npc {
@@ -1614,8 +1752,6 @@ function handleRolesAndAging(state: GameState): void {
     if (n.vivo) counts[n.rol]++;
   }
 
-  const effectiveObreroCap = Math.round(preset.topesPrivados.obrero * popScale);
-
   // Gradual layoff if service level lowered below current public headcount (ESTADOS §2)
   for (const pRole of PUBLIC_ROLES) {
     const cap = getPublicRoleTargetCap(state, pRole, vivosCount);
@@ -1657,79 +1793,65 @@ function handleRolesAndAging(state: GameState): void {
     }
   }
 
-  // Enterprise gradual layoffs while respuesta === 'despedir' (EMPRESAS §4: tecnicos before agricultores)
-  if (state.empresas.alimento.respuesta?.tipo === 'despedir') {
+  // Enterprise gradual layoffs from despidosPendientes (ECONOMIA §5: tecnicos before agricultores)
+  if (state.empresas.alimento.despidosPendientes > 0) {
     const ent = state.empresas.alimento;
-    const workers = state.npcs.filter(
+    const pool = state.npcs.filter(
       (n) => n.vivo && (n.rol === 'agricultor' || n.rol === 'tecnico')
     );
-    const estFloorPayroll = estimateWorkerFloorPeriodCost(workers, state);
-    if (estFloorPayroll > ent.ultimoIngresoPeriodo + 0.5 && workers.length > 0) {
-      let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
-      const pool = [...workers];
-      while (cutsLeft > 0 && pool.length > 0) {
-        const currentCost = estimateWorkerFloorPeriodCost(pool, state);
-        if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
-        const target = pickNextLayoffTarget(pool, true, state);
-        counts[target.rol]--;
-        counts.desempleado++;
-        target.rol = 'desempleado';
-        target.mapa.accion = 'buscando trabajo';
-        target.mapa.destino = getDistrictPosition('desempleado', state);
-        applyInstantModifierToNpc(
-          target,
-          {
-            afecta: { satisfaccion: -8 },
-            origen: 'empresa:alimento/respuesta',
-            causa: ent.respuesta?.causa,
-            texto: 'Despedido por déficit de alimento',
-            recordOnNpc: true,
-          },
-          state
-        );
-        cutsLeft--;
-      }
+    let cutsLeft = Math.min(ent.despidosPendientes, ECON_CONSTANTS.maxPaseDesempleoPorDia);
+    while (cutsLeft > 0 && pool.length > 0) {
+      const target = pickNextLayoffTarget(pool, true, state);
+      counts[target.rol]--;
+      counts.desempleado++;
+      target.rol = 'desempleado';
+      target.mapa.accion = 'buscando trabajo';
+      target.mapa.destino = getDistrictPosition('desempleado', state);
+      applyInstantModifierToNpc(
+        target,
+        {
+          afecta: { satisfaccion: -8 },
+          origen: 'empresa:alimento/respuesta',
+          causa: ent.ultimaCausa,
+          texto: 'Despedido por recorte bajo piso salarial en alimento',
+          recordOnNpc: true,
+        },
+        state
+      );
+      ent.despidosPendientes = Math.max(0, ent.despidosPendientes - 1);
+      cutsLeft--;
     }
   }
 
-  if (state.empresas.comercio.respuesta?.tipo === 'despedir') {
+  if (state.empresas.comercio.despidosPendientes > 0) {
     const ent = state.empresas.comercio;
-    const workers = state.npcs.filter((n) => n.vivo && n.rol === 'obrero');
-    const estFloorPayroll = estimateWorkerFloorPeriodCost(workers, state);
-    if (estFloorPayroll > ent.ultimoIngresoPeriodo + 0.5 && workers.length > 0) {
-      let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
-      const pool = [...workers];
-      while (cutsLeft > 0 && pool.length > 0) {
-        const currentCost = estimateWorkerFloorPeriodCost(pool, state);
-        if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
-        const target = pickNextLayoffTarget(pool, false, state);
-        counts.obrero--;
-        counts.desempleado++;
-        target.rol = 'desempleado';
-        target.mapa.accion = 'buscando trabajo';
-        target.mapa.destino = getDistrictPosition('desempleado', state);
-        applyInstantModifierToNpc(
-          target,
-          {
-            afecta: { satisfaccion: -8 },
-            origen: 'empresa:comercio/respuesta',
-            causa: ent.respuesta?.causa,
-            texto: 'Despedido por déficit de comercio',
-            recordOnNpc: true,
-          },
-          state
-        );
-        cutsLeft--;
-      }
+    const pool = state.npcs.filter((n) => n.vivo && n.rol === 'obrero');
+    let cutsLeft = Math.min(ent.despidosPendientes, ECON_CONSTANTS.maxPaseDesempleoPorDia);
+    while (cutsLeft > 0 && pool.length > 0) {
+      const target = pickNextLayoffTarget(pool, false, state);
+      counts.obrero--;
+      counts.desempleado++;
+      target.rol = 'desempleado';
+      target.mapa.accion = 'buscando trabajo';
+      target.mapa.destino = getDistrictPosition('desempleado', state);
+      applyInstantModifierToNpc(
+        target,
+        {
+          afecta: { satisfaccion: -8 },
+          origen: 'empresa:comercio/respuesta',
+          causa: ent.ultimaCausa,
+          texto: 'Despedido por recorte bajo piso salarial en comercio',
+          recordOnNpc: true,
+        },
+        state
+      );
+      ent.despidosPendientes = Math.max(0, ent.despidosPendientes - 1);
+      cutsLeft--;
     }
   }
 
-  const foodFrozen = state.empresas.alimento.respuesta !== null;
-  const comFrozen = state.empresas.comercio.respuesta !== null;
-  let foodHiresLeft = foodFrozen ? 0 : ECON_CONSTANTS.maxContratacionesPorDia;
-  let foodBudgetLeft = state.empresas.alimento.ultimaGanancia;
-  let comHiresLeft = comFrozen ? 0 : ECON_CONSTANTS.maxContratacionesPorDia;
-  let comBudgetLeft = state.empresas.comercio.ultimaGanancia;
+  const foodLayoff = state.empresas.alimento.ultimoTramo === 'despido';
+  const comLayoff = state.empresas.comercio.ultimoTramo === 'despido';
 
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
@@ -1757,8 +1879,9 @@ function handleRolesAndAging(state: GameState): void {
       }
     }
 
+    // Unemployed can fill public jobs, owner seats or media seats daily; enterprise employees hire on payday (ECONOMIA §5)
     if (npc.rol === 'desempleado') {
-      const candidateRoles: Array<{ rol: RoleId; score: number; refCost: number }> = [];
+      const candidateRoles: Array<{ rol: RoleId; score: number }> = [];
 
       if (state.reloj.dia % 3 === 0) {
         for (const pRole of PUBLIC_ROLES) {
@@ -1769,49 +1892,32 @@ function handleRolesAndAging(state: GameState): void {
             candidateRoles.push({
               rol: pRole,
               score: traitVal + state.gobierno.palancasVigentes.salarioPublico * 0.25,
-              refCost: 0,
             });
           }
         }
       }
 
-      for (const privRole of PRIVATE_ROLES) {
-        const isFoodEmployee = privRole === 'agricultor' || privRole === 'tecnico';
-        const isComEmployee = privRole === 'obrero';
-        if (foodFrozen && (isFoodEmployee || privRole === 'empresario')) continue;
-        if (comFrozen && (isComEmployee || privRole === 'comerciante')) continue;
-
+      const nonPayrollPrivate: PrivateRoleId[] = ['comerciante', 'empresario', 'periodista'];
+      for (const privRole of nonPayrollPrivate) {
+        if (privRole === 'empresario' && foodLayoff) continue;
+        if (privRole === 'comerciante' && comLayoff) continue;
         const cap =
-          privRole === 'obrero'
-            ? effectiveObreroCap
-            : privRole === 'empresario'
+          privRole === 'empresario'
             ? Math.max(1, preset.topesPrivados.empresario)
             : Math.round(preset.topesPrivados[privRole] * popScale);
         const def = ROLE_CATALOG[privRole];
         if (counts[privRole] < cap && npc.educacion.nivel >= def.educMin) {
-          const refCost = estimateNewWorkerPeriodRefWage(npc, privRole, state);
-          if (isFoodEmployee && (foodHiresLeft <= 0 || foodBudgetLeft < refCost)) continue;
-          if (isComEmployee && (comHiresLeft <= 0 || comBudgetLeft < refCost)) continue;
-
           const traitVal = def.afinidad ? getEffectiveTrait(npc, def.afinidad) : 50;
-          candidateRoles.push({ rol: privRole, score: traitVal, refCost });
+          candidateRoles.push({ rol: privRole, score: traitVal });
         }
       }
 
       if (candidateRoles.length > 0) {
         candidateRoles.sort((a, b) => b.score - a.score);
-        const picked = candidateRoles[0];
-        const chosen = picked.rol;
+        const chosen = candidateRoles[0].rol;
         counts.desempleado--;
         counts[chosen]++;
         npc.rol = chosen;
-        if (chosen === 'agricultor' || chosen === 'tecnico') {
-          foodHiresLeft--;
-          foodBudgetLeft -= picked.refCost;
-        } else if (chosen === 'obrero') {
-          comHiresLeft--;
-          comBudgetLeft -= picked.refCost;
-        }
         const allowedZones = preset.zonaPorRol[chosen] || ['centro'];
         if (!allowedZones.includes(npc.zona)) {
           npc.zona = allowedZones[counts[chosen] % allowedZones.length];
@@ -1822,12 +1928,12 @@ function handleRolesAndAging(state: GameState): void {
     }
   }
 
-  // Adults fill vacant public roles and vacant critical private roles (e.g. empresario) by affinity
+  // Adults fill vacant public roles and vacant critical empresario seat by affinity
   if (state.reloj.dia % 3 === 0) {
     let transfersLeft = 2;
     const targetRoles: RoleId[] = [
       ...PUBLIC_ROLES,
-      ...(!foodFrozen && counts.empresario < Math.max(1, preset.topesPrivados.empresario)
+      ...(!foodLayoff && counts.empresario < Math.max(1, preset.topesPrivados.empresario)
         ? (['empresario'] as RoleId[])
         : []),
     ];
@@ -1896,6 +2002,7 @@ function killNpc(
   causaId?: string
 ): void {
   if (!npc.vivo) return;
+  // Preserves npc.economia.dinero for strict world money conservation (ECONOMIA §1)
   const effZone = getEffectiveZone(npc, zonesCount);
   const wasWaitingBed = npc.hospital.esperandoCama;
   npc.vivo = false;
@@ -2015,194 +2122,6 @@ function runPoliceRelocation(state: GameState): void {
   }
 }
 
-function settleSingleEnterprise(
-  state: GameState,
-  ent: {
-    id: string;
-    ingresosAcum: number;
-    sueldosAcum: number;
-    sueldosReferenciaAcum: number;
-    diasPeriodo: number;
-    ultimaGanancia: number;
-    ultimoIngresoPeriodo: number;
-    ultimoSueldosPeriodo: number;
-    respuesta: GameState['empresas']['alimento']['respuesta'];
-  },
-  isFoodEnterprise: boolean,
-  vivos: Npc[],
-  taxRate: number
-): number {
-  const sueldosRef = ent.sueldosReferenciaAcum > 0 ? ent.sueldosReferenciaAcum : ent.sueldosAcum;
-  const alcanza = ent.ingresosAcum >= sueldosRef;
-  const gananciaBruta = Math.max(0, ent.ingresosAcum - ent.sueldosAcum);
-  ent.ultimoIngresoPeriodo = Number(ent.ingresosAcum.toFixed(1));
-  ent.ultimoSueldosPeriodo = Number(ent.sueldosAcum.toFixed(1));
-  ent.ingresosAcum = 0;
-  ent.sueldosAcum = 0;
-  ent.sueldosReferenciaAcum = 0;
-  ent.diasPeriodo = 0;
-
-  const duenoNpc = isFoodEnterprise
-    ? state.empresas.alimento.dueno
-      ? vivos.find((n) => n.id === state.empresas.alimento.dueno) || null
-      : null
-    : null;
-  const sociosNpcs = isFoodEnterprise ? [] : vivos.filter((n) => n.rol === 'comerciante');
-  const repNpc = duenoNpc || sociosNpcs[0] || null;
-
-  if (alcanza) {
-    if (ent.respuesta) {
-      const prevCausa = ent.respuesta.causa;
-      ent.respuesta = null;
-      emitSimEvent(state, {
-        id: nextSeqId(state, `ev_${state.reloj.dia}`),
-        dia: state.reloj.dia,
-        tipo: 'empresa_respuesta_fin',
-        zona: repNpc?.zona ?? 'centro',
-        empresaId: ent.id,
-        causa: prevCausa,
-      });
-    }
-    ent.ultimaGanancia = Number(gananciaBruta.toFixed(1));
-    const tax = gananciaBruta * (taxRate / 100);
-    const netProfit = gananciaBruta - tax;
-    if (isFoodEnterprise) {
-      if (duenoNpc) {
-        duenoNpc.economia.dinero += netProfit;
-        duenoNpc.economia.ultimoIngresoNeto = Number(
-          (netProfit / ECON_CONSTANTS.periodoPagoDias).toFixed(2)
-        );
-      }
-    } else if (sociosNpcs.length > 0) {
-      const share = netProfit / sociosNpcs.length;
-      const dailyShare = Number((share / ECON_CONSTANTS.periodoPagoDias).toFixed(2));
-      for (const socio of sociosNpcs) {
-        socio.economia.dinero += share;
-        socio.economia.ultimoIngresoNeto = dailyShare;
-      }
-    }
-    return tax;
-  }
-
-  // Insufficient revenue for reference payroll -> deterministic response rule (EMPRESAS §4)
-  const deficit = Math.max(0, sueldosRef - ent.ultimoIngresoPeriodo);
-  const employees = isFoodEnterprise
-    ? vivos.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico')
-    : vivos.filter((n) => n.rol === 'obrero');
-
-  const piso = ECON_CONSTANTS.pisoSueldoPct / 100;
-  const neededFactor = sueldosRef > 0.01 ? ent.ultimoIngresoPeriodo / sueldosRef : 0;
-  const chosen: EnterpriseResponseType =
-    neededFactor >= piso || employees.length === 0 ? 'recortar_sueldos' : 'despedir';
-  const factorSueldo = Number(clamp(neededFactor, piso, 1).toFixed(3));
-
-  const origen = `empresa:${ent.id}/respuesta`;
-  const causa = state.ultimaCausaPalanca || state.ultimoEventoClimaId;
-  const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
-  state.ultimoEventoEmpresaId = evId;
-
-  let despidos = 0;
-  if (chosen === 'despedir') {
-    const pool = [...employees];
-    let cutsLeft = ECON_CONSTANTS.maxPaseDesempleoPorDia;
-    while (cutsLeft > 0 && pool.length > 0) {
-      const currentCost = estimateWorkerFloorPeriodCost(pool, state);
-      if (currentCost <= ent.ultimoIngresoPeriodo + 0.5) break;
-      const target = pickNextLayoffTarget(pool, isFoodEnterprise, state);
-      target.rol = 'desempleado';
-      target.mapa.accion = 'buscando trabajo';
-      target.mapa.destino = getDistrictPosition('desempleado', state);
-      applyInstantModifierToNpc(
-        target,
-        {
-          afecta: { satisfaccion: -8 },
-          origen,
-          causa: evId,
-          texto: `Despedido por déficit de ${ent.id}`,
-          recordOnNpc: true,
-        },
-        state
-      );
-      cutsLeft--;
-      despidos++;
-    }
-  }
-
-  emitSimEvent(state, {
-    id: evId,
-    dia: state.reloj.dia,
-    tipo: 'empresa_respuesta',
-    zona: repNpc?.zona ?? 'centro',
-    empresaId: ent.id,
-    duenoId: duenoNpc ? duenoNpc.id : sociosNpcs[0]?.id ?? null,
-    respuesta: chosen,
-    factor: factorSueldo,
-    despidos,
-    deficit: Number(deficit.toFixed(1)),
-    origen,
-    causa,
-  });
-
-  ent.ultimaGanancia = 0;
-  if (duenoNpc) duenoNpc.economia.ultimoIngresoNeto = 0;
-  for (const socio of sociosNpcs) socio.economia.ultimoIngresoNeto = 0;
-
-  ent.respuesta = {
-    tipo: chosen,
-    diasRestantes: ECON_CONSTANTS.diasRespuestaEmpresa,
-    duracionTotal: ECON_CONSTANTS.diasRespuestaEmpresa,
-    factorSueldo,
-    origen,
-    causa: evId,
-  };
-
-  addLog(
-    state,
-    'economia',
-    origen,
-    `Empresa ${ent.id}: ${chosen.replace('_', ' ')}`,
-    `Déficit de $${deficit.toFixed(1)} en el cierre semanal; responde con ${chosen.replace('_', ' ')} (factor ${Math.round(factorSueldo * 100)}%).`,
-    causa,
-    evId
-  );
-
-  return 0;
-}
-
-function settleEnterprises(state: GameState): void {
-  const vivos = state.npcs.filter((n) => n.vivo);
-  const taxRate = state.gobierno.palancasVigentes.impuesto;
-
-  const tickEnterprise = (
-    ent: GameState['empresas']['alimento'] | GameState['empresas']['comercio'],
-    isFood: boolean
-  ) => {
-    ent.diasPeriodo += 1;
-    const isSettlementDay = ent.diasPeriodo >= ECON_CONSTANTS.periodoPagoDias;
-    if (ent.respuesta && !isSettlementDay) {
-      ent.respuesta.diasRestantes -= 1;
-      if (ent.respuesta.diasRestantes <= 0) {
-        const prevCausa = ent.respuesta.causa;
-        ent.respuesta = null;
-        emitSimEvent(state, {
-          id: nextSeqId(state, `ev_${state.reloj.dia}`),
-          dia: state.reloj.dia,
-          tipo: 'empresa_respuesta_fin',
-          zona: 'centro',
-          empresaId: ent.id,
-          causa: prevCausa,
-        });
-      }
-    }
-    if (isSettlementDay) {
-      const netTax = settleSingleEnterprise(state, ent, isFood, vivos, taxRate);
-      state.gobierno.acumuladoPeriodo.impuestos += netTax;
-    }
-  };
-
-  tickEnterprise(state.empresas.alimento, true);
-  tickEnterprise(state.empresas.comercio, false);
-}
 
 function runDailyEconomyAndNeeds(state: GameState): void {
   const vivos = state.npcs.filter((n) => n.vivo);
@@ -2259,7 +2178,6 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   state.alimento.stock += produccionAlimento;
   state.alimento.produccionDiaria = Number(produccionAlimento.toFixed(1));
 
-  // Enforce warehouse silo cap after production (ESTADOS §4)
   const siloDays = state.alimento.siloDias || ECON_CONSTANTS.siloDias;
   const maxSiloStock = pop * ECON_CONSTANTS.consumoPorNpc * siloDays;
   state.alimento.stock = Math.min(state.alimento.stock, maxSiloStock);
@@ -2283,7 +2201,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       : Number((ECON_CONSTANTS.precioBaseAlimento * capMult).toFixed(2));
   const precioAlimento = Number(Math.min(precioMercado, precioTope).toFixed(2));
 
-  // 2. Foreign Trade (comercioExterior, ESTADOS §12)
+  // 2. Foreign Trade (ECONOMIA §9, ESTADOS §12)
   let importacionesDia = 0;
   let exportacionesDia = 0;
   const tradeLever = pal.comercioExterior;
@@ -2303,9 +2221,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
         : 0;
     const units = Number(affordableUnits.toFixed(2));
     if (units > 0) {
+      const paidImp = Math.min(Math.max(0, state.gobierno.reserva), units * purchaseUnitPrice);
       state.alimento.stock = Math.min(maxSiloStock, state.alimento.stock + units);
-      importacionesDia = units * purchaseUnitPrice;
-      state.gobierno.reserva = Number(Math.max(0, state.gobierno.reserva - importacionesDia).toFixed(1));
+      state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidImp);
+      state.auditSalidasDia += paidImp;
+      importacionesDia = paidImp;
     }
   } else if (tradeLever < 0 && maxTradeUnits > 0) {
     const minStockReserve = pop * ECON_CONSTANTS.consumoPorNpc * ECON_CONSTANTS.stockMinExportarDias;
@@ -2318,7 +2238,8 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       if (units > 0) {
         state.alimento.stock = Number(Math.max(0, state.alimento.stock - units).toFixed(2));
         const exportRevenue = units * externalPriceBase;
-        state.empresas.alimento.ingresosAcum += exportRevenue;
+        state.empresas.alimento.ventasAcum += exportRevenue;
+        state.auditEntradasDia += exportRevenue;
         exportacionesDia = exportRevenue;
       }
     }
@@ -2342,7 +2263,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
-  // 4. Pantry rebuy & Payment (ESTADOS §4 & §12)
+  // 4. Pantry rebuy & Payment (ECONOMIA §3, §6; ESTADOS §4, §12)
   const desiredMap = new Map<string, number>();
   let totalDemanded = 0;
   const cheapFoodBoost = precioAlimento < precioMercado * 0.9;
@@ -2386,12 +2307,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   const stockShareRatio =
     totalDemanded > 0 ? Math.min(1, Math.max(0, state.alimento.stock) / totalDemanded) : 1;
 
+  let comidaMenoresDia = 0;
   let garantiaAlimentariaDia = 0;
+  let garantiaImpagaDia = 0;
   let paidFoodMoney = 0;
   const garantiaPct = pal.garantiaAlimentaria / 100;
-  const prorrateoSec = state.gobierno.finanzas.impago
-    ? clamp(state.gobierno.finanzas.prorrateoPensionGarantia ?? 1, 0, 1)
-    : 1;
 
   for (const npc of vivos) {
     const desired = desiredMap.get(npc.id) || 0;
@@ -2402,22 +2322,30 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     let paidUnits = 0;
 
     if (stage === 'menor') {
-      // Minors food is ALWAYS 100% covered by the state (ESTADOS §12)
-      garantiaAlimentariaDia += cost;
-      paidUnits = allocated;
-      paidFoodMoney += cost;
+      // Minors food is paid daily from reserva first; cannot spend negative reserva
+      const paidMinor = Math.min(Math.max(0, state.gobierno.reserva), cost);
+      state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidMinor);
+      const unpaidMinor = Math.max(0, cost - paidMinor);
+      comidaMenoresDia += paidMinor;
+      garantiaImpagaDia += unpaidMinor;
+      paidUnits = cost > 0 ? allocated * clamp(paidMinor / cost, 0, 1) : allocated;
+      paidFoodMoney += paidMinor;
     } else if (npc.economia.dinero >= cost) {
       npc.economia.dinero -= cost;
       paidUnits = allocated;
       paidFoodMoney += cost;
     } else {
       npc.economia.noPudoPagarComida = true;
-      const faltante = Math.max(0, cost - npc.economia.dinero);
-      const cubiertoFull = faltante * garantiaPct;
-      const cubiertoPaid = cubiertoFull * prorrateoSec;
-      garantiaAlimentariaDia += cubiertoFull;
-      const pagoTotal = npc.economia.dinero + cubiertoPaid;
+      const fromNpc = Math.max(0, npc.economia.dinero);
       npc.economia.dinero = 0;
+      const faltante = Math.max(0, cost - fromNpc);
+      const garantiaFull = faltante * garantiaPct;
+      const garantiaPaid = Math.min(Math.max(0, state.gobierno.reserva), garantiaFull);
+      state.gobierno.reserva = Math.max(0, state.gobierno.reserva - garantiaPaid);
+      const garantiaUnpaid = Math.max(0, garantiaFull - garantiaPaid);
+      garantiaAlimentariaDia += garantiaPaid;
+      garantiaImpagaDia += garantiaUnpaid;
+      const pagoTotal = fromNpc + garantiaPaid;
       const frac = cost > 0 ? clamp(pagoTotal / cost, 0, 1) : 0;
       paidUnits = allocated * frac;
       paidFoodMoney += pagoTotal;
@@ -2434,11 +2362,11 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     }
   }
 
-  // Credit paid food revenue to comercio (margin) and food enterprise (rest) (ESTADOS §4)
+  // Credit paid food revenue to comercio (margin) and food enterprise (rest)
   if (paidFoodMoney > 0) {
     const toComercio = paidFoodMoney * (ECON_CONSTANTS.margenComercialPct / 100);
-    state.empresas.comercio.ingresosAcum += toComercio;
-    state.empresas.alimento.ingresosAcum += paidFoodMoney - toComercio;
+    state.empresas.comercio.ventasAcum += toComercio;
+    state.empresas.alimento.ventasAcum += paidFoodMoney - toComercio;
   }
 
   // 5. Effect 'comparte' (transfers pantry between same-zone neighbors before eating)
@@ -2494,99 +2422,88 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   state.empresas.alimento.stock = Number(state.alimento.stock.toFixed(2));
   state.empresas.alimento.diasStock = state.alimento.diasStock;
 
-  // 7. Incomes, Taxes, Wages to Enterprises, Ayuda Social & Living Expenses
+  // 7. Living Expense + Daily Entitlement Accruals (settled at Payday every PERIOD_DAYS)
+  const acum = state.gobierno.acumuladoPeriodo;
   const salarioPublicoDia = ECON_CONSTANTS.salarioBasePublico * (pal.salarioPublico / 100);
-  const pisoSueldo = ECON_CONSTANTS.pisoSueldoPct / 100;
-  const foodWageFactor = state.empresas.alimento.respuesta
-    ? clamp(state.empresas.alimento.respuesta.factorSueldo, pisoSueldo, 1)
-    : 1;
-  const comWageFactor = state.empresas.comercio.respuesta
-    ? clamp(state.empresas.comercio.respuesta.factorSueldo, pisoSueldo, 1)
-    : 1;
+  const colchonRef = ECON_CONSTANTS.colchonDias * precioAlimento * ECON_CONSTANTS.consumoPorNpc;
 
-  let impuestosDia = 0;
-  let nominaDia = 0;
-  let pensionesDia = 0;
-  let ayudaSocialDia = 0;
+  let impuestosDiaEst = 0;
+  let nominaDiaEst = 0;
+  let pensionesDiaEst = 0;
+  let ayudaSocialDiaEst = 0;
   let livingPoolDomestico = 0;
-  const inflDiaria = mod === 'fiscal' ? state.gobierno.inflacion / 100 / 365 : 0;
   const poderAdquisitivo: Record<string, number> = {};
   const ayudaRecibidaByNpc: Record<string, number> = {};
-
-  const prorrateoNomina = state.gobierno.finanzas.impago
-    ? clamp(state.gobierno.finanzas.prorrateoNomina ?? 1, 0, 1)
-    : 1;
-  const prorrateoDisc = state.gobierno.finanzas.impago
-    ? clamp(state.gobierno.finanzas.prorrateoDiscrecional ?? 1, 0, 1)
-    : 1;
 
   for (const npc of vivos) {
     const def = ROLE_CATALOG[npc.rol];
     const taxRate = getTaxRateForNpc(npc, state);
-    let bruto = 0;
     const isOwner = npc.rol === 'empresario' || npc.rol === 'comerciante';
 
     if (def.publico) {
-      nominaDia += salarioPublicoDia;
-      bruto = salarioPublicoDia * prorrateoNomina;
+      acum.nominaPorNpc[npc.id] = (acum.nominaPorNpc[npc.id] || 0) + salarioPublicoDia;
+      acum.nominaDevengada += salarioPublicoDia;
+      nominaDiaEst += salarioPublicoDia;
+      impuestosDiaEst += salarioPublicoDia * (taxRate / 100);
     } else if (npc.rol === 'jubilado') {
-      pensionesDia += ECON_CONSTANTS.pensionBase;
-      bruto = ECON_CONSTANTS.pensionBase * prorrateoSec;
+      acum.pensionesPorNpc[npc.id] = (acum.pensionesPorNpc[npc.id] || 0) + ECON_CONSTANTS.pensionBase;
+      acum.pensionesDevengadas += ECON_CONSTANTS.pensionBase;
+      pensionesDiaEst += ECON_CONSTANTS.pensionBase;
     } else if (!isOwner && def.ingreso && !npc.hospital.internado) {
       const prod = getNpcProductivity(npc, state);
       const [minI, maxI] = def.ingreso;
-      const baseWage = (minI + npc.economia.ingresoPos * (maxI - minI)) * prod;
+      const refDia = (minI + npc.economia.ingresoPos * (maxI - minI)) * prod;
 
       if (npc.rol === 'agricultor' || npc.rol === 'tecnico') {
-        state.empresas.alimento.sueldosReferenciaAcum += baseWage;
-        bruto = baseWage * foodWageFactor;
-        state.empresas.alimento.sueldosAcum += bruto;
+        state.empresas.alimento.refPorEmpleado[npc.id] =
+          (state.empresas.alimento.refPorEmpleado[npc.id] || 0) + refDia;
+        impuestosDiaEst += refDia * state.empresas.alimento.factor * (taxRate / 100);
       } else if (npc.rol === 'obrero') {
-        state.empresas.comercio.sueldosReferenciaAcum += baseWage;
-        bruto = baseWage * comWageFactor;
-        state.empresas.comercio.sueldosAcum += bruto;
-      } else {
-        // periodista (simplified private media model)
-        bruto = baseWage;
+        state.empresas.comercio.refPorEmpleado[npc.id] =
+          (state.empresas.comercio.refPorEmpleado[npc.id] || 0) + refDia;
+        impuestosDiaEst += refDia * state.empresas.comercio.factor * (taxRate / 100);
+      } else if (npc.rol === 'periodista') {
+        acum.periodistasPorNpc[npc.id] = (acum.periodistasPorNpc[npc.id] || 0) + refDia;
+        impuestosDiaEst += refDia * (taxRate / 100);
       }
+    } else if (npc.rol === 'empresario') {
+      impuestosDiaEst += (Math.max(0, state.empresas.alimento.ultimaGanancia) / PERIOD_DAYS) * (taxRate / 100);
+    } else if (npc.rol === 'comerciante') {
+      const sociosLen = Math.max(1, state.empresas.comercio.socios.length);
+      impuestosDiaEst +=
+        (Math.max(0, state.empresas.comercio.ultimaGanancia) / sociosLen / PERIOD_DAYS) * (taxRate / 100);
     }
 
-    if (!isOwner) {
-      const impuesto = bruto * (taxRate / 100);
-      const neto = bruto - impuesto;
-      impuestosDia += impuesto;
-      npc.economia.ultimoIngresoNeto = Number(neto.toFixed(2));
-      npc.economia.dinero = Math.max(0, npc.economia.dinero * (1 - inflDiaria) + neto);
-    } else {
-      npc.economia.dinero = Math.max(0, npc.economia.dinero * (1 - inflDiaria));
-    }
-
-    // Ayuda social -> desempleados y jubilados (GOBERNADOR §4, ESTADOS §12)
+    // Ayuda social accrual -> desempleados y jubilados (paid on payday)
     if ((npc.rol === 'desempleado' || npc.rol === 'jubilado') && pal.ayudaSocial > 0) {
-      ayudaSocialDia += pal.ayudaSocial;
-      const paidAyuda = pal.ayudaSocial * prorrateoDisc;
-      npc.economia.dinero += paidAyuda;
-      npc.economia.ultimoIngresoNeto = Number((npc.economia.ultimoIngresoNeto + paidAyuda).toFixed(2));
-      ayudaRecibidaByNpc[npc.id] = paidAyuda;
+      acum.ayudaPorNpc[npc.id] = (acum.ayudaPorNpc[npc.id] || 0) + pal.ayudaSocial;
+      acum.ayudaDevengada += pal.ayudaSocial;
+      ayudaSocialDiaEst += pal.ayudaSocial;
+      ayudaRecibidaByNpc[npc.id] = pal.ayudaSocial;
     }
 
-    // Gasto de vida -> 100% goes to empresa de comercio (ESTADOS §4 & §12)
+    // Gasto de vida (ECONOMIA §4) -> 100% goes to empresa de comercio
     if (getStage(npc.edad) !== 'menor') {
       const propMod = getModifierDelta(npc, 'propensionGasto');
-      const effProp = clamp(npc.economia.propensionGasto + propMod, 0.05, 0.9);
+      const effProp = clamp(npc.economia.propensionGasto + propMod, 0.05, 0.95);
       const baseNet = Math.max(0, npc.economia.ultimoIngresoNeto - precioAlimento);
-      const desiredLiving = baseNet * effProp;
-      const actualLiving = Math.min(npc.economia.dinero, desiredLiving);
+      const wealthTerm =
+        npc.economia.dinero > colchonRef ? ECON_CONSTANTS.kRiqueza * (npc.economia.dinero - colchonRef) : 0;
+      const desiredLiving = effProp * baseNet + wealthTerm;
+      const actualLiving = Math.min(
+        Math.max(0, npc.economia.dinero - precioAlimento),
+        Math.max(0, desiredLiving)
+      );
       if (actualLiving > 0) {
         npc.economia.dinero -= actualLiving;
         livingPoolDomestico += actualLiving;
       }
     }
 
-    const dineroTarget = precioAlimento * 20;
+    const dineroTarget = precioAlimento * (ECON_CONSTANTS.colchonDias * 1.9);
     const wealthScore = clamp(
       (npc.economia.dinero / Math.max(1, dineroTarget)) * 60 +
-        (Math.max(0, npc.economia.ultimoIngresoNeto) / Math.max(1, precioAlimento * 2.5)) * 40,
+        (Math.max(0, npc.economia.ultimoIngresoNeto) / Math.max(1, precioAlimento * 2.0)) * 40,
       0,
       100
     );
@@ -2594,25 +2511,23 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   }
 
   if (livingPoolDomestico > 0) {
-    state.empresas.comercio.ingresosAcum += livingPoolDomestico;
+    state.empresas.comercio.ventasAcum += livingPoolDomestico;
   }
 
   const opScale = pop / 100;
   const areaOpDia: Record<ServiceAreaId, number> = {
-    seguridad: (SERVICE_LEVEL_TABLE.seguridad[pal.servicios.seguridad].operacionPeriodo * opScale) / FISCAL_PERIOD_DAYS,
-    salud: (SERVICE_LEVEL_TABLE.salud[pal.servicios.salud].operacionPeriodo * opScale) / FISCAL_PERIOD_DAYS,
-    infraestructura: (SERVICE_LEVEL_TABLE.obras[pal.servicios.obras].operacionPeriodo * opScale) / FISCAL_PERIOD_DAYS,
+    seguridad: (SERVICE_LEVEL_TABLE.seguridad[pal.servicios.seguridad].operacionPeriodo * opScale) / PERIOD_DAYS,
+    salud: (SERVICE_LEVEL_TABLE.salud[pal.servicios.salud].operacionPeriodo * opScale) / PERIOD_DAYS,
+    infraestructura: (SERVICE_LEVEL_TABLE.obras[pal.servicios.obras].operacionPeriodo * opScale) / PERIOD_DAYS,
   };
   const operacionDia = areaOpDia.seguridad + areaOpDia.salud + areaOpDia.infraestructura;
-  const prensaDia = pal.prensa / FISCAL_PERIOD_DAYS;
+  const prensaDia = pal.prensa / PERIOD_DAYS;
 
-  const acum = state.gobierno.acumuladoPeriodo;
   acum.dias += 1;
-  acum.impuestos += impuestosDia;
-  acum.nomina += nominaDia;
-  acum.pensiones += pensionesDia;
+  acum.impuestos += impuestosDiaEst;
   acum.garantiaAlimentaria += garantiaAlimentariaDia;
-  acum.ayudaSocial += ayudaSocialDia;
+  acum.garantiaImpaga += garantiaImpagaDia;
+  acum.comidaMenores += comidaMenoresDia;
   acum.operacion += operacionDia;
   acum.operacionPorArea.seguridad += areaOpDia.seguridad;
   acum.operacionPorArea.salud += areaOpDia.salud;
@@ -2622,8 +2537,14 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   acum.exportaciones += exportacionesDia;
 
   const estSaldoDia =
-    impuestosDia -
-    (nominaDia + pensionesDia + garantiaAlimentariaDia + ayudaSocialDia + operacionDia + prensaDia);
+    impuestosDiaEst -
+    (nominaDiaEst +
+      pensionesDiaEst +
+      garantiaAlimentariaDia +
+      comidaMenoresDia +
+      ayudaSocialDiaEst +
+      operacionDia +
+      prensaDia);
 
   state.ultimaSalidaEconomica = {
     accesoComida,
@@ -3011,10 +2932,10 @@ function runDailyEconomyAndNeeds(state: GameState): void {
     const inflDrag = mod === 'fiscal' ? Math.max(0, state.gobierno.inflacion - 10) * 0.35 : 0;
     const desempDrag = npc.rol === 'desempleado' ? 16 : 0;
     const modSat = getModifierDelta(npc, 'satisfaccion') * 0.3;
-    const ayudaBoost = Math.min(12, (ayudaRecibidaByNpc[npc.id] || 0) * 2.2);
+    const ayudaBoost = Math.min(18, (ayudaRecibidaByNpc[npc.id] || 0) * 3.5);
 
     const targetSat = clamp(
-      52 +
+      54.5 +
         (poder - 50) * 0.45 +
         saludService * 10 +
         (state.gobierno.indicadores.infraestructura / 100) * 6 -
@@ -3045,57 +2966,304 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   }
 }
 
-function settleFiscalPeriod(state: GameState): void {
+function settleEnterpriseAtPayday(
+  state: GameState,
+  ent: GameState['empresas']['alimento'] | GameState['empresas']['comercio'],
+  isFood: boolean,
+  vivos: Npc[]
+): number {
+  const preset = SCENARIO_PRESETS[state.config.escenarioId];
+  const popScale = Math.max(0.6, vivos.length / 100);
+  const ventas = Math.max(0, ent.ventasAcum);
+  const fondoSueldos = ventas * ent.parteSueldos;
+
+  const currentWorkers = isFood
+    ? vivos.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico')
+    : vivos.filter((n) => n.rol === 'obrero');
+  const workersWithRef = vivos.filter((n) => (ent.refPorEmpleado[n.id] || 0) > 0);
+  const sumRef = workersWithRef.reduce((acc, n) => acc + (ent.refPorEmpleado[n.id] || 0), 0);
+
+  // Hiring on boom before raises (ECONOMIA §5)
+  if (ent.ultimoTramo !== 'despido' && sumRef > 0 && fondoSueldos > sumRef) {
+    const roleCounts: Record<RoleId, number> = {
+      estudiante: 0,
+      agricultor: 0,
+      obrero: 0,
+      policia: 0,
+      estatal: 0,
+      comerciante: 0,
+      empresario: 0,
+      tecnico: 0,
+      docente: 0,
+      periodista: 0,
+      medico: 0,
+      ingeniero: 0,
+      desempleado: 0,
+      jubilado: 0,
+    };
+    for (const n of vivos) roleCounts[n.rol]++;
+
+    const hireRoles: PrivateRoleId[] = isFood ? ['tecnico', 'agricultor'] : ['obrero'];
+    let hiresLeft = ECON_CONSTANTS.maxContratacionesPorPeriodo;
+    let extraRefReserved = 0;
+
+    while (hiresLeft > 0) {
+      let hiredOne = false;
+      for (const r of hireRoles) {
+        const cap = Math.round(preset.topesPrivados[r] * popScale);
+        if (roleCounts[r] >= cap) continue;
+        const def = ROLE_CATALOG[r];
+        const candidates = vivos.filter(
+          (n) =>
+            n.rol === 'desempleado' &&
+            !n.hospital.internado &&
+            n.educacion.nivel >= def.educMin &&
+            n.edad >= def.edadMin &&
+            (def.edadMax === null || n.edad <= def.edadMax)
+        );
+        if (candidates.length === 0) continue;
+        candidates.sort((a, b) => {
+          const tA = def.afinidad ? getEffectiveTrait(a, def.afinidad) : 50;
+          const tB = def.afinidad ? getEffectiveTrait(b, def.afinidad) : 50;
+          return tB - tA;
+        });
+        const cand = candidates[0];
+        const [minI, maxI] = def.ingreso!;
+        const candPeriodRef =
+          (minI + cand.economia.ingresoPos * (maxI - minI)) *
+          Math.max(0.4, getNpcProductivity(cand, state)) *
+          PERIOD_DAYS;
+        if (fondoSueldos >= sumRef + extraRefReserved + candPeriodRef) {
+          cand.rol = r;
+          const allowedZones = preset.zonaPorRol[r] || ['centro'];
+          if (!allowedZones.includes(cand.zona)) {
+            cand.zona = allowedZones[roleCounts[r] % allowedZones.length];
+          }
+          cand.mapa.destino = getDistrictPosition(r, state);
+          cand.mapa.accion = 'trabajando';
+          roleCounts.desempleado--;
+          roleCounts[r]++;
+          extraRefReserved += candPeriodRef;
+          hiresLeft--;
+          hiredOne = true;
+          break;
+        }
+      }
+      if (!hiredOne) break;
+    }
+  }
+
+  const rawFactor = sumRef > 0 ? fondoSueldos / sumRef : 1;
+  const factor = Number(clamp(rawFactor, 0, ECON_CONSTANTS.factorMax).toFixed(3));
+
+  let taxesCollected = 0;
+  let totalGrossPaid = 0;
+
+  for (const w of workersWithRef) {
+    const ref = ent.refPorEmpleado[w.id] || 0;
+    const remainingVentas = Math.max(0, ventas - totalGrossPaid);
+    const gross = Math.min(remainingVentas, ref * factor);
+    const taxRate = getTaxRateForNpc(w, state);
+    const tax = gross * (taxRate / 100);
+    const net = gross - tax;
+    w.economia.dinero += net;
+    w.economia.ultimoIngresoNeto = Number((net / PERIOD_DAYS).toFixed(2));
+    state.gobierno.reserva += tax;
+    taxesCollected += tax;
+    totalGrossPaid += gross;
+  }
+
+  const gananciaBruta = Math.max(0, ventas - totalGrossPaid);
+  const duenoNpc = isFood
+    ? state.empresas.alimento.dueno
+      ? vivos.find((n) => n.id === state.empresas.alimento.dueno) || null
+      : null
+    : null;
+  const sociosNpcs = isFood ? [] : vivos.filter((n) => n.rol === 'comerciante');
+  const owners = isFood ? (duenoNpc ? [duenoNpc] : []) : sociosNpcs;
+
+  if (owners.length > 0) {
+    const share = gananciaBruta / owners.length;
+    for (const owner of owners) {
+      const taxRate = getTaxRateForNpc(owner, state);
+      const tax = share * (taxRate / 100);
+      const net = share - tax;
+      owner.economia.dinero += net;
+      owner.economia.ultimoIngresoNeto = Number((net / PERIOD_DAYS).toFixed(2));
+      state.gobierno.reserva += tax;
+      taxesCollected += tax;
+    }
+  } else if (gananciaBruta > 0) {
+    // Profit of an ownerless enterprise exits the world (ECONOMIA §9)
+    state.auditSalidasDia += gananciaBruta;
+  }
+
+  ent.ventasAcum = 0;
+  ent.refPorEmpleado = {};
+  ent.ultimoIngresoPeriodo = Number(ventas.toFixed(1));
+  ent.ultimoSueldosPeriodo = Number(totalGrossPaid.toFixed(1));
+  ent.ultimaGanancia = Number(gananciaBruta.toFixed(1));
+  ent.factor = factor;
+
+  const prevTramo = ent.ultimoTramo;
+  const piso = ECON_CONSTANTS.pisoSueldoPct / 100;
+  const repNpc = duenoNpc || sociosNpcs[0] || currentWorkers[0] || null;
+  const repZone = repNpc?.zona ?? 'centro';
+  const empCausa = state.ultimaCausaPalanca || state.ultimoEventoClimaId;
+  const origen = `empresa:${ent.id}/respuesta`;
+
+  if (sumRef > 0 && factor < piso) {
+    ent.ultimoTramo = 'despido';
+    // Calculate how many current workers exceed the floor payroll capacity
+    const orderedForLayoff = isFood
+      ? [
+          ...currentWorkers.filter((n) => n.rol === 'tecnico'),
+          ...currentWorkers.filter((n) => n.rol === 'agricultor'),
+        ]
+      : [...currentWorkers];
+    let remainingRef = sumRef;
+    let surplusCount = 0;
+    const maxCuts = Math.max(0, orderedForLayoff.length - 1);
+    for (const w of orderedForLayoff) {
+      if (surplusCount >= maxCuts) break;
+      if (remainingRef * piso <= fondoSueldos + 0.01) break;
+      const wRef =
+        ent.refPorEmpleado[w.id] ??
+        sumRef / Math.max(1, orderedForLayoff.length);
+      remainingRef = Math.max(0, remainingRef - wRef);
+      surplusCount++;
+    }
+    if (surplusCount === 0 && maxCuts > 0) surplusCount = 1;
+    ent.despidosPendientes = surplusCount;
+
+    const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
+    state.ultimoEventoEmpresaId = evId;
+    ent.ultimaCausa = evId;
+    emitSimEvent(state, {
+      id: evId,
+      dia: state.reloj.dia,
+      tipo: 'empresa_despido',
+      zona: repZone,
+      empresaId: ent.id,
+      cantidad: surplusCount,
+      factor,
+      origen,
+      causa: empCausa,
+    });
+    addLog(
+      state,
+      'economia',
+      origen,
+      `Empresa ${ent.id}: despidos programados (${surplusCount})`,
+      `El factor salarial cayó a ${Math.round(factor * 100)}% (bajo el piso de ${ECON_CONSTANTS.pisoSueldoPct}%).`,
+      empCausa,
+      evId
+    );
+  } else if (sumRef > 0 && factor < 0.995) {
+    ent.ultimoTramo = 'recorte';
+    ent.despidosPendientes = 0;
+    const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
+    state.ultimoEventoEmpresaId = evId;
+    ent.ultimaCausa = evId;
+    emitSimEvent(state, {
+      id: evId,
+      dia: state.reloj.dia,
+      tipo: 'empresa_recorte',
+      zona: repZone,
+      empresaId: ent.id,
+      factor,
+      origen,
+      causa: empCausa,
+    });
+    addLog(
+      state,
+      'economia',
+      origen,
+      `Empresa ${ent.id}: recorte salarial (${Math.round(factor * 100)}%)`,
+      `Las ventas del período redujeron el reparto de sueldos al ${Math.round(factor * 100)}% de referencia.`,
+      empCausa,
+      evId
+    );
+  } else if (sumRef > 0 && factor > 1.005) {
+    ent.ultimoTramo = 'aumento';
+    ent.despidosPendientes = 0;
+    if (prevTramo !== 'aumento') {
+      const evId = nextSeqId(state, `ev_${state.reloj.dia}`);
+      ent.ultimaCausa = evId;
+      emitSimEvent(state, {
+        id: evId,
+        dia: state.reloj.dia,
+        tipo: 'empresa_aumento',
+        zona: repZone,
+        empresaId: ent.id,
+        factor,
+        origen,
+        causa: empCausa,
+      });
+      addLog(
+        state,
+        'economia',
+        origen,
+        `Empresa ${ent.id}: aumento salarial (${Math.round(factor * 100)}%)`,
+        `El auge de ventas elevó el factor salarial a ${Math.round(factor * 100)}%.`,
+        empCausa,
+        evId
+      );
+    }
+  } else {
+    ent.ultimoTramo = 'normal';
+    ent.despidosPendientes = 0;
+  }
+
+  return taxesCollected;
+}
+
+function runPaydaySettlement(state: GameState): void {
   const acum = state.gobierno.acumuladoPeriodo;
   const pal = state.gobierno.palancasVigentes;
   const mod = state.config.economiaModulo;
   const vivos = state.npcs.filter((n) => n.vivo);
   const pop = Math.max(1, vivos.length);
 
-  if (mod === 'fiscal' && state.gobierno.inflacion > 0) {
-    const erosion = state.gobierno.inflacion / 100 / 52;
-    state.gobierno.reserva = Math.max(0, state.gobierno.reserva * (1 - erosion));
-  }
+  // Step 1: Private Enterprises (alimento + comercio) settle sales -> wages + profits -> taxes
+  let taxesCollected = 0;
+  taxesCollected += settleEnterpriseAtPayday(state, state.empresas.alimento, true, vivos);
+  taxesCollected += settleEnterpriseAtPayday(state, state.empresas.comercio, false, vivos);
 
-  const ingresos = acum.impuestos;
-  const gastos =
-    acum.nomina +
-    acum.pensiones +
-    acum.garantiaAlimentaria +
-    acum.ayudaSocial +
-    acum.operacion +
-    acum.prensa;
-  const saldo = ingresos - gastos;
+  // Step 2: State Payday Payouts in strict priority order (ECONOMIA §6)
+  // Compute living obligations
+  const pensNpcs = vivos.filter((n) => (acum.pensionesPorNpc[n.id] || 0) > 0);
+  const nomNpcs = vivos.filter((n) => (acum.nominaPorNpc[n.id] || 0) > 0);
+  const ayuNpcs = vivos.filter((n) => (acum.ayudaPorNpc[n.id] || 0) > 0);
 
-  const wasImpago = state.gobierno.finanzas.impago;
+  const pensReq = pensNpcs.reduce((acc, n) => acc + (acum.pensionesPorNpc[n.id] || 0), 0);
+  const nomReq = nomNpcs.reduce((acc, n) => acc + (acum.nominaPorNpc[n.id] || 0), 0);
+  const ayuReq = ayuNpcs.reduce((acc, n) => acc + (acum.ayudaPorNpc[n.id] || 0), 0);
+  const opReq = acum.operacion;
+  const prenReq = state.medios.length > 0 ? acum.prensa : 0;
+
+  const totalBill = pensReq + nomReq + ayuReq + opReq + prenReq;
   let emision = 0;
-  let impago = false;
-  let alcanzaNomina = false;
-  let prorrateoDiscrecional = 1;
-  let prorrateoNomina = 1;
-  let prorrateoPensionGarantia = 1;
 
-  if (saldo >= 0) {
-    state.gobierno.reserva = Number((state.gobierno.reserva + saldo).toFixed(1));
-    if (mod === 'fiscal') {
-      state.gobierno.inflacion = Math.max(2, Number((state.gobierno.inflacion * 0.94).toFixed(1)));
-    }
-  } else {
-    let remaining = Math.abs(saldo);
-
-    if (state.gobierno.reserva > 0) {
-      const used = Math.min(state.gobierno.reserva, remaining);
-      state.gobierno.reserva = Number((state.gobierno.reserva - used).toFixed(1));
-      remaining -= used;
-    }
-
-    if (remaining > 0 && mod === 'fiscal') {
-      const maxEmit = Math.max(0, ingresos) * (pal.topeEmision / 100);
-      emision = Math.min(remaining, maxEmit);
-      remaining -= emision;
+  if (mod === 'fiscal') {
+    if (state.gobierno.reserva < totalBill) {
+      const shortfallBeforeEmit = totalBill - state.gobierno.reserva;
+      const refIncomeBase = Math.max(
+        taxesCollected,
+        acum.impuestos,
+        state.gobierno.finanzas.ingresos
+      );
+      const maxEmit = refIncomeBase * (pal.topeEmision / 100);
+      emision = Math.min(shortfallBeforeEmit, maxEmit);
       if (emision > 0) {
+        state.gobierno.reserva += emision;
+        state.auditEntradasDia += emision;
         const inflJump = (emision / Math.max(100, pop * 12)) * 28;
-        state.gobierno.inflacion = clamp(Number((state.gobierno.inflacion + inflJump).toFixed(1)), 0, 300);
+        state.gobierno.inflacion = clamp(
+          Number((state.gobierno.inflacion + inflJump).toFixed(1)),
+          0,
+          300
+        );
         addLog(
           state,
           'economia',
@@ -3104,65 +3272,80 @@ function settleFiscalPeriod(state: GameState): void {
           `Cubre déficit fiscal pero eleva la inflación a ${state.gobierno.inflacion.toFixed(1)}%.`
         );
       }
-    }
-
-    if (remaining > 0.5) {
-      impago = true;
-      const discTotal = acum.prensa + acum.operacion + acum.ayudaSocial;
-      const discShortfall = Math.min(discTotal, remaining);
-      prorrateoDiscrecional = discTotal > 0 ? clamp(1 - discShortfall / discTotal, 0, 1) : 1;
-
-      const rem1 = Math.max(0, remaining - discTotal);
-      alcanzaNomina = rem1 > 0.01 && acum.nomina > 0;
-      const nominaShortfall = Math.min(acum.nomina, rem1);
-      prorrateoNomina = acum.nomina > 0 ? clamp(1 - nominaShortfall / acum.nomina, 0, 1) : 1;
-
-      const rem2 = Math.max(0, rem1 - acum.nomina);
-      const secTotal = acum.pensiones + acum.garantiaAlimentaria;
-      const secShortfall = Math.min(secTotal, rem2);
-      prorrateoPensionGarantia = secTotal > 0 ? clamp(1 - secShortfall / secTotal, 0, 1) : 1;
-
-      if (alcanzaNomina) {
-        for (const npc of vivos) {
-          if (ROLE_CATALOG[npc.rol].publico) {
-            npc.variables.satisfaccion = clamp(npc.variables.satisfaccion - 14, 0, 100);
-            npc.variables.lealtad = clamp(npc.variables.lealtad - 12, 0, 100);
-          }
-        }
-      }
-
-      const impEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
-      emitSimEvent(state, {
-        id: impEvId,
-        dia: state.reloj.dia,
-        tipo: 'impago',
-        zona: 'centro',
-        faltante: Number(remaining.toFixed(1)),
-        alcanzaNomina,
-        causa: state.ultimaCausaPalanca,
-      });
-      addLog(
-        state,
-        'economia',
-        'finanzas:impago',
-        alcanzaNomina ? 'Impago de nómina pública' : 'Impago de gastos discrecionales',
-        `Faltaron $${remaining.toFixed(0)} en la liquidación del período.`,
-        state.ultimaCausaPalanca,
-        impEvId
-      );
+    } else {
+      state.gobierno.inflacion = Math.max(2, Number((state.gobierno.inflacion * 0.94).toFixed(1)));
     }
   }
 
-  // Update all 3 service indicators every settlement using paid operation * coverage (ESTADOS §12)
-  const costoBase = pop * ECON_CONSTANTS.costoBaseServicioPorPoblacion * FISCAL_PERIOD_DAYS;
+  const periodIncomeByNpc: Record<string, number> = {};
+
+  // 2.1 Pensiones
+  const paidPens = Math.min(Math.max(0, state.gobierno.reserva), pensReq);
+  state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidPens);
+  const pensRatio = pensReq > 0 ? paidPens / pensReq : 1;
+  for (const n of pensNpcs) {
+    const paid = (acum.pensionesPorNpc[n.id] || 0) * pensRatio;
+    n.economia.dinero += paid;
+    periodIncomeByNpc[n.id] = (periodIncomeByNpc[n.id] || 0) + paid;
+  }
+  const pensShortfall = Math.max(0, pensReq - paidPens);
+
+  // 2.2 Nómina (gross paid, tax retained back to reserva immediately)
+  const paidNomGross = Math.min(Math.max(0, state.gobierno.reserva), nomReq);
+  state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidNomGross);
+  const nomRatio = nomReq > 0 ? paidNomGross / nomReq : 1;
+  let totalNomTax = 0;
+  for (const n of nomNpcs) {
+    const gross = (acum.nominaPorNpc[n.id] || 0) * nomRatio;
+    const tax = gross * (getTaxRateForNpc(n, state) / 100);
+    const net = gross - tax;
+    n.economia.dinero += net;
+    periodIncomeByNpc[n.id] = (periodIncomeByNpc[n.id] || 0) + net;
+    totalNomTax += tax;
+  }
+  state.gobierno.reserva += totalNomTax;
+  taxesCollected += totalNomTax;
+  const nomShortfall = Math.max(0, nomReq - paidNomGross);
+
+  // 2.3 Ayuda social
+  const paidAyu = Math.min(Math.max(0, state.gobierno.reserva), ayuReq);
+  state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidAyu);
+  const ayuRatio = ayuReq > 0 ? paidAyu / ayuReq : 1;
+  for (const n of ayuNpcs) {
+    const paid = (acum.ayudaPorNpc[n.id] || 0) * ayuRatio;
+    n.economia.dinero += paid;
+    periodIncomeByNpc[n.id] = (periodIncomeByNpc[n.id] || 0) + paid;
+  }
+  const ayuShortfall = Math.max(0, ayuReq - paidAyu);
+
+  // Sync daily net income for pension/public/unemployed recipients
+  for (const n of vivos) {
+    if (n.id in periodIncomeByNpc) {
+      n.economia.ultimoIngresoNeto = Number((periodIncomeByNpc[n.id] / PERIOD_DAYS).toFixed(2));
+    } else if (n.rol === 'desempleado' || n.rol === 'estudiante') {
+      n.economia.ultimoIngresoNeto = 0;
+    }
+  }
+
+  // 2.4 Operación de servicios -> exact paid amount goes to empresa de comercio
+  const paidOp = Math.min(Math.max(0, state.gobierno.reserva), opReq);
+  state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidOp);
+  if (paidOp > 0) {
+    state.empresas.comercio.ventasAcum += paidOp;
+  }
+  const opRatio = opReq > 0 ? paidOp / opReq : 1;
+  const opShortfall = Math.max(0, opReq - paidOp);
+
+  // Update all 3 service indicators using paid operation * coverage (ESTADOS §12)
+  const costoBase = pop * ECON_CONSTANTS.costoBaseServicioPorPoblacion * PERIOD_DAYS;
   const areaToCoverage: Record<ServiceAreaId, number> = {
     salud: state.gobierno.coberturas.medico,
     seguridad: state.gobierno.coberturas.policia,
     infraestructura: state.gobierno.coberturas.ingeniero,
   };
   (['salud', 'seguridad', 'infraestructura'] as ServiceAreaId[]).forEach((area) => {
-    const paidOp = acum.operacionPorArea[area] * prorrateoDiscrecional;
-    const ratio = paidOp / Math.max(1, costoBase);
+    const areaPaidOp = acum.operacionPorArea[area] * opRatio;
+    const ratio = areaPaidOp / Math.max(1, costoBase);
     const inversion = ratio <= 1 ? ratio : 1 + Math.sqrt(ratio - 1) * 0.55;
     const gain = areaToCoverage[area] * inversion * 6.8;
     const decay = 0.8 + state.gobierno.indicadores[area] * 0.08;
@@ -3173,32 +3356,45 @@ function settleFiscalPeriod(state: GameState): void {
     );
   });
 
-  if (wasImpago && !impago) {
-    const impFinEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
-    emitSimEvent(state, {
-      id: impFinEvId,
-      dia: state.reloj.dia,
-      tipo: 'impago_fin',
-      zona: 'centro',
-      causa: state.ultimaCausaPalanca,
-    });
-    addLog(
-      state,
-      'economia',
-      'finanzas:impago_fin',
-      'Fin de impago fiscal',
-      'La liquidación cubrió los gastos obligatorios sin faltante.',
-      state.ultimaCausaPalanca,
-      impFinEvId
-    );
-  }
+  // 2.5 Prensa -> paid amount splits evenly across active media outlets
+  const paidPrensa = Math.min(Math.max(0, state.gobierno.reserva), prenReq);
+  state.gobierno.reserva = Math.max(0, state.gobierno.reserva - paidPrensa);
+  const prenShortfall = Math.max(0, prenReq - paidPrensa);
 
-  const paidPrensa = acum.prensa * prorrateoDiscrecional;
+  // Step 3: Media Outlets pay living columnists & retain surpluses out of world (ECONOMIA §8 & §9)
   const fondosPorMedio = state.medios.length > 0 ? paidPrensa / state.medios.length : 0;
   for (const medio of state.medios) {
+    const propios = medio.finanzas.ingresosPropios;
+    state.auditEntradasDia += propios;
+    const totalFunds = propios + fondosPorMedio;
+
+    const cols = medio.columnistas
+      .map((id) => vivos.find((n) => n.id === id))
+      .filter((n): n is Npc => Boolean(n));
+    const reqCols = cols.reduce((acc, c) => acc + (acum.periodistasPorNpc[c.id] || 0), 0);
+    const colPayFactor = reqCols > totalFunds ? totalFunds / reqCols : 1;
+
+    let paidColGross = 0;
+    for (const col of cols) {
+      const baseRef = acum.periodistasPorNpc[col.id] || 0;
+      const gross = baseRef * colPayFactor;
+      const tax = gross * (getTaxRateForNpc(col, state) / 100);
+      const net = gross - tax;
+      col.economia.dinero += net;
+      col.economia.ultimoIngresoNeto = Number((net / PERIOD_DAYS).toFixed(2));
+      state.gobierno.reserva += tax;
+      taxesCollected += tax;
+      paidColGross += gross;
+    }
+
+    const surplus = Math.max(0, totalFunds - paidColGross);
+    if (surplus > 0) {
+      state.auditSalidasDia += surplus;
+    }
+
     medio.finanzas.fondosEstado = Number(fondosPorMedio.toFixed(1));
     medio.finanzas.dependenciaPct = Number(
-      ((fondosPorMedio / Math.max(1, medio.finanzas.ingresosPropios + fondosPorMedio)) * 100).toFixed(1)
+      ((fondosPorMedio / Math.max(1, propios + fondosPorMedio)) * 100).toFixed(1)
     );
     const targetReach = clamp(14 + Math.sqrt(fondosPorMedio) * 11.5, 12, 95);
     medio.alcancePct = Math.round(targetReach);
@@ -3225,14 +3421,90 @@ function settleFiscalPeriod(state: GameState): void {
     }
   }
 
+  // Step 4: Evaluate Impago & Fiscal Ledger (ECONOMIA §6)
+  const wasImpago = state.gobierno.finanzas.impago;
+  const totalShortfall =
+    acum.garantiaImpaga + pensShortfall + nomShortfall + ayuShortfall + opShortfall + prenShortfall;
+  const impago = totalShortfall > 0.5;
+  const alcanzaNomina = nomShortfall > 0.01 && nomReq > 0;
+
+  if (impago) {
+    if (alcanzaNomina) {
+      for (const npc of vivos) {
+        if (ROLE_CATALOG[npc.rol].publico) {
+          npc.variables.satisfaccion = clamp(npc.variables.satisfaccion - 14, 0, 100);
+          npc.variables.lealtad = clamp(npc.variables.lealtad - 12, 0, 100);
+        }
+      }
+    }
+    const impEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
+    emitSimEvent(state, {
+      id: impEvId,
+      dia: state.reloj.dia,
+      tipo: 'impago',
+      zona: 'centro',
+      faltante: Number(totalShortfall.toFixed(1)),
+      alcanzaNomina,
+      causa: state.ultimaCausaPalanca,
+    });
+    addLog(
+      state,
+      'economia',
+      'finanzas:impago',
+      alcanzaNomina ? 'Impago de nómina pública' : 'Impago de gastos del período',
+      `Faltaron $${totalShortfall.toFixed(0)} en la liquidación del período.`,
+      state.ultimaCausaPalanca,
+      impEvId
+    );
+  } else if (wasImpago) {
+    const impFinEvId = nextSeqId(state, `ev_${state.reloj.dia}`);
+    emitSimEvent(state, {
+      id: impFinEvId,
+      dia: state.reloj.dia,
+      tipo: 'impago_fin',
+      zona: 'centro',
+      causa: state.ultimaCausaPalanca,
+    });
+    addLog(
+      state,
+      'economia',
+      'finanzas:impago_fin',
+      'Fin de impago fiscal',
+      'La liquidación cubrió los gastos obligatorios sin faltante.',
+      state.ultimaCausaPalanca,
+      impFinEvId
+    );
+  }
+
+  const discReq = ayuReq + opReq + prenReq;
+  const discPaid = paidAyu + paidOp + paidPrensa;
+  const prorrateoDiscrecional = discReq > 0 ? clamp(discPaid / discReq, 0, 1) : 1;
+  const prorrateoNomina = nomReq > 0 ? clamp(paidNomGross / nomReq, 0, 1) : 1;
+  const garTotalReq = acum.garantiaAlimentaria + acum.garantiaImpaga;
+  const secReq = pensReq + garTotalReq;
+  const secPaid = paidPens + acum.garantiaAlimentaria;
+  const prorrateoPensionGarantia = secReq > 0 ? clamp(secPaid / secReq, 0, 1) : 1;
+
+  const gastosPeriodo =
+    paidNomGross +
+    paidPens +
+    acum.garantiaAlimentaria +
+    acum.comidaMenores +
+    paidAyu +
+    paidOp +
+    paidPrensa;
+  const saldo = taxesCollected - gastosPeriodo;
+
   state.gobierno.finanzas = {
-    ingresos: Number(ingresos.toFixed(1)),
-    nomina: Number(acum.nomina.toFixed(1)),
-    pensiones: Number(acum.pensiones.toFixed(1)),
+    ingresos: Number(taxesCollected.toFixed(1)),
+    nomina: Number(paidNomGross.toFixed(1)),
+    pensiones: Number(paidPens.toFixed(1)),
     garantiaAlimentaria: Number(acum.garantiaAlimentaria.toFixed(1)),
-    ayudaSocial: Number(acum.ayudaSocial.toFixed(1)),
-    operacion: Number(acum.operacion.toFixed(1)),
-    prensa: Number(acum.prensa.toFixed(1)),
+    garantiaImpaga: Number(acum.garantiaImpaga.toFixed(1)),
+    comidaMenores: Number(acum.comidaMenores.toFixed(1)),
+    ayudaSocial: Number(paidAyu.toFixed(1)),
+    operacion: Number(paidOp.toFixed(1)),
+    prensa: Number(paidPrensa.toFixed(1)),
     saldo: Number(saldo.toFixed(1)),
     emision: Number(emision.toFixed(1)),
     importaciones: Number(acum.importaciones.toFixed(1)),
@@ -3243,14 +3515,21 @@ function settleFiscalPeriod(state: GameState): void {
     prorrateoNomina: Number(prorrateoNomina.toFixed(4)),
     prorrateoPensionGarantia: Number(prorrateoPensionGarantia.toFixed(4)),
   };
+  state.ultimoSaldoCierre = state.gobierno.finanzas.saldo;
 
   state.gobierno.acumuladoPeriodo = {
     dias: 0,
     impuestos: 0,
-    nomina: 0,
-    pensiones: 0,
+    nominaPorNpc: {},
+    pensionesPorNpc: {},
+    ayudaPorNpc: {},
+    periodistasPorNpc: {},
+    nominaDevengada: 0,
+    pensionesDevengadas: 0,
+    ayudaDevengada: 0,
     garantiaAlimentaria: 0,
-    ayudaSocial: 0,
+    garantiaImpaga: 0,
+    comidaMenores: 0,
     operacion: 0,
     operacionPorArea: { seguridad: 0, salud: 0, infraestructura: 0 },
     prensa: 0,
@@ -3634,8 +3913,10 @@ function compactHistorialIfNeeded(state: GameState): void {
 function advanceDay(state: GameState): void {
   state.reloj.dia += 1;
   state.reloj.anio = Math.floor((state.reloj.dia - 1) / 365) + 1;
-  state.reloj.diasEnPeriodoFiscal += 1;
+  state.reloj.diasEnPeriodo += 1;
   state.eventosDiaActual = [];
+  state.auditEntradasDia = 0;
+  state.auditSalidasDia = 0;
 
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const zonesCount = Object.keys(preset.zonas).length;
@@ -3686,16 +3967,15 @@ function advanceDay(state: GameState): void {
   updateClimate(state);
   runPoliceRelocation(state);
   runDailyEconomyAndNeeds(state);
-  settleEnterprises(state);
   pruneOrphanedContagions(state, zonesCount);
   runDailyActionContagion(state, zonesCount);
   updateZoneIntegrity(state, zonesCount);
 
   let settledThisDay = false;
-  if (state.reloj.diasEnPeriodoFiscal >= FISCAL_PERIOD_DAYS) {
-    settleFiscalPeriod(state);
-    state.reloj.diasEnPeriodoFiscal = 0;
-    state.reloj.periodoFiscal += 1;
+  if (state.reloj.diasEnPeriodo >= PERIOD_DAYS) {
+    runPaydaySettlement(state);
+    state.reloj.diasEnPeriodo = 0;
+    state.reloj.periodo += 1;
     settledThisDay = true;
   }
 
@@ -3713,6 +3993,11 @@ function advanceDay(state: GameState): void {
 
   checkConditionTriggers(state, derived);
   evaluateObjective(state, derived);
+
+  collectDailyPressFacts(state, derived);
+  state.precioAyer = state.alimento.precio;
+  state.hambreAyerPct = derived.hambreCriticaPct;
+  state.ultimoDineroTotal = computeTotalWorldMoney(state);
 
   state.historial.push({
     dia: state.reloj.dia,
@@ -3782,115 +4067,533 @@ export function stepHeadlessDay(state: GameState): void {
   advanceDay(state);
 }
 
-export function pickPressTopicAndTone(state: GameState): {
-  tema: string;
-  tono: NewsTone;
-  origen: string;
-  detalle: string;
-  zonaOrigen?: ZoneId;
-  fenomenoId?: string;
-  esAviso?: boolean;
-  vigenteHastaDia?: number;
-} {
-  const derived = deriveCommunityStats(state);
-  const dia = state.reloj.dia;
+function isCauseFromGovernment(state: GameState, startRef?: string): boolean {
+  let cursor = startRef;
+  const visited = new Set<string>();
+  for (let depth = 0; depth < 6 && cursor; depth++) {
+    if (visited.has(cursor)) break;
+    visited.add(cursor);
+    if (cursor.startsWith('palanca:')) return true;
+    const ev = state.eventos.find((e) => e.id === cursor);
+    if (!ev) break;
+    if (ev.tipo === 'palanca') return true;
+    cursor = ev.causa;
+  }
+  return false;
+}
 
-  const announced = getAnnouncedPhenomena(state).filter((f) => f.origen);
-  for (const fen of announced) {
-    const alreadyCoveredRecently = state.noticias.some(
-      (n) => n.esAviso && n.fenomenoId === fen.id && dia - n.dia <= 3
-    );
-    if (!alreadyCoveredRecently) {
-      const daysLeft = fen.inicioDia - dia;
-      return {
-        tema: fen.tipo,
-        tono: 'alarmista',
-        origen: `clima:${fen.tipo}`,
-        detalle: `Alerta temprana: ${fen.nombre} se aproxima por la zona ${fen.origen} en ${daysLeft} días (intensidad estimada ${Math.round(fen.intensidad)}%).`,
-        zonaOrigen: fen.origen,
-        fenomenoId: fen.id,
-        esAviso: true,
-        vigenteHastaDia: fen.inicioDia + fen.duracionDias,
-      };
+export function collectDailyPressFacts(state: GameState, preDerived?: CommunityDerived): void {
+  const derived = preDerived ?? deriveCommunityStats(state);
+  const dia = state.reloj.dia;
+  const facts: PressFact[] = [];
+  const relMap = PRESS_CONSTANTS.relevanciaPorTema;
+
+  // 1. Notices / Climate
+  for (const ev of state.eventosDiaActual) {
+    if (ev.tipo === 'aviso') {
+      const fen = state.clima.fenomenos.find(
+        (f) =>
+          f.nombre === ev.fenomeno &&
+          (!ev.zonaOrigen || f.origen === ev.zonaOrigen) &&
+          f.inicioDia - dia === ev.diasRestantes
+      );
+      const zona = ev.zonaOrigen ?? ev.zona;
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'aviso',
+        relevancia: relMap.aviso,
+        obligatoria: true,
+        valencia: 'mala',
+        esDelGobierno: false,
+        zona,
+        origen: `clima:${fen?.tipo ?? 'fenomeno'}`,
+        causa: ev.id,
+        datos: {
+          zona,
+          fenomeno: ev.fenomeno,
+          fenomenoId: fen?.id,
+          dias: ev.diasRestantes,
+          esAviso: true,
+          vigenteHastaDia: fen ? fen.inicioDia + fen.duracionDias : undefined,
+        },
+      });
+    } else if (ev.tipo === 'fenomeno_inicio' || ev.tipo === 'fenomeno_fin') {
+      const fen = state.clima.fenomenos.find((f) => f.id === ev.fenomenoId);
+      const zona = ev.zonaOrigen ?? ev.zona;
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'clima',
+        relevancia: relMap.clima,
+        valencia: ev.tipo === 'fenomeno_fin' ? 'buena' : 'mala',
+        esDelGobierno: false,
+        zona,
+        origen: `clima:${fen?.tipo ?? 'fenomeno'}`,
+        causa: ev.id,
+        datos: {
+          zona,
+          fenomeno: ev.fenomeno,
+          fenomenoId: ev.fenomenoId,
+          dias: fen?.duracionDias ?? 0,
+          esAviso: ev.tipo === 'fenomeno_inicio' && Boolean(ev.zonaOrigen),
+          vigenteHastaDia: fen ? fen.inicioDia + fen.duracionDias : undefined,
+        },
+      });
+    } else if (ev.tipo === 'impago' || ev.tipo === 'impago_fin') {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'impago',
+        relevancia: relMap.impago,
+        valencia: ev.tipo === 'impago_fin' ? 'buena' : 'mala',
+        esDelGobierno: true,
+        zona: ev.zona,
+        origen: ev.tipo === 'impago_fin' ? 'estado:impago_fin' : 'estado:impago',
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          cifra: ev.tipo === 'impago' ? `$${ev.faltante}` : '$0',
+        },
+      });
+    } else if (ev.tipo === 'hospital_saturado') {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'salud',
+        relevancia: relMap.salud,
+        valencia: 'mala',
+        esDelGobierno: isCauseFromGovernment(state, ev.causa),
+        zona: ev.zona,
+        origen: 'estado:hospital_saturado',
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          cifra: `${ev.ocupacionPct}%`,
+        },
+      });
+    } else if (
+      ev.tipo === 'empresa_despido' ||
+      ev.tipo === 'empresa_recorte' ||
+      ev.tipo === 'empresa_aumento'
+    ) {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'empresas',
+        relevancia: relMap.empresas,
+        valencia: ev.tipo === 'empresa_aumento' ? 'buena' : 'mala',
+        esDelGobierno: isCauseFromGovernment(state, ev.causa),
+        zona: ev.zona,
+        origen: ev.origen,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          empresa: ev.empresaId === 'alimento' ? 'Productora de Alimento' : 'Empresa de Comercio',
+          cifra:
+            ev.tipo === 'empresa_despido'
+              ? `${ev.cantidad} despidos`
+              : `${Math.round(ev.factor * 100)}%`,
+        },
+      });
+    } else if (ev.tipo === 'palanca') {
+      const rule = LEVER_VALENCIA[ev.palanca];
+      let valencia: PressValence = 'neutra';
+      if (rule) {
+        if (typeof ev.valorAnterior === 'number' && typeof ev.valorNuevo === 'number') {
+          valencia = ev.valorNuevo > ev.valorAnterior ? rule.alSubir : rule.alBajar;
+        } else if (ev.palanca === 'precio_maximo') {
+          valencia = ev.valorNuevo === 'libre' ? 'buena' : 'neutra';
+        }
+      }
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'gobierno',
+        relevancia: relMap.gobierno,
+        valencia,
+        esDelGobierno: true,
+        zona: ev.zona,
+        origen: `palanca:${ev.palanca}`,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          palanca: ev.palanca,
+          valorAnterior: String(ev.valorAnterior),
+          valorNuevo: String(ev.valorNuevo),
+        },
+      });
+    } else if (ev.tipo === 'victoria' || ev.tipo === 'objetivo_perdido') {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'objetivo',
+        relevancia: relMap.objetivo,
+        obligatoria: true,
+        valencia: ev.tipo === 'victoria' ? 'buena' : 'mala',
+        esDelGobierno: true,
+        zona: ev.zona,
+        origen: `objetivo:${ev.tipo}`,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          cifra: String(ev.valor),
+        },
+      });
     }
   }
 
-  if (state.gobierno.finanzas.impago) {
-    return {
-      tema: 'impago',
-      tono: state.gobierno.finanzas.alcanzaNomina ? 'alarmista' : 'critico',
-      origen: 'estado:impago_nomina',
-      detalle: state.gobierno.finanzas.alcanzaNomina
-        ? 'El estado no pudo cubrir la nómina de los trabajadores públicos en el último cierre fiscal.'
-        : 'El estado recortó gastos discrecionales por déficit en el último cierre fiscal.',
-    };
+  // 2. Aggregated Zombie attacks (golpe / muerte) per zone
+  const attackHitsByZone = new Map<ZoneId, { count: number; evId: string; isGov: boolean }>();
+  let pandemicDeaths = 0;
+  let pandemicDeathEvId: string | undefined;
+
+  for (const ev of state.eventosDiaActual) {
+    if (ev.tipo === 'golpe' && ev.origen?.includes('plaga_zombie')) {
+      const prev = attackHitsByZone.get(ev.zona);
+      attackHitsByZone.set(ev.zona, {
+        count: (prev?.count || 0) + 1,
+        evId: prev?.evId || ev.id,
+        isGov: prev?.isGov || isCauseFromGovernment(state, ev.causa),
+      });
+    } else if (ev.tipo === 'muerte') {
+      if (ev.causa?.includes('pandemia')) {
+        pandemicDeaths++;
+        pandemicDeathEvId = pandemicDeathEvId || ev.id;
+      } else if (ev.causa?.includes('plaga_zombie')) {
+        const prev = attackHitsByZone.get(ev.zona);
+        attackHitsByZone.set(ev.zona, {
+          count: (prev?.count || 0) + 1,
+          evId: prev?.evId || ev.id,
+          isGov: prev?.isGov || isCauseFromGovernment(state, ev.causa),
+        });
+      }
+    }
   }
-  if (derived.hambreCriticaPct > 15) {
-    return {
+
+  for (const [zona, info] of attackHitsByZone.entries()) {
+    facts.push({
+      id: nextSeqId(state, `pf_${dia}`),
+      dia,
+      tema: 'ataque',
+      relevancia: relMap.ataque,
+      valencia: 'mala',
+      esDelGobierno: info.isGov,
+      zona,
+      origen: 'clima:plaga_zombie',
+      causa: info.evId,
+      datos: {
+        zona,
+        cifra: `${info.count} afectados`,
+      },
+    });
+  }
+
+  if (pandemicDeaths > 0) {
+    facts.push({
+      id: nextSeqId(state, `pf_${dia}`),
+      dia,
+      tema: 'salud',
+      relevancia: relMap.salud,
+      valencia: 'mala',
+      esDelGobierno: isCauseFromGovernment(state, pandemicDeathEvId),
+      zona: 'centro',
+      origen: 'clima:pandemia',
+      causa: pandemicDeathEvId,
+      datos: {
+        zona: 'centro',
+        cifra: `${pandemicDeaths} bajas sanitarias`,
+      },
+    });
+  }
+
+  // 3. Conflicts & Neighbors (accion_inicio)
+  const conflictByActionZone = new Map<
+    string,
+    { count: number; zone: ZoneId; evId: string; isGov: boolean }
+  >();
+  const neighborByActionZone = new Map<string, { count: number; zone: ZoneId; evId: string }>();
+
+  for (const ev of state.eventosDiaActual) {
+    if (ev.tipo !== 'accion_inicio') continue;
+    const isCond = ev.accion === 'huelga' || ev.accion === 'protesta' || ev.accion === 'saqueo';
+    const zone = ev.zonaDestino ?? ev.zona;
+    const key = `${ev.accion}|${zone}`;
+    if (isCond) {
+      const prev = conflictByActionZone.get(key);
+      conflictByActionZone.set(key, {
+        count: (prev?.count || 0) + ev.npcIds.length,
+        zone,
+        evId: prev?.evId || ev.id,
+        isGov: prev?.isGov || isCauseFromGovernment(state, ev.causa),
+      });
+    } else {
+      const prev = neighborByActionZone.get(key);
+      neighborByActionZone.set(key, {
+        count: (prev?.count || 0) + ev.npcIds.length,
+        zone,
+        evId: prev?.evId || ev.id,
+      });
+    }
+  }
+
+  for (const [key, info] of conflictByActionZone.entries()) {
+    const accionId = key.split('|')[0];
+    facts.push({
+      id: nextSeqId(state, `pf_${dia}`),
+      dia,
+      tema: 'conflicto',
+      relevancia: relMap.conflicto,
+      valencia: 'mala',
+      esDelGobierno: info.isGov,
+      zona: info.zone,
+      origen: `accion:${accionId}`,
+      causa: info.evId,
+      datos: {
+        zona: info.zone,
+        cifra: `${info.count}`,
+      },
+    });
+  }
+
+  for (const [key, info] of neighborByActionZone.entries()) {
+    const accionId = key.split('|')[0];
+    const isOdd = [
+      'cavar_pozo',
+      'coleccionar_piedras',
+      'hablar_con_gallinas',
+      'sermon_apocaliptico',
+    ].includes(accionId);
+    if (info.count >= 3 || isOdd) {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'vecinos',
+        relevancia: relMap.vecinos,
+        valencia: 'neutra',
+        esDelGobierno: false,
+        zona: info.zone,
+        origen: `accion:${accionId}`,
+        causa: info.evId,
+        datos: {
+          zona: info.zone,
+          cifra: `${info.count}`,
+        },
+      });
+    }
+  }
+
+  // 4. Hunger surge & sharp food price swing
+  if (
+    derived.hambreCriticaPct >= PRESS_CONSTANTS.hambreSubaUmbralPct &&
+    derived.hambreCriticaPct > state.hambreAyerPct + 1.5
+  ) {
+    facts.push({
+      id: nextSeqId(state, `pf_${dia}`),
+      dia,
       tema: 'hambre',
-      tono: 'alarmista',
+      relevancia: relMap.hambre,
+      valencia: 'mala',
+      esDelGobierno: Boolean(state.ultimaCausaPalanca),
+      zona: 'centro',
       origen: 'estado:hambre_critica',
-      detalle: `El ${derived.hambreCriticaPct}% de la población padece hambre crítica y quedan ${state.alimento.diasStock} días de reserva alimentaria.`,
-    };
+      causa: state.ultimoEventoClimaId || state.ultimaCausaPalanca,
+      datos: {
+        zona: 'centro',
+        cifra: `${derived.hambreCriticaPct.toFixed(1)}%`,
+      },
+    });
   }
 
-  const active = getActivePhenomena(state);
-  if (active.length > 0) {
-    const fen =
-      active.find(
-        (f) => f.origen && !state.noticias.some((n) => n.esAviso && n.fenomenoId === f.id && dia - n.dia <= 5)
-      ) || active[0];
-    return {
-      tema: fen.tipo,
-      tono: fen.intensidad > 50 ? 'alarmista' : 'critico',
-      origen: `clima:${fen.tipo}`,
-      detalle: `Persiste ${fen.nombre}${fen.origen ? ` desde ${fen.origen}` : ''} con una intensidad del ${Math.round(fen.intensidad)}%.`,
-      zonaOrigen: fen.origen,
-      fenomenoId: fen.id,
-      esAviso: Boolean(fen.origen),
-      vigenteHastaDia: fen.origen ? fen.inicioDia + fen.duracionDias : undefined,
-    };
+  if (state.precioAyer > 0) {
+    const priceDeltaPct = ((state.alimento.precio - state.precioAyer) / state.precioAyer) * 100;
+    if (Math.abs(priceDeltaPct) >= PRESS_CONSTANTS.precioCambioFuertePct) {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'precio',
+        relevancia: relMap.precio,
+        valencia: priceDeltaPct > 0 ? 'mala' : 'buena',
+        esDelGobierno: Boolean(state.ultimaCausaPalanca),
+        zona: 'centro',
+        origen: 'economia:precio',
+        causa: state.ultimaCausaPalanca || state.ultimoEventoClimaId,
+        datos: {
+          zona: 'centro',
+          cifra: `$${state.alimento.precio.toFixed(2)}`,
+        },
+      });
+    }
   }
 
-  if (derived.descontentosPct > 25) {
-    return {
-      tema: 'malestar_social',
-      tono: 'critico',
-      origen: 'estado:descontento_alto',
-      detalle: `Un ${derived.descontentosPct}% de los vecinos expresa fuerte malestar con la situación actual.`,
-    };
+  state.colaHechosDia = facts
+    .filter((f) => f.obligatoria || f.relevancia >= PRESS_CONSTANTS.relevanciaMin)
+    .sort((a, b) => b.relevancia - a.relevancia)
+    .slice(0, 20);
+}
+
+export interface PlannedPressPublication {
+  medio: GameState['medios'][number];
+  autor: Npc;
+  fact: PressFact;
+  tono: NewsTone;
+  templateTitulo: string;
+  templateTexto: string;
+  zoneNorm: ZoneId;
+}
+
+function interpolateTemplate(
+  raw: string,
+  medioNombre: string,
+  autorNombre: string,
+  fact: PressFact
+): string {
+  const d = fact.datos;
+  return raw
+    .replaceAll('{medio}', medioNombre)
+    .replaceAll('{autor}', autorNombre)
+    .replaceAll('{zona}', d.zona ?? fact.zona ?? 'centro')
+    .replaceAll('{fenomeno}', d.fenomeno ?? 'fenómeno climático')
+    .replaceAll('{dias}', d.dias !== undefined ? String(d.dias) : '0')
+    .replaceAll('{cifra}', d.cifra ?? '0')
+    .replaceAll('{empresa}', d.empresa ?? 'la empresa')
+    .replaceAll('{palanca}', d.palanca ?? 'medida')
+    .replaceAll('{valor_anterior}', d.valorAnterior ?? '')
+    .replaceAll('{valor_nuevo}', d.valorNuevo ?? '');
+}
+
+function drawPressToneForFact(
+  medio: GameState['medios'][number],
+  fact: PressFact,
+  rng: { rngState: number }
+): NewsTone {
+  const aff = medio.lineaEditorial.afinidadGobierno / 100;
+  const sens = medio.lineaEditorial.sensacionalismo / 100;
+  const base = PRESS_CONSTANTS.pesosTonoBase;
+
+  const weights: Array<{ tone: NewsTone; w: number }> = [
+    {
+      tone: 'neutral',
+      w: base.neutral,
+    },
+    {
+      tone: 'alarmista',
+      w: base.alarmista * (1 + sens * 1.6) * (fact.valencia === 'mala' ? 1.8 : 0.2),
+    },
+    {
+      tone: 'critico',
+      w:
+        base.critico *
+        (1 + (1 - aff) * 1.5) *
+        (fact.valencia === 'mala' ? 1.5 : 0.3) *
+        (fact.esDelGobierno ? 1.6 : 0.7),
+    },
+    {
+      tone: 'favorable',
+      w:
+        base.favorable *
+        (1 + aff * 1.5) *
+        (fact.valencia === 'buena' ? 1.7 : fact.valencia === 'neutra' ? 0.8 : 0.2) *
+        (fact.esDelGobierno ? 1.4 : 0.9),
+    },
+  ];
+
+  const availableTemplates = NEWS_TEMPLATES[fact.tema] || {};
+  const total = weights.reduce((acc, item) => acc + item.w, 0);
+  let r = drawRand(rng) * Math.max(0.001, total);
+  let chosen: NewsTone = 'neutral';
+  for (const item of weights) {
+    r -= item.w;
+    if (r <= 0) {
+      chosen = item.tone;
+      break;
+    }
   }
-  if (state.config.economiaModulo === 'fiscal' && state.gobierno.inflacion > 25) {
-    return {
-      tema: 'inflacion',
-      tono: 'critico',
-      origen: 'economia:inflacion_alta',
-      detalle: `La inflación alcanza ${state.gobierno.inflacion.toFixed(1)}% y encarece el costo de la comida ($${state.alimento.precio.toFixed(2)}).`,
-    };
+  if (!availableTemplates[chosen] || availableTemplates[chosen]!.length === 0) {
+    return 'neutral';
   }
-  const latestActionNpc = state.npcs.find((n) => n.vivo && n.accionIa);
-  if (latestActionNpc && latestActionNpc.accionIa) {
-    return {
-      tema: 'vida_comunitaria',
-      tono: 'informativo',
-      origen: latestActionNpc.accionIa.origen,
-      detalle: latestActionNpc.accionIa.texto,
-    };
+  return chosen;
+}
+
+export function planDailyPressPublications(
+  state: GameState,
+  rng: { rngState: number } = state
+): PlannedPressPublication[] {
+  if (state.medios.length === 0 || state.colaHechosDia.length === 0) return [];
+  const planned: PlannedPressPublication[] = [];
+  const sensTopics = new Set<NewsTopic>(['ataque', 'conflicto', 'hambre', 'vecinos']);
+
+  for (const medio of state.medios) {
+    const livingCols = medio.columnistas
+      .map((id) => state.npcs.find((n) => n.id === id && n.vivo))
+      .filter((n): n is Npc => Boolean(n));
+    if (livingCols.length === 0) continue;
+
+    const capacity = livingCols.length * PRESS_CONSTANTS.noticiasPorColumnista;
+    const mandatory = state.colaHechosDia.filter((f) => f.obligatoria);
+    const optionalPool = [...state.colaHechosDia.filter((f) => !f.obligatoria)];
+    const chosenFacts: PressFact[] = [...mandatory];
+
+    let slotsLeft = Math.max(0, capacity - mandatory.length);
+    while (slotsLeft > 0 && optionalPool.length > 0) {
+      const weights = optionalPool.map((f) => {
+        const zoneNorm = f.datos.zona ?? f.zona ?? 'centro';
+        const sensBoost = sensTopics.has(f.tema)
+          ? 1 + (medio.lineaEditorial.sensacionalismo / 100) * 0.85
+          : 1;
+        const recentlyCovered =
+          state.noticias.some(
+            (n) =>
+              n.tema === f.tema &&
+              (n.zonaOrigen ?? n.zona ?? 'centro') === zoneNorm &&
+              state.reloj.dia - n.dia <= PRESS_CONSTANTS.ventanaRepeticionDias
+          ) ||
+          chosenFacts.some((cf) => cf.tema === f.tema && (cf.datos.zona ?? cf.zona) === zoneNorm);
+        const repMult = recentlyCovered ? PRESS_CONSTANTS.factorRepeticionPeso : 1;
+        return Math.max(1, f.relevancia * sensBoost * repMult);
+      });
+
+      const totalW = weights.reduce((acc, w) => acc + w, 0);
+      let r = drawRand(rng) * Math.max(0.001, totalW);
+      let pickIdx = optionalPool.length - 1;
+      for (let i = 0; i < optionalPool.length; i++) {
+        r -= weights[i];
+        if (r <= 0) {
+          pickIdx = i;
+          break;
+        }
+      }
+      chosenFacts.push(optionalPool.splice(pickIdx, 1)[0]);
+      slotsLeft--;
+    }
+
+    for (const fact of chosenFacts) {
+      const autor = livingCols[Math.floor(drawRand(rng) * livingCols.length)];
+      const tono = drawPressToneForFact(medio, fact, rng);
+      const variants =
+        NEWS_TEMPLATES[fact.tema]?.[tono] ||
+        NEWS_TEMPLATES[fact.tema]?.neutral || [
+          {
+            titulo: `Actualidad en {zona}`,
+            texto: `{autor} reporta desde {medio} las novedades de la jornada.`,
+          },
+        ];
+      const variant = variants[Math.floor(drawRand(rng) * variants.length)];
+      const zoneNorm = fact.datos.zona ?? fact.zona ?? 'centro';
+
+      planned.push({
+        medio,
+        autor,
+        fact,
+        tono,
+        templateTitulo: interpolateTemplate(variant.titulo, medio.nombre, autor.nombre, fact),
+        templateTexto: interpolateTemplate(variant.texto, medio.nombre, autor.nombre, fact),
+        zoneNorm,
+      });
+    }
   }
-  if (derived.apoyoPct >= 60) {
-    return {
-      tema: 'gestion_y_clima_social',
-      tono: 'favorable',
-      origen: 'estado:consenso_social',
-      detalle: `El apoyo al gobernador se sostiene en ${derived.apoyoPct}% con una satisfacción media de ${derived.satisfaccionMedia}%.`,
-    };
-  }
-  return {
-    tema: 'coyuntura_local',
-    tono: 'informativo',
-    origen: 'estado:rutina',
-    detalle: `La comunidad cierra la jornada con ${derived.poblacion} habitantes y ${state.alimento.diasStock} días de alimento en stock.`,
-  };
+
+  return planned;
 }
 
 function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
@@ -4009,24 +4712,32 @@ function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         titulo: 'Fin de impago fiscal',
         detalle: 'La liquidación cubrió los gastos obligatorios sin faltante.',
       };
-    case 'empresa_respuesta':
+    case 'empresa_aumento':
       return {
         id: ev.id,
         dia: ev.dia,
         tipo: ev.tipo,
         zona: ev.zona,
-        npcId: ev.duenoId ?? undefined,
-        titulo: `Empresa ${ev.empresaId}: ${ev.respuesta.replace('_', ' ')}`,
-        detalle: `Déficit de $${ev.deficit} al cierre semanal${typeof ev.factor === 'number' ? ` · factor ${Math.round(ev.factor * 100)}%` : ''}${ev.despidos ? ` · ${ev.despidos} despido(s)` : ''}.`,
+        titulo: `Empresa ${ev.empresaId}: aumento salarial`,
+        detalle: `El factor salarial subió a ${Math.round(ev.factor * 100)}%.`,
       };
-    case 'empresa_respuesta_fin':
+    case 'empresa_recorte':
       return {
         id: ev.id,
         dia: ev.dia,
         tipo: ev.tipo,
         zona: ev.zona,
-        titulo: `Empresa ${ev.empresaId}: fin de respuesta`,
-        detalle: 'La empresa recuperó ingresos para cubrir los sueldos de referencia.',
+        titulo: `Empresa ${ev.empresaId}: recorte salarial`,
+        detalle: `Las ventas redujeron el factor salarial a ${Math.round(ev.factor * 100)}%.`,
+      };
+    case 'empresa_despido':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Empresa ${ev.empresaId}: ${ev.cantidad} despido(s)`,
+        detalle: `Factor salarial cayó a ${Math.round(ev.factor * 100)}% bajo el piso.`,
       };
     case 'noticia':
       return {

@@ -48,19 +48,25 @@ async function startServer() {
     }
 
     try {
-      const { medio, periodista, noticia, comunidad } = req.body;
-      const prompt = `Escribe una columna breve de prensa local para el medio "${medio.nombre}".
-Reglas estrictas del motor:
-- Tema obligatorio: ${noticia.tema}
-- Tono obligatorio: ${noticia.tono}
-- Origen del hecho: ${noticia.origen}
-- NO inventes ni agregues cifras, porcentajes, eventos ni hechos que no estén explícitamente abajo. Redacta solo título y texto a partir de estos datos.
-- Línea editorial del medio: afinidad con el gobierno ${medio.afinidad_gobierno}/100, sensacionalismo ${medio.sensacionalismo}/100, credibilidad ${medio.credibilidad}/100.
-- Periodista autor: ${periodista.nombre} (rebeldía ${periodista.rebeldia}/100, satisfacción ${Math.round(periodista.satisfaccion)}/100).
-- Situación real del pueblo (Día ${comunidad.dia}): población ${comunidad.poblacion}, satisfacción media ${Math.round(comunidad.satisfaccion_media)}%, hambre crítica ${Math.round(comunidad.hambre_critica_pct)}%, apoyo ${Math.round(comunidad.apoyo_pct)}%, inflación ${comunidad.inflacion}%, fenómenos activos: ${comunidad.fenomenos || 'ninguno'}.
-- Hecho específico: ${noticia.detalle}
+      const body = req.body ?? {};
+      const tema = String(body.tema ?? body.noticia?.tema ?? 'vecinos');
+      const tono = String(body.tono ?? body.noticia?.tono ?? 'neutral');
+      const medio = body.medio ?? { nombre: 'Prensa Local', afinidad_gobierno: 50, sensacionalismo: 50, credibilidad: 70 };
+      const autor = typeof body.autor === 'string' ? body.autor : String(body.periodista?.nombre ?? 'Redacción');
+      const datos = body.datos ?? { detalle: body.noticia?.detalle ?? '' };
+      const plantilla = body.plantilla ?? { titulo: '', texto: '' };
+      const maxLargo = body.max_largo ?? { titulo: 90, texto: 360 };
 
-Devuelve un título periodístico corto (máx 10 palabras) y un texto breve de columna (2 a 3 oraciones).`;
+      const prompt = `Escribe una columna breve de prensa local para el medio "${medio.nombre}".
+Reglas estrictas (DIRECTOR_PRENSA §6):
+- Tema obligatorio: ${tema}
+- Tono obligatorio: ${tono}
+- Autor: ${autor}
+- Línea editorial del medio: afinidad con el gobierno ${medio.afinidad_gobierno}/100, sensacionalismo ${medio.sensacionalismo}/100, credibilidad ${medio.credibilidad}/100.
+- Datos exactos del hecho (JSON): ${JSON.stringify(datos)}
+- Plantilla base (úsalá SOLO como guía de estilo): Título "${plantilla.titulo}" | Texto "${plantilla.texto}"
+- PROHIBIDO inventar números o nombres propios que no aparezcan explícitamente en datos, medio, autor o plantilla.
+- Largo máximo obligatorio: título <= ${maxLargo.titulo} caracteres, texto <= ${maxLargo.texto} caracteres.`;
 
       const response = await ai.models.generateContent({
         model: MODEL,
@@ -71,8 +77,8 @@ Devuelve un título periodístico corto (máx 10 palabras) y un texto breve de c
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              titulo: { type: Type.STRING, description: 'Titular breve y acorde al tono.' },
-              texto: { type: Type.STRING, description: 'Cuerpo breve de 2 a 3 oraciones sin inventar datos.' },
+              titulo: { type: Type.STRING, description: `Titular breve (máx ${maxLargo.titulo} caracteres).` },
+              texto: { type: Type.STRING, description: `Cuerpo breve (máx ${maxLargo.texto} caracteres) sin inventar datos.` },
             },
             required: ['titulo', 'texto'],
           },
@@ -81,8 +87,8 @@ Devuelve un título periodístico corto (máx 10 palabras) y un texto breve de c
 
       const parsed = JSON.parse((response.text ?? '{}').trim());
       return res.json({
-        titulo: parsed.titulo || '',
-        texto: parsed.texto || '',
+        titulo: typeof parsed.titulo === 'string' ? parsed.titulo : '',
+        texto: typeof parsed.texto === 'string' ? parsed.texto : '',
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error al generar columna de prensa';
@@ -97,18 +103,28 @@ Devuelve un título periodístico corto (máx 10 palabras) y un texto breve de c
     }
 
     try {
-      const { npc, candidatas, contexto } = req.body;
-      const lista = (candidatas as Array<{ id: string; nombre: string; descripcion: string }>)
-        .map((c) => `- ${c.id}: ${c.nombre} — ${c.descripcion}`)
-        .join('\n');
+      const body = req.body ?? {};
+      const npc = body.npc ?? {};
+      const rasgos = npc.rasgos ?? npc.personalidad ?? {};
+      const variables = npc.variables ?? {};
+      const situacion: string[] = Array.isArray(body.situacion)
+        ? body.situacion
+        : body.contexto?.resumen
+        ? [String(body.contexto.resumen)]
+        : [];
+      const candidatas = (Array.isArray(body.candidatas) ? body.candidatas : []) as Array<{
+        id: string;
+        descripcion: string;
+      }>;
+      const lista = candidatas.map((c) => `- ${c.id}: ${c.descripcion}`).join('\n');
 
-      const prompt = `Actúa SOLO como clasificador de probabilidades. Evalúa qué tan probable es que este habitante emprenda cada acción espontánea dada su personalidad y estado. NO generes texto narrativo.
-Habitante: ${npc.nombre} (${npc.edad} años, ${npc.rol}).
-Personalidad: rebeldía ${npc.personalidad.rebeldia}, laboriosidad ${npc.personalidad.laboriosidad}, codicia ${npc.personalidad.codicia}, valentía ${npc.personalidad.valentia}, resiliencia ${npc.personalidad.resiliencia ?? 50}.
-Estado: satisfacción ${Math.round(npc.variables.satisfaccion)}, hambre ${Math.round(npc.variables.hambre)}, miedo ${Math.round(npc.variables.miedo)}.
-Contexto: Día ${contexto.dia}, ${contexto.resumen}.
+      const prompt = `Actúa SOLO como clasificador de probabilidades (DIRECTOR_PRENSA §5). NO generes texto narrativo.
+Habitante: rol ${npc.rol ?? 'vecino'}, zona ${npc.zona ?? 'centro'}.
+Rasgos: ${JSON.stringify(rasgos)}.
+Variables: ${JSON.stringify(variables)}.
+Situación actual: ${situacion.join('; ') || 'jornada normal'}.
 
-Candidatas válidas (devuelve un peso de probabilidad 0-100 para CADA id):
+Candidatas válidas (devuelve un peso entre 0 y 1 para CADA id):
 ${lista}`;
 
       const response = await ai.models.generateContent({
@@ -125,8 +141,8 @@ ${lista}`;
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    id: { type: Type.STRING, description: 'ID exacto de la candidata.' },
-                    prob: { type: Type.NUMBER, description: 'Peso relativo 0 a 100.' },
+                    id: { type: Type.STRING, description: 'ID neutro exacto de la candidata (c1, c2...).' },
+                    prob: { type: Type.NUMBER, description: 'Peso entre 0 y 1.' },
                   },
                   required: ['id', 'prob'],
                 },
@@ -138,8 +154,17 @@ ${lista}`;
       });
 
       const parsed = JSON.parse((response.text ?? '{}').trim());
+      const probMap: Record<string, number> = {};
+      if (Array.isArray(parsed.probabilidades)) {
+        for (const item of parsed.probabilidades) {
+          if (item && typeof item.id === 'string' && typeof item.prob === 'number' && Number.isFinite(item.prob)) {
+            probMap[item.id] = item.prob > 1 && item.prob <= 100 ? item.prob / 100 : item.prob;
+          }
+        }
+      }
       return res.json({
-        probabilidades: Array.isArray(parsed.probabilidades) ? parsed.probabilidades : [],
+        ...probMap,
+        probabilidades: probMap,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error al clasificar acción';
@@ -154,14 +179,23 @@ ${lista}`;
     }
 
     try {
-      const { disparador, candidatas, afectados, contexto } = req.body;
-      const lista = (candidatas as Array<{ id: string; nombre: string; descripcion: string }>)
-        .map((c) => `- ${c.id}: ${c.nombre} — ${c.descripcion}`)
-        .join('\n');
+      const body = req.body ?? {};
+      const disparador = String(body.disparador ?? 'descontento');
+      const afectados = body.afectados ?? { cantidad: 1 };
+      const situacion: string[] = Array.isArray(body.situacion)
+        ? body.situacion
+        : body.contexto?.resumen
+        ? [String(body.contexto.resumen)]
+        : [];
+      const candidatas = (Array.isArray(body.candidatas) ? body.candidatas : []) as Array<{
+        id: string;
+        descripcion: string;
+      }>;
+      const lista = candidatas.map((c) => `- ${c.id}: ${c.descripcion}`).join('\n');
 
-      const prompt = `Actúa SOLO como clasificador de probabilidades. Se disparó una consecuencia mecánica en la comunidad (${disparador}). NO puedes evitarla ni generar texto narrativo. Asigna un peso relativo (0-100) a cada acción de condición válida según la situación.
-Afectados (${afectados.cantidad} habitantes): ${afectados.muestra}.
-Contexto: Día ${contexto.dia}, ${contexto.resumen}.
+      const prompt = `Actúa SOLO como clasificador de probabilidades (DIRECTOR_PRENSA §5). Se disparó una acción de condición (${disparador}). NO puedes evitarla ni generar texto narrativo. Devuelve un peso entre 0 y 1 para cada id.
+Afectados: ${afectados.cantidad} habitantes${afectados.muestra ? ` (${afectados.muestra})` : ''}.
+Situación actual: ${situacion.join('; ') || 'tensión social'}.
 
 Acciones de condición válidas:
 ${lista}`;
@@ -180,8 +214,8 @@ ${lista}`;
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    id: { type: Type.STRING, description: 'ID exacto de la acción de condición.' },
-                    prob: { type: Type.NUMBER, description: 'Peso relativo 0 a 100.' },
+                    id: { type: Type.STRING, description: 'ID neutro exacto de la acción de condición (c1, c2...).' },
+                    prob: { type: Type.NUMBER, description: 'Peso entre 0 y 1.' },
                   },
                   required: ['id', 'prob'],
                 },
@@ -193,8 +227,17 @@ ${lista}`;
       });
 
       const parsed = JSON.parse((response.text ?? '{}').trim());
+      const probMap: Record<string, number> = {};
+      if (Array.isArray(parsed.probabilidades)) {
+        for (const item of parsed.probabilidades) {
+          if (item && typeof item.id === 'string' && typeof item.prob === 'number' && Number.isFinite(item.prob)) {
+            probMap[item.id] = item.prob > 1 && item.prob <= 100 ? item.prob / 100 : item.prob;
+          }
+        }
+      }
       return res.json({
-        probabilidades: Array.isArray(parsed.probabilidades) ? parsed.probabilidades : [],
+        ...probMap,
+        probabilidades: probMap,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Error al clasificar acción de condición';

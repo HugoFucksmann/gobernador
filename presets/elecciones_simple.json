@@ -6,10 +6,10 @@
   "poblacion": 100,
   "duracionDias": 365,
   "ECON_CONSTANTS": {
-    "salarioBasePublico": 3.15,
-    "pensionBase": 1.95,
+    "salarioBasePublico": 4.25,
+    "pensionBase": 2.56,
     "maxPaseDesempleoPorDia": 2,
-    "maxContratacionesPorDia": 2,
+    "maxContratacionesPorPeriodo": 3,
     "precioBaseAlimento": 2.55,
     "consumoPorNpc": 1.0,
     "siloDias": 25,
@@ -17,9 +17,10 @@
     "objetivoBaseDias": 3.4,
     "umbralRecompraDias": 3.6,
     "margenComercialPct": 26,
-    "periodoPagoDias": 7,
     "pisoSueldoPct": 70,
-    "diasRespuestaEmpresa": 7,
+    "factorMax": 1.5,
+    "kRiqueza": 0.045,
+    "colchonDias": 7,
     "propensionGastoBase": 0.85,
     "propensionGastoMin": 0.55,
     "propensionGastoMax": 0.95,
@@ -34,15 +35,15 @@
     "fiscalPendiente": 0.01
   },
   "ROLE_CATALOG_ingresos": {
-    "agricultor": [6.6, 8.8],
+    "agricultor": [5.8, 7.8],
     "obrero": [8.0, 10.6],
     "tecnico": [9.0, 12.2],
-    "periodista": [16, 22]
+    "periodista": [4.2, 6.4]
   },
   "SCENARIO_PRESET": {
     "poblacionDefault": 100,
     "mediosDefault": 2,
-    "inflacionInicial": 10,
+    "inflacionInicial": 0,
     "reservaInicial": 4800,
     "stockAlimentoInicial": 1600,
     "topesPrivados": {

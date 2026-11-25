@@ -1,15 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ECON_CONSTANTS, FISCAL_PERIOD_DAYS, ROLE_CATALOG, SCENARIO_PRESETS } from '../src/data/catalogs';
+import {
+  DIRECTOR_CONSTANTS,
+  ECON_CONSTANTS,
+  PERIOD_DAYS,
+  ROLE_CATALOG,
+  SCENARIO_PRESETS,
+} from '../src/data/catalogs';
 import { nextRand, nextSeqId } from '../src/engine/rng';
 import {
   applyActionToNpc,
   applyPressArticleEffects,
   canTriggerSpontaneousChaos,
+  computeTotalWorldMoney,
   deriveCommunityStats,
   pickActionText,
   pickChaosCandidateNpc,
-  pickPressTopicAndTone,
+  planDailyPressPublications,
   resolveConditionWindowWithFallback,
   selectCandidateActions,
   stepHeadlessDay,
@@ -90,43 +97,45 @@ function runRandomDirectorDay(state: GameState): void {
       resolveConditionWindowWithFallback(state, win.id, chosen?.id, 'motor');
     }
   }
-  if (state.reloj.dia % 4 === 0 && state.medios.length > 0) {
-    const medio = state.medios[Math.floor(nextRand(state) * state.medios.length)];
-    const periodistaId = medio.columnistas[0] || state.npcs.find((n) => n.vivo)?.id;
-    if (periodistaId) {
-      const periodista = state.npcs.find((n) => n.id === periodistaId) || state.npcs[0];
-      const topic = pickPressTopicAndTone(state);
+  if (state.colaHechosDia.length > 0 && state.medios.length > 0) {
+    const planned = planDailyPressPublications(state, state);
+    state.colaHechosDia = [];
+    for (const plan of planned) {
       applyPressArticleEffects(state, {
         id: nextSeqId(state, `n_${state.reloj.dia}`),
         dia: state.reloj.dia,
-        medioId: medio.id,
-        medioNombre: medio.nombre,
-        autorId: periodista.id,
-        autorNombre: periodista.nombre,
-        tema: topic.tema,
-        tono: topic.tono,
-        alcance: medio.alcancePct,
-        credibilidad: medio.credibilidad,
-        titulo: `Nota ${topic.tema}`,
-        texto: topic.detalle,
-        origen: topic.origen,
+        medioId: plan.medio.id,
+        medioNombre: plan.medio.nombre,
+        autorId: plan.autor.id,
+        autorNombre: plan.autor.nombre,
+        tema: plan.fact.tema,
+        tono: plan.tono,
+        alcance: plan.medio.alcancePct,
+        credibilidad: plan.medio.credibilidad,
+        titulo: plan.templateTitulo,
+        texto: plan.templateTexto,
+        origen: plan.fact.origen,
+        causa: plan.fact.causa,
         textoOrigen: 'plantilla',
+        zona: plan.zoneNorm,
+        zonaOrigen: plan.zoneNorm,
+        fenomenoId: plan.fact.datos.fenomenoId,
+        esAviso: plan.fact.datos.esAviso,
+        vigenteHastaDia: plan.fact.datos.vigenteHastaDia,
       });
     }
   }
-  if (state.reloj.dia % 2 === 0) {
+  for (let i = 0; i < DIRECTOR_CONSTANTS.ofertasPorDia; i++) {
     const gate = canTriggerSpontaneousChaos(state);
-    if (gate.allowed) {
-      const npc = pickChaosCandidateNpc(state);
-      if (npc) {
-        const candidatas = selectCandidateActions(npc, state);
-        if (candidatas.length > 0) {
-          const chosen = candidatas[Math.floor(nextRand(state) * candidatas.length)];
-          applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre, state), 'motor');
-          state.caosTracker.accionesEnVentana += 1;
-        }
-      }
-    }
+    if (!gate.allowed) break;
+    const npc = pickChaosCandidateNpc(state);
+    if (!npc) break;
+    const candidatas = selectCandidateActions(npc, state);
+    if (candidatas.length === 0) break;
+    const chosen = candidatas[Math.floor(nextRand(state) * candidatas.length)];
+    const roleName = ROLE_CATALOG[npc.rol].nombre.toLowerCase();
+    applyActionToNpc(state, npc, chosen, pickActionText(chosen, npc.nombre, state, roleName, npc.zona), 'motor');
+    state.caosTracker.accionesEnVentana += 1;
   }
 }
 
@@ -288,16 +297,22 @@ function runBatch(label: string, opts: BatchOpts) {
       if (opts.dailyMutator) {
         opts.dailyMutator(s, s.reloj.dia);
       }
+      const prevTotalMoney = computeTotalWorldMoney(s);
       stepHeadlessDay(s);
+      const curTotalMoney = computeTotalWorldMoney(s);
+      if (Math.abs(curTotalMoney - (prevTotalMoney + s.auditEntradasDia - s.auditSalidasDia)) > 0.05) {
+        invariantViolations++;
+      }
       if (d === 1) {
         prod1.push(s.alimento.produccionDiaria);
         cons1.push(s.alimento.consumoDiario);
       }
-      if (d === FISCAL_PERIOD_DAYS) {
+      if (d === PERIOD_DAYS) {
         const fin = s.gobierno.finanzas;
         const gastos =
           fin.nomina +
           fin.pensiones +
+          fin.comidaMenores +
           fin.garantiaAlimentaria +
           fin.ayudaSocial +
           fin.operacion +
@@ -310,13 +325,13 @@ function runBatch(label: string, opts: BatchOpts) {
       if (opts.chaos && (!opts.chaosStopDay || s.reloj.dia <= opts.chaosStopDay)) {
         runRandomDirectorDay(s);
       }
-      if (s.gobierno.finanzas.impago && s.reloj.diasEnPeriodoFiscal === 0) {
+      if (s.gobierno.finanzas.impago && s.reloj.diasEnPeriodo === 0) {
         totalImpagos++;
         hadImp = true;
       }
       if (s.alimento.stock < minS) minS = s.alimento.stock;
 
-      if (d % FISCAL_PERIOD_DAYS === 0) {
+      if (d % PERIOD_DAYS === 0) {
         if (s.gobierno.reserva < -0.01 || s.alimento.stock < -0.01) {
           invariantViolations++;
         }
@@ -341,7 +356,9 @@ function runBatch(label: string, opts: BatchOpts) {
     }
 
     totalNominaImpagos += s.eventos.filter((e) => e.tipo === 'impago' && e.alcanzaNomina).length;
-    totalEnterpriseResponses += s.eventos.filter((e) => e.tipo === 'empresa_respuesta').length;
+    totalEnterpriseResponses += s.eventos.filter(
+      (e) => e.tipo === 'empresa_recorte' || e.tipo === 'empresa_despido'
+    ).length;
     const de = deriveCommunityStats(s);
     if (s.resultado.estado === 'derrota') {
       defeats++;
@@ -434,7 +451,9 @@ function runAll10LeversSensitivity(n: number) {
       hambres.push(ds.hambreCriticaPct);
       stocks.push(s.alimento.stock);
       precios.push(s.alimento.precio);
-      empResps.push(s.eventos.filter((e) => e.tipo === 'empresa_respuesta').length);
+      empResps.push(
+        s.eventos.filter((e) => e.tipo === 'empresa_recorte' || e.tipo === 'empresa_despido').length
+      );
       segInd.push(s.gobierno.indicadores.seguridad);
       salInd.push(s.gobierno.indicadores.salud);
       infInd.push(s.gobierno.indicadores.infraestructura);

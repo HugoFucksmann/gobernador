@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import {
   ECON_CONSTANTS,
-  FISCAL_PERIOD_DAYS,
+  PERIOD_DAYS,
   FOREIGN_TRADE_STEPS,
   LEVER_BOUNDS,
   PRICE_CAP_FACTORS,
@@ -217,7 +217,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
           <div className="bg-slate-800/60 border border-slate-700/80 rounded-md p-2.5 space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
               <span className="font-semibold text-slate-200">
-                Proyección por período ({FISCAL_PERIOD_DAYS}d · cierre en {daysLeft}d)
+                Proyección por período ({PERIOD_DAYS}d · cierre en {daysLeft}d)
               </span>
               {hasPendingChanges ? (
                 <button
@@ -254,9 +254,10 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               </div>
             </div>
             <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-              Nómina ${budget.nominaEst.toFixed(0)} · Pens. ${budget.pensionesEst.toFixed(0)} · Gar. ~$
-              {budget.garantiaEst.toFixed(0)} · Ayuda ${budget.ayudaSocialEst.toFixed(0)} · Op. $
-              {budget.operacionEst.toFixed(0)} · Prensa ${budget.prensaEst.toFixed(0)}
+              Nómina ${budget.nominaEst.toFixed(0)} · Pens. ${budget.pensionesEst.toFixed(0)} · Menores $
+              {budget.comidaMenoresEst.toFixed(0)} · Gar. ~${budget.garantiaEst.toFixed(0)} · Ayuda $
+              {budget.ayudaSocialEst.toFixed(0)} · Op. ${budget.operacionEst.toFixed(0)} · Prensa $
+              {budget.prensaEst.toFixed(0)}
             </div>
           </div>
 

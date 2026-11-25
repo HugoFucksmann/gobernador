@@ -116,8 +116,8 @@ export const LEVER_BOUNDS = {
 } as const;
 
 export const ECON_CONSTANTS = {
-  salarioBasePublico: 3.15,
-  pensionBase: 1.95,
+  salarioBasePublico: 4.25,
+  pensionBase: 2.56,
   maxPaseDesempleoPorDia: 2,
   maxContratacionesPorPeriodo: 3,
   precioBaseAlimento: 2.55,
@@ -331,7 +331,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 0,
     afinidad: 'laboriosidad',
     produce: { alimento: ECON_CONSTANTS.produccionBaseAgricultor },
-    ingreso: [6.6, 8.8],
+    ingreso: [5.8, 7.8],
     color: '#16a34a',
     distrito: 'campos',
   },
@@ -433,7 +433,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     educMin: 2,
     afinidad: 'rebeldia',
     produce: { informacion: 1 },
-    ingreso: [16, 22],
+    ingreso: [4.2, 6.4],
     color: '#be185d',
     distrito: 'mercado',
   },
@@ -933,7 +933,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     economiaDefault: 'base',
     poblacionDefault: 100,
     mediosDefault: 2,
-    inflacionInicial: 10,
+    inflacionInicial: 0,
     reservaInicial: 4800,
     stockAlimentoInicial: 1600,
     topesPrivados: {
@@ -994,7 +994,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     economiaDefault: 'base',
     poblacionDefault: 100,
     mediosDefault: 2,
-    inflacionInicial: 12,
+    inflacionInicial: 0,
     reservaInicial: 3400,
     stockAlimentoInicial: 1800,
     topesPrivados: {
@@ -1585,7 +1585,7 @@ export const MEDIA_TEMPLATES = [
     afinidadGobierno: 45,
     sensacionalismo: 65,
     credibilidad: 68,
-    ingresosPropios: 35,
+    ingresosPropios: 40,
   },
   {
     id: 'medio_2',
@@ -1593,7 +1593,7 @@ export const MEDIA_TEMPLATES = [
     afinidadGobierno: 65,
     sensacionalismo: 35,
     credibilidad: 75,
-    ingresosPropios: 30,
+    ingresosPropios: 36,
   },
   {
     id: 'medio_3',
@@ -1601,7 +1601,7 @@ export const MEDIA_TEMPLATES = [
     afinidadGobierno: 25,
     sensacionalismo: 82,
     credibilidad: 55,
-    ingresosPropios: 25,
+    ingresosPropios: 32,
   },
 ];
 

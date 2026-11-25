@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, TrendingUp } from 'lucide-react';
-import { FISCAL_PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
+import { PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
 import { CommunityDerived, GameState, HistoryPoint } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
@@ -79,16 +79,18 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
   const lastExpenses =
     fin.nomina +
     fin.pensiones +
+    fin.comidaMenores +
     fin.garantiaAlimentaria +
     fin.ayudaSocial +
     fin.operacion +
     fin.prensa;
   const curIngresos = acum.impuestos;
   const curGastos =
-    acum.nomina +
-    acum.pensiones +
+    acum.nominaDevengada +
+    acum.pensionesDevengadas +
+    acum.comidaMenores +
     acum.garantiaAlimentaria +
-    acum.ayudaSocial +
+    acum.ayudaDevengada +
     acum.operacion +
     acum.prensa;
 
@@ -180,7 +182,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
               {/* Current Period + Last Settlement */}
               <div className="space-y-1.5 text-xs">
                 <div className="flex items-center justify-between font-semibold text-white pb-1 border-b border-slate-800">
-                  <span>Período en curso ({acum.dias}/{FISCAL_PERIOD_DAYS}d)</span>
+                  <span>Período en curso ({acum.dias}/{PERIOD_DAYS}d)</span>
                   <span className="font-mono text-[11px] text-slate-300 tabular-nums">
                     Ing +${curIngresos.toFixed(0)} · Gas -${curGastos.toFixed(0)}
                   </span>
@@ -195,6 +197,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                   { label: 'Ingresos (impuestos)', val: fin.ingresos },
                   { label: 'Nómina empleados públicos', val: -fin.nomina },
                   { label: 'Pensiones (jubilados)', val: -fin.pensiones },
+                  { label: 'Comida menores (escuela)', val: -fin.comidaMenores },
                   { label: 'Garantía alimentaria', val: -fin.garantiaAlimentaria },
                   { label: 'Ayuda social', val: -fin.ayudaSocial },
                   { label: 'Operación de servicios', val: -fin.operacion },
@@ -240,6 +243,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                     Impago vigente: discrecional {Math.round(fin.prorrateoDiscrecional * 100)}% · nómina{' '}
                     {Math.round(fin.prorrateoNomina * 100)}% · pens./garantía{' '}
                     {Math.round(fin.prorrateoPensionGarantia * 100)}%
+                    {fin.garantiaImpaga > 0 && ` · Garantía impaga $${fin.garantiaImpaga.toFixed(1)}`}
                   </div>
                 )}
               </div>
@@ -309,21 +313,31 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                         {label} <span className="font-normal text-slate-400">({ownerLabel})</span>
                       </div>
                       <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                        Empleados: {employees} · Vacantes: {vacancies}
+                        Empleados: {employees} · Vacantes: {vacancies} · Sueldos: {Math.round(ent.factor * 100)}%
                       </div>
-                      {ent.respuesta && (
-                        <div className="flex items-center gap-1.5 text-[10px] text-amber-300 flex-wrap">
+                      {ent.ultimoTramo !== 'normal' && (
+                        <div
+                          className={`flex items-center gap-1.5 text-[10px] flex-wrap ${
+                            ent.ultimoTramo === 'aumento'
+                              ? 'text-emerald-300'
+                              : ent.ultimoTramo === 'despido'
+                              ? 'text-rose-300'
+                              : 'text-amber-300'
+                          }`}
+                        >
                           <span>
-                            Respuesta: {ent.respuesta.tipo.replace('_', ' ')} (sueldos{' '}
-                            {Math.round(ent.respuesta.factorSueldo * 100)}% · {ent.respuesta.diasRestantes}d)
+                            Tramo: {ent.ultimoTramo} ({Math.round(ent.factor * 100)}%)
+                            {ent.ultimoTramo === 'despido' && ent.despidosPendientes > 0
+                              ? ` · ${ent.despidosPendientes} despido(s)`
+                              : ''}
                           </span>
                           <button
                             type="button"
                             onClick={() =>
                               onInspectCausal(
-                                `${label}: ${ent.respuesta!.tipo.replace('_', ' ')}`,
-                                ent.respuesta!.causa || ent.respuesta!.origen,
-                                `Los ingresos del período no alcanzaron a cubrir los sueldos de referencia de ${label}.`
+                                `${label}: ${ent.ultimoTramo}`,
+                                ent.ultimaCausa,
+                                `Los ingresos del período ubicaron el factor salarial de ${label} en ${Math.round(ent.factor * 100)}%.`
                               )
                             }
                             className="px-1.5 py-0.5 text-[9px] font-semibold bg-teal-700 hover:bg-teal-600 text-white rounded-sm"

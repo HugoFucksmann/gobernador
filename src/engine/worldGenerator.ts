@@ -2,6 +2,7 @@ import {
   DISTRICTS,
   ECON_CONSTANTS,
   MEDIA_TEMPLATES,
+  PERIOD_DAYS,
   ROLE_CATALOG,
   SAVE_FORMAT_VERSION,
   SCENARIO_PRESETS,
@@ -276,11 +277,19 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
 
       const initTaxRate = def.grupo === 'sin_ingreso' ? 0 : initialLevers.impuesto;
       const initIncomePos = Number(nextRand(rng).toFixed(2));
+      const estProdInit = clamp(
+        (0.35 + 0.65 * (personalidad.laboriosidad / 100)) *
+          (0.45 + 0.55 * (saludInicial / 100)) *
+          (0.55 + 0.45 * 0.62) *
+          (0.85 + 0.3 * 0.56),
+        0,
+        1.35
+      );
       const estNetoInicial =
         entry.rol === 'empresario'
-          ? 10
+          ? 14.5
           : entry.rol === 'comerciante'
-          ? 8
+          ? 9.5
           : entry.rol === 'jubilado'
           ? Number((ECON_CONSTANTS.pensionBase + initialLevers.ayudaSocial).toFixed(2))
           : entry.rol === 'desempleado'
@@ -297,11 +306,33 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
           ? Number(
               (
                 (def.ingreso[0] + initIncomePos * (def.ingreso[1] - def.ingreso[0])) *
-                0.78 *
+                estProdInit *
                 (1 - initTaxRate / 100)
               ).toFixed(2)
             )
           : 0;
+
+      const colchon =
+        ECON_CONSTANTS.colchonDias *
+        ECON_CONSTANTS.precioBaseAlimento *
+        ECON_CONSTANTS.consumoPorNpc;
+      const initialDinero =
+        entry.rol === 'estudiante'
+          ? 0
+          : entry.rol === 'desempleado'
+          ? Math.round(colchon * (1.1 + drawRand(rng) * 0.25) + ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS)
+          : Math.round(
+              colchon * (1.1 + drawRand(rng) * 0.35) +
+                ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS +
+                Math.max(0, estNetoInicial - ECON_CONSTANTS.precioBaseAlimento) * 4.5
+            );
+      const initialDespensa = Number(
+        clamp(
+          Math.min(objetivoDespensa, ECON_CONSTANTS.umbralRecompraDias - 0.85),
+          1.5,
+          ECON_CONSTANTS.despensaMaxDias
+        ).toFixed(2)
+      );
 
       npcs.push({
         id,
@@ -321,9 +352,9 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         },
         economia: {
           ingresoPos: initIncomePos,
-          dinero: entry.rol === 'desempleado' ? randInt(rng, 10, 20) : randInt(rng, 40, 110),
+          dinero: initialDinero,
           ultimoIngresoNeto: estNetoInicial,
-          despensa: Number(objetivoDespensa.toFixed(2)),
+          despensa: initialDespensa,
           propensionGasto,
           noPudoPagarComida: false,
         },
@@ -468,37 +499,78 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const inflacionInicial = preset.inflacionInicial;
   const diasStockInicial = Number((stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(1));
 
+  const estInitialProd = (w: Npc): number => {
+    const lab = w.personalidad.laboriosidad / 100;
+    const sal = w.variables.salud / 100;
+    const sat = w.variables.satisfaccion / 100;
+    const infraFactor = 0.85 + 0.3 * (56 / 100);
+    return clamp((0.35 + 0.65 * lab) * (0.45 + 0.55 * sal) * (0.55 + 0.45 * sat) * infraFactor, 0, 1.35);
+  };
+
   const foodWorkers = npcs.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico');
   const foodWageEstPeriodo = Number(
     (
       foodWorkers.reduce((acc, w) => {
         const range = ROLE_CATALOG[w.rol].ingreso!;
-        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * 0.72;
-      }, 0) * ECON_CONSTANTS.periodoPagoDias
+        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * estInitialProd(w);
+      }, 0) * PERIOD_DAYS
     ).toFixed(1)
+  );
+  const estFoodSalesPeriodo =
+    pop *
+    ECON_CONSTANTS.consumoPorNpc *
+    ECON_CONSTANTS.precioBaseAlimento *
+    (1 - ECON_CONSTANTS.margenComercialPct / 100) *
+    PERIOD_DAYS;
+  const foodParteSueldos = clamp(
+    Number(((foodWageEstPeriodo * 1.12) / Math.max(1, estFoodSalesPeriodo)).toFixed(4)),
+    0.25,
+    0.92
   );
   const foodRevEstPeriodo = Number(
-    Math.max(
-      foodWageEstPeriodo * 1.18,
-      pop * ECON_CONSTANTS.consumoPorNpc * ECON_CONSTANTS.precioBaseAlimento * (1 - ECON_CONSTANTS.margenComercialPct / 100) * ECON_CONSTANTS.periodoPagoDias
-    ).toFixed(1)
+    Math.max(foodWageEstPeriodo / Math.max(0.1, foodParteSueldos), estFoodSalesPeriodo).toFixed(1)
   );
+
+  const estOpPeriodo =
+    (SERVICE_LEVEL_TABLE.seguridad[initialLevers.servicios.seguridad].operacionPeriodo +
+      SERVICE_LEVEL_TABLE.salud[initialLevers.servicios.salud].operacionPeriodo +
+      SERVICE_LEVEL_TABLE.obras[initialLevers.servicios.obras].operacionPeriodo) *
+    scale;
+  const estLivingDia = npcs.reduce((acc, n) => {
+    if (n.edad < 18) return acc;
+    const baseNet = Math.max(0, n.economia.ultimoIngresoNeto - ECON_CONSTANTS.precioBaseAlimento);
+    return acc + n.economia.propensionGasto * baseNet;
+  }, 0);
+  const estComSalesPeriodo =
+    pop *
+      ECON_CONSTANTS.consumoPorNpc *
+      ECON_CONSTANTS.precioBaseAlimento *
+      (ECON_CONSTANTS.margenComercialPct / 100) *
+      PERIOD_DAYS +
+    estLivingDia * PERIOD_DAYS +
+    estOpPeriodo;
 
   const comWorkers = npcs.filter((n) => n.rol === 'obrero');
   const comWageEstPeriodo = Number(
     (
       comWorkers.reduce((acc, w) => {
         const range = ROLE_CATALOG[w.rol].ingreso!;
-        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * 0.72;
-      }, 0) * ECON_CONSTANTS.periodoPagoDias
+        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * estInitialProd(w);
+      }, 0) * PERIOD_DAYS
     ).toFixed(1)
   );
+  const comParteSueldos = clamp(
+    Number(((comWageEstPeriodo * 0.94) / Math.max(1, estComSalesPeriodo)).toFixed(4)),
+    0.2,
+    0.9
+  );
   const comRevEstPeriodo = Number(
-    Math.max(
-      comWageEstPeriodo * 1.2,
-      pop * ECON_CONSTANTS.consumoPorNpc * ECON_CONSTANTS.precioBaseAlimento * (ECON_CONSTANTS.margenComercialPct / 100) * ECON_CONSTANTS.periodoPagoDias +
-        pop * 4.5 * ECON_CONSTANTS.periodoPagoDias
-    ).toFixed(1)
+    Math.max(comWageEstPeriodo / Math.max(0.1, comParteSueldos), estComSalesPeriodo).toFixed(1)
+  );
+
+  const initialReserva = Math.round(preset.reservaInicial * scale);
+  const initMoneyTotal = Number(
+    (npcs.reduce((acc, n) => acc + n.economia.dinero, 0) + initialReserva).toFixed(2)
   );
 
   return {
@@ -512,18 +584,20 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       tick: 0,
       dia: 1,
       anio: 1,
-      periodoFiscal: 1,
-      diasEnPeriodoFiscal: 0,
+      periodo: 1,
+      diasEnPeriodo: 0,
     },
     npcs,
     gobierno: {
-      reserva: Math.round(preset.reservaInicial * scale),
+      reserva: initialReserva,
       inflacion: inflacionInicial,
       finanzas: {
         ingresos: 0,
         nomina: 0,
         pensiones: 0,
         garantiaAlimentaria: 0,
+        garantiaImpaga: 0,
+        comidaMenores: 0,
         ayudaSocial: 0,
         operacion: 0,
         prensa: 0,
@@ -540,10 +614,16 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       acumuladoPeriodo: {
         dias: 0,
         impuestos: 0,
-        nomina: 0,
-        pensiones: 0,
+        nominaPorNpc: {},
+        pensionesPorNpc: {},
+        ayudaPorNpc: {},
+        periodistasPorNpc: {},
+        nominaDevengada: 0,
+        pensionesDevengadas: 0,
+        ayudaDevengada: 0,
         garantiaAlimentaria: 0,
-        ayudaSocial: 0,
+        garantiaImpaga: 0,
+        comidaMenores: 0,
         operacion: 0,
         operacionPorArea: {
           seguridad: 0,
@@ -578,26 +658,28 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         stock: stockInicial,
         diasStock: diasStockInicial,
         siloDias: ECON_CONSTANTS.siloDias,
-        ingresosAcum: 0,
-        sueldosAcum: 0,
-        sueldosReferenciaAcum: 0,
-        diasPeriodo: 0,
+        ventasAcum: 0,
+        parteSueldos: foodParteSueldos,
+        factor: 1,
+        ultimoTramo: 'normal',
+        despidosPendientes: 0,
+        refPorEmpleado: {},
         ultimaGanancia: Number(Math.max(0, foodRevEstPeriodo - foodWageEstPeriodo).toFixed(1)),
         ultimoIngresoPeriodo: foodRevEstPeriodo,
         ultimoSueldosPeriodo: foodWageEstPeriodo,
-        respuesta: null,
       },
       comercio: {
         id: 'comercio',
         socios: comerciantesNpcs.map((c) => c.id),
-        ingresosAcum: 0,
-        sueldosAcum: 0,
-        sueldosReferenciaAcum: 0,
-        diasPeriodo: 0,
+        ventasAcum: 0,
+        parteSueldos: comParteSueldos,
+        factor: 1,
+        ultimoTramo: 'normal',
+        despidosPendientes: 0,
+        refPorEmpleado: {},
         ultimaGanancia: Number(Math.max(0, comRevEstPeriodo - comWageEstPeriodo).toFixed(1)),
         ultimoIngresoPeriodo: comRevEstPeriodo,
         ultimoSueldosPeriodo: comWageEstPeriodo,
-        respuesta: null,
       },
     },
     alimento: {
@@ -638,8 +720,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         autorId: medios[0].columnistas[0] || npcs[0].id,
         autorNombre:
           npcs.find((n) => n.id === (medios[0].columnistas[0] || npcs[0].id))?.nombre || 'Redacción',
-        tema: 'asuncion',
-        tono: 'informativo',
+        tema: 'gobierno',
+        tono: 'neutral',
         alcance: medios[0].alcancePct,
         credibilidad: medios[0].credibilidad,
         titulo:
@@ -705,6 +787,15 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
     fenomenosIniciadosIds: initialPhenomena.filter((f) => f.inicioDia <= 1).map((f) => f.id),
     avisosEmitidos: [],
+    auditEntradasDia: 0,
+    auditSalidasDia: 0,
+    ultimoDineroTotal: initMoneyTotal,
+    precioAyer: ECON_CONSTANTS.precioBaseAlimento,
+    hambreAyerPct: hambreInicial,
+    ultimoSaldoCierre: 0,
+    colaHechosDia: [],
+    ultimaVariantePorAccion: {},
+    clasificadorRegistro: [],
     metricasBaseObjetivo: {
       victoriaInicial: getMetricValue(preset.victoria.metrica),
       derrotaInicial: getMetricValue(preset.derrota.metrica),
