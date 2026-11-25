@@ -1,4 +1,4 @@
-# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.6)
+# Juego de gobernador con comunidad de NPCs (título provisorio) (BORRADOR v0.8)
 
 > Estado del documento: idea en definición. El detalle del gobernador está en GOBERNADOR.md. El detalle técnico (estados, tabla de acciones, medios) vive en ESTADOS.md. La interfaz final está en UI.md y los niveles del juego en HOJA_DE_RUTA.md.
 
@@ -121,8 +121,8 @@ Los niveles de cada idea están en HOJA_DE_RUTA (niveles 1.1 a 3 y "sin nivel as
 ## 11. Pendiente para después
 
 - Primero se hace un prototipo en TypeScript para validar la idea. El motor final queda por decidir. La UI final es en Godot y el contrato entre UI y motor es independiente del lenguaje (UI §11), así que decidir dónde vive el motor no cambia la UI.
-- **IA opcional (decidido):** el juego funciona completo sin IA. Si el usuario la activa, elige los modelos (clasificador y generativo, locales o por API). El juego se diseña y se balancea sin IA, con el director mecánico, y la IA se prueba como mejora. Si el modelo falla o tarda, el juego sigue con el motor y las plantillas. Queda por definir si la IA viene activada o apagada por defecto.
-- Otras decisiones técnicas (arquitectura, costos, latencia, memoria de NPCs, implementación del tiempo real y la aceleración, guardado y reanudación de partidas largas).
+- **IA opcional (decidido):** el juego funciona completo sin IA. Si el usuario la activa, elige los modelos (clasificador y generativo, locales o por API). El juego se diseña y se balancea sin IA, con el director mecánico, y la IA se prueba como mejora. Si el modelo falla o tarda, el juego sigue con el motor y las plantillas. **Viene apagada por defecto** en el primer arranque (decidido): el usuario la activa desde las opciones.
+- Otras decisiones técnicas (arquitectura, costos, latencia, memoria de NPCs, implementación del tiempo real y la aceleración). El guardado y la reanudación de partidas largas ya están definidos (ESTADOS §13).
 
 ## 12. Cómo se alteran los NPCs (decidido a nivel idea)
 

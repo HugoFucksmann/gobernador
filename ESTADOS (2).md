@@ -1,4 +1,4 @@
-# Estados internos (borrador v0.16)
+# Estados internos (borrador v0.20)
 
 > Lo marcado **[cerrado]** está decidido; el resto es lo acordado hasta ahora, salvo lo listado en la sección 15. Los valores que se ajustan probando (constantes, coeficientes, umbrales, topes, plazos y valores iniciales) no viven acá: están en CALIBRACION.md y en el preset de cada escenario. Los números que aparecen en los ejemplos solo ilustran la forma de los datos. Escala 0-100 salvo donde se indique. Ejemplos escalados a unos 100 NPCs. Las palancas del gobernador están en GOBERNADOR.md; acá solo sus efectos sobre los estados. La economía es modular (sección 3.1).
 
@@ -74,7 +74,7 @@
 - `ingreso: [min, max]` por rol (valores en CALIBRACION): lo que gana por día un NPC privado en ese rol. Real = (min + `ingreso_pos` / 100 × (max − min)) × productividad. En `simple` solo sirve para calcular la recaudación.
 - `publico: true`: cobra el `salario_publico`, igual para todos: `salario_base_publico` × palanca / 100, con `salario_base_publico` (se calibra por escenario y puede quedar por debajo del ingreso privado). No tiene ingreso propio y forma parte de la nómina.
 - Obrero y técnico no producen un recurso físico: su aporte es el ingreso gravable.
-- **Comerciante (propuesta a confirmar):** gana su ingreso base (el rango de `ingreso`) más una comisión sobre lo que se vende en el período. Ventas = gasto de la población en comida + volumen de intercambio con el exterior, repartidas entre los comerciantes. Es un valor derivado: no se traza quién le paga a quién (ver Circulación en la sección 12). Tiene empleados: cada comerciante sostiene hasta `empleados_por_comerciante` obreros. El tope efectivo de obreros = min(`tope_privado[obrero]`, comerciantes × `empleados_por_comerciante`). Si baja el número de comerciantes, los obreros que quedan sin puesto pasan a desempleados.
+- **Comerciante (empleados confirmados: son los obreros; la comisión por ventas sigue como propuesta):** gana su ingreso base (el rango de `ingreso`) más una comisión sobre lo que se vende en el período. Ventas = gasto de la población en comida + volumen de intercambio con el exterior, repartidas entre los comerciantes. Es un valor derivado: no se traza quién le paga a quién (ver Circulación en la sección 12). Tiene empleados: cada comerciante sostiene hasta `empleados_por_comerciante` obreros. El tope efectivo de obreros = min(`tope_privado[obrero]`, comerciantes × `empleados_por_comerciante`). Si baja el número de comerciantes, el tope efectivo baja de inmediato, pero los obreros que quedan sin puesto no pasan todos a desempleados de golpe: pasan como máximo `max_pase_desempleo_por_dia` por día (valor en CALIBRACION), elegidos al azar con semilla entre los que exceden el tope. Mientras haya exceso no se cubren vacantes de obrero. Cada pase queda con origen `estado:comercio` y `causa` = el evento que redujo a los comerciantes (muerte, acción en curso), para poder explicar la cadena.
 - **Sin ingreso propio (desde `individual`):** los jubilados reciben una pensión fija (`pension_base`), gasto obligatorio del estado. La comida de los menores la paga el estado. Los desempleados dependen de la garantía alimentaria y de los subsidios.
 - `policia`: rol de seguridad en el nivel 1, con dos usos: defensa y orden (sección 14). En zombies el gobernador sube el cupo y los NPCs lo cubren por afinidad (valentía), como cualquier rol. Su `zona` define dónde defiende (sección 14).
 - `medico`: da camas al hospital (sección 12, Salud).
@@ -385,6 +385,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
   "hospital_ocupacion_pct": 40,
   "defensa": { "norte": 40, "este": 40, "sur": 40, "oeste": 40, "centro": 40 },
   "orden": { "norte": 60, "este": 60, "sur": 60, "oeste": 60, "centro": 60 },
+  "amenaza": { "norte": 0, "este": 35, "sur": 0, "oeste": 10, "centro": 0 },
   "productividad_total": 6800,
   "roles": {
     "estudiante": 12, "agricultor": 30, "obrero": 14, "tecnico": 3, "policia": 5,
@@ -394,7 +395,9 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 }
 ```
 
-- `apoyo_pct`: lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: NPCs que no pueden pagar su comida. `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `productividad_total`: suma de la productividad (0-100) de cada NPC.
+- `apoyo_pct`: lealtad ≥ 50. `descontentos_pct`: satisfacción < 30. `hambre_critica_pct`: hambre > 80. `sin_dinero_pct`: NPCs que no pueden pagar su comida. `hospital_ocupacion_pct`: (internados + NPCs en espera de cama) / camas, con mínimo 1 cama; más de 100 es hospital saturado. `defensa`: por zona, derivada de `seguridad`, de dónde están los policías y de la `integridad` de la zona (sección 14). `orden`: por zona, derivado de los policías dedicados al orden en la zona (sección 14). `amenaza`: por zona, la amenaza percibida (sección 14); se expone para la capa de lectura del mapa (UI §6). `productividad_total`: suma de la productividad (0-100) de cada NPC.
+
+- **Historial [cerrado]:** excepción acotada a "lo derivado no se guarda". El motor agrega cada día un punto a una serie por indicador clave (`reserva`, `inflacion`, `satisfaccion_media`, `hambre_critica_pct`, `apoyo_pct`, `poblacion`) y la UI solo la lee (UI §5). Es un registro de lectura: ninguna regla lo usa y no es estado de simulación, pero entra en el guardado para recuperarlo al cargar la partida. Rendimiento: se escribe un valor por indicador por día, sin recalcular nada. Pasado el tope `historial_max_dias` (CALIBRACION), los días más viejos se compactan por promedio semanal. El registro de hechos del historial son los eventos (sección 14), que también se guardan.
 
 ## 11. Objetivo (condición sobre los datos de arriba)
 
@@ -434,7 +437,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 
 **Alimento**
 
-- **`simple`:** consumo = población × `consumo_por_npc` × ración / 100, desde el almacén común. Precio fijo. Si no alcanza, reparto parejo. Con ración < 100 el hambre tiende a un valor proporcional al recorte, `k_hambre` × (1 − ración / 100), acotado a 0-100, mientras el almacén cubra esa ración: no hay umbral ni salto. El almacén tiene tope (silo, sección 4).
+- **`simple`:** consumo = población × `consumo_por_npc` × ración / 100, desde el almacén común. Precio fijo. Si no alcanza, reparto parejo. La ración va de 50 a 100 (100 es lo normal y no se puede subir). Con ración < 100 el hambre tiende a un valor proporcional al recorte, `k_hambre` × (1 − ración / 100), acotado a 0-100, mientras el almacén cubra esa ración: no hay umbral ni salto. El almacén tiene tope (silo, sección 4).
 - **`individual`:** precio y reparto según la sección 4.
 - **Garantía alimentaria:** el estado paga un % del faltante de comida de los NPCs sin dinero suficiente. Costo = faltante × precio × %. La comida de los menores la paga siempre el estado (100%).
 - **Intercambio:** el estado compra o vende alimento al exterior, hasta la capacidad de los comerciantes. Precio externo = `precio_base` × (1 + inflación / 100) × factor de sequía (sube con sequía y plaga). La compra cuesta más que la venta (el diferencial está en CALIBRACION). La compra se paga de la reserva (ver Disponible); la venta es ingreso.
@@ -465,6 +468,7 @@ Los parámetros son `max_acciones_por_periodo`, `periodo_dias`, `max_pct_rol_fue
 
 - **Módulos de economía:** `simple` (nivel 1), `individual` y `fiscal` (nivel 1.1, HOJA_DE_RUTA §3) (ver 3.1). Son lógica del núcleo. El campo `dinero`, que usa `individual`, existe desde el nivel 1 y los tres módulos comparten la misma salida (sección 3.1): sumar un módulo no cambia lo ya construido.
 - **Calibración:** los valores que se ajustan probando, los criterios de arranque de un mundo y el plan de pruebas están en CALIBRACION.md. Los valores calibrados de cada escenario viven en su preset (`presets/*.json`) y el historial de rondas, en el informe de calibración.
+- **Guardado [cerrado]:** un archivo por partida, en un formato independiente del lenguaje (JSON versionado y comprimido), para que cualquier implementación del motor lo lea igual (UI §11). Contiene: `version_formato`, la semilla, la configuración efectiva del mundo (con los valores del preset ya aplicados, para que un cambio futuro del preset no altere una partida guardada, y con las marcas de "configuración de prueba"), el estado completo del último día cerrado (NPCs, gobierno, clima, medios, integridad) con el estado del generador de azar, las elecciones guardadas del clasificador y los textos generativos (sección 9), el registro de eventos y el historial (sección 10). Se retoma desde esa foto y no reproduciendo la partida desde el día 1, así que cargar cuesta lo mismo en el día 10 que en el 300. La foto se toma en memoria al cierre de un día y se escribe en segundo plano: no pausa ni frena la simulación. Escritura segura: se escribe a un archivo temporal y se renombra al terminar, así un corte no deja un guardado roto. Cada partida tiene un guardado manual y un autoguardado periódico (UI §13; período en CALIBRACION). Un guardado de otra versión de formato se migra si hay migración y, si no, se rechaza con un aviso claro.
 - **Edad en el nivel 1:** los NPCs envejecen sin morir por vejez ni nacer. La población baja solo por salud 0.
 - **Fuera del nivel 1 y a futuro:** ver HOJA_DE_RUTA §3 a §7. Lo preparado desde el nivel 1 para no volver atrás está en HOJA_DE_RUTA §6.
 
@@ -500,7 +504,7 @@ El motor conoce el espacio solo por **zonas**. Las coordenadas, el movimiento y 
 - No agrega palancas: el gobernador la influye con el presupuesto de infraestructura y con los cupos de ingenieros.
 - Se desarrolla en el nivel 2 como construcción real (HOJA_DE_RUTA §4): solo cambia de dónde sale este número.
 
-**Reubicación.** Cada día, un % de los policías (valor en CALIBRACION) cambia de `zona` hacia la zona con más amenaza percibida, elegida con peso proporcional a esa amenaza. Si la amenaza es 0 en todas, no se mueven.
+**Reubicación.** Cada día, un % de los policías (valor en CALIBRACION) cambia de `zona` hacia la zona con más necesidad total, elegida con peso proporcional a esa necesidad. La necesidad total de una zona es su necesidad de defensa más su necesidad de orden (ver Reparto policial, abajo), sumadas tal cual **[propuesta: sin peso por escenario hasta que las corridas lo pidan]**. Si la necesidad total es 0 en todas, no se mueven. En elecciones se mueven solo por orden; en zombies, por la mezcla de las dos.
 
 **Amenaza percibida por zona** (derivada): el mayor entre estos dos valores.
 
@@ -514,7 +518,7 @@ La ciudadanía percibe, no sabe: un aviso tardío o poco creíble deja la defens
 - Necesidad de defensa: su amenaza percibida (arriba).
 - Necesidad de orden: min(100, % de NPCs de la zona con una acción espontánea en curso + % de descontentos de la zona).
 
-Los policías de la zona se reparten entre los dos usos en proporción a esas necesidades. Cada uso con necesidad mayor que 0 recibe al menos `min_reparto`. Si una necesidad es 0, la otra recibe todo; si las dos son 0, todos quedan en orden. En elecciones no hay amenaza, así que toda la policía queda en orden. En zombies la amenaza atrae policías a la defensa y deja menos para el orden. La reubicación entre zonas sigue siendo solo por amenaza (arriba).
+Los policías de la zona se reparten entre los dos usos en proporción a esas necesidades. Cada uso con necesidad mayor que 0 recibe al menos `min_reparto`. Si una necesidad es 0, la otra recibe todo; si las dos son 0, todos quedan en orden. En elecciones no hay amenaza, así que toda la policía queda en orden. En zombies la amenaza atrae policías a la defensa y deja menos para el orden. La reubicación entre zonas responde a la necesidad total de cada zona, defensa más orden (Reubicación, arriba).
 
 **Orden por zona** (derivado, no se guarda). `orden[zona]` = min(100, 100 × (policías en orden de la zona / población de la zona) / `objetivo_orden`), con `objetivo_orden` (por ejemplo, un policía cada tantos habitantes). Es el freno del contagio de las acciones espontáneas de esa zona (sección 7.2): contagio efectivo = `contagio` × (1 − `k_orden` × `orden`/100) × (1 − `k_satisfaccion` × satisfacción media de la zona/100), con `k_orden` y `k_satisfaccion` (valores en CALIBRACION). Solo afecta a las acciones espontáneas: las de condición (sección 7) no se modifican. El gobernador no fija este reparto: lo influye con los cupos y el presupuesto de seguridad. Una palanca para inclinarlo queda pendiente (GOBERNADOR §8).
 
@@ -549,8 +553,6 @@ Reglas de la UI sobre los eventos: UI §9 y §11.
 Las preguntas que se resuelven midiendo (calibración de salud, zonas, contagio, clasificador, plazos de la IA, textos y memoria) están en CALIBRACION.md. Acá quedan las de diseño.
 
 1. **Roles y niveles de educación:** se dejan los 13 roles y 4 niveles y se afinan después.
-2. **Comerciantes y empleados:** confirmar que los empleados son los obreros.
-3. **Modelo de salud individual:** confirmar los golpes (sección 5) y el hospital (sección 12, Salud).
-4. **Zonas y defensa:** confirmar el modelo (sección 14) y quiénes reparan.
-5. **Reubicación y orden:** definir si la reubicación entre zonas también responde a la necesidad de orden (hoy solo a la amenaza).
-6. **Catálogo de efectos:** confirmar el conjunto inicial (`fuera_de_puesto`, `anima`, `agita`, `acapara`, `moviliza`, `decorativa`) y qué efectos nuevos pide cada escenario.
+2. **Modelo de salud individual:** confirmar los golpes (sección 5) y el hospital (sección 12, Salud).
+3. **Zonas y defensa:** confirmar el modelo (sección 14) y quiénes reparan.
+4. **Catálogo de efectos:** confirmar el conjunto inicial (`fuera_de_puesto`, `anima`, `agita`, `acapara`, `moviliza`, `decorativa`) y qué efectos nuevos pide cada escenario.

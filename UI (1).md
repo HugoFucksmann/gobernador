@@ -1,4 +1,4 @@
-# UI del juego: estructura (BORRADOR v0.9)
+# UI del juego: estructura (BORRADOR v0.12)
 
 > Solo la estructura de la interfaz final en Godot (nivel 2, HOJA_DE_RUTA). La UI de depuración del motor (nivel 1) es del prototipo y no se define acá. Los detalles (colores, tooltips, leyendas, estilo de ventanas) se definen después. Palancas: GOBERNADOR.md. Estados y reglas: ESTADOS.md. Idea general: IDEA_JUEGO.md. **[decidido]** lo fijó el autor; **[propuesta]** es base para pulir.
 
@@ -48,7 +48,7 @@ Cuatro capas, de atrás hacia adelante:
   - Comunidad (resumen derivado).
   - Ficha del NPC.
   - Prensa (medios y noticias).
-  - Historial: gráficos de línea de los indicadores clave (reserva, hambre, satisfacción, inflación) y registro de hechos con filtro.
+  - Historial: gráficos de línea de los indicadores clave (reserva, hambre, satisfacción, inflación) y registro de hechos con filtro. Las series las guarda el motor y la ventana solo las lee (ESTADOS §10).
   - Clima.
   - Objetivo, con progreso claro y condición de derrota (el HUD lo muestra siempre en resumen). Al cumplirse la victoria queda marcado como cumplido.
 - Toda palanca muestra su valor, su rango, sus efectos y costos antes de confirmar, el margen de cambio que le queda y los días que faltan para la próxima liquidación (GOBERNADOR §4, §5 y §7).
@@ -58,7 +58,7 @@ Cuatro capas, de atrás hacia adelante:
 - **[decidido]** Cámara libre con límites: la altura va entre "ver una persona" y "ver todo el mundo", sin pasar por debajo del terreno ni salir del borde del mundo. La inclinación también es acotada. Los valores exactos están en CALIBRACION.md.
 - Selección de NPC o zona con un clic. La selección abre su ficha o resumen.
 - Los resúmenes y las capas de lectura a distancia se agrupan por zona.
-- Capas de lectura sobre el mapa para ver estados de la comunidad. **[decidido]** Capas iniciales: variables del NPC, roles y acciones activas. **[propuesta]** Una a la vez, apagadas por defecto.
+- Capas de lectura sobre el mapa para ver estados de la comunidad. **[decidido]** Capas: variables del NPC, roles, acciones activas, defensa por zona, orden por zona, integridad por zona, amenaza percibida por zona y hospital (ocupación, ESTADOS §10). El hospital está en el `centro`, así que esa capa muestra un solo valor y no un reparto por zona. **[propuesta]** Una a la vez, apagadas por defecto.
 - Las alertas pueden centrar la cámara en el hecho.
 - Lista filtrable de NPCs fuera del mapa, para llegar a uno sin buscarlo.
 
@@ -105,7 +105,7 @@ Cómo se ven los ataques zombie, las obras y la destrucción. El motor conoce el
 ## 11. Frontera entre UI y motor
 
 - **[propuesta]** El motor no depende de ninguna escena ni de la UI.
-- La UI solo **lee** el estado del motor y le **envía** dos cosas: las órdenes de palancas y el NPC en foco (el que el jugador selecciona). El foco queda reservado para el pensamiento generado a futuro (ESTADOS §9); en la v1 solo abre su ficha. No contiene lógica de juego.
+- La UI solo **lee** el estado del motor (incluidas las series del historial, ESTADOS §10) y le **envía** dos cosas: las órdenes de palancas y el NPC en foco (el que el jugador selecciona). El foco queda reservado para el pensamiento generado a futuro (ESTADOS §9); en la v1 solo abre su ficha. No contiene lógica de juego.
 - El estado cambia por día de juego (ESTADOS §5). La vista interpola entre actualizaciones para que no haya saltos.
 - **[decidido]** Este contrato (estado de lectura, eventos de ESTADOS §14, órdenes de palancas y NPC en foco) es una interfaz independiente del lenguaje. Cualquier implementación del motor lo cumple igual, así que cambiar dónde vive el motor no cambia la UI.
 - **[propuesta]** Mientras el motor existe solo en TypeScript, la UI de Godot se desarrolla reproduciendo partidas grabadas: el motor exporta el estado de cada día y los eventos, y Godot los reproduce. Así se construye y se prueba la UI (incluido el rendimiento con 1.000 NPCs) sin depender de dónde viva el motor final.
@@ -128,8 +128,9 @@ Cómo se ven los ataques zombie, las obras y la destrucción. El motor conoce el
 ## 13. Opciones y guardado
 
 - **[decidido]** Opciones: calidad gráfica (perfiles), controles de cámara, volumen e IA opcional: activarla y elegir los modelos (IDEA §11).
+- **[decidido]** La IA viene apagada por defecto en el primer arranque (IDEA §11).
 - **[decidido]** Con la IA activada, un indicador discreto en la barra superior muestra su estado: activa, lenta o sin respuesta (decide el motor y se usan plantillas). Con la IA apagada no se muestra.
-- **[decidido]** Guardado: un guardado manual por partida y un autoguardado periódico. Se cargan desde el menú principal. El formato y la técnica de guardado están pendientes (sección 18).
+- **[decidido]** Guardado: un guardado manual por partida y un autoguardado periódico. Se cargan desde el menú principal. El formato y la técnica están en ESTADOS §13: una foto completa del último día en un archivo versionado, escrita en segundo plano sin pausar el juego.
 
 ## 14. Entrada
 
@@ -154,10 +155,7 @@ Idiomas adicionales, tutorial, gamepad y Steam Deck (nivel 3, HOJA_DE_RUTA §5) 
 
 ## 18. Preguntas abiertas
 
-1. **Capas de lectura:** ¿se suman la defensa por zona, el orden por zona, la integridad, la amenaza percibida (ESTADOS §14) y una vista del hospital (ocupación, ESTADOS §10)? Hoy solo hay variables del NPC, roles y acciones activas.
-2. **Guardado:** qué formato y técnica usar para guardar y reanudar partidas largas (IDEA §11).
-3. **Historial:** quién guarda las series diarias de los gráficos, el motor o la UI a partir de las partidas grabadas. ESTADOS dice que lo derivado no se guarda.
-4. **IA por defecto:** si la IA opcional viene activada o apagada en el primer arranque, y si la detección automática de perfil (sección 12) también sugiere si activarla.
+1. **Sugerencia de IA:** con la IA apagada por defecto, si la detección automática de perfil (sección 12) también sugiere activarla cuando la PC alcanza (por ejemplo, un aviso único) o solo elige la calidad gráfica.
 
 ## 19. Detalle para más adelante
 
