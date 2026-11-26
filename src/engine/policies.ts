@@ -1,6 +1,7 @@
 import {
   BUILDING_CATALOG,
   ECON_CONSTANTS,
+  HOUSING_CONSTANTS,
   OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
   ROLE_CATALOG,
@@ -9,10 +10,10 @@ import {
 import {
   BuildingInstance,
   CommunityDerived,
-  FiscalLedger,
   GameState,
   GovernorLevers,
   Parcela,
+  RoleId,
   ServiceAreaId,
   ServiceLevel,
   ServicePublicRoleId,
@@ -21,9 +22,9 @@ import {
 
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   escenarioId: 'elecciones',
-  economiaModulo: SCENARIO_PRESETS.elecciones.economiaDefault,
-  nivelMundo: SCENARIO_PRESETS.elecciones.economiaDefault === 'fiscal' ? 'M2' : 'M1',
-  nivelGobernador: SCENARIO_PRESETS.elecciones.economiaDefault === 'fiscal' ? 'G3' : 'G2',
+  economiaModulo: 'base',
+  nivelMundo: 'M2',
+  nivelGobernador: 'G2',
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,
   caos: { ...SCENARIO_PRESETS.elecciones.caosDefault },
@@ -50,11 +51,12 @@ export interface PeriodBudgetEstimate {
   daysToSettlement: number;
 }
 
-export function sumPeriodExpenses(fin: FiscalLedger): number {
+export function sumPeriodExpenses(fin: GameState['gobierno']['finanzas']): number {
   return (
     fin.nomina +
     fin.pensiones +
     fin.comidaMenores +
+    (fin.acogidaMenores ?? 0) +
     fin.garantiaAlimentaria +
     fin.ayudaSocial +
     fin.operacion +
@@ -69,7 +71,7 @@ export function daysToSettlement(state: GameState): number {
 }
 
 export function getDevPopScale(poblacionInicial: number): number {
-  return Math.max(0.5, poblacionInicial / 100);
+  return Math.max(1, poblacionInicial / 100);
 }
 
 export function getObrasTargetJobs(population: number, level: ServiceLevel): number {
@@ -87,11 +89,24 @@ export function getActiveBuildings(parcelas: Parcela[]): BuildingInstance[] {
   return list;
 }
 
+export function getBuildingRoleCapacity(b: BuildingInstance): Partial<Record<RoleId, number>> {
+  const def = BUILDING_CATALOG[b.tipo];
+  if (!def) return {};
+  const healthFactor = b.estadoSalud < 40 ? 0.5 : 1;
+  const result: Partial<Record<RoleId, number>> = {};
+  for (const [role, count] of Object.entries(def.puestos)) {
+    if (typeof count === 'number' && count > 0) {
+      result[role as RoleId] = Math.max(1, Math.round(count * healthFactor));
+    }
+  }
+  return result;
+}
+
 export function getBuildingJobCaps(
   parcelas: Parcela[],
   population: number,
   nivelObras: ServiceLevel,
-  poblacionInicial: number,
+  _poblacionInicial: number,
   cuposFijosBase?: { estatal: number; docente: number }
 ): {
   policia: number;
@@ -100,49 +115,58 @@ export function getBuildingJobCaps(
   estatal: number;
   docente: number;
   agricultor: number;
+  tecnico: number;
   obrero: number;
   comerciante: number;
+  constructor: number;
+  inmobiliario: number;
+  periodista: number;
 } {
-  const devScale = getDevPopScale(poblacionInicial);
   let policia = 0;
   let medico = 0;
   let estatal = 0;
   let docente = 0;
   let agricultor = 0;
+  let tecnico = 0;
   let obrero = 0;
   let comerciante = 0;
+  let constructor = 0;
+  let inmobiliario = 0;
+  let periodista = 0;
   let hasEscuela = false;
   let hasOficina = false;
 
   for (const b of getActiveBuildings(parcelas)) {
-    const def = BUILDING_CATALOG[b.tipo];
-    if (b.tipo === 'comisaria' && def.puestosRol) {
-      policia += Math.round(def.puestosRol * devScale);
-    } else if (b.tipo === 'hospital' && def.puestosRol) {
-      medico += Math.round(def.puestosRol * devScale);
-    } else if (b.tipo === 'oficina_publica' && def.puestosRol) {
-      hasOficina = true;
-      estatal += Math.round(def.puestosRol * devScale);
-    } else if (b.tipo === 'escuela' && def.puestosRol) {
-      hasEscuela = true;
-      docente += Math.round(def.puestosRol * devScale);
-    } else if (b.tipo === 'campo' && def.puestosAgricultor) {
-      agricultor += Math.round(def.puestosAgricultor * devScale);
-    } else if (b.tipo === 'local_comercio') {
-      if (def.puestosObrero) obrero += Math.round(def.puestosObrero * devScale);
-      if (def.puestosComerciante) comerciante += Math.round(def.puestosComerciante * devScale);
-    }
+    const caps = getBuildingRoleCapacity(b);
+    if (b.tipo === 'oficina_publica') hasOficina = true;
+    if (b.tipo === 'escuela') hasEscuela = true;
+
+    policia += caps.policia ?? 0;
+    medico += caps.medico ?? 0;
+    estatal += caps.estatal ?? 0;
+    docente += caps.docente ?? 0;
+    agricultor += caps.agricultor ?? 0;
+    tecnico += caps.tecnico ?? 0;
+    obrero += caps.obrero ?? 0;
+    comerciante += caps.comerciante ?? 0;
+    constructor += caps.constructor ?? 0;
+    inmobiliario += caps.inmobiliario ?? 0;
+    periodista += caps.periodista ?? 0;
   }
 
   return {
     policia,
     medico,
     ingeniero: getObrasTargetJobs(population, nivelObras),
-    estatal: hasOficina ? cuposFijosBase?.estatal ?? estatal : 0,
-    docente: hasEscuela ? cuposFijosBase?.docente ?? docente : 0,
+    estatal: hasOficina ? Math.max(cuposFijosBase?.estatal ?? estatal, 0) : 0,
+    docente: hasEscuela ? Math.max(cuposFijosBase?.docente ?? docente, 0) : 0,
     agricultor,
+    tecnico,
     obrero,
     comerciante,
+    constructor,
+    inmobiliario,
+    periodista,
   };
 }
 
@@ -150,14 +174,13 @@ export function computeMaintenanceBreakdown(
   parcelas: Parcela[],
   nivelObras: ServiceLevel,
   vivosCount: number,
-  poblacionInicial: number
+  _poblacionInicial: number
 ): {
   mantenimientoPorArea: Record<ServiceAreaId, number>;
   mantenimientoTotal: number;
   operacionObras: number;
   operacionTotal: number;
 } {
-  const devScale = getDevPopScale(poblacionInicial);
   const mantenimientoPorArea: Record<ServiceAreaId, number> = {
     seguridad: 0,
     salud: 0,
@@ -166,8 +189,12 @@ export function computeMaintenanceBreakdown(
 
   for (const b of getActiveBuildings(parcelas)) {
     const def = BUILDING_CATALOG[b.tipo];
-    if (def.mantenimientoPeriodo > 0 && def.areaServicio) {
-      mantenimientoPorArea[def.areaServicio] += def.mantenimientoPeriodo * devScale;
+    if (
+      (def.categoria === 'publico' || def.categoria === 'suceso') &&
+      def.mantenimientoPeriodo > 0 &&
+      def.areaServicio
+    ) {
+      mantenimientoPorArea[def.areaServicio] += def.mantenimientoPeriodo;
     }
   }
 
@@ -196,33 +223,55 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
   let jubilados = 0;
   let desempleados = 0;
   let comerciantes = 0;
-  let minorsCount = 0;
+  let acogidaMinors = 0;
   let baseTaxableGrossDia = 0;
 
+  const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
+  const firmaById = new Map(state.firmas.map((f) => [f.id, f]));
+
+  for (const h of state.hogares) {
+    if (h.estado === 'acogida') acogidaMinors += h.miembros.length;
+  }
+
   for (const n of vivos) {
-    if (n.edad < 18) minorsCount++;
     if (n.rol === 'jubilado') jubilados++;
     if (n.rol === 'desempleado') desempleados++;
     if (n.rol === 'comerciante') comerciantes++;
+
     const def = ROLE_CATALOG[n.rol];
-    if (def.grupo !== 'sin_ingreso') {
-      if (def.publico) {
-        baseTaxableGrossDia += ECON_CONSTANTS.salarioBasePublico * (levers.salarioPublico / 100);
-      } else if (def.ingreso) {
-        const factor =
-          n.rol === 'agricultor' || n.rol === 'tecnico'
-            ? state.empresas.alimento.factor
-            : n.rol === 'obrero'
-            ? state.empresas.comercio.factor
-            : 1;
+    if (def.grupo === 'publico') {
+      baseTaxableGrossDia += ECON_CONSTANTS.salarioBasePublico * (levers.salarioPublico / 100);
+    } else if (def.grupo === 'privado') {
+      const f = n.empleadorId ? firmaById.get(n.empleadorId) : undefined;
+      const factor = f ? f.factor : 1;
+      if (def.ingreso) {
         baseTaxableGrossDia +=
-          (def.ingreso[0] + n.economia.ingresoPos * (def.ingreso[1] - def.ingreso[0])) * 0.65 * factor;
-      } else if (n.rol === 'empresario') {
-        baseTaxableGrossDia += Math.max(0, state.empresas.alimento.ultimaGanancia) / PERIOD_DAYS;
-      } else if (n.rol === 'comerciante') {
-        const livePartners = Math.max(1, state.empresas.comercio.socios.length);
-        baseTaxableGrossDia +=
-          Math.max(0, state.empresas.comercio.ultimaGanancia) / livePartners / PERIOD_DAYS;
+          (def.ingreso[0] + n.economia.ingresoPos * (def.ingreso[1] - def.ingreso[0])) *
+          0.65 *
+          factor;
+      }
+    }
+    if (n.partes && n.partes.length > 0) {
+      for (const part of n.partes) {
+        const f = firmaById.get(part.firmaId);
+        if (f && f.ultimaGanancia > 0) {
+          baseTaxableGrossDia += ((f.ultimaGanancia * (part.pct / 100)) * 0.65) / PERIOD_DAYS;
+        }
+      }
+    }
+  }
+
+  // Taxable rents received by household/npc owners
+  for (const c of state.casas) {
+    if (c.hogarId && (c.dueno.tipo === 'hogar' || c.dueno.tipo === 'npc')) {
+      const occ = hogarById.get(c.hogarId);
+      if (occ) {
+        const isSelfOwned =
+          (c.dueno.tipo === 'hogar' && c.dueno.id === occ.id) ||
+          (c.dueno.tipo === 'npc' && occ.miembros.includes(c.dueno.id));
+        if (!isSelfOwned) {
+          baseTaxableGrossDia += c.alquiler / PERIOD_DAYS;
+        }
       }
     }
   }
@@ -268,25 +317,25 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
       ? (acum.comidaMenores / acum.dias) * PERIOD_DAYS
       : fin.comidaMenores > 0
       ? fin.comidaMenores
-      : minorsCount * state.alimento.precio * ECON_CONSTANTS.consumoPorNpc * PERIOD_DAYS;
+      : acogidaMinors *
+        (state.alimento.precio * ECON_CONSTANTS.consumoPorNpc + HOUSING_CONSTANTS.costoAcogidaMenorDia) *
+        PERIOD_DAYS;
 
   let garantiaEst = 0;
   if (acum.dias > 0 && acum.garantiaAlimentaria > 0) {
     const baseGar = (acum.garantiaAlimentaria / acum.dias) * PERIOD_DAYS;
-    if (vig.garantiaAlimentaria > 0) {
-      garantiaEst = baseGar * (levers.garantiaAlimentaria / vig.garantiaAlimentaria);
-    } else {
-      garantiaEst = baseGar * (levers.garantiaAlimentaria / 100);
-    }
+    garantiaEst =
+      vig.garantiaAlimentaria > 0
+        ? baseGar * (levers.garantiaAlimentaria / vig.garantiaAlimentaria)
+        : baseGar * (levers.garantiaAlimentaria / 100);
   } else if (fin.garantiaAlimentaria > 0) {
-    if (vig.garantiaAlimentaria > 0) {
-      garantiaEst = fin.garantiaAlimentaria * (levers.garantiaAlimentaria / vig.garantiaAlimentaria);
-    } else {
-      garantiaEst = fin.garantiaAlimentaria * (levers.garantiaAlimentaria / 100);
-    }
+    garantiaEst =
+      vig.garantiaAlimentaria > 0
+        ? fin.garantiaAlimentaria * (levers.garantiaAlimentaria / vig.garantiaAlimentaria)
+        : fin.garantiaAlimentaria * (levers.garantiaAlimentaria / 100);
   }
 
-  const prensaEst = levers.prensa;
+  const prensaEst = state.medios.some((m) => m.activa !== false) ? levers.prensa : 0;
 
   let ingresosEst = 0;
   const taxScale = vig.impuesto > 0 ? levers.impuesto / vig.impuesto : 0;
@@ -344,6 +393,7 @@ export function hasActiveCrisisAlert(state: GameState, derived: CommunityDerived
     derived.descontentosPct > 30 ||
     derived.hambreCriticaPct > 20 ||
     derived.hospitalOcupacionPct > 100 ||
+    derived.callePct > 15 ||
     state.demandasActivas.length > 0
   );
 }

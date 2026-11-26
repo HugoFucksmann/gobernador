@@ -1,8 +1,9 @@
 {
   "id": "elecciones_simple",
-  "nombre": "Año Electoral — Economía Base (Calibrado)",
+  "nombre": "Año Electoral V2 — Mundo Base (Calibrado)",
   "escenarioId": "elecciones",
   "economiaModulo": "base",
+  "nivelMundo": "M2",
   "poblacion": 100,
   "duracionDias": 365,
   "ECON_CONSTANTS": {
@@ -38,6 +39,10 @@
     "agricultor": [8.2, 8.8],
     "obrero": [8.0, 10.4],
     "tecnico": [8.0, 9.0],
+    "comerciante": [8.4, 10.6],
+    "constructor": [8.2, 10.2],
+    "inmobiliario": [8.8, 11.2],
+    "empresario": [9.5, 12.0],
     "periodista": [7.1, 7.3]
   },
   "SCENARIO_PRESET": {
@@ -47,10 +52,12 @@
     "reservaInicial": 6000,
     "stockAlimentoInicial": 2000,
     "topesPrivados": {
-      "agricultor": 30,
+      "agricultor": 28,
       "obrero": 16,
-      "comerciante": 4,
-      "empresario": 1,
+      "comerciante": 6,
+      "constructor": 3,
+      "inmobiliario": 2,
+      "empresario": 2,
       "tecnico": 3,
       "periodista": 2
     },
@@ -84,7 +91,7 @@
     "intensidad": 95,
     "inicioDia": 140,
     "duracionDias": 90,
-    "nota": "Secuencia calibrada para módulo base cerrado con empresas y despensas."
+    "nota": "Secuencia calibrada para mundo V2 con hogares, casas y firmas por rubro."
   },
   "heuristicPolicy": {
     "evaluacionCadaDias": 7,

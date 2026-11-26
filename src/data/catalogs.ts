@@ -2,11 +2,10 @@ import {
   ActionDefinition,
   BuildingDefinition,
   BuildingType,
-  ChaosLimits,
+  ChaosSettings,
   DistrictId,
-  DistrictZone,
   ForeignTradeStep,
-  HitoDef,
+  HitoDefinition,
   NewsTone,
   NewsTopic,
   PressValence,
@@ -18,43 +17,71 @@ import {
   ScenarioPreset,
   ServiceLevel,
   ServicePublicRoleId,
+  ZoneDefinition,
   ZoneId,
 } from '../types/game';
 
 import MAPA_ELECCIONES from '../../presets/mapa_elecciones.json';
 
-export const SAVE_FORMAT_VERSION = 4;
+export const SAVE_FORMAT_VERSION = 5;
 export const PERIOD_DAYS = 7;
+export const PERIOD_DAYS_DEMOG = 30;
 
-export const ZONE_IDS: ZoneId[] = ['centro', 'norte', 'este', 'sur', 'oeste'];
+export const DEFAULT_ZONAS: Record<ZoneId, ZoneDefinition> = Object.fromEntries(
+  Object.entries(MAPA_ELECCIONES.zonas).map(([k, v]) => {
+    const raw = v as unknown as {
+      id?: string;
+      nombre?: string;
+      caracter?: ZoneDefinition['caracter'];
+      vecinas: string[];
+      demandaAlquilerIndice?: number;
+      rect?: { wx: number; wy: number; ww: number; wh: number };
+    };
+    return [
+      k,
+      {
+        id: raw.id ?? k,
+        nombre: raw.nombre ?? k,
+        caracter: raw.caracter ?? 'residencial',
+        vecinas: [...raw.vecinas],
+        demandaAlquilerIndice: raw.demandaAlquilerIndice ?? 1.0,
+        rect: raw.rect ?? { wx: 415, wy: 270, ww: 370, wh: 225 },
+      },
+    ];
+  })
+);
 
-export const ZONE_TO_DISTRICT: Record<ZoneId, DistrictId | 'all'> = {
+export const ZONE_IDS: ZoneId[] = Object.keys(DEFAULT_ZONAS);
+
+export const ZONE_TO_DISTRICT: Record<string, DistrictId | 'all'> = {
   centro: 'civico',
-  norte: 'campos',
-  este: 'residencial',
-  sur: 'taller',
+  norte: 'residencial',
+  noreste: 'residencial',
+  este: 'mercado',
+  sureste: 'campos',
+  sur: 'residencial',
+  suroeste: 'campos',
   oeste: 'campos',
+  noroeste: 'campos',
 };
 
-const DEFAULT_ZONAS = Object.fromEntries(
-  Object.entries(MAPA_ELECCIONES.zonas).map(([k, v]) => [k, { vecinas: (v as { vecinas: string[] }).vecinas }])
-) as Record<ZoneId, { vecinas: ZoneId[] }>;
-
 const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
-  agricultor: ['norte', 'este', 'sur', 'oeste'],
-  tecnico: ['norte', 'este', 'sur', 'oeste'],
-  obrero: ['sur', 'oeste', 'norte', 'este'],
-  comerciante: ['centro', 'este', 'sur'],
-  empresario: ['centro', 'este', 'sur'],
-  periodista: ['centro', 'norte', 'oeste'],
-  policia: ['centro'],
+  agricultor: ['noroeste', 'oeste', 'suroeste', 'sureste'],
+  tecnico: ['noroeste', 'oeste', 'suroeste', 'sureste'],
+  obrero: ['centro', 'este', 'norte', 'sur'],
+  comerciante: ['centro', 'este', 'norte', 'sur', 'noreste'],
+  constructor: ['centro', 'norte', 'este', 'sur'],
+  inmobiliario: ['centro', 'este', 'norte', 'sur'],
+  empresario: ['centro', 'este', 'norte', 'sur'],
+  periodista: ['centro', 'este', 'norte'],
+  policia: ['centro', 'este', 'norte', 'sur'],
   estatal: ['centro'],
-  medico: ['centro'],
-  ingeniero: ['centro'],
-  docente: ['centro', 'norte', 'sur', 'oeste', 'este'],
-  estudiante: ['centro', 'norte', 'este', 'sur', 'oeste'],
-  desempleado: ['centro', 'norte', 'este', 'sur', 'oeste'],
-  jubilado: ['centro', 'norte', 'este', 'sur', 'oeste'],
+  medico: ['centro', 'norte', 'sur', 'este'],
+  ingeniero: ['centro', 'este'],
+  docente: ['centro', 'sur', 'norte', 'noreste'],
+  estudiante: ['centro', 'norte', 'noreste', 'este', 'sureste', 'sur', 'suroeste', 'oeste', 'noroeste'],
+  desempleado: ['centro', 'norte', 'noreste', 'este', 'sureste', 'sur', 'suroeste', 'oeste', 'noroeste'],
+  jubilado: ['centro', 'norte', 'noreste', 'este', 'sureste', 'sur', 'suroeste', 'oeste', 'noroeste'],
 };
 
 export const OBRAS_LEVEL_TABLE: Record<
@@ -70,147 +97,327 @@ export const OBRAS_LEVEL_TABLE: Record<
 };
 
 export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
-  hospital: {
-    tipo: 'hospital',
-    nombre: 'Hospital',
-    categoria: 'publico',
-    duenoBase: 'estado',
-    construibleGobernador: true,
-    costoObra: 380,
-    diasObra: 4,
-    mantenimientoPeriodo: 30,
-    areaServicio: 'salud',
-    rolOperario: 'medico',
-    puestosRol: 4,
-    camasHospital: 12,
-    educMin: 3,
-    descripcion: 'Brinda 4 puestos de médico y 12 camas para internación y cura diaria.',
-  },
-  comisaria: {
-    tipo: 'comisaria',
-    nombre: 'Comisaría',
-    categoria: 'publico',
-    duenoBase: 'estado',
-    construibleGobernador: true,
-    costoObra: 300,
+  // === Viviendas (EDIFICIOS_V2 §2) ===
+  casa_chica: {
+    tipo: 'casa_chica',
+    nombre: 'Casa Chica',
+    parcelTipo: 'residencial',
+    categoria: 'vivienda',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 140,
+    mantenimientoPeriodo: 3.0,
     diasObra: 3,
-    mantenimientoPeriodo: 22,
-    areaServicio: 'seguridad',
-    rolOperario: 'policia',
-    puestosRol: 4,
-    bonusDefensa: 14,
-    educMin: 1,
-    descripcion: 'Abre 4 puestos de policía y refuerza la defensa y el orden en su zona.',
+    capacidadCasa: 3,
+    alquilerBase: 8.5,
+    puestos: {},
   },
-  escuela: {
-    tipo: 'escuela',
-    nombre: 'Escuela',
-    categoria: 'publico',
-    duenoBase: 'estado',
+  casa_mediana: {
+    tipo: 'casa_mediana',
+    nombre: 'Casa Mediana',
+    parcelTipo: 'residencial',
+    categoria: 'vivienda',
     construibleGobernador: false,
-    costoObra: 0,
-    diasObra: 0,
-    mantenimientoPeriodo: 0,
-    rolOperario: 'docente',
-    puestosRol: 4,
-    educMin: 2,
-    descripcion: 'Sostiene los puestos fijos de docentes e instrucción comunitaria.',
+    requiereG2: false,
+    costoObra: 220,
+    mantenimientoPeriodo: 5.0,
+    diasObra: 4,
+    capacidadCasa: 5,
+    alquilerBase: 14.0,
+    puestos: {},
   },
-  oficina_publica: {
-    tipo: 'oficina_publica',
-    nombre: 'Oficina Pública',
-    categoria: 'publico',
-    duenoBase: 'estado',
+  casa_grande: {
+    tipo: 'casa_grande',
+    nombre: 'Casa Grande',
+    parcelTipo: 'residencial',
+    categoria: 'vivienda',
     construibleGobernador: false,
-    costoObra: 0,
-    diasObra: 0,
-    mantenimientoPeriodo: 0,
-    rolOperario: 'estatal',
-    puestosRol: 4,
-    educMin: 1,
-    descripcion: 'Sede administrativa donde trabajan los empleados estatales fijos.',
+    requiereG2: false,
+    costoObra: 340,
+    mantenimientoPeriodo: 8.0,
+    diasObra: 5,
+    capacidadCasa: 8,
+    alquilerBase: 22.0,
+    puestos: {},
   },
+
+  // === Privados (EDIFICIOS_V2 §4) ===
   campo: {
     tipo: 'campo',
     nombre: 'Campo Productivo',
+    parcelTipo: 'agricola',
     categoria: 'privado',
-    duenoBase: 'alimento',
+    rubro: 'agro',
     construibleGobernador: false,
+    requiereG2: false,
     costoObra: 260,
+    mantenimientoPeriodo: 8.0,
     diasObra: 3,
-    mantenimientoPeriodo: 0,
-    puestosAgricultor: 6,
-    descripcion: 'Parcela privada de la Productora de Alimento (+6 puestos de agricultor).',
+    capacidadVentasDiaria: 120,
+    puestos: { agricultor: 5, tecnico: 1 },
+  },
+  almacen: {
+    tipo: 'almacen',
+    nombre: 'Almacén',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'comercio',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 240,
+    mantenimientoPeriodo: 7.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 95,
+    puestos: { obrero: 3, comerciante: 1 },
+  },
+  kiosco: {
+    tipo: 'kiosco',
+    nombre: 'Kiosco',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'comercio',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 130,
+    mantenimientoPeriodo: 4.0,
+    diasObra: 2,
+    capacidadVentasDiaria: 45,
+    puestos: { obrero: 1, comerciante: 1 },
+  },
+  restoran: {
+    tipo: 'restoran',
+    nombre: 'Restorán',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'comercio',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 300,
+    mantenimientoPeriodo: 9.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 110,
+    puestos: { obrero: 4, comerciante: 1 },
+  },
+  oficina_constructora: {
+    tipo: 'oficina_constructora',
+    nombre: 'Oficina Constructora',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'construccion',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 250,
+    mantenimientoPeriodo: 7.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 180,
+    puestos: { obrero: 2, constructor: 2 },
+  },
+  oficina_inmobiliaria: {
+    tipo: 'oficina_inmobiliaria',
+    nombre: 'Oficina Inmobiliaria',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'inmobiliaria',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 220,
+    mantenimientoPeriodo: 6.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 160,
+    puestos: { inmobiliario: 2 },
+  },
+  oficina_medio: {
+    tipo: 'oficina_medio',
+    nombre: 'Redacción de Medio',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'medio',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 200,
+    mantenimientoPeriodo: 5.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 120,
+    puestos: { periodista: 2 },
+  },
+  oficina_banco: {
+    tipo: 'oficina_banco',
+    nombre: 'Banco Local',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'banco',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 280,
+    mantenimientoPeriodo: 8.0,
+    diasObra: 4,
+    capacidadVentasDiaria: 200,
+    puestos: { empresario: 1 },
   },
   local_comercio: {
     tipo: 'local_comercio',
     nombre: 'Local Comercial',
+    parcelTipo: 'comercial',
     categoria: 'privado',
-    duenoBase: 'comercio',
+    rubro: 'comercio',
     construibleGobernador: false,
+    requiereG2: false,
     costoObra: 280,
+    mantenimientoPeriodo: 7.0,
     diasObra: 3,
-    mantenimientoPeriodo: 0,
-    puestosObrero: 4,
-    puestosComerciante: 1,
-    descripcion: 'Edificio privado de Comercio y Servicios (+4 obreros, +1 comerciante).',
+    capacidadVentasDiaria: 100,
+    puestos: { obrero: 4, comerciante: 1 },
   },
+
+  // === Públicos (EDIFICIOS_V2 §3) ===
+  hospital: {
+    tipo: 'hospital',
+    nombre: 'Hospital',
+    parcelTipo: 'publica',
+    categoria: 'publico',
+    construibleGobernador: true,
+    requiereG2: false,
+    costoObra: 380,
+    mantenimientoPeriodo: 30,
+    diasObra: 4,
+    areaServicio: 'salud',
+    puestos: { medico: 4 },
+    camasHospital: 12,
+  },
+  comisaria: {
+    tipo: 'comisaria',
+    nombre: 'Comisaría',
+    parcelTipo: 'publica',
+    categoria: 'publico',
+    construibleGobernador: true,
+    requiereG2: false,
+    costoObra: 300,
+    mantenimientoPeriodo: 22,
+    diasObra: 3,
+    areaServicio: 'seguridad',
+    puestos: { policia: 4 },
+    bonusDefensa: 14,
+  },
+  escuela: {
+    tipo: 'escuela',
+    nombre: 'Escuela',
+    parcelTipo: 'publica',
+    categoria: 'publico',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 0,
+    mantenimientoPeriodo: 0,
+    diasObra: 0,
+    puestos: { docente: 4 },
+  },
+  oficina_publica: {
+    tipo: 'oficina_publica',
+    nombre: 'Oficina Pública',
+    parcelTipo: 'publica',
+    categoria: 'publico',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 0,
+    mantenimientoPeriodo: 0,
+    diasObra: 0,
+    puestos: { estatal: 4 },
+  },
+
+  // === Suceso (EDIFICIOS_V2 §5, capa gobernador G2+) ===
   muralla: {
     tipo: 'muralla',
     nombre: 'Muralla Zonal',
+    parcelTipo: 'publica',
     categoria: 'suceso',
-    duenoBase: 'estado',
     construibleGobernador: true,
     requiereG2: true,
     costoObra: 320,
-    diasObra: 3,
     mantenimientoPeriodo: 12,
+    diasObra: 3,
     areaServicio: 'seguridad',
+    puestos: {},
     defensaMuralla: 20,
-    descripcion: 'Suma +20 de defensa en su zona ante ataques y acompaña su integridad.',
   },
   silo: {
     tipo: 'silo',
     nombre: 'Silo de Granos',
+    parcelTipo: 'publica',
     categoria: 'suceso',
-    duenoBase: 'estado',
     construibleGobernador: true,
     requiereG2: true,
     costoObra: 260,
-    diasObra: 3,
     mantenimientoPeriodo: 8,
+    diasObra: 3,
     areaServicio: 'infraestructura',
+    puestos: {},
     siloExtraDias: 10,
-    descripcion: 'Amplía en +10 días el tope de reserva alimentaria sin pérdida.',
   },
   riego: {
     tipo: 'riego',
     nombre: 'Canal de Riego',
+    parcelTipo: 'publica',
     categoria: 'suceso',
-    duenoBase: 'estado',
     construibleGobernador: true,
     requiereG2: true,
     costoObra: 280,
-    diasObra: 3,
     mantenimientoPeriodo: 10,
+    diasObra: 3,
     areaServicio: 'infraestructura',
+    puestos: {},
     reduccionSequiaPct: 50,
-    descripcion: 'Reduce a la mitad la caída de producción agrícola durante sequías.',
   },
   hospital_campana: {
     tipo: 'hospital_campana',
     nombre: 'Hospital de Campaña',
+    parcelTipo: 'publica',
     categoria: 'suceso',
-    duenoBase: 'estado',
     construibleGobernador: true,
     requiereG2: true,
     costoObra: 220,
-    diasObra: 2,
     mantenimientoPeriodo: 14,
+    diasObra: 2,
     areaServicio: 'salud',
+    puestos: {},
     camasHospital: 8,
     diasCampana: 25,
-    descripcion: 'Suma 8 camas temporales durante 25 días (cura al 50%, sin requerir médicos).',
+  },
+
+  // === Especiales (EDIFICIOS_V2 §1) ===
+  plaza: {
+    tipo: 'plaza',
+    nombre: 'Plaza Mayor',
+    parcelTipo: 'especial',
+    categoria: 'especial',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 0,
+    mantenimientoPeriodo: 0,
+    diasObra: 0,
+    puestos: {},
+  },
+  puerto: {
+    tipo: 'puerto',
+    nombre: 'Puerto Fluvial',
+    parcelTipo: 'especial',
+    categoria: 'especial',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 0,
+    mantenimientoPeriodo: 0,
+    diasObra: 0,
+    puestos: {},
+  },
+  muelle_comercio: {
+    tipo: 'muelle_comercio',
+    nombre: 'Muelle Comercial',
+    parcelTipo: 'especial',
+    categoria: 'especial',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 0,
+    mantenimientoPeriodo: 0,
+    diasObra: 0,
+    puestos: {},
   },
 };
 
@@ -349,6 +556,70 @@ export const ECON_CONSTANTS = {
   } as Record<ServicePublicRoleId, number>,
 };
 
+export const HOUSING_CONSTANTS = {
+  capChica: 3,
+  capMediana: 5,
+  capGrande: 8,
+  pctAlquilerMax: 42,
+  pasoAlquilerPct: 6,
+  alquilerPisoFactor: 0.45,
+  periodosSinPagarDesalojo: 3,
+  multiploCasa: 18,
+  decaimientoEstadoCasaPeriodo: 1.4,
+  estadoCasaSinMantVacia: 3.2,
+  umbralEstadoCasaMalo: 55,
+  umbralAbandonoCasa: 12,
+  recargoCalleComidaPct: 20,
+  danoSaludCalleDia: 1.25,
+  calleProdFactor: 0.78,
+  umbralCalleConstruirPct: 5,
+  umbralHacinamientoConstruirPct: 12,
+  periodosRecuperoInversionCasa: 42,
+  periodosHacinadoSeparacion: 3,
+  costoAcogidaMenorDia: 1.6,
+  maxOcupacionesPorPeriodo: 4,
+  umbralCalleOcupacionPct: 8,
+} as const;
+
+export const FIRM_CONSTANTS = {
+  parteSueldosBase: 0.58,
+  pctReinversion: 0.35,
+  pctPublicidad: 0.03,
+  sueldoGerenteFactor: 1.25,
+  umbralPoderPrecio: 0.38,
+  margenPoderMax: 0.42,
+  periodosParaInvertir: 2,
+  periodosParaQuebrar: 3,
+  periodosValuacionCompra: 4,
+  multiploCompraFirma: 6.5,
+  maxComprasPorPeriodo: 2,
+  cajaMaxSinDueno: 900,
+  ahorroMinEmprender: 180,
+  umbralPropensionEmprender: 58,
+  maxEmprendimientosPorPeriodo: 2,
+  maxConstruccionesPrivadasPeriodo: 2,
+  kLineaEditorial: 0.22,
+  umbralBoicotCuota: 0.38,
+  umbralBoicotPrecioFactor: 1.35,
+  maxPctHogaresBoicot: 35,
+  umbralParoFirmaFactor: 0.82,
+  umbralRecorteFuerteFactor: 0.85,
+  tasaInteresCreditoPeriodo: 0.04,
+} as const;
+
+export const DEMOG_CONSTANTS = {
+  edadFertilMin: 20,
+  edadFertilMax: 42,
+  edadIndependizacion: 21,
+  umbralNatalidadSatisfaccion: 46,
+  probNacimientoBase: 0.075,
+  topeNatalidadPctPeriodo: 2.5,
+  probParejaPeriodo: 0.14,
+  probSeparacionBase: 0.008,
+  probSeparacionHacinadoExtra: 0.025,
+  probEmprenderBase: 0.04,
+} as const;
+
 export const EFFECT_CATALOG = {
   anima: {
     baja: { satisfaccion: 6 },
@@ -400,240 +671,275 @@ export const EFFECT_CATALOG = {
     media: { topeDiario: 2.5 },
     alta: { topeDiario: 4.0 },
   },
+  ocupa: {
+    baja: { diasGracia: 4 },
+    media: { diasGracia: 7 },
+    alta: { diasGracia: 10 },
+  },
+  boicotea: {
+    baja: { factorDesvio: 0.6 },
+    media: { factorDesvio: 0.85 },
+    alta: { factorDesvio: 1.0 },
+  },
+  emprendedor: {
+    baja: { bonusPropension: 14 },
+    media: { bonusPropension: 22 },
+    alta: { bonusPropension: 32 },
+  },
 } as const;
 
-export const DISTRICTS: DistrictZone[] = [
-  {
-    id: 'campos',
-    nombre: 'Campos del Valle',
-    subtitulo: 'Producción y técnica agrícola',
-    x: 24,
-    y: 24,
-    w: 320,
-    h: 260,
-    color: '#ecfdf5',
-  },
-  {
-    id: 'taller',
-    nombre: 'Zona Industrial',
-    subtitulo: 'Talleres y manufactura',
-    x: 24,
-    y: 306,
-    w: 320,
-    h: 250,
-    color: '#f1f5f9',
-  },
-  {
-    id: 'mercado',
-    nombre: 'Plaza y Mercado',
-    subtitulo: 'Comercio, empresas y prensa',
-    x: 366,
-    y: 24,
-    w: 288,
-    h: 260,
-    color: '#fefce8',
-  },
-  {
-    id: 'civico',
-    nombre: 'Centro Cívico',
-    subtitulo: 'Estado, salud y orden',
-    x: 366,
-    y: 306,
-    w: 288,
-    h: 250,
-    color: '#eff6ff',
-  },
-  {
-    id: 'residencial',
-    nombre: 'Barrio Sur y Escuela',
-    subtitulo: 'Viviendas y estudio',
-    x: 676,
-    y: 24,
-    w: 300,
-    h: 532,
-    color: '#f8fafc',
-  },
+export const DISTRICTS = [
+  { id: 'campos' as DistrictId, nombre: 'Periferia Agraria', subtitulo: 'Campos productivos', x: 20, y: 20, w: 370, h: 725, color: '#ecfdf5' },
+  { id: 'taller' as DistrictId, nombre: 'Talleres y Obra', subtitulo: 'Construcción y servicios', x: 415, y: 270, w: 370, h: 225, color: '#f1f5f9' },
+  { id: 'mercado' as DistrictId, nombre: 'Puerto y Comercios', subtitulo: 'Comercio, firmas y prensa', x: 810, y: 270, w: 370, h: 225, color: '#fefce8' },
+  { id: 'civico' as DistrictId, nombre: 'Centro Cívico', subtitulo: 'Estado, salud y orden', x: 415, y: 270, w: 370, h: 225, color: '#eff6ff' },
+  { id: 'residencial' as DistrictId, nombre: 'Anillo Residencial', subtitulo: 'Hogares, casas y escuelas', x: 415, y: 20, w: 765, h: 725, color: '#f8fafc' },
 ];
 
-export const DISTRICT_BY_ID: Record<DistrictId, DistrictZone> = Object.fromEntries(
-  DISTRICTS.map((d) => [d.id, d])
-) as Record<DistrictId, DistrictZone>;
+export const DISTRICT_BY_ID = Object.fromEntries(DISTRICTS.map((d) => [d.id, d])) as Record<
+  DistrictId,
+  (typeof DISTRICTS)[number]
+>;
+
+export const ROLE_COLORS: Record<RoleId, string> = {
+  estudiante: '#6366f1',
+  agricultor: '#16a34a',
+  tecnico: '#15803d',
+  obrero: '#64748b',
+  comerciante: '#d97706',
+  constructor: '#ea580c',
+  inmobiliario: '#0d9488',
+  empresario: '#b45309',
+  periodista: '#be185d',
+  policia: '#1d4ed8',
+  medico: '#059669',
+  ingeniero: '#0369a1',
+  estatal: '#0f766e',
+  docente: '#0284c7',
+  desempleado: '#dc2626',
+  jubilado: '#94a3b8',
+};
+
+export const ROLE_DISTRICTS: Record<RoleId, DistrictId> = {
+  estudiante: 'residencial',
+  agricultor: 'campos',
+  tecnico: 'campos',
+  obrero: 'taller',
+  comerciante: 'mercado',
+  constructor: 'taller',
+  inmobiliario: 'mercado',
+  empresario: 'mercado',
+  periodista: 'mercado',
+  policia: 'civico',
+  medico: 'civico',
+  ingeniero: 'civico',
+  estatal: 'civico',
+  docente: 'residencial',
+  desempleado: 'residencial',
+  jubilado: 'residencial',
+};
 
 export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   estudiante: {
     id: 'estudiante',
     nombre: 'Estudiante',
-    grupo: 'sin_ingreso',
     edadMin: 0,
     edadMax: 24,
     educMin: 0,
+    afinidad: null,
+    publico: false,
     estudia: true,
-    produce: {},
-    color: '#6366f1',
-    distrito: 'residencial',
+    grupo: 'sin_ingreso',
+    ingreso: null,
+    produce: null,
   },
   agricultor: {
     id: 'agricultor',
     nombre: 'Agricultor',
-    grupo: 'agro',
     edadMin: 18,
     edadMax: 64,
     educMin: 0,
     afinidad: 'laboriosidad',
-    produce: { alimento: ECON_CONSTANTS.produccionBaseAgricultor },
+    publico: false,
+    rubro: 'agro',
+    grupo: 'privado',
     ingreso: [8.2, 8.8],
-    color: '#16a34a',
-    distrito: 'campos',
+    produce: 'alimento',
+  },
+  tecnico: {
+    id: 'tecnico',
+    nombre: 'Técnico',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 2,
+    afinidad: 'laboriosidad',
+    publico: false,
+    rubro: 'agro',
+    grupo: 'privado',
+    ingreso: [8.0, 9.0],
+    produce: 'tecnificacion',
   },
   obrero: {
     id: 'obrero',
     nombre: 'Obrero',
-    grupo: 'industria',
     edadMin: 18,
     edadMax: 64,
     educMin: 0,
     afinidad: 'laboriosidad',
-    produce: {},
+    publico: false,
+    rubro: 'comercio|construccion',
+    grupo: 'privado',
     ingreso: [8.0, 10.4],
-    color: '#64748b',
-    distrito: 'taller',
+    produce: null,
+  },
+  comerciante: {
+    id: 'comerciante',
+    nombre: 'Comerciante',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 1,
+    afinidad: 'codicia',
+    publico: false,
+    rubro: 'comercio',
+    grupo: 'privado',
+    ingreso: [8.4, 10.6],
+    produce: 'comercio',
+  },
+  constructor: {
+    id: 'constructor',
+    nombre: 'Constructor',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 1,
+    afinidad: 'laboriosidad',
+    publico: false,
+    rubro: 'construccion',
+    grupo: 'privado',
+    ingreso: [8.2, 10.2],
+    produce: 'construccion',
+  },
+  inmobiliario: {
+    id: 'inmobiliario',
+    nombre: 'Inmobiliario',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 2,
+    afinidad: 'codicia',
+    publico: false,
+    rubro: 'inmobiliaria',
+    grupo: 'privado',
+    ingreso: [8.8, 11.2],
+    produce: 'vivienda',
+  },
+  empresario: {
+    id: 'empresario',
+    nombre: 'Empresario',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 2,
+    afinidad: 'codicia',
+    publico: false,
+    gerencia: true,
+    grupo: 'privado',
+    ingreso: [9.5, 12.0],
+    produce: null,
+  },
+  periodista: {
+    id: 'periodista',
+    nombre: 'Periodista',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 2,
+    afinidad: 'rebeldia',
+    publico: false,
+    rubro: 'medio',
+    grupo: 'privado',
+    ingreso: [7.1, 7.3],
+    produce: 'informacion',
   },
   policia: {
     id: 'policia',
     nombre: 'Policía',
-    grupo: 'publico',
     edadMin: 18,
     edadMax: 64,
     educMin: 1,
     afinidad: 'valentia',
     publico: true,
-    produce: { seguridad: 1 },
-    color: '#1d4ed8',
-    distrito: 'civico',
-  },
-  estatal: {
-    id: 'estatal',
-    nombre: 'Estatal',
     grupo: 'publico',
-    edadMin: 18,
-    edadMax: 64,
-    educMin: 1,
-    afinidad: 'laboriosidad',
-    publico: true,
-    produce: {},
-    color: '#0f766e',
-    distrito: 'civico',
-  },
-  comerciante: {
-    id: 'comerciante',
-    nombre: 'Comerciante',
-    grupo: 'comercio',
-    edadMin: 18,
-    edadMax: 64,
-    educMin: 1,
-    afinidad: 'codicia',
-    produce: { comercio: 1 },
-    color: '#d97706',
-    distrito: 'mercado',
-  },
-  empresario: {
-    id: 'empresario',
-    nombre: 'Empresario',
-    grupo: 'comercio',
-    edadMin: 18,
-    edadMax: 64,
-    educMin: 2,
-    afinidad: 'codicia',
-    produce: {},
-    color: '#b45309',
-    distrito: 'mercado',
-  },
-  tecnico: {
-    id: 'tecnico',
-    nombre: 'Técnico',
-    grupo: 'agro',
-    edadMin: 18,
-    edadMax: 64,
-    educMin: 2,
-    afinidad: 'laboriosidad',
-    produce: { tecnificacion: 1 },
-    ingreso: [8.0, 9.0],
-    color: '#15803d',
-    distrito: 'campos',
-  },
-  docente: {
-    id: 'docente',
-    nombre: 'Docente',
-    grupo: 'publico',
-    edadMin: 18,
-    edadMax: 64,
-    educMin: 2,
-    afinidad: 'laboriosidad',
-    publico: true,
-    produce: {},
-    color: '#0284c7',
-    distrito: 'residencial',
-  },
-  periodista: {
-    id: 'periodista',
-    nombre: 'Periodista',
-    grupo: 'comercio',
-    edadMin: 18,
-    edadMax: 64,
-    educMin: 2,
-    afinidad: 'rebeldia',
-    produce: { informacion: 1 },
-    ingreso: [7.1, 7.3],
-    color: '#be185d',
-    distrito: 'mercado',
+    ingreso: null,
+    produce: 'seguridad',
   },
   medico: {
     id: 'medico',
     nombre: 'Médico',
-    grupo: 'publico',
     edadMin: 18,
     edadMax: 64,
     educMin: 3,
     afinidad: 'laboriosidad',
     publico: true,
-    produce: { salud: 1 },
-    color: '#059669',
-    distrito: 'civico',
+    grupo: 'publico',
+    ingreso: null,
+    produce: 'salud',
   },
   ingeniero: {
     id: 'ingeniero',
     nombre: 'Ingeniero',
-    grupo: 'publico',
     edadMin: 18,
     edadMax: 64,
     educMin: 3,
     afinidad: 'laboriosidad',
     publico: true,
-    produce: { infraestructura: 1 },
-    color: '#0369a1',
-    distrito: 'civico',
+    grupo: 'publico',
+    ingreso: null,
+    produce: 'infraestructura',
+  },
+  estatal: {
+    id: 'estatal',
+    nombre: 'Estatal',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 1,
+    afinidad: 'laboriosidad',
+    publico: true,
+    grupo: 'publico',
+    ingreso: null,
+    produce: null,
+  },
+  docente: {
+    id: 'docente',
+    nombre: 'Docente',
+    edadMin: 18,
+    edadMax: 64,
+    educMin: 2,
+    afinidad: 'laboriosidad',
+    publico: true,
+    grupo: 'publico',
+    ingreso: null,
+    produce: null,
   },
   desempleado: {
     id: 'desempleado',
     nombre: 'Desempleado',
-    grupo: 'sin_ingreso',
     edadMin: 18,
     edadMax: 64,
     educMin: 0,
-    produce: {},
-    color: '#dc2626',
-    distrito: 'residencial',
+    afinidad: null,
+    publico: false,
+    grupo: 'sin_ingreso',
+    ingreso: null,
+    produce: null,
   },
   jubilado: {
     id: 'jubilado',
     nombre: 'Jubilado',
-    grupo: 'sin_ingreso',
     edadMin: 65,
     edadMax: null,
     educMin: 0,
-    produce: {},
-    color: '#94a3b8',
-    distrito: 'residencial',
+    afinidad: null,
+    publico: false,
+    grupo: 'sin_ingreso',
+    ingreso: null,
+    produce: null,
   },
 };
 
@@ -641,8 +947,7 @@ export const PUBLIC_ROLES: PublicRoleId[] = ['policia', 'estatal', 'docente', 'm
 export const SERVICE_PUBLIC_ROLES: ServicePublicRoleId[] = ['policia', 'medico', 'ingeniero'];
 
 export const ACTION_TABLE: ActionDefinition[] = [
-  // === 19 Acciones espontáneas (ACCIONES.md §2) ===
-  // Rarezas y trabajo (6)
+  // === 19 Acciones espontáneas (ACCIONES_V1) ===
   {
     id: 'cavar_pozo',
     nombre: 'Cavar un pozo',
@@ -745,8 +1050,6 @@ export const ACTION_TABLE: ActionDefinition[] = [
     duracionDias: [1, 3],
     contagio: 0.1,
   },
-
-  // Ánimo y palabra (7)
   {
     id: 'predicar',
     nombre: 'Predicar en la esquina',
@@ -877,28 +1180,26 @@ export const ACTION_TABLE: ActionDefinition[] = [
     duracionDias: [1, 4],
     contagio: 0.2,
   },
-
-  // Plata y comida (4)
   {
     id: 'acaparar_comida',
     nombre: 'Acaparar comida',
-    descripcion: 'Eleva la reserva deseada en su despensa por temor a desabastecimiento.',
+    descripcion: 'Eleva la reserva deseada en la despensa de su hogar por temor a desabastecimiento.',
     tipo: 'espontanea',
     textos: [
       '{nombre} llena la despensa por si acaso',
-      '{nombre} recorre los puestos buscando estirar su reserva hogareña',
+      '{nombre} recorre los almacenes buscando estirar la reserva del hogar',
       '{nombre} acumula víveres extra ante la incertidumbre del mercado',
     ],
     requisitos: { etapa: 'adulto' },
     afinidad: { codicia: '+', valentia: '-' },
-    efectos: [{ id: 'acapara', intensidad: 'media' }],
+    efectos: [{ id: 'acapara', intensidad: 'media', alcance: 'hogar' }],
     duracionDias: [3, 7],
     contagio: 0.15,
   },
   {
     id: 'ahorro_obsesivo',
     nombre: 'Ahorro obsesivo',
-    descripcion: 'Recorta su gasto diario de vida al mínimo, enfriando ventas comerciales.',
+    descripcion: 'Recorta el gasto cotidiano del hogar al mínimo, enfriando ventas comerciales.',
     tipo: 'espontanea',
     textos: [
       '{nombre} decide no gastar ni un peso de más',
@@ -907,14 +1208,14 @@ export const ACTION_TABLE: ActionDefinition[] = [
     ],
     requisitos: { etapa: 'adulto', conDinero: true },
     afinidad: { codicia: '+' },
-    efectos: [{ id: 'ahorra', intensidad: 'media' }],
+    efectos: [{ id: 'ahorra', intensidad: 'media', alcance: 'hogar' }],
     duracionDias: [3, 8],
     contagio: 0.1,
   },
   {
     id: 'compras_compulsivas',
     nombre: 'Compras compulsivas',
-    descripcion: 'Dispara su gasto cotidiano en bienes del comercio local.',
+    descripcion: 'Dispara el gasto cotidiano del hogar en bienes del comercio local.',
     tipo: 'espontanea',
     textos: [
       '{nombre} sale a comprar de todo',
@@ -923,32 +1224,30 @@ export const ACTION_TABLE: ActionDefinition[] = [
     ],
     requisitos: { etapa: 'adulto', conDinero: true },
     afinidad: { codicia: '-', resiliencia: '-' },
-    efectos: [{ id: 'gasta', intensidad: 'alta' }],
+    efectos: [{ id: 'gasta', intensidad: 'alta', alcance: 'hogar' }],
     duracionDias: [1, 3],
     contagio: 0.1,
   },
   {
     id: 'compartir_comida',
     nombre: 'Compartir comida',
-    descripcion: 'Cede parte de su despensa a vecinos de su zona que tienen poca comida.',
+    descripcion: 'Cede parte de la despensa del hogar a vecinos de su zona que tienen poca comida.',
     tipo: 'espontanea',
     textos: [
       '{nombre} reparte comida con los vecinos',
-      '{nombre} acerca víveres de su alacena a las casas con menos reserva',
+      '{nombre} acerca víveres de su alacena a los hogares con menos reserva',
       '{nombre} comparte porciones de su despensa en el vecindario',
     ],
     requisitos: { etapa: 'adulto', conDespensa: true },
     contexto: { vecinoDespensaBaja: true },
     afinidad: { valentia: '+', codicia: '-' },
     efectos: [
-      { id: 'comparte', intensidad: 'baja' },
+      { id: 'comparte', intensidad: 'baja', alcance: 'hogar' },
       { id: 'anima', intensidad: 'baja', signo: 1 },
     ],
     duracionDias: [2, 5],
     contagio: 0.1,
   },
-
-  // Cuidado y defensa (2)
   {
     id: 'cuidar_vecinos',
     nombre: 'Cuidar vecinos',
@@ -984,7 +1283,151 @@ export const ACTION_TABLE: ActionDefinition[] = [
     contagio: 0.15,
   },
 
-  // === 3 Acciones de condición (ACCIONES.md §3) ===
+  // === 8 Acciones espontáneas nuevas V2 (ACCIONES_V2 §1) ===
+  {
+    id: 'idea_de_negocio',
+    nombre: 'Idea de negocio',
+    descripcion: 'Evalúa abrir un emprendimiento propio y se prepara para fundar firma.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} anda con una idea de negocio entre manos',
+      '{nombre} anota números en un cuaderno pensando en abrir local propio',
+      '{nombre} recorre parcelas libres imaginando su propio comercio',
+    ],
+    requisitos: { etapa: 'adulto', conDinero: true },
+    afinidad: { codicia: '+', rebeldia: '+' },
+    efectos: [
+      { id: 'emprendedor', intensidad: 'media' },
+      { id: 'anima', intensidad: 'baja', signo: 1 },
+    ],
+    duracionDias: [2, 6],
+    contagio: 0.1,
+  },
+  {
+    id: 'apostar_los_ahorros',
+    nombre: 'Apostar los ahorros',
+    descripcion: 'Arriesga ahorros del hogar en gastos impulsivos por una corazonada.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} apuesta todo a una corazonada',
+      '{nombre} gasta de golpe los ahorros de la semana en una ocurrencia',
+      '{nombre} se deja llevar por una jugada arriesgada en el barrio',
+    ],
+    requisitos: { etapa: 'adulto', conDinero: true },
+    afinidad: { codicia: '+', resiliencia: '-' },
+    efectos: [{ id: 'gasta', intensidad: 'alta', alcance: 'hogar' }],
+    duracionDias: [1, 3],
+    contagio: 0.05,
+  },
+  {
+    id: 'reunion_familiar',
+    nombre: 'Reunión familiar',
+    descripcion: 'Junta a todo el hogar a comer y levantar el ánimo conjunto.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} junta a toda la familia a comer',
+      '{nombre} prepara una mesa larga para reunir al hogar entero',
+      '{nombre} arma sobremesa con toda la familia en casa',
+    ],
+    requisitos: { etapa: 'adulto', conHogarGrande: true },
+    afinidad: { resiliencia: '+' },
+    efectos: [
+      { id: 'anima', intensidad: 'media', signo: 1, alcance: 'hogar' },
+      { id: 'gasta', intensidad: 'baja', alcance: 'hogar' },
+    ],
+    duracionDias: [1, 2],
+    contagio: 0.1,
+  },
+  {
+    id: 'cuidar_abuelos',
+    nombre: 'Cuidar a los mayores',
+    descripcion: 'Acompaña y cuida la salud de los jubilados que viven en su hogar.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} se pasa los días cuidando a los mayores',
+      '{nombre} atiende con paciencia a los abuelos de la casa',
+      '{nombre} prioriza cuidados en el hogar para los mayores de la familia',
+    ],
+    requisitos: { etapa: 'adulto', conJubiladoEnHogar: true },
+    afinidad: { laboriosidad: '+', valentia: '+' },
+    efectos: [{ id: 'cuida', intensidad: 'baja', alcance: 'hogar' }],
+    duracionDias: [3, 8],
+    contagio: 0.05,
+  },
+  {
+    id: 'dar_posada',
+    nombre: 'Dar posada',
+    descripcion: 'Comparte comida y alivio con un vecino en situación de calle.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} acoge un rato a un vecino sin casa',
+      '{nombre} invita a pasar y comparte abrigo con gente en la calle',
+      '{nombre} abre la puerta de su hogar a un vecino desamparado',
+    ],
+    requisitos: { etapa: 'adulto', conCasa: true },
+    contexto: { vecinoEnCalle: true },
+    afinidad: { valentia: '+', codicia: '-' },
+    efectos: [
+      { id: 'comparte', intensidad: 'baja', alcance: 'hogar' },
+      { id: 'anima', intensidad: 'baja', signo: 1 },
+    ],
+    duracionDias: [3, 8],
+    contagio: 0.1,
+  },
+  {
+    id: 'remodelar_casa',
+    nombre: 'Arreglar la casa',
+    descripcion: 'Repara manualmente desperfectos de su vivienda cuando está en mal estado.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} se pone a arreglar la casa',
+      '{nombre} pinta paredes y repara techos en su vivienda',
+      '{nombre} dedica la jornada a mejorar el estado de su hogar',
+    ],
+    requisitos: { etapa: 'adulto', conCasa: true, casaEnMalEstado: true },
+    afinidad: { laboriosidad: '+' },
+    efectos: [
+      { id: 'repara', intensidad: 'media', alcance: 'hogar' },
+      { id: 'anima', intensidad: 'baja', signo: 1 },
+    ],
+    duracionDias: [2, 6],
+    contagio: 0.1,
+  },
+  {
+    id: 'mudarse_a_otro_barrio',
+    nombre: 'Explorar otro barrio',
+    descripcion: 'Recorre otras zonas soñando con mudarse de barrio.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} decide buscar aires nuevos en otro barrio',
+      '{nombre} camina por otras zonas comparando veredas y plazas',
+      '{nombre} comenta con los vecinos sus ganas de cambiar de barrio',
+    ],
+    requisitos: { etapa: 'adulto', conCasa: true },
+    afinidad: { rebeldia: '+' },
+    efectos: [{ id: 'decorativa' }],
+    duracionDias: [1, 3],
+    contagio: 0.03,
+  },
+  {
+    id: 'rumor_de_quiebra',
+    nombre: 'Rumor de quiebra',
+    descripcion: 'Difunde rumores de crisis cuando alguna firma entra en recorte.',
+    tipo: 'espontanea',
+    textos: [
+      '{nombre} anda diciendo que un negocio se funde',
+      '{nombre} advierte en la esquina que hay comercios con problemas de caja',
+      '{nombre} comenta con temor que se vienen despidos en el sector privado',
+    ],
+    requisitos: { etapa: 'adulto' },
+    contexto: { firmaEnRecorte: true },
+    afinidad: { valentia: '-', rebeldia: '+' },
+    efectos: [{ id: 'difunde', intensidad: 'baja', temaRumor: 'miedo' }],
+    duracionDias: [2, 5],
+    contagio: 0.2,
+  },
+
+  // === 3 Acciones de condición V1 ===
   {
     id: 'huelga',
     nombre: 'Huelga de estatales',
@@ -995,7 +1438,6 @@ export const ACTION_TABLE: ActionDefinition[] = [
       '{nombre} se suma a la huelga por salarios impagos',
       '{nombre} detiene su labor pública hasta que se regularicen los sueldos',
     ],
-    disparador: { impagoNomina: true },
     requisitos: { publico: true },
     afinidad: { rebeldia: '+', resiliencia: '-' },
     efectos: [{ id: 'fuera_de_puesto' }],
@@ -1012,7 +1454,6 @@ export const ACTION_TABLE: ActionDefinition[] = [
       '{nombre} se concentra en la plaza exigiendo un cambio de rumbo',
       '{nombre} sale a protestar por el malestar en la comunidad',
     ],
-    disparador: { descontentosPctMayorA: 30 },
     requisitos: { etapa: 'adulto' },
     afinidad: { rebeldia: '+', resiliencia: '-' },
     zonaDestino: 'centro',
@@ -1034,12 +1475,11 @@ export const ACTION_TABLE: ActionDefinition[] = [
       '{nombre} irrumpe en busca de víveres ante la escasez crítica',
       '{nombre} participa de saqueos desesperados por comida',
     ],
-    disparador: { hambreCriticaPctMayorA: 20 },
     requisitos: { etapa: 'adulto', conHambre: true },
     afinidad: { codicia: '+', valentia: '+', rebeldia: '+' },
     zonaDestino: 'centro',
     efectos: [
-      { id: 'toma', intensidad: 'media' },
+      { id: 'toma', intensidad: 'media', alcance: 'hogar' },
       { id: 'moviliza' },
       { id: 'agita', intensidad: 'baja' },
       { id: 'fuera_de_puesto' },
@@ -1047,9 +1487,65 @@ export const ACTION_TABLE: ActionDefinition[] = [
     duracionDias: [2, 5],
     contagio: 0.2,
   },
+
+  // === 3 Acciones de condición nuevas V2 (ACCIONES_V2 §2) ===
+  {
+    id: 'paro_firma',
+    nombre: 'Paro en firma',
+    descripcion: 'Empleados de una firma privada paran tras un recorte o despido fuerte.',
+    tipo: 'condicion',
+    textos: [
+      '{nombre} se une al paro de la firma',
+      '{nombre} cruza los brazos frente al local por los recortes salariales',
+      '{nombre} participa en la medida de fuerza contra los despidos de la empresa',
+    ],
+    requisitos: { etapa: 'adulto', conEmpleo: true },
+    afinidad: { rebeldia: '+', resiliencia: '-' },
+    efectos: [{ id: 'fuera_de_puesto' }],
+    duracionDias: [3, 8],
+    contagio: 0.2,
+  },
+  {
+    id: 'ocupacion',
+    nombre: 'Ocupación de vivienda',
+    descripcion: 'Un hogar en la calle se instala temporalmente en una casa vacía.',
+    tipo: 'condicion',
+    textos: [
+      '{nombre} se instala con su hogar en una casa vacía',
+      '{nombre} ocupa una vivienda deshabitada ante la falta de techo',
+      '{nombre} abre una casa abandonada para resguardar a su familia',
+    ],
+    requisitos: { etapa: 'adulto', sinCasa: true },
+    afinidad: { rebeldia: '+', valentia: '+' },
+    efectos: [
+      { id: 'ocupa', intensidad: 'media', alcance: 'hogar' },
+      { id: 'agita', intensidad: 'baja' },
+    ],
+    duracionDias: [3, 10],
+    contagio: 0.15,
+  },
+  {
+    id: 'boicot',
+    nombre: 'Boicot comercial',
+    descripcion: 'Consumidores dejan de comprarle a una firma dominante por precios abusivos.',
+    tipo: 'condicion',
+    textos: [
+      '{nombre} deja de comprarle a la firma dominante',
+      '{nombre} organiza el boicot vecinal contra los precios abusivos',
+      '{nombre} desvía las compras de su hogar hacia comercios competidores',
+    ],
+    requisitos: { etapa: 'adulto' },
+    afinidad: { rebeldia: '+', codicia: '-' },
+    efectos: [
+      { id: 'boicotea', intensidad: 'media', alcance: 'hogar' },
+      { id: 'ahorra', intensidad: 'media', alcance: 'hogar' },
+    ],
+    duracionDias: [3, 8],
+    contagio: 0.25,
+  },
 ];
 
-export const DEFAULT_CHAOS_LIMITS: ChaosLimits = {
+export const DEFAULT_CHAOS_LIMITS: ChaosSettings = {
   maxAccionesPorPeriodo: 3,
   periodoDias: 5,
   maxPctRolFueraDePuesto: 20,
@@ -1057,75 +1553,123 @@ export const DEFAULT_CHAOS_LIMITS: ChaosLimits = {
   respiroSiSatisfaccionMediaMenorA: 35,
 };
 
-// Zonas y parcelas vienen SIEMPRE de un archivo de mapa (presets/mapa_<escenario>.json).
-// El motor usa id, zona, estado y vecindad; la vista 3D usa pos/tam/rot. Nada acá supone cantidades fijas.
-const DEFAULT_PARCELAS: ScenarioParcelDef[] = (MAPA_ELECCIONES.parcelas as unknown as ScenarioParcelDef[]).map((p) => ({
+const DEFAULT_PARCELAS: ScenarioParcelDef[] = (
+  MAPA_ELECCIONES.parcelas as unknown as ScenarioParcelDef[]
+).map((p, idx) => ({
   id: p.id,
   nombre: p.nombre,
   zona: p.zona,
   distrito: p.distrito,
+  tipoParcela: p.tipoParcela,
+  orden: p.orden ?? idx + 1,
   estadoInicial: p.estadoInicial,
   edificioInicial: p.edificioInicial,
-  hitoRequerido: p.hitoRequerido,
+  duenoInicial: p.duenoInicial,
+  houseType: p.houseType,
   wx: p.wx,
   wy: p.wy,
   ww: p.ww,
   wh: p.wh,
 }));
 
-const HITOS_ELECCIONES: HitoDef[] = [
+const HITOS_ELECCIONES: HitoDefinition[] = [
   {
     id: 'hito_estabilidad',
     nombre: 'Estabilidad Social',
-    descripcion: 'Mantener al menos 52% de satisfacción media durante 2 períodos seguidos.',
+    descripcion: 'Mantener al menos 52% de satisfacción media.',
+    parcelaId: 'p_hito_este_1',
     condicion: {
       metrica: 'satisfaccionMedia',
       op: '>=',
       umbral: 52,
-      periodos: 2,
     },
-    habilita: 'p_hito_este_1',
   },
   {
     id: 'hito_prosperidad',
     nombre: 'Impulso Popular',
-    descripcion: 'Mantener al menos 55% de apoyo electoral durante 2 períodos seguidos.',
+    descripcion: 'Mantener al menos 55% de apoyo electoral.',
+    parcelaId: 'p_hito_este_2',
     condicion: {
       metrica: 'apoyoPct',
       op: '>=',
       umbral: 55,
-      periodos: 2,
     },
-    habilita: 'p_hito_este_2',
   },
 ];
 
-const HITOS_ZOMBIES: HitoDef[] = [
+const HITOS_ZOMBIES: HitoDefinition[] = [
   {
     id: 'hito_estabilidad',
     nombre: 'Orden y Abasto',
-    descripcion: 'Mantener hambre crítica <= 15% durante 2 períodos seguidos.',
+    descripcion: 'Mantener hambre crítica <= 15%.',
+    parcelaId: 'p_hito_este_1',
     condicion: {
       metrica: 'hambreCriticaPct',
       op: '<=',
       umbral: 15,
-      periodos: 2,
     },
-    habilita: 'p_hito_este_1',
   },
   {
     id: 'hito_prosperidad',
     nombre: 'Baluarte en Pie',
-    descripcion: 'Sostener al menos 80% de la población viva durante 3 períodos.',
+    descripcion: 'Sostener al menos 80% de la población viva.',
+    parcelaId: 'p_hito_este_2',
     condicion: {
       metrica: 'poblacionPct',
       op: '>=',
       umbral: 80,
-      periodos: 3,
     },
-    habilita: 'p_hito_este_2',
   },
 ];
+
+export const MEDIA_TEMPLATES = [
+  {
+    id: 'medio_1',
+    nombre: 'El Heraldo',
+    afinidadGobierno: 45,
+    sensacionalismo: 65,
+    credibilidad: 68,
+    alcancePct: 58,
+    ingresosPropios: 140,
+  },
+  {
+    id: 'medio_2',
+    nombre: 'La Crónica del Valle',
+    afinidadGobierno: 65,
+    sensacionalismo: 35,
+    credibilidad: 75,
+    alcancePct: 54,
+    ingresosPropios: 130,
+  },
+  {
+    id: 'medio_3',
+    nombre: 'Voz Popular',
+    afinidadGobierno: 25,
+    sensacionalismo: 82,
+    credibilidad: 55,
+    alcancePct: 48,
+    ingresosPropios: 120,
+  },
+];
+
+const DEFAULT_PROPORCIONES_V2: Record<RoleId, number> = {
+  estudiante: 0.22,
+  agricultor: 0.22,
+  obrero: 0.14,
+  comerciante: 0.06,
+  constructor: 0.04,
+  inmobiliario: 0.02,
+  empresario: 0.03,
+  tecnico: 0.03,
+  periodista: 0.02,
+  policia: 0.05,
+  medico: 0.04,
+  ingeniero: 0.03,
+  estatal: 0.03,
+  docente: 0.03,
+  desempleado: 0.01,
+  jubilado: 0.03,
+};
 
 export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> = {
   elecciones: {
@@ -1133,18 +1677,20 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     nombre: 'Año Electoral',
     subtitulo: 'Gobernar y ganar las elecciones al día 365',
     historia:
-      'La comunidad arranca con un núcleo chico y una sola clínica y comisaría. Construye obras en las parcelas libres, equilibra impuestos y precios, responde presiones y llega con apoyo mayoritario al día 365.',
-    economiaDefault: 'base',
+      'La ciudad crece en 9 zonas con hogares, casas, familias y firmas competitivas. Sostén servicios públicos, vivienda accesible y economía estable hasta el día 365.',
     poblacionDefault: 100,
     mediosDefault: 2,
-    inflacionInicial: 0,
     reservaInicial: 6000,
     stockAlimentoInicial: 2000,
+    inflacionInicial: 0,
+    proporciones: { ...DEFAULT_PROPORCIONES_V2 },
     topesPrivados: {
-      agricultor: 30,
+      agricultor: 28,
       obrero: 16,
-      comerciante: 4,
-      empresario: 1,
+      comerciante: 6,
+      constructor: 3,
+      inmobiliario: 2,
+      empresario: 2,
       tecnico: 3,
       periodista: 2,
     },
@@ -1153,6 +1699,12 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       docente: 3,
     },
     nivelObrasInicial: 2,
+    parcelas: structuredClone(DEFAULT_PARCELAS),
+    hitos: structuredClone(HITOS_ELECCIONES),
+    zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
+    zonas: structuredClone(DEFAULT_ZONAS),
+    mediosCatalog: structuredClone(MEDIA_TEMPLATES),
+    caosDefault: { ...DEFAULT_CHAOS_LIMITS },
     initialLevers: {
       impuesto: 36,
       salarioPublico: 100,
@@ -1164,10 +1716,8 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       prensa: 60,
       topeEmision: 10,
     },
-    parcelas: structuredClone(DEFAULT_PARCELAS),
-    hitos: structuredClone(HITOS_ELECCIONES),
-    zonas: structuredClone(DEFAULT_ZONAS),
-    zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
+    fenomenosIniciales: [],
+    proximoEventoDiaInicial: 90,
     victoria: {
       metrica: 'apoyoPct',
       op: '>=',
@@ -1181,26 +1731,34 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       umbral: 50,
       descripcion: 'Más del 50% de la comunidad cae en hambre crítica.',
     },
-    derrotasExtra: [{ metrica: 'poblacionPct', op: '<', umbral: 50, descripcion: 'La población viva cae por debajo del 50% de la inicial.' }],
-    caosDefault: { ...DEFAULT_CHAOS_LIMITS },
+    derrotasExtra: [
+      {
+        metrica: 'poblacionPct',
+        op: '<',
+        umbral: 50,
+        descripcion: 'La población viva cae por debajo del 50% de la inicial.',
+      },
+    ],
   },
   zombies: {
     id: 'zombies',
     nombre: 'Apocalipsis Zombie',
     subtitulo: 'Sostener la comunidad con vida durante 180 días',
     historia:
-      'Los primeros brotes en las afueras anuncian una plaga creciente y tus defensas iniciales no bastan. Construye comisarías, hospitales y obras de emergencia sin fundir la reserva ni quebrar las empresas.',
-    economiaDefault: 'base',
+      'Los primeros brotes en la periferia agraria anuncian una plaga creciente y tus defensas iniciales no bastan. Protege zonas, familias, firmas y hospitales hasta el día 180.',
     poblacionDefault: 100,
     mediosDefault: 2,
-    inflacionInicial: 0,
-    reservaInicial: 3400,
+    reservaInicial: 3600,
     stockAlimentoInicial: 1800,
+    inflacionInicial: 0,
+    proporciones: { ...DEFAULT_PROPORCIONES_V2 },
     topesPrivados: {
-      agricultor: 30,
+      agricultor: 28,
       obrero: 16,
-      comerciante: 4,
-      empresario: 1,
+      comerciante: 6,
+      constructor: 3,
+      inmobiliario: 2,
+      empresario: 2,
       tecnico: 3,
       periodista: 3,
     },
@@ -1209,6 +1767,12 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       docente: 3,
     },
     nivelObrasInicial: 2,
+    parcelas: structuredClone(DEFAULT_PARCELAS),
+    hitos: structuredClone(HITOS_ZOMBIES),
+    zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
+    zonas: structuredClone(DEFAULT_ZONAS),
+    mediosCatalog: structuredClone(MEDIA_TEMPLATES),
+    caosDefault: { ...DEFAULT_CHAOS_LIMITS },
     initialLevers: {
       impuesto: 40,
       salarioPublico: 100,
@@ -1220,10 +1784,20 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       prensa: 12,
       topeEmision: 10,
     },
-    parcelas: structuredClone(DEFAULT_PARCELAS),
-    hitos: structuredClone(HITOS_ZOMBIES),
-    zonas: structuredClone(DEFAULT_ZONAS),
-    zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
+    fenomenosIniciales: [
+      {
+        id: 'fen_zombie_init',
+        tipo: 'plaga_zombie',
+        nombre: 'Brote Perimetral',
+        intensidad: 35,
+        inicioDia: 18,
+        duracionDias: 180,
+        avisoDias: 8,
+        origen: 'noroeste',
+        crecimientoDia: 0.45,
+      },
+    ],
+    proximoEventoDiaInicial: 10,
     victoria: {
       metrica: 'poblacionPct',
       op: '>=',
@@ -1237,7 +1811,6 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
       umbral: 40,
       descripcion: 'La población viva cae por debajo del 40% de la inicial.',
     },
-    caosDefault: { ...DEFAULT_CHAOS_LIMITS },
   },
 };
 
@@ -1266,10 +1839,14 @@ export const PRESS_CONSTANTS = {
     conflicto: 78,
     clima: 75,
     presiones: 72,
+    vivienda: 72,
+    firmas: 66,
     obras: 64,
+    demografia: 58,
     precio: 55,
     empresas: 55,
     gobierno: 50,
+    familia: 38,
     vecinos: 25,
   } as Record<NewsTopic, number>,
   noticiasPorColumnista: 1,
@@ -1292,6 +1869,7 @@ export const PRESS_CONSTANTS = {
   maxEfectoNoticiasDia: 14,
   hambreSubaUmbralPct: 12,
   precioCambioFuertePct: 18,
+  calleSubaUmbralPct: 8,
   noticiasMuevenSatisfaccion: false as boolean,
 } as const;
 
@@ -1329,7 +1907,6 @@ export const LEVER_VALENCIA: Record<string, { alSubir: PressValence; alBajar: Pr
   nivelEducacion: { alSubir: 'buena', alBajar: 'mala' },
 };
 
-/** Valores del nivel 1.1 (CALIBRACION §8). Reglas que los docs no fijan: [propuesta]. */
 export const LEVEL11_CONSTANTS = {
   subsidioProdPorPunto: 0.005,
   educCostoPorNpcPeriodo: 0.05,
@@ -1372,19 +1949,11 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
         titulo: 'Advierten demoras ante {fenomeno} en {zona}',
         texto: '{autor} cuestiona en {medio} la preparación previa frente a {fenomeno}, previsto desde {zona} en {dias} días.',
       },
-      {
-        titulo: 'Preocupación por falta de margen antes de {fenomeno}',
-        texto: 'Con {dias} días de antelación, {medio} señala que la llegada de {fenomeno} a {zona} pondrá a prueba las medidas del gobernador.',
-      },
     ],
     alarmista: [
       {
         titulo: '¡Alerta máxima! {fenomeno} se acerca por {zona}',
-        texto: '{autor} advierte en {medio} que en apenas {dias} días golpeará {fenomeno} desde {zona} y crece la inquietud vecinal.',
-      },
-      {
-        titulo: 'Temor en {zona}: cuentan los días para {fenomeno}',
-        texto: 'Las filas se multiplican tras el anuncio de {fenomeno} en {zona} para dentro de {dias} días, reporta {medio}.',
+        texto: '{autor} advierte en {medio} que en apenas {dias} días golpeará {fenomeno} desde {zona}.',
       },
     ],
   },
@@ -1392,11 +1961,7 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
     favorable: [
       {
         titulo: 'Alivio en {zona}: cede {fenomeno}',
-        texto: '{autor} destaca en {medio} que la mejora climática tras {fenomeno} devuelve previsibilidad a los vecinos de {zona}.',
-      },
-      {
-        titulo: 'La comunidad respira tras el fin de {fenomeno}',
-        texto: 'El repliegue de {fenomeno} en {zona} abre margen para recomponer reservas y actividad normal, según {medio}.',
+        texto: '{autor} destaca en {medio} que la mejora climática tras {fenomeno} devuelve previsibilidad a {zona}.',
       },
     ],
     neutral: [
@@ -1404,93 +1969,57 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
         titulo: 'Cambio climático en {zona}: {fenomeno}',
         texto: '{autor} registra en {medio} la evolución de {fenomeno} en {zona}, con duración estimada de {dias} días.',
       },
-      {
-        titulo: 'Reporte del día sobre {fenomeno} en {zona}',
-        texto: '{medio} sigue el curso de {fenomeno} en el sector de {zona} y su impacto sobre la rutina local.',
-      },
     ],
     critico: [
       {
         titulo: 'Exigen respuesta rápida por {fenomeno} en {zona}',
-        texto: 'La presencia de {fenomeno} durante {dias} días en {zona} expone flancos en la planificación oficial, escribe {autor} en {medio}.',
-      },
-      {
-        titulo: '{fenomeno} golpea a {zona} sin resguardo suficiente',
-        texto: '{medio} recoge reclamos por los efectos de {fenomeno} en {zona} y pide ajustes inmediatos.',
+        texto: 'La presencia de {fenomeno} durante {dias} días en {zona} expone flancos en la planificación, escribe {autor} en {medio}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Estalla {fenomeno} y golpea a {zona}!',
-        texto: '{autor} alerta en {medio} sobre el avance de {fenomeno} desde {zona}, con fuerte tensión en las calles.',
-      },
-      {
-        titulo: 'Impacto severo por {fenomeno} en {zona}',
-        texto: 'Vecinos de {zona} miran con temor el despliegue de {fenomeno} durante los próximos {dias} días, informa {medio}.',
+        texto: '{autor} alerta en {medio} sobre el avance de {fenomeno} desde {zona} con tensión en las calles.',
       },
     ],
   },
   ataque: {
     neutral: [
       {
-        titulo: 'Parte de seguridad en {zona}: {cifra} afectados',
-        texto: '{autor} detalla en {medio} los incidentes de la jornada por la plaga en {zona}, con un saldo de {cifra}.',
-      },
-      {
-        titulo: 'Balance del perímetro en {zona}',
-        texto: 'La jornada dejó {cifra} en {zona} tras los cruces con la plaga zombie, reporta {medio}.',
+        titulo: 'Parte de seguridad en {zona}: {cifra}',
+        texto: '{autor} detalla en {medio} los incidentes por la plaga en {zona} con saldo de {cifra}.',
       },
     ],
     critico: [
       {
         titulo: 'Cuestionan la cobertura defensiva tras bajas en {zona}',
-        texto: '{autor} señala en {medio} que los episodios en {zona} ({cifra}) muestran brechas que el gobierno debe corregir.',
-      },
-      {
-        titulo: 'Presión sobre el mando por golpes de la plaga en {zona}',
-        texto: 'Con {cifra} registrados en {zona}, crecen las críticas en {medio} hacia el despliegue actual.',
+        texto: '{autor} señala en {medio} que los episodios en {zona} ({cifra}) muestran brechas defensivas.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Pánico en {zona}! La plaga deja {cifra}',
-        texto: '{autor} relata en {medio} una jornada crítica en {zona}, donde la incursión zombie sumó {cifra}.',
-      },
-      {
-        titulo: 'Noche de miedo en {zona} tras nuevos ataques',
-        texto: 'El terror recorre {zona} luego de que la plaga provocara {cifra}, advierte {medio}.',
+        texto: '{autor} relata en {medio} una jornada crítica en {zona}, donde la incursión dejó {cifra}.',
       },
     ],
   },
   salud: {
     neutral: [
       {
-        titulo: 'Situación sanitaria: {cifra} de presión en salud',
-        texto: '{autor} informa en {medio} sobre la demanda hospitalaria y los cuadros registrados en {zona} ({cifra}).',
-      },
-      {
-        titulo: 'Informe del hospital del centro sobre {zona}',
-        texto: 'El sistema médico registra {cifra} mientras atiende a los afectados derivados hacia el centro, señala {medio}.',
+        titulo: 'Situación sanitaria en {zona}: {cifra}',
+        texto: '{autor} informa en {medio} sobre la demanda hospitalaria y los cuadros registrados ({cifra}).',
       },
     ],
     critico: [
       {
-        titulo: 'El hospital no da abasto y llueven críticas',
-        texto: 'Con {cifra}, {autor} apunta en {medio} a la falta de inversión y médicos frente a la demanda sanitaria.',
-      },
-      {
-        titulo: 'Demoras en camas revelan falta de previsión en salud',
-        texto: '{medio} cuestiona que el sistema de atención alcance {cifra} mientras crecen las listas de espera.',
+        titulo: 'El sistema de salud bajo presión ({cifra})',
+        texto: 'Con {cifra}, {autor} apunta en {medio} a la falta de camas y médicos frente a la demanda.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Emergencia sanitaria! Alarma por {cifra}',
-        texto: '{autor} advierte en {medio} un escenario delicado en salud con {cifra} y vecinos en espera de atención.',
-      },
-      {
-        titulo: 'Desborde sanitario sacude a {zona}',
-        texto: 'Las guardias crujen bajo {cifra}, generando alarma en toda la comunidad según {medio}.',
+        texto: '{autor} advierte en {medio} un escenario delicado con {cifra} en {zona}.',
       },
     ],
   },
@@ -1498,31 +2027,19 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
     neutral: [
       {
         titulo: 'Sube el hambre crítica a {cifra}',
-        texto: '{autor} reporta en {medio} que el porcentaje de vecinos con hambre crítica alcanzó {cifra}.',
-      },
-      {
-        titulo: 'Despensas ajustadas llevan el hambre a {cifra}',
-        texto: 'El monitoreo social registra {cifra} de hambre crítica con foco en {zona}, indica {medio}.',
+        texto: '{autor} reporta en {medio} que los hogares con hambre crítica alcanzaron {cifra}.',
       },
     ],
     critico: [
       {
-        titulo: 'Duras críticas al gobierno por hambre en {cifra}',
-        texto: 'Con el indicador en {cifra}, {autor} responsabiliza en {medio} a las decisiones oficiales sobre ingresos y comida.',
-      },
-      {
-        titulo: 'El costo de vida deja al {cifra} sin plato asegurado',
-        texto: '{medio} exige revisar asistencia e impuestos tras la suba del hambre crítica a {cifra}.',
+        titulo: 'Críticas al rumbo económico por hambre en {cifra}',
+        texto: 'Con el indicador en {cifra}, {autor} señala en {medio} el impacto en las mesas de {zona}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Crisis alimentaria! El hambre crítica toca {cifra}',
-        texto: '{autor} alerta en {medio} que ya es {cifra} la población en hambre crítica y crece la desesperación.',
-      },
-      {
-        titulo: 'Alacenas vacías en {zona}: alarma por {cifra}',
-        texto: 'Temen saqueos e inestabilidad mientras el hambre escala a {cifra}, informa {medio}.',
+        texto: '{autor} alerta en {medio} que ya es {cifra} la población en hambre crítica.',
       },
     ],
   },
@@ -1530,41 +2047,25 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
     favorable: [
       {
         titulo: 'Respiro en el mercado: la comida baja a {cifra}',
-        texto: '{autor} celebra en {medio} la caída del precio de la comida hasta {cifra} por unidad.',
-      },
-      {
-        titulo: 'Alivio en las compras diarias con comida a {cifra}',
-        texto: 'La baja del precio a {cifra} mejora el poder de compra de los hogares en {zona}, destaca {medio}.',
+        texto: '{autor} celebra en {medio} la caída del precio de la comida hasta {cifra} en {zona}.',
       },
     ],
     neutral: [
       {
         titulo: 'La comida ajusta su precio a {cifra}',
-        texto: '{autor} consigna en {medio} una variación marcada en el mercado, donde la comida se ubica en {cifra}.',
-      },
-      {
-        titulo: 'Movimiento en las góndolas: precio en {cifra}',
-        texto: 'Comerciantes y vecinos de {zona} se adaptan al nuevo valor de {cifra} reportado hoy en {medio}.',
+        texto: '{autor} consigna en {medio} una variación marcada en el mercado ({cifra}) en {zona}.',
       },
     ],
     critico: [
       {
-        titulo: 'El precio en {cifra} reabre el debate sobre el rumbo',
-        texto: '{autor} critica en {medio} los desajustes de oferta y topes que llevaron la comida a {cifra}.',
-      },
-      {
-        titulo: 'Tensión por el precio de la comida en {cifra}',
-        texto: '{medio} advierte que el salto a {cifra} erosiona los bolsillos más frágiles de {zona}.',
+        titulo: 'El precio en {cifra} reabre el debate de mercado',
+        texto: '{autor} critica en {medio} los desajustes de oferta que llevaron la comida a {cifra}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡La comida se dispara a {cifra}!',
-        texto: '{autor} informa en {medio} que los vecinos de {zona} corren a comprar ante un salto súbito a {cifra}.',
-      },
-      {
-        titulo: 'Precios fuera de control: comida a {cifra}',
-        texto: 'El nerviosismo domina los mostradores de {zona} con la comida tocando {cifra}, señala {medio}.',
+        texto: '{autor} informa en {medio} nerviosismo en las góndolas de {zona} con comida a {cifra}.',
       },
     ],
   },
@@ -1572,11 +2073,7 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
     favorable: [
       {
         titulo: 'El Estado normaliza pagos y cierra el impago',
-        texto: '{autor} destaca en {medio} que las cuentas públicas cubrieron la liquidación sin nuevo faltante.',
-      },
-      {
-        titulo: 'Fin del impago devuelve calma a la administración',
-        texto: 'Con los salarios al día, la comunidad recupera certidumbre financiera según {medio}.',
+        texto: '{autor} destaca en {medio} que las cuentas públicas cubrieron la liquidación sin faltante.',
       },
     ],
     neutral: [
@@ -1584,187 +2081,115 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
         titulo: 'Cierre fiscal con faltante de {cifra}',
         texto: '{autor} informa en {medio} que la liquidación dejó un impago de {cifra} al agotarse la reserva.',
       },
-      {
-        titulo: 'Tesorería reporta ajuste de {cifra} en pagos',
-        texto: 'La caja pública no alcanzó a cubrir la totalidad de los compromisos y cerró con {cifra} pendientes, indica {medio}.',
-      },
     ],
     critico: [
       {
-        titulo: 'El impago de {cifra} golpea la credibilidad oficial',
-        texto: '{autor} cuestiona en {medio} el manejo de la reserva tras un faltante de {cifra} en la liquidación.',
-      },
-      {
-        titulo: 'Malestar por cuentas en rojo: faltaron {cifra}',
-        texto: 'Para {medio}, el déficit no cubierto de {cifra} refleja gastos desbalanceados.',
+        titulo: 'El impago de {cifra} golpea la confianza',
+        texto: '{autor} cuestiona en {medio} el manejo de la reserva tras un faltante de {cifra}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Caja vacía! Impago estatal de {cifra}',
-        texto: '{autor} advierte en {medio} sobre una fuerte crisis fiscal tras el faltante de {cifra} en el día de pago.',
-      },
-      {
-        titulo: 'Alarma en empleados públicos por faltante de {cifra}',
-        texto: 'El impago de {cifra} amenaza con paralizar servicios esenciales desde {zona}, reporta {medio}.',
+        texto: '{autor} advierte en {medio} sobre una fuerte crisis fiscal tras el faltante de {cifra}.',
       },
     ],
   },
   conflicto: {
     neutral: [
       {
-        titulo: 'Conflicto activo en {zona} ({cifra} participantes)',
-        texto: '{autor} reporta en {medio} una movilización en {zona} que reúne a {cifra} vecinos.',
-      },
-      {
-        titulo: 'Jornada de reclamos con {cifra} en {zona}',
-        texto: 'La protesta o medida de fuerza concentra atención en {zona} sin incidentes mayores reportados aún, según {medio}.',
+        titulo: 'Conflicto activo en {zona} ({cifra})',
+        texto: '{autor} reporta en {medio} una movilización en {zona} con {cifra} participantes.',
       },
     ],
     critico: [
       {
-        titulo: 'El conflicto en {zona} interpela al gobernador',
-        texto: '{autor} sostiene en {medio} que los {cifra} movilizados en {zona} expresan un desgaste acumulado por la gestión.',
-      },
-      {
-        titulo: 'Reclamos de {cifra} vecinos ponen en jaque la calma',
-        texto: 'La falta de respuestas alimenta las medidas de fuerza en {zona}, apunta {medio}.',
+        titulo: 'El conflicto en {zona} interpela a las autoridades',
+        texto: '{autor} sostiene en {medio} que los {cifra} movilizados en {zona} reflejan malestar acumulado.',
       },
     ],
     alarmista: [
       {
-        titulo: '¡Tensión en {zona}! {cifra} en las calles',
-        texto: '{autor} describe en {medio} un clima caldeado en {zona} con {cifra} vecinos movilizados.',
-      },
-      {
-        titulo: 'Estalla el conflicto social en {zona}',
-        texto: 'Las actividades se ven alteradas mientras {cifra} personas mantienen su medida en {zona}, alerta {medio}.',
+        titulo: '¡Tensión en {zona}! {cifra} movilizados',
+        texto: '{autor} describe en {medio} un clima caldeado en {zona} con {cifra} en protesta o boicot.',
       },
     ],
   },
   empresas: {
     favorable: [
       {
-        titulo: '{empresa} mejora salarios (factor {cifra})',
-        texto: '{autor} destaca en {medio} el buen período de {empresa}, que elevó sus sueldos al factor {cifra}.',
-      },
-      {
-        titulo: 'Crecimiento en {empresa} impulsa ingresos',
-        texto: 'Las ventas sostenidas permiten a {empresa} pagar por encima de la referencia ({cifra}), informa {medio}.',
+        titulo: '{firma} mejora salarios (factor {cifra})',
+        texto: '{autor} destaca en {medio} el buen período de {firma}, que elevó sus pagos al factor {cifra}.',
       },
     ],
     neutral: [
       {
-        titulo: 'Balance en {empresa}: ajuste con cifra {cifra}',
-        texto: '{autor} informa en {medio} la liquidación de {empresa}, que cerró el período con {cifra}.',
-      },
-      {
-        titulo: 'Novedades laborales en {empresa}',
-        texto: 'La empresa {empresa} ajustó su reparto de ingresos y plantilla dejando un registro de {cifra}, señala {medio}.',
+        titulo: 'Balance en {firma}: cifra {cifra}',
+        texto: '{autor} informa en {medio} la liquidación de {firma} con registro {cifra}.',
       },
     ],
     critico: [
       {
-        titulo: 'Preocupa la situación en {empresa} ({cifra})',
-        texto: '{autor} vincula en {medio} las dificultades de {empresa} ({cifra}) con el peso de las cargas y topes vigentes.',
-      },
-      {
-        titulo: 'Golpe al empleo: {empresa} cierra período en {cifra}',
-        texto: '{medio} advierte que los recortes o despidos en {empresa} enfriarán aún más el consumo.',
+        titulo: 'Preocupa la situación en {firma} ({cifra})',
+        texto: '{autor} vincula en {medio} las dificultades de {firma} ({cifra}) con el enfriamiento del consumo.',
       },
     ],
     alarmista: [
       {
-        titulo: '¡Alarma económica! Crisis en {empresa} ({cifra})',
-        texto: '{autor} alerta en {medio} por la contracción en {empresa}, que marcó {cifra} y golpea a las familias.',
-      },
-      {
-        titulo: 'Temor por el empleo tras ajuste en {empresa}',
-        texto: 'El sector privado acusa recibo del freno en {empresa} ({cifra}), reporta {medio}.',
+        titulo: '¡Alarma económica! Contracción en {firma} ({cifra})',
+        texto: '{autor} alerta en {medio} por el recorte en {firma}, que marcó {cifra}.',
       },
     ],
   },
   gobierno: {
     favorable: [
       {
-        titulo: 'Respaldo al ajuste en {control}: pasa a {valor_nuevo}',
+        titulo: 'Respaldo al ajuste en {control}: {valor_nuevo}',
         texto: '{autor} elogia en {medio} la medida oficial que llevó {control} de {valor_anterior} a {valor_nuevo}.',
-      },
-      {
-        titulo: 'Ven con buenos ojos el cambio en {control}',
-        texto: 'La decisión de fijar {control} en {valor_nuevo} genera expectativas positivas en {zona}, señala {medio}.',
       },
     ],
     neutral: [
       {
         titulo: 'Entra en vigor cambio en {control}: {valor_nuevo}',
-        texto: '{autor} informa en {medio} que {control} pasó de {valor_anterior} a {valor_nuevo} desde hoy.',
-      },
-      {
-        titulo: 'Nueva disposición para {control}',
-        texto: 'El gobierno modificó {control} de {valor_anterior} a {valor_nuevo} en todo el distrito, consigna {medio}.',
+        texto: '{autor} informa en {medio} que {control} pasó de {valor_anterior} a {valor_nuevo}.',
       },
     ],
     critico: [
       {
-        titulo: 'Cuestionan la suba o giro en {control} a {valor_nuevo}',
+        titulo: 'Cuestionan giro en {control} a {valor_nuevo}',
         texto: '{autor} advierte en {medio} sobre los costos de mover {control} desde {valor_anterior} hacia {valor_nuevo}.',
-      },
-      {
-        titulo: 'Críticas al decreto sobre {control}',
-        texto: 'Sectores locales miran con recelo el paso de {control} a {valor_nuevo}, según {medio}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Fuerte giro en {control} desata inquietud!',
-        texto: '{autor} señala en {medio} sorpresa y nerviosismo por el salto de {control} de {valor_anterior} a {valor_nuevo}.',
-      },
-      {
-        titulo: 'Alerta en la plaza tras cambio en {control}',
-        texto: 'El paso de {control} a {valor_nuevo} reconfigura el humor social de inmediato, advierte {medio}.',
+        texto: '{autor} señala en {medio} nerviosismo por el salto de {control} a {valor_nuevo}.',
       },
     ],
   },
   vecinos: {
     favorable: [
       {
-        titulo: 'Iniciativa solidaria contagia a {cifra} vecinos en {zona}',
-        texto: '{autor} celebra en {medio} que {cifra} residentes de {zona} se sumen a una acción comunitaria.',
-      },
-      {
-        titulo: 'Buen clima barrial en {zona}',
-        texto: 'Un grupo de {cifra} vecinos protagoniza jornadas positivas en {zona}, destaca {medio}.',
+        titulo: 'Iniciativa vecinal contagia a {cifra} en {zona}',
+        texto: '{autor} celebra en {medio} que {cifra} residentes de {zona} impulsen una movida solidaria.',
       },
     ],
     neutral: [
       {
-        titulo: 'Movida vecinal en {zona} reúne a {cifra} personas',
-        texto: '{autor} comenta en {medio} una iniciativa espontánea que sumó {cifra} participantes en {zona}.',
-      },
-      {
-        titulo: 'Postales del día en {zona}',
-        texto: 'La rutina de {zona} se vio alterada por {cifra} vecinos compartiendo una actividad inusual, según {medio}.',
+        titulo: 'Movida vecinal en {zona} reúne a {cifra}',
+        texto: '{autor} comenta en {medio} una iniciativa espontánea con {cifra} participantes en {zona}.',
       },
     ],
     critico: [
       {
-        titulo: 'Desconcierto por ausencias y revuelo en {zona}',
-        texto: '{autor} observa en {medio} que {cifra} vecinos de {zona} dejaron sus tareas para sumarse a la movida.',
-      },
-      {
-        titulo: 'Señalan falta de control en {zona}',
-        texto: 'Con {cifra} involucrados en {zona}, {medio} pide atención sobre el ánimo del barrio.',
+        titulo: 'Desconcierto por ausencias en {zona} ({cifra})',
+        texto: '{autor} observa en {medio} que {cifra} vecinos dejaron sus tareas en {zona}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Inquietud en {zona}! {cifra} vecinos alteran la calma',
-        texto: '{autor} informa en {medio} que la concentración de {cifra} personas en {zona} alimenta rumores.',
-      },
-      {
-        titulo: 'Revuelo creciente en las calles de {zona}',
-        texto: 'Un episodio con {cifra} participantes despierta preocupación en {zona}, reporta {medio}.',
+        texto: '{autor} informa en {medio} que la concentración en {zona} alimenta rumores.',
       },
     ],
   },
@@ -1772,11 +2197,7 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
     favorable: [
       {
         titulo: 'Inauguran {edificio} en {zona}',
-        texto: '{autor} destaca en {medio} la habilitación de {edificio} en {parcela} ({zona}), ampliando la capacidad de la ciudad.',
-      },
-      {
-        titulo: 'Nuevo impulso en {zona}: abre {edificio}',
-        texto: 'Con el cierre de obra en {parcela}, {medio} subraya el impacto positivo de {edificio} para los vecinos de {zona}.',
+        texto: '{autor} destaca en {medio} la habilitación de {edificio} en {parcela} ({zona}).',
       },
     ],
     neutral: [
@@ -1784,29 +2205,17 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
         titulo: 'Movimiento de obras en {zona}: {edificio}',
         texto: '{autor} informa en {medio} novedades sobre {edificio} en {parcela} ({zona}).',
       },
-      {
-        titulo: 'Actualización de parcelas en {zona}',
-        texto: 'La parcela {parcela} registra novedades de {edificio}, consigna {medio}.',
-      },
     ],
     critico: [
       {
-        titulo: 'Cuestionan demolición o cierre de {edificio} en {zona}',
-        texto: '{autor} critica en {medio} la decisión sobre {edificio} en {parcela} ({zona}) y su costo para el barrio.',
-      },
-      {
-        titulo: 'Debate por el uso de suelo tras baja en {parcela}',
-        texto: 'El desmantelamiento de {edificio} en {zona} abre reclamos vecinales, reporta {medio}.',
+        titulo: 'Cuestionan cierre de {edificio} en {zona}',
+        texto: '{autor} critica en {medio} la baja de {edificio} en {parcela} ({zona}).',
       },
     ],
     alarmista: [
       {
         titulo: '¡Tensión por demolición de {edificio} en {zona}!',
-        texto: '{autor} advierte en {medio} malestar fuerte en {zona} tras la pérdida de {edificio} en {parcela}.',
-      },
-      {
-        titulo: 'Alarma vecinal por baja de {edificio} en {parcela}',
-        texto: 'Residentes de {zona} reclaman por el cierre de {edificio} en {parcela}, consigna {medio}.',
+        texto: '{autor} advierte malestar en {zona} tras la pérdida de {edificio} en {parcela}.',
       },
     ],
   },
@@ -1814,41 +2223,25 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
     favorable: [
       {
         titulo: 'Acuerdo con {actor}: compromiso en {demanda}',
-        texto: '{autor} celebra en {medio} el entendimiento alcanzado con {actor} en torno a {demanda}.',
-      },
-      {
-        titulo: 'Distensión en la gestión tras acuerdo con {actor}',
-        texto: 'El compromiso asumido en {demanda} destraba el frente con {actor}, destaca {medio}.',
+        texto: '{autor} celebra en {medio} el entendimiento alcanzado con {actor} en {demanda}.',
       },
     ],
     neutral: [
       {
         titulo: '{actor} plantea demanda: {demanda}',
-        texto: '{autor} reporta en {medio} la exigencia formal de {actor} ({demanda}), a la espera de respuesta oficial.',
-      },
-      {
-        titulo: 'Cruce en la mesa política por {actor}',
-        texto: 'El reclamo de {actor} ({demanda}) marca la agenda del día, señala {medio}.',
+        texto: '{autor} reporta en {medio} la exigencia formal de {actor} ({demanda}).',
       },
     ],
     critico: [
       {
-        titulo: 'Conflicto abierto con {actor} tras rechazo en {demanda}',
-        texto: '{autor} señala en {medio} que la negativa ante {actor} derivó en medidas de fuerza ({medida}).',
-      },
-      {
-        titulo: 'Escalan las presiones de {actor} sobre el despacho',
-        texto: 'Sin acuerdo por {demanda}, {actor} activa {medida} y tensa el clima en {zona}, según {medio}.',
+        titulo: 'Conflicto con {actor} tras rechazo en {demanda}',
+        texto: '{autor} señala en {medio} que la negativa ante {actor} derivó en {medida}.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Ruptura con {actor}! Activan {medida}',
-        texto: '{autor} alerta en {medio} que el choque con {actor} desató {medida} con impacto directo en la comunidad.',
-      },
-      {
-        titulo: 'Alerta por represalia de {actor}: {medida}',
-        texto: 'El quiebre tras {demanda} deja activa {medida} y complica la jornada, informa {medio}.',
+        texto: '{autor} alerta en {medio} que el choque con {actor} desató {medida}.',
       },
     ],
   },
@@ -1858,70 +2251,121 @@ export const NEWS_TEMPLATES: Record<NewsTopic, Partial<Record<NewsTone, NewsTemp
         titulo: '¡Meta alcanzada! La gestión cumple el objetivo ({cifra})',
         texto: '{autor} destaca en {medio} que al cumplirse el plazo la comunidad cerró con {cifra}.',
       },
-      {
-        titulo: 'Balance positivo del mandato al llegar al plazo',
-        texto: 'Con {cifra} registrado en el cierre, el gobierno superó la meta del escenario según {medio}.',
-      },
     ],
     neutral: [
       {
         titulo: 'Cierre de plazo del objetivo con {cifra}',
-        texto: '{autor} resume en {medio} el resultado oficial de la etapa al alcanzarse {cifra}.',
-      },
-      {
-        titulo: 'Veredicto del plazo: la comunidad marca {cifra}',
-        texto: 'Se cumplió el día clave del mandato con un indicador de {cifra}, informa {medio}.',
+        texto: '{autor} resume en {medio} el resultado oficial al alcanzarse {cifra}.',
       },
     ],
     critico: [
       {
-        titulo: 'Objetivo incumplido al cierre del plazo ({cifra})',
-        texto: '{autor} remarca en {medio} que el resultado de {cifra} dejó al gobierno por debajo de la meta prometida.',
-      },
-      {
-        titulo: 'Duro balance político tras quedar en {cifra}',
-        texto: 'La comunidad no alcanzó el umbral previsto y cerró el plazo en {cifra}, analiza {medio}.',
+        titulo: 'Objetivo incumplido al cierre ({cifra})',
+        texto: '{autor} remarca en {medio} que {cifra} dejó a la comunidad por debajo de la meta.',
       },
     ],
     alarmista: [
       {
         titulo: '¡Fracaso en la meta! Cierre crítico con {cifra}',
-        texto: '{autor} advierte en {medio} un clima de fuerte decepción tras marcar apenas {cifra} al fin del plazo.',
+        texto: '{autor} advierte en {medio} fuerte decepción tras marcar {cifra}.',
       },
+    ],
+  },
+
+  // === V2 Topics (CAOS_PRENSA_V2 §8) ===
+  vivienda: {
+    favorable: [
       {
-        titulo: 'Incertidumbre tras no superar el objetivo ({cifra})',
-        texto: 'Con el marcador en {cifra}, crecen las dudas sobre el futuro inmediato, reporta {medio}.',
+        titulo: 'Nuevas viviendas alivian {zona}',
+        texto: '{autor} destaca en {medio} la entrega de casas ({cifra}) para familias de {zona}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Pulso inmobiliario en {zona}: {cifra}',
+        texto: '{autor} repasa en {medio} los movimientos de alquiler y mudanzas en {zona} ({cifra}).',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Preocupa la situación habitacional en {zona} ({cifra})',
+        texto: '{autor} advierte en {medio} sobre desalojos y hogares sin techo en {zona} ({cifra}).',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Crisis de vivienda en {zona}! Calle en {cifra}',
+        texto: '{autor} alerta en {medio} que los desalojos y la falta de casas golpean duro a {hogar} y vecinos.',
+      },
+    ],
+  },
+  firmas: {
+    favorable: [
+      {
+        titulo: '{dueno} funda {firma} en {zona}',
+        texto: '{autor} celebra en {medio} la apertura de {firma}, impulsando empleo y competencia en {zona}.',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Operación societaria por {firma} ({cifra})',
+        texto: '{autor} informa en {medio} que {dueno} concretó un movimiento sobre {firma} en {zona} ({cifra}).',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Concentración comercial en {zona}: {firma} alcanza {cifra}',
+        texto: '{autor} analiza en {medio} el peso creciente de {firma} y el riesgo de monopolio en {zona}.',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Quiebra {firma} en {zona}!',
+        texto: '{autor} reporta en {medio} el cierre de {firma} tras pérdidas sostenidas, dejando {cifra}.',
+      },
+    ],
+  },
+  demografia: {
+    favorable: [
+      {
+        titulo: 'Crece la vida familiar en {zona}: {cifra}',
+        texto: '{autor} registra en {medio} nuevos nacimientos y emparejamientos en {zona} ({cifra}).',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Registro demográfico en {zona}: {cifra}',
+        texto: '{autor} consigne en {medio} el balance poblacional reciente de {zona} ({cifra}).',
+      },
+    ],
+    critico: [
+      {
+        titulo: 'Luto en {zona} tras pérdidas recientes ({cifra})',
+        texto: '{autor} recoge en {medio} la preocupación vecinal por la mortalidad en {zona} ({cifra}).',
+      },
+    ],
+    alarmista: [
+      {
+        titulo: '¡Ola de fallecimientos sacude a {zona}!',
+        texto: '{autor} alerta en {medio} sobre la caída demográfica en {zona} ({cifra}).',
+      },
+    ],
+  },
+  familia: {
+    favorable: [
+      {
+        titulo: 'Celebración en {familia} en {zona}',
+        texto: '{autor} cuenta en {medio} la formación o crecimiento del hogar {hogar} ({familia}).',
+      },
+    ],
+    neutral: [
+      {
+        titulo: 'Crónica de familia: {familia} en {zona}',
+        texto: '{autor} comenta en {medio} el traspaso de bienes y herencia dentro de {familia} ({cifra}).',
       },
     ],
   },
 };
-
-export const MEDIA_TEMPLATES = [
-  {
-    id: 'medio_1',
-    nombre: 'El Heraldo',
-    afinidadGobierno: 45,
-    sensacionalismo: 65,
-    credibilidad: 68,
-    ingresosPropios: 140,
-  },
-  {
-    id: 'medio_2',
-    nombre: 'La Crónica del Valle',
-    afinidadGobierno: 65,
-    sensacionalismo: 35,
-    credibilidad: 75,
-    ingresosPropios: 130,
-  },
-  {
-    id: 'medio_3',
-    nombre: 'Voz Popular',
-    afinidadGobierno: 25,
-    sensacionalismo: 82,
-    credibilidad: 55,
-    ingresosPropios: 120,
-  },
-];
 
 export const SPANISH_NAMES = [
   'Marta', 'Lucas', 'Sofía', 'Mateo', 'Valentina', 'Tomás', 'Camila', 'Nicolás',
@@ -1932,9 +2376,17 @@ export const SPANISH_NAMES = [
   'Laura', 'Rodrigo', 'Beatriz', 'Sebastián', 'Daniela', 'Marcos', 'Silvia', 'Pablo',
   'Verónica', 'Rafael', 'Patricia', 'Andrés', 'Lorena', 'Eduardo', 'Alicia', 'Gustavo',
   'Susana', 'Ricardo', 'Mónica', 'Alberto', 'Graciela', 'Fernando', 'Rosa', 'Carlos',
-  'Norma', 'Héctor', 'Marta E.', 'Oscar', 'Isabel', 'Raúl', 'Teresa', 'Jorge',
-  'Miriam', 'Sergio', 'Adriana', 'Marcelo', 'Claudia', 'Roberto', 'Liliana', 'Daniel',
-  'Estela', 'Alejandro', 'Sandra', 'Guillermo', 'Nora', 'Hugo', 'Olga', 'Mario',
-  'Julia', 'César', 'Inés', 'Víctor', 'Ana', 'Pedro', 'Lidia', 'Rubén',
-  'Elsa', 'Néstor', 'Irene', 'Damián',
+  'Norma', 'Héctor', 'Oscar', 'Isabel', 'Raúl', 'Teresa', 'Jorge', 'Miriam',
+  'Sergio', 'Adriana', 'Marcelo', 'Claudia', 'Roberto', 'Liliana', 'Daniel', 'Estela',
+  'Alejandro', 'Sandra', 'Guillermo', 'Nora', 'Hugo', 'Olga', 'Mario', 'Julia',
+  'César', 'Inés', 'Víctor', 'Ana', 'Pedro', 'Lidia', 'Rubén', 'Elsa',
+  'Néstor', 'Irene', 'Damián', 'Renata',
+];
+
+export const SPANISH_LAST_NAMES = [
+  'Gil', 'Romero', 'Sosa', 'Molina', 'Fernández', 'Peralta', 'Ríos', 'Benítez',
+  'Cabrera', 'Moreno', 'Díaz', 'Alvarez', 'Acosta', 'Torres', 'Vega', 'Castillo',
+  'Medina', 'Herrera', 'Ruiz', 'Navarro', 'Rojas', 'Silva', 'Pereyra', 'Giménez',
+  'Vargas', 'Campos', 'Méndez', 'Flores', 'Cruz', 'Ortiz', 'Ledesma', 'Ferreyra',
+  'Domínguez', 'Arias', 'Cardozo', 'Ponce', 'Valdez', 'Salazar', 'Córdoba', 'Núñez',
 ];

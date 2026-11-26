@@ -1,165 +1,106 @@
 import {
-  DISTRICT_BY_ID,
+  BUILDING_CATALOG,
   ECON_CONSTANTS,
+  FIRM_CONSTANTS,
   MEDIA_TEMPLATES,
   PERIOD_DAYS,
   ROLE_CATALOG,
+  ROLE_DISTRICTS,
   SAVE_FORMAT_VERSION,
   SCENARIO_PRESETS,
+  SPANISH_LAST_NAMES,
   SPANISH_NAMES,
 } from '../data/catalogs';
 import {
   BuildingInstance,
+  BuildingType,
+  Casa,
   ClimatePhenomenon,
   EconomyModule,
+  Firma,
+  FirmRubro,
   GameState,
   GovernorComplexityLevel,
   GovernorLevers,
+  Hogar,
+  HouseType,
   MediaOutlet,
   Npc,
   Parcela,
+  ParcelTipo,
   RoleId,
   ServicePublicRoleId,
   WorldComplexityLevel,
   WorldConfig,
+  ZoneDefinition,
   ZoneId,
 } from '../types/game';
+import { getBuildingJobCaps, getObrasTargetJobs } from './policies';
+import { initSubsystemRng, nextRand, normalizeSeed, randInt, randRange } from './rng';
 import {
-  computeMaintenanceBreakdown,
-  getBuildingJobCaps,
-  getObrasTargetJobs,
-} from './policies';
-import { nextRand, normalizeSeed, randInt, randRange } from './rng';
+  clamp,
+  computeTotalWorldMoney,
+  getWorldZones,
+  syncLegacyEnterprisesView,
+} from './worldHelpers';
 
 interface RngHolder {
   rngState: number;
-}
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, v));
 }
 
 function drawRand(rng?: RngHolder): number {
   return rng ? nextRand(rng) : Math.random();
 }
 
-export function getZoneCanvasPosition(zone: ZoneId, rng?: RngHolder): { x: number; y: number } {
-  const ranges: Record<ZoneId, { x: [number, number]; y: [number, number] }> = {
-    centro: { x: [380, 640], y: [250, 535] },
-    norte: { x: [45, 860], y: [45, 220] },
-    este: { x: [685, 955], y: [180, 535] },
-    sur: { x: [45, 640], y: [330, 545] },
-    oeste: { x: [35, 330], y: [50, 520] },
-  };
-  const r = ranges[zone] || ranges.centro;
+export function getZoneCanvasPosition(
+  zone: ZoneId,
+  rng?: RngHolder,
+  zonas?: Record<ZoneId, ZoneDefinition>
+): { x: number; y: number } {
+  const zDef = zonas?.[zone];
+  if (zDef?.rect) {
+    return {
+      x: zDef.rect.wx + 28 + drawRand(rng) * Math.max(40, zDef.rect.ww - 56),
+      y: zDef.rect.wy + 28 + drawRand(rng) * Math.max(40, zDef.rect.wh - 56),
+    };
+  }
   return {
-    x: r.x[0] + drawRand(rng) * (r.x[1] - r.x[0]),
-    y: r.y[0] + drawRand(rng) * (r.y[1] - r.y[0]),
+    x: 440 + drawRand(rng) * 320,
+    y: 290 + drawRand(rng) * 180,
   };
 }
 
 export function getDistrictPosition(role: RoleId, rng?: RngHolder): { x: number; y: number } {
-  const def = ROLE_CATALOG[role];
-  const zone = DISTRICT_BY_ID[def.distrito] || DISTRICT_BY_ID.campos;
-
-  if (role === 'docente' || role === 'estudiante') {
-    return {
-      x: zone.x + 34 + drawRand(rng) * (zone.w - 68),
-      y: zone.y + 62 + drawRand(rng) * 170,
-    };
-  }
-  if (role === 'jubilado' || role === 'desempleado') {
-    return {
-      x: zone.x + 34 + drawRand(rng) * (zone.w - 68),
-      y: zone.y + 245 + drawRand(rng) * (zone.h - 275),
-    };
-  }
-  if (role === 'medico') {
-    return {
-      x: zone.x + 28 + drawRand(rng) * 115,
-      y: zone.y + 65 + drawRand(rng) * (zone.h - 90),
-    };
-  }
-  if (role === 'estatal' || role === 'ingeniero') {
-    return {
-      x: zone.x + 145 + drawRand(rng) * (zone.w - 175),
-      y: zone.y + 65 + drawRand(rng) * (zone.h - 90),
-    };
-  }
+  const dist = ROLE_DISTRICTS[role] ?? 'residencial';
+  const box =
+    dist === 'campos'
+      ? { x: 35, y: 40, w: 340, h: 680 }
+      : dist === 'mercado'
+      ? { x: 825, y: 285, w: 340, h: 190 }
+      : dist === 'civico'
+      ? { x: 430, y: 285, w: 340, h: 190 }
+      : { x: 430, y: 40, w: 720, h: 680 };
 
   return {
-    x: zone.x + 30 + drawRand(rng) * (zone.w - 60),
-    y: zone.y + 56 + drawRand(rng) * (zone.h - 80),
+    x: box.x + drawRand(rng) * box.w,
+    y: box.y + drawRand(rng) * box.h,
   };
 }
 
 export function getCityErrandPosition(
   role: RoleId,
   zone?: ZoneId,
-  rng?: RngHolder
+  rng?: RngHolder,
+  zonas?: Record<ZoneId, ZoneDefinition>
 ): { x: number; y: number; accion: string } {
-  if (role === 'policia') {
-    if (zone && zone !== 'centro') {
-      const zPos = getZoneCanvasPosition(zone, rng);
-      return { ...zPos, accion: `patrullando zona ${zone}` };
-    }
-    const patrolSpots = [
-      { x: 355, y: 120 + drawRand(rng) * 340, accion: 'patrullando avenida oeste' },
-      { x: 665, y: 120 + drawRand(rng) * 340, accion: 'patrullando avenida este' },
-      { x: 140 + drawRand(rng) * 480, y: 295, accion: 'patrullando bulevar central' },
-      { x: 430 + drawRand(rng) * 160, y: 140 + drawRand(rng) * 100, accion: 'vigilando la plaza' },
-    ];
-    return patrolSpots[Math.floor(drawRand(rng) * patrolSpots.length)];
+  if (zone && zonas?.[zone]) {
+    const zPos = getZoneCanvasPosition(zone, rng, zonas);
+    if (role === 'policia') return { ...zPos, accion: `patrullando ${zonas[zone].nombre}` };
+    if (role === 'periodista') return { ...zPos, accion: `reportando en ${zonas[zone].nombre}` };
+    return { ...zPos, accion: ROLE_CATALOG[role].nombre.toLowerCase() };
   }
-
-  if (role === 'periodista') {
-    const spots = [
-      { x: 420 + drawRand(rng) * 180, y: 100 + drawRand(rng) * 140, accion: 'cubriendo la plaza' },
-      { x: 420 + drawRand(rng) * 180, y: 360 + drawRand(rng) * 150, accion: 'entrevistando en Centro Cívico' },
-      { x: 100 + drawRand(rng) * 200, y: 100 + drawRand(rng) * 140, accion: 'reportando en los campos' },
-    ];
-    return spots[Math.floor(drawRand(rng) * spots.length)];
-  }
-
-  if (drawRand(rng) < 0.28) {
-    const plaza = DISTRICT_BY_ID.mercado;
-    return {
-      x: plaza.x + 36 + drawRand(rng) * (plaza.w - 72),
-      y: plaza.y + 62 + drawRand(rng) * (plaza.h - 86),
-      accion: 'en el mercado central',
-    };
-  }
-
-  if (drawRand(rng) < 0.18) {
-    const home = DISTRICT_BY_ID.residencial;
-    return {
-      x: home.x + 36 + drawRand(rng) * (home.w - 72),
-      y: home.y + 240 + drawRand(rng) * (home.h - 270),
-      accion: 'pasando por su barrio',
-    };
-  }
-
-  const workPos = getDistrictPosition(role, rng);
-  const workAction =
-    role === 'estudiante'
-      ? 'estudiando en la escuela'
-      : role === 'jubilado'
-      ? 'paseando por el parque'
-      : role === 'desempleado'
-      ? 'buscando trabajo'
-      : role === 'agricultor'
-      ? 'trabajando en los cultivos'
-      : role === 'tecnico'
-      ? 'tecnificando los campos'
-      : role === 'medico'
-      ? 'atendiendo en la clínica'
-      : role === 'comerciante'
-      ? 'atendiendo su comercio'
-      : role === 'empresario'
-      ? 'gestionando su empresa'
-      : 'trabajando';
-
-  return { ...workPos, accion: workAction };
+  const p = getDistrictPosition(role, rng);
+  return { ...p, accion: 'trabajando' };
 }
 
 export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
@@ -167,82 +108,242 @@ export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
   nivelGobernador: GovernorComplexityLevel;
   economiaModulo: EconomyModule;
 } {
-  const preset = SCENARIO_PRESETS[raw.escenarioId ?? 'elecciones'];
-  const defaultWorld: WorldComplexityLevel = preset.economiaDefault === 'fiscal' ? 'M2' : 'M1';
-  const nivelMundo: WorldComplexityLevel =
-    raw.nivelMundo ??
-    (raw.economiaModulo === 'fiscal' ? 'M2' : raw.economiaModulo === 'base' ? defaultWorld : defaultWorld);
-  const economiaModulo: EconomyModule = nivelMundo === 'M2' ? 'fiscal' : 'base';
-  const defaultGov: GovernorComplexityLevel = nivelMundo === 'M2' ? 'G3' : 'G2';
+  const defaultWorld: WorldComplexityLevel =
+    raw.economiaModulo === 'fiscal' ? 'M4' : 'M3';
+  const nivelMundo: WorldComplexityLevel = raw.nivelMundo ?? defaultWorld;
+  const economiaModulo: EconomyModule = nivelMundo === 'M4' ? 'fiscal' : 'base';
+  const defaultGov: GovernorComplexityLevel = nivelMundo === 'M4' ? 'G3' : 'G2';
   const nivelGobernador: GovernorComplexityLevel = raw.nivelGobernador ?? defaultGov;
   return { nivelMundo, nivelGobernador, economiaModulo };
 }
 
 export function isTestConfig(config: WorldConfig): boolean {
   const preset = SCENARIO_PRESETS[config.escenarioId];
-  const { nivelMundo, nivelGobernador, economiaModulo } = resolveComplexityConfig(config);
-  const defaultWorld: WorldComplexityLevel = preset.economiaDefault === 'fiscal' ? 'M2' : 'M1';
-  if (economiaModulo !== preset.economiaDefault) return true;
-  if (nivelMundo !== defaultWorld) return true;
-  const defaultGov: GovernorComplexityLevel = defaultWorld === 'M2' ? 'G3' : 'G2';
-  if (nivelGobernador !== defaultGov && !(defaultWorld === 'M2' && nivelGobernador === 'G2')) {
-    return true;
-  }
+  const { nivelMundo, nivelGobernador } = resolveComplexityConfig(config);
+  if (nivelMundo !== 'M3' && nivelMundo !== 'M4') return true;
+  if (nivelGobernador === 'G0' || nivelGobernador === 'G1') return true;
   if (config.poblacionInicial !== preset.poblacionDefault) return true;
   if (config.cantidadMedios !== preset.mediosDefault) return true;
-  const c = config.caos;
-  const d = preset.caosDefault;
-  return (
-    c.maxAccionesPorPeriodo !== d.maxAccionesPorPeriodo ||
-    c.periodoDias !== d.periodoDias ||
-    c.maxPctRolFueraDePuesto !== d.maxPctRolFueraDePuesto ||
-    c.duracionMaxDias !== d.duracionMaxDias ||
-    c.respiroSiSatisfaccionMediaMenorA !== d.respiroSiSatisfaccionMediaMenorA
-  );
+  return false;
 }
 
-export function buildInitialParcelas(
+function buildScaledParcelas(
   escenarioId: 'elecciones' | 'zombies',
-  nivelMundo: WorldComplexityLevel
+  nivelMundo: WorldComplexityLevel,
+  pop: number,
+  zonas: Record<ZoneId, ZoneDefinition>
 ): Parcela[] {
   const preset = SCENARIO_PRESETS[escenarioId];
-  return preset.parcelas.map((def, idx) => {
-    const zona: ZoneId = nivelMundo === 'M0' ? 'centro' : def.zona;
+  const base: Parcela[] = preset.parcelas.map((def, idx) => {
+    const tipoParcela: ParcelTipo =
+      def.tipoParcela ??
+      (def.houseType
+        ? 'residencial'
+        : def.edificioInicial === 'campo'
+        ? 'agricola'
+        : def.edificioInicial === 'plaza' || def.edificioInicial === 'puerto' || def.edificioInicial === 'muelle_comercio'
+        ? 'especial'
+        : def.edificioInicial === 'hospital' ||
+          def.edificioInicial === 'comisaria' ||
+          def.edificioInicial === 'escuela' ||
+          def.edificioInicial === 'oficina_publica' ||
+          def.id.includes('libre') ||
+          def.id.includes('hito')
+        ? 'publica'
+        : 'comercial');
+
+    const zona = def.zona;
     let edificio: BuildingInstance | null = null;
     if (def.estadoInicial === 'ocupada' && def.edificioInicial) {
-      const dueno =
-        def.edificioInicial === 'campo'
-          ? 'alimento'
-          : def.edificioInicial === 'local_comercio'
-          ? 'comercio'
-          : 'estado';
       edificio = {
         id: `ed_init_${idx + 1}`,
         tipo: def.edificioInicial,
         parcelaId: def.id,
-        dueno,
+        dueno: def.duenoInicial ?? 'estado',
         estado: 'ocupada',
         activo: true,
+        estadoSalud: 100,
         diasObraRestantes: 0,
         diasObraTotal: 0,
         zona,
       };
     }
+
     return {
       id: def.id,
       nombre: def.nombre,
       zona,
       distrito: def.distrito,
-      estado: def.estadoInicial,
-      edificio,
+      tipoParcela,
+      orden: def.orden ?? idx + 1,
       wx: def.wx,
       wy: def.wy,
       ww: def.ww,
       wh: def.wh,
-      hitoRequerido: def.hitoRequerido,
-      orden: idx,
+      estado: def.estadoInicial,
+      edificio,
     };
   });
+
+  // Dynamically expand parcels for larger population targets (150..5000)
+  const scale = Math.max(1, pop / 100);
+  if (scale > 1.2) {
+    const zoneList = Object.keys(zonas);
+    const neededHouses = Math.ceil(pop / 2.6) + 12;
+    const currentRes = base.filter((p) => p.tipoParcela === 'residencial').length;
+    const extraRes = Math.max(0, neededHouses - currentRes);
+
+    const resZones = zoneList.filter((z) => zonas[z].caracter === 'residencial' || zonas[z].caracter === 'centro');
+    for (let i = 0; i < extraRes; i++) {
+      const z = resZones[i % resZones.length] ?? 'norte';
+      const rect = zonas[z].rect;
+      const col = i % 7;
+      const row = Math.floor(i / 7) % 4;
+      base.push({
+        id: `p_res_ext_${i + 1}`,
+        nombre: `Solar Residencial ${z} ${i + 1}`,
+        zona: z,
+        distrito: 'residencial',
+        tipoParcela: 'residencial',
+        orden: 100 + i,
+        wx: rect.wx + 16 + col * 48,
+        wy: rect.wy + 135 + row * 24,
+        ww: 42,
+        wh: 20,
+        estado: 'libre',
+        edificio: null,
+      });
+    }
+
+    const extraFields = Math.max(0, Math.round(6 * (scale - 1)));
+    const agroZones = zoneList.filter((z) => zonas[z].caracter === 'agricola');
+    for (let i = 0; i < extraFields; i++) {
+      const z = agroZones[i % agroZones.length] ?? 'noroeste';
+      const rect = zonas[z].rect;
+      const pid = `p_campo_ext_${i + 1}`;
+      base.push({
+        id: pid,
+        nombre: `Campo Expandido ${i + 1}`,
+        zona: z,
+        distrito: 'campos',
+        tipoParcela: 'agricola',
+        orden: 200 + i,
+        wx: rect.wx + 24 + (i % 4) * 82,
+        wy: rect.wy + 150,
+        ww: 74,
+        wh: 46,
+        estado: 'ocupada',
+        edificio: {
+          id: `ed_campo_ext_${i + 1}`,
+          tipo: 'campo',
+          parcelaId: pid,
+          dueno: 'agro',
+          estado: 'ocupada',
+          activo: true,
+          estadoSalud: 100,
+          diasObraRestantes: 0,
+          diasObraTotal: 0,
+          zona: z,
+        },
+      });
+    }
+
+    const extraShops = Math.max(0, Math.round(6 * (scale - 1)));
+    const comZones = zoneList.filter((z) => zonas[z].caracter !== 'agricola');
+    for (let i = 0; i < extraShops; i++) {
+      const z = comZones[i % comZones.length] ?? 'centro';
+      const rect = zonas[z].rect;
+      const pid = `p_com_ext_${i + 1}`;
+      const tipo: BuildingType = i % 3 === 0 ? 'restoran' : i % 3 === 1 ? 'almacen' : 'kiosco';
+      base.push({
+        id: pid,
+        nombre: `Comercio ${z} ${i + 1}`,
+        zona: z,
+        distrito: 'mercado',
+        tipoParcela: 'comercial',
+        orden: 300 + i,
+        wx: rect.wx + 20 + (i % 5) * 56,
+        wy: rect.wy + 88,
+        ww: 46,
+        wh: 36,
+        estado: 'ocupada',
+        edificio: {
+          id: `ed_com_ext_${i + 1}`,
+          tipo,
+          parcelaId: pid,
+          dueno: 'comercio',
+          estado: 'ocupada',
+          activo: true,
+          estadoSalud: 100,
+          diasObraRestantes: 0,
+          diasObraTotal: 0,
+          zona: z,
+        },
+      });
+    }
+
+    const extraHosp = Math.max(0, Math.floor((pop - 120) / 140));
+    const pubZones = ['norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'];
+    for (let i = 0; i < extraHosp; i++) {
+      const z = pubZones[i % pubZones.length] ?? 'norte';
+      const rect = zonas[z].rect;
+      const pidH = `p_hosp_ext_${i + 1}`;
+      base.push({
+        id: pidH,
+        nombre: `Hospital Zonal ${z}`,
+        zona: z,
+        distrito: 'civico',
+        tipoParcela: 'publica',
+        orden: 400 + i * 2,
+        wx: rect.wx + 260,
+        wy: rect.wy + 32,
+        ww: 50,
+        wh: 40,
+        estado: 'ocupada',
+        edificio: {
+          id: `ed_hosp_ext_${i + 1}`,
+          tipo: 'hospital',
+          parcelaId: pidH,
+          dueno: 'estado',
+          estado: 'ocupada',
+          activo: true,
+          estadoSalud: 100,
+          diasObraRestantes: 0,
+          diasObraTotal: 0,
+          zona: z,
+        },
+      });
+      const pidC = `p_comis_ext_${i + 1}`;
+      base.push({
+        id: pidC,
+        nombre: `Comisaría Zonal ${z}`,
+        zona: z,
+        distrito: 'civico',
+        tipoParcela: 'publica',
+        orden: 401 + i * 2,
+        wx: rect.wx + 314,
+        wy: rect.wy + 32,
+        ww: 46,
+        wh: 38,
+        estado: 'ocupada',
+        edificio: {
+          id: `ed_comis_ext_${i + 1}`,
+          tipo: 'comisaria',
+          parcelaId: pidC,
+          dueno: 'estado',
+          estado: 'ocupada',
+          activo: true,
+          estadoSalud: 100,
+          diasObraRestantes: 0,
+          diasObraTotal: 0,
+          zona: z,
+        },
+      });
+    }
+  }
+
+  void nivelMundo;
+  return base;
 }
 
 export function createInitialGameState(rawConfig: WorldConfig): GameState {
@@ -253,548 +354,699 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     ...resolved,
     semilla,
   };
-  const rng: RngHolder = { rngState: semilla };
-  const preset = SCENARIO_PRESETS[config.escenarioId];
-  const pop = config.poblacionInicial;
-  const scale = pop / 100;
 
-  const parcelas = buildInitialParcelas(config.escenarioId, config.nivelMundo ?? 'M1');
+  const rng: RngHolder = { rngState: semilla };
+  const subRng = initSubsystemRng(semilla);
+  const preset = SCENARIO_PRESETS[config.escenarioId];
+  const pop = clamp(Math.round(config.poblacionInicial || 100), 50, 5000);
+  const scale = pop / 100;
+  const zonas = structuredClone(preset.zonas);
+  const zoneIds = Object.keys(zonas);
+
+  const parcelas = buildScaledParcelas(config.escenarioId, config.nivelMundo, pop, zonas);
+  const initialLevers: GovernorLevers = structuredClone(preset.initialLevers);
   const cuposFijos = {
-    estatal: Math.max(1, Math.round(preset.cuposFijos.estatal * scale)),
-    docente: Math.max(1, Math.round(preset.cuposFijos.docente * scale)),
+    estatal: Math.max(2, Math.round(preset.cuposFijos.estatal * scale)),
+    docente: Math.max(2, Math.round(preset.cuposFijos.docente * scale)),
   };
 
-  const initialLevers: GovernorLevers = structuredClone(preset.initialLevers);
   const jobCaps = getBuildingJobCaps(parcelas, pop, initialLevers.nivelObras, pop, cuposFijos);
 
-  // ESTADOS §10 exact composition across all 14 roles (100 NPCs default)
-  const baseDistribution: Array<{ rol: RoleId; count: number }> = [
+  // Build role counts that fit exact initial vacancies + balanced minors/retirees
+  const roleDistribution: Array<{ rol: RoleId; count: number }> = [
     { rol: 'agricultor', count: jobCaps.agricultor },
+    { rol: 'tecnico', count: jobCaps.tecnico },
     { rol: 'obrero', count: jobCaps.obrero },
-    { rol: 'tecnico', count: Math.max(1, Math.round(preset.topesPrivados.tecnico * scale)) },
-    { rol: 'comerciante', count: Math.max(2, jobCaps.comerciante) },
-    { rol: 'empresario', count: Math.max(1, preset.topesPrivados.empresario) },
-    { rol: 'periodista', count: Math.max(config.cantidadMedios, Math.round(preset.topesPrivados.periodista * scale)) },
+    { rol: 'comerciante', count: jobCaps.comerciante },
+    { rol: 'constructor', count: Math.max(2, jobCaps.constructor) },
+    { rol: 'inmobiliario', count: Math.max(1, jobCaps.inmobiliario) },
+    { rol: 'empresario', count: Math.max(2, Math.round(3 * scale)) },
+    { rol: 'periodista', count: Math.max(config.cantidadMedios, jobCaps.periodista) },
     { rol: 'policia', count: jobCaps.policia },
-    { rol: 'estatal', count: cuposFijos.estatal },
-    { rol: 'docente', count: cuposFijos.docente },
     { rol: 'medico', count: jobCaps.medico },
     { rol: 'ingeniero', count: getObrasTargetJobs(pop, initialLevers.nivelObras) },
-    { rol: 'estudiante', count: Math.round(12 * scale) },
-    { rol: 'jubilado', count: Math.round(10 * scale) },
-    { rol: 'desempleado', count: Math.max(1, Math.round(2 * scale)) },
+    { rol: 'estatal', count: cuposFijos.estatal },
+    { rol: 'docente', count: cuposFijos.docente },
+    { rol: 'estudiante', count: Math.round(20 * scale) },
+    { rol: 'jubilado', count: Math.round(8 * scale) },
+    { rol: 'desempleado', count: 0 },
   ];
 
-  const currentTotal = baseDistribution.reduce((acc, item) => acc + item.count, 0);
-  if (currentTotal !== pop) {
-    // Keep private farmer/worker roles capped by existing buildings, adjust unallocated slack into desempleado/estudiante
-    const delta = pop - currentTotal;
-    const desIdx = baseDistribution.findIndex((b) => b.rol === 'desempleado');
-    if (desIdx >= 0 && baseDistribution[desIdx].count + delta >= 0) {
-      baseDistribution[desIdx].count += delta;
-    } else {
-      baseDistribution[0].count = Math.max(5, baseDistribution[0].count + delta);
+  const sumAssigned = roleDistribution.reduce((s, r) => s + r.count, 0);
+  if (sumAssigned < pop) {
+    const slack = pop - sumAssigned;
+    const estSlot = roleDistribution.find((r) => r.rol === 'estudiante')!;
+    const agSlot = roleDistribution.find((r) => r.rol === 'agricultor')!;
+    const desSlot = roleDistribution.find((r) => r.rol === 'desempleado')!;
+    const extraStud = Math.floor(slack * 0.45);
+    const extraAg = Math.floor(slack * 0.35);
+    estSlot.count += extraStud;
+    agSlot.count += extraAg;
+    desSlot.count += slack - extraStud - extraAg;
+  } else if (sumAssigned > pop) {
+    let over = sumAssigned - pop;
+    for (const r of ['estudiante', 'jubilado', 'obrero', 'agricultor'] as RoleId[]) {
+      const slot = roleDistribution.find((x) => x.rol === r)!;
+      const cut = Math.min(over, Math.max(0, slot.count - 2));
+      slot.count -= cut;
+      over -= cut;
     }
   }
 
+  // Generate NPCs
   const npcs: Npc[] = [];
-  let idx = 0;
-
-  const activeComisariaZones = Array.from(
-    new Set(
-      parcelas
-        .filter((p) => p.estado === 'ocupada' && p.edificio?.activo && p.edificio.tipo === 'comisaria')
-        .map((p) => p.zona)
-    )
-  );
-
-  for (const entry of baseDistribution) {
-    const def = ROLE_CATALOG[entry.rol];
-    const allowedZones: ZoneId[] =
-      config.nivelMundo === 'M0'
-        ? ['centro']
-        : entry.rol === 'policia' && activeComisariaZones.length > 0
-        ? activeComisariaZones
-        : preset.zonaPorRol[entry.rol] || ['centro'];
-    for (let i = 0; i < entry.count; i++) {
-      const id = `npc_${String(idx + 1).padStart(3, '0')}`;
-      const baseName = SPANISH_NAMES[idx % SPANISH_NAMES.length];
-      const nombre = idx >= SPANISH_NAMES.length ? `${baseName} ${Math.floor(idx / SPANISH_NAMES.length) + 1}` : baseName;
-      const zona: ZoneId = config.nivelMundo === 'M0' ? 'centro' : allowedZones[i % allowedZones.length];
-
-      let edad = randInt(rng, 22, 58);
-      if (entry.rol === 'estudiante') edad = randInt(rng, 8, 17);
-      if (entry.rol === 'jubilado') edad = randInt(rng, 65, 84);
-
+  let npcSeq = 0;
+  for (const item of roleDistribution) {
+    const def = ROLE_CATALOG[item.rol];
+    const allowedZ = preset.zonaPorRol[item.rol] ?? zoneIds;
+    for (let i = 0; i < item.count; i++) {
+      npcSeq++;
+      const id = `npc_${String(npcSeq).padStart(3, '0')}`;
+      const nombre = SPANISH_NAMES[(npcSeq - 1) % SPANISH_NAMES.length];
+      const apellido = SPANISH_LAST_NAMES[(npcSeq * 7 + randInt(rng, 0, 10)) % SPANISH_LAST_NAMES.length];
+      const zona = allowedZ[i % allowedZ.length] ?? 'centro';
+      const edad =
+        item.rol === 'estudiante'
+          ? randInt(rng, 3, 17)
+          : item.rol === 'jubilado'
+          ? randInt(rng, 65, 82)
+          : randInt(rng, 21, 56);
       const educNivel =
-        entry.rol === 'estudiante' ? randInt(rng, 0, 3) : Math.max(def.educMin, randInt(rng, def.educMin, 3));
-      const pos = getDistrictPosition(entry.rol, rng);
-      const dest = getDistrictPosition(entry.rol, rng);
+        item.rol === 'estudiante'
+          ? edad >= 14
+            ? 1
+            : 0
+          : Math.max(def.educMin, randInt(rng, def.educMin, 3));
 
       const personalidad = {
-        valentia: clamp(Math.round(randRange(rng, 20, 80) + (def.afinidad === 'valentia' ? 18 : 0)), 5, 98),
-        laboriosidad: clamp(Math.round(randRange(rng, 25, 82) + (def.afinidad === 'laboriosidad' ? 15 : 0)), 10, 98),
-        codicia: clamp(Math.round(randRange(rng, 18, 78) + (def.afinidad === 'codicia' ? 18 : 0)), 5, 98),
-        rebeldia: clamp(Math.round(randRange(rng, 12, 65) + (def.afinidad === 'rebeldia' ? 18 : 0)), 5, 95),
-        resiliencia: clamp(Math.round(randRange(rng, 30, 85)), 10, 98),
+        valentia: clamp(Math.round(randRange(rng, 25, 80) + (def.afinidad === 'valentia' ? 16 : 0)), 8, 96),
+        laboriosidad: clamp(Math.round(randRange(rng, 30, 84) + (def.afinidad === 'laboriosidad' ? 14 : 0)), 10, 98),
+        codicia: clamp(Math.round(randRange(rng, 20, 78) + (def.afinidad === 'codicia' ? 16 : 0)), 8, 96),
+        rebeldia: clamp(Math.round(randRange(rng, 14, 62) + (def.afinidad === 'rebeldia' ? 16 : 0)), 5, 92),
+        resiliencia: clamp(Math.round(randRange(rng, 34, 86)), 15, 96),
       };
 
-      const miedoInicial = config.escenarioId === 'zombies' ? randInt(rng, 18, 34) : randInt(rng, 5, 16);
-      const lealtadInicial = clamp(Math.round(randRange(rng, 42, 66)), 25, 82);
-      const saludInicial = entry.rol === 'jubilado' ? randInt(rng, 68, 86) : randInt(rng, 82, 98);
-
-      const objetivoDespensa = clamp(
-        ECON_CONSTANTS.objetivoBaseDias *
-          (1 +
-            ECON_CONSTANTS.kPrudenciaDespensa * (1 - personalidad.valentia / 100) +
-            ECON_CONSTANTS.kMiedoDespensa * (miedoInicial / 100)),
-        1,
-        ECON_CONSTANTS.despensaMaxDias
+      const zPos = getZoneCanvasPosition(zona, rng, zonas);
+      const propGasto = Math.round(
+        clamp(68 - (personalidad.codicia - 50) * 0.25 + randRange(rng, -6, 6), 42, 88)
       );
-
-      const propensionGasto = Number(
-        clamp(
-          ECON_CONSTANTS.propensionGastoBase -
-            (personalidad.codicia / 100 - 0.5) * 0.22 +
-            randRange(rng, -0.05, 0.05),
-          ECON_CONSTANTS.propensionGastoMin,
-          ECON_CONSTANTS.propensionGastoMax
-        ).toFixed(3)
-      );
-
-      const initTaxRate = def.grupo === 'sin_ingreso' ? 0 : initialLevers.impuesto;
-      const initIncomePos = Number(nextRand(rng).toFixed(2));
-      const estProdInit = clamp(
-        (0.35 + 0.65 * (personalidad.laboriosidad / 100)) *
-          (0.45 + 0.55 * 0.99) *
-          (0.55 + 0.45 * 0.57) *
-          (0.85 + 0.3 * 0.575),
-        0,
-        1.35
-      );
-      const estNetoInicial =
-        entry.rol === 'empresario'
-          ? 14.5
-          : entry.rol === 'comerciante'
-          ? 9.5
-          : entry.rol === 'jubilado'
-          ? Number((ECON_CONSTANTS.pensionBase + initialLevers.ayudaSocial).toFixed(2))
-          : entry.rol === 'desempleado'
-          ? initialLevers.ayudaSocial
-          : def.publico
-          ? Number(
-              (
-                ECON_CONSTANTS.salarioBasePublico *
-                (initialLevers.salarioPublico / 100) *
-                (1 - initTaxRate / 100)
-              ).toFixed(2)
-            )
-          : def.ingreso
-          ? Number(
-              (
-                (def.ingreso[0] + initIncomePos * (def.ingreso[1] - def.ingreso[0])) *
-                estProdInit *
-                (1 - initTaxRate / 100)
-              ).toFixed(2)
-            )
-          : 0;
-
-      const initialDinero = 0;
-      const initialDespensa = Number(
-        clamp(objetivoDespensa - 1, 1.5, ECON_CONSTANTS.despensaMaxDias).toFixed(2)
+      const propEmprender = Math.round(
+        clamp(personalidad.codicia * 0.42 + personalidad.rebeldia * 0.22 + randRange(rng, 0, 18), 10, 92)
       );
 
       npcs.push({
         id,
         nombre,
+        apellido,
         edad,
         cumpleanosDia: randInt(rng, 1, 365),
+        hogarId: '',
+        parejaId: null,
+        padresIds: [],
+        rol: item.rol,
+        empleadorId: null,
+        partes: [],
+        zona,
+        vivo: true,
         educacion: {
           nivel: educNivel,
+          estudiando: item.rol === 'estudiante',
         },
         personalidad,
         variables: {
-          salud: saludInicial,
+          salud: item.rol === 'jubilado' ? randInt(rng, 70, 88) : randInt(rng, 84, 98),
           hambre: randInt(rng, 8, 22),
-          miedo: miedoInicial,
-          satisfaccion: randInt(rng, 52, 72),
-          lealtad: lealtadInicial,
+          miedo: config.escenarioId === 'zombies' ? randInt(rng, 14, 30) : randInt(rng, 5, 16),
+          satisfaccion: randInt(rng, 54, 74),
+          lealtad: randInt(rng, 46, 68),
         },
         economia: {
-          ingresoPos: initIncomePos,
-          dinero: initialDinero,
-          ultimoIngresoNeto: estNetoInicial,
-          despensa: initialDespensa,
-          propensionGasto,
-          noPudoPagarComida: false,
+          ingresoPos: randInt(rng, 25, 80),
+          propensionGasto: propGasto,
+          propensionEmprender: propEmprender,
+          ultimoIngresoNeto: def.grupo === 'sin_ingreso' ? 0 : 6.2,
         },
-        rol: entry.rol,
-        zona,
         hospital: {
           internado: false,
           esperandoCama: false,
           diasInternado: 0,
         },
-        mapa: {
-          x: pos.x,
-          y: pos.y,
-          destino: dest,
-          accion:
-            entry.rol === 'estudiante'
-              ? 'estudiando'
-              : entry.rol === 'jubilado' || entry.rol === 'desempleado'
-              ? 'paseando'
-              : 'trabajando',
-        },
         accionIa: null,
         modificadores: [],
-        vivo: true,
+        mapa: {
+          x: zPos.x,
+          y: zPos.y,
+          destino: { x: zPos.x, y: zPos.y },
+          accion: item.rol === 'estudiante' ? 'estudiando' : item.rol === 'jubilado' ? 'paseando' : 'trabajando',
+        },
       });
-      idx++;
     }
   }
 
-  const journalistIds = npcs.filter((n) => n.rol === 'periodista').map((n) => n.id);
-  const mediaCount = clamp(config.cantidadMedios, 1, 3);
-  const fondosInicialesPorMedio = Number((initialLevers.prensa / mediaCount).toFixed(1));
-  const medios: MediaOutlet[] = MEDIA_TEMPLATES.slice(0, mediaCount).map((tpl, mIdx) => {
-    const assigned = journalistIds.filter((_, jIdx) => jIdx % mediaCount === mIdx);
-    if (assigned.length === 0 && journalistIds.length > 0) {
-      assigned.push(journalistIds[0]);
+  // Group NPCs into coherent Households (adult couples, children, retirees)
+  const adults = npcs.filter((n) => n.edad >= 18 && n.edad < 65);
+  const retirees = npcs.filter((n) => n.edad >= 65);
+  const minors = npcs.filter((n) => n.edad < 18);
+
+  const hogares: Hogar[] = [];
+  let hSeq = 0;
+
+  let adultCursor = 0;
+  while (adultCursor < adults.length) {
+    hSeq++;
+    const hId = `h_${hSeq}`;
+    const p1 = adults[adultCursor++];
+    const members: Npc[] = [p1];
+
+    // Pair ~65% of adults
+    if (adultCursor < adults.length && nextRand(rng) < 0.65) {
+      const p2 = adults[adultCursor++];
+      p1.parejaId = p2.id;
+      p2.parejaId = p1.id;
+      p2.apellido = p1.apellido;
+      p2.zona = p1.zona;
+      members.push(p2);
     }
-    const depPct = Number(
-      ((fondosInicialesPorMedio / Math.max(1, tpl.ingresosPropios + fondosInicialesPorMedio)) * 100).toFixed(1)
+
+    hogares.push({
+      id: hId,
+      miembros: members.map((m) => m.id),
+      casaId: null,
+      dinero: 0,
+      despensa: 0,
+      estado: 'calle',
+      periodosSinPagar: 0,
+      periodosHacinado: 0,
+      zona: p1.zona,
+      ultimoIngresoNeto: 0,
+      alquilerPagadoPeriodo: 0,
+    });
+    for (const m of members) m.hogarId = hId;
+  }
+
+  // Attach retirees either with an adult family or in own retiree household
+  for (let i = 0; i < retirees.length; i++) {
+    const ret = retirees[i];
+    if (i % 2 === 0 && hogares.length > 0) {
+      const targetH = hogares[i % hogares.length];
+      targetH.miembros.push(ret.id);
+      ret.hogarId = targetH.id;
+      ret.zona = targetH.zona;
+    } else {
+      hSeq++;
+      const hId = `h_${hSeq}`;
+      hogares.push({
+        id: hId,
+        miembros: [ret.id],
+        casaId: null,
+        dinero: 0,
+        despensa: 0,
+        estado: 'calle',
+        periodosSinPagar: 0,
+        periodosHacinado: 0,
+        zona: ret.zona,
+        ultimoIngresoNeto: 0,
+        alquilerPagadoPeriodo: 0,
+      });
+      ret.hogarId = hId;
+    }
+  }
+
+  // Attach minors to multi-adult or matching-zone households with coherent parents/apellido
+  const npcById = new Map(npcs.map((n) => [n.id, n]));
+  const eligibleFamilyHogares = hogares.filter((h) => h.miembros.length >= 2);
+  const fallbackHogares = hogares.length > 0 ? hogares : [];
+  for (let i = 0; i < minors.length; i++) {
+    const ch = minors[i];
+    const pool = eligibleFamilyHogares.length > 0 ? eligibleFamilyHogares : fallbackHogares;
+    const h = pool[i % pool.length];
+    const firstParent = npcById.get(h.miembros[0]);
+    const secondParent = h.miembros[1] ? npcById.get(h.miembros[1]) : undefined;
+    ch.hogarId = h.id;
+    ch.zona = h.zona;
+    if (firstParent) {
+      ch.apellido = firstParent.apellido;
+      ch.padresIds = secondParent ? [firstParent.id, secondParent.id] : [firstParent.id];
+    }
+    h.miembros.push(ch.id);
+  }
+
+  // Build Firms by Rubro (V2 generic Firma model)
+  const firmas: Firma[] = [];
+  let fSeq = 0;
+  const privateParcels = parcelas.filter(
+    (p) => p.estado === 'ocupada' && p.edificio && (p.tipoParcela === 'agricola' || p.tipoParcela === 'comercial')
+  );
+
+  const createFirma = (
+    rubro: FirmRubro,
+    nombre: string,
+    zona: ZoneId,
+    locales: string[],
+    owners: Npc[],
+    initCaja: number
+  ): Firma => {
+    fSeq++;
+    const fid = `f_${fSeq}`;
+    const validOwners = owners.filter((o) => o.vivo);
+    const pctEach = validOwners.length > 0 ? 100 / validOwners.length : 0;
+    const partes = validOwners.map((o) => ({ tipo: 'npc' as const, id: o.id, pct: Number(pctEach.toFixed(4)) }));
+    if (partes.length > 1) {
+      const sum = partes.reduce((s, p) => s + p.pct, 0);
+      partes[0].pct = Number((partes[0].pct + (100 - sum)).toFixed(4));
+    }
+    for (const p of partes) {
+      const o = npcById.get(p.id);
+      if (o) o.partes.push({ firmaId: fid, pct: p.pct });
+    }
+
+    const f: Firma = {
+      id: fid,
+      rubro,
+      nombre,
+      zona,
+      activa: true,
+      partes,
+      gerenteId: validOwners[0]?.id ?? null,
+      locales: [...locales],
+      empleados: [],
+      ventas: 0,
+      caja: initCaja,
+      parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
+      factor: 1.0,
+      cuotaZona: {},
+      margenPoder: 0,
+      stock: rubro === 'agro' ? 0 : undefined,
+      siloDias: rubro === 'agro' ? ECON_CONSTANTS.siloDias : undefined,
+      periodosEnPerdida: 0,
+      periodosSinDueno: 0,
+      periodosFactorAlto: 0,
+      periodosFactorBajo: 0,
+      ultimoTramo: 'normal',
+      despidosPendientes: 0,
+      refPorEmpleado: {},
+      ultimoIngresoPeriodo: 120,
+      ultimoSueldosPeriodo: 75,
+      ultimaGanancia: 35,
+      historialGanancias: [35],
+    };
+
+    for (const pid of locales) {
+      const parcel = parcelas.find((x) => x.id === pid);
+      if (parcel?.edificio) {
+        parcel.edificio.firmaId = fid;
+        parcel.edificio.dueno = fid;
+        parcel.edificio.duenoRef = { tipo: 'firma', id: fid };
+      }
+    }
+
+    firmas.push(f);
+    return f;
+  };
+
+  const empresarios = npcs.filter((n) => n.rol === 'empresario');
+  const comerciantes = npcs.filter((n) => n.rol === 'comerciante');
+  const constructores = npcs.filter((n) => n.rol === 'constructor');
+  const inmobiliarios = npcs.filter((n) => n.rol === 'inmobiliario');
+  const periodistas = npcs.filter((n) => n.rol === 'periodista');
+
+  if (config.nivelMundo === 'M0') {
+    const agroParcels = privateParcels.filter((p) => p.tipoParcela === 'agricola').map((p) => p.id);
+    const comParcels = privateParcels.filter((p) => p.tipoParcela === 'comercial').map((p) => p.id);
+    createFirma('agro', 'Productora de Alimento', 'centro', agroParcels, empresarios.slice(0, 1), 360);
+    createFirma('comercio', 'Comercio y Servicios', 'centro', comParcels, comerciantes.slice(0, 2), 340);
+  } else {
+    // Group agricultural fields into 2-4 agro firms
+    const agroParcels = privateParcels.filter((p) => p.edificio?.tipo === 'campo');
+    const agroGroups = Math.max(2, Math.min(4, Math.ceil(agroParcels.length / 2)));
+    for (let g = 0; g < agroGroups; g++) {
+      const slice = agroParcels.filter((_, idx) => idx % agroGroups === g);
+      if (slice.length === 0) continue;
+      const owner = empresarios[g % Math.max(1, empresarios.length)] ?? comerciantes[0];
+      createFirma(
+        'agro',
+        `Agropecuaria ${slice[0].zona.charAt(0).toUpperCase() + slice[0].zona.slice(1)}`,
+        slice[0].zona,
+        slice.map((s) => s.id),
+        owner ? [owner] : [],
+        320
+      );
+    }
+
+    // Commerce firms (each shop/kiosco/restoran parcel or pair is a competing comercio firm)
+    const comParcels = privateParcels.filter(
+      (p) =>
+        p.edificio &&
+        (p.edificio.tipo === 'almacen' ||
+          p.edificio.tipo === 'kiosco' ||
+          p.edificio.tipo === 'restoran' ||
+          p.edificio.tipo === 'local_comercio')
     );
-    return {
-      id: tpl.id,
+    comParcels.forEach((p, idx) => {
+      const owner = comerciantes[idx % Math.max(1, comerciantes.length)] ?? empresarios[0];
+      createFirma(
+        'comercio',
+        p.nombre,
+        p.zona,
+        [p.id],
+        owner ? [owner] : [],
+        220
+      );
+    });
+
+    // Constructora firms
+    const constrParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_constructora');
+    if (constrParcels.length > 0) {
+      constrParcels.forEach((p, idx) => {
+        const owner = constructores[idx % Math.max(1, constructores.length)] ?? empresarios[0];
+        createFirma('construccion', p.nombre, p.zona, [p.id], owner ? [owner] : [], 380);
+      });
+    } else {
+      createFirma('construccion', 'Constructora del Valle', 'centro', [], constructores.slice(0, 1), 380);
+    }
+
+    // Inmobiliaria firms
+    const inmobParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_inmobiliaria');
+    if (inmobParcels.length > 0) {
+      inmobParcels.forEach((p, idx) => {
+        const owner = inmobiliarios[idx % Math.max(1, inmobiliarios.length)] ?? empresarios[0];
+        createFirma('inmobiliaria', p.nombre, p.zona, [p.id], owner ? [owner] : [], 360);
+      });
+    } else {
+      createFirma('inmobiliaria', 'Inmobiliaria del Valle', 'centro', [], inmobiliarios.slice(0, 1), 360);
+    }
+  }
+
+  // Media outlets (as rubro 'medio' firms)
+  const mediaCount = clamp(config.cantidadMedios ?? preset.mediosDefault, 1, 3);
+  const medioParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_medio');
+  const medios: MediaOutlet[] = [];
+  const fondosPorMedio = Number((initialLevers.prensa / mediaCount).toFixed(1));
+  for (let mIdx = 0; mIdx < mediaCount; mIdx++) {
+    const tpl = MEDIA_TEMPLATES[mIdx] ?? MEDIA_TEMPLATES[0];
+    const parcel = medioParcels[mIdx];
+    const owner = periodistas[mIdx % Math.max(1, periodistas.length)] ?? empresarios[0];
+    const mFirm = createFirma(
+      'medio',
+      tpl.nombre,
+      parcel?.zona ?? 'centro',
+      parcel ? [parcel.id] : [],
+      owner ? [owner] : [],
+      180
+    );
+    const cols = periodistas.filter((_, j) => j % mediaCount === mIdx).map((n) => n.id);
+    if (cols.length === 0 && periodistas[0]) cols.push(periodistas[0].id);
+
+    const depPct = Number(
+      ((fondosPorMedio / Math.max(1, tpl.ingresosPropios + fondosPorMedio)) * 100).toFixed(1)
+    );
+    medios.push({
+      id: mFirm.id,
+      firmaId: mFirm.id,
       nombre: tpl.nombre,
+      zona: mFirm.zona,
+      activa: true,
+      duenoNpcIds: owner ? [owner.id] : [],
+      columnistas: cols,
+      alcancePct: tpl.alcancePct,
+      credibilidad: tpl.credibilidad,
+      afinidadBase: tpl.afinidadGobierno,
       lineaEditorial: {
         afinidadGobierno: tpl.afinidadGobierno,
         sensacionalismo: tpl.sensacionalismo,
       },
-      afinidadBase: tpl.afinidadGobierno,
-      credibilidad: tpl.credibilidad,
-      alcancePct: Math.round(clamp(14 + Math.sqrt(fondosInicialesPorMedio) * 11.5, 12, 95)),
-      columnistas: assigned,
-      finanzas: {
-        ingresosPropios: tpl.ingresosPropios,
-        fondosEstado: fondosInicialesPorMedio,
+      ingresos: {
+        publicidad: tpl.ingresosPropios,
+        fondosEstado: fondosPorMedio,
         dependenciaPct: depPct,
       },
-    };
-  });
+      finanzas: {
+        ingresosPropios: tpl.ingresosPropios,
+        fondosEstado: fondosPorMedio,
+        dependenciaPct: depPct,
+      },
+      caja: mFirm.caja,
+      periodosEnPerdida: 0,
+    });
+  }
 
-  const serviceRoleCounts: Record<ServicePublicRoleId, number> = {
+  // Assign private workers to firms
+  const firmsByRoleMatch = (rol: RoleId): Firma[] => {
+    const def = ROLE_CATALOG[rol];
+    if (def.rubro === 'agro') return firmas.filter((f) => f.rubro === 'agro');
+    if (def.rubro === 'comercio') return firmas.filter((f) => f.rubro === 'comercio');
+    if (def.rubro === 'construccion') return firmas.filter((f) => f.rubro === 'construccion');
+    if (def.rubro === 'comercio|construccion') {
+      return firmas.filter((f) => f.rubro === 'comercio' || f.rubro === 'construccion');
+    }
+    if (def.rubro === 'inmobiliaria') return firmas.filter((f) => f.rubro === 'inmobiliaria');
+    if (def.rubro === 'medio') return firmas.filter((f) => f.rubro === 'medio');
+    return [];
+  };
+
+  for (const n of npcs) {
+    const def = ROLE_CATALOG[n.rol];
+    if (def.grupo !== 'privado' || def.gerencia) continue;
+    const pool = firmsByRoleMatch(n.rol);
+    if (pool.length === 0) continue;
+    // Pick same zone firm if possible, balanced by fewest employees
+    pool.sort((a, b) => {
+      const aZone = a.zona === n.zona ? 0 : 1;
+      const bZone = b.zona === n.zona ? 0 : 1;
+      if (aZone !== bZone) return aZone - bZone;
+      return a.empleados.length - b.empleados.length;
+    });
+    const chosen = pool[0];
+    n.empleadorId = chosen.id;
+    chosen.empleados.push(n.id);
+  }
+
+  // Allocate Houses to Residential Parcels & Households
+  const casas: Casa[] = [];
+  let cSeq = 0;
+  const resParcels = parcelas.filter((p) => p.tipoParcela === 'residencial');
+  const inmobFirms = firmas.filter((f) => f.rubro === 'inmobiliaria');
+  const sortedHogares = [...hogares].sort((a, b) => b.miembros.length - a.miembros.length);
+
+  // First build houses on residential parcels enough for households + ~12% vacant buffer
+  const targetHouses = Math.min(resParcels.length, Math.ceil(sortedHogares.length * 1.12));
+  for (let i = 0; i < targetHouses; i++) {
+    const parcel = resParcels[i];
+    const h = sortedHogares[i];
+    const desiredCap = h ? h.miembros.length : 4;
+    const houseType: HouseType =
+      desiredCap >= 6 ? 'casa_grande' : desiredCap >= 4 ? 'casa_mediana' : 'casa_chica';
+    const def = BUILDING_CATALOG[houseType];
+    cSeq++;
+    const casaId = `c_${cSeq}`;
+
+    // Distribute ownership: ~45% homeowner, ~35% inmobiliaria, ~20% individual npc
+    let dueno: Casa['dueno'] = { tipo: 'hogar', id: h?.id ?? 'estado' };
+    if (h && i % 10 < 5) {
+      dueno = { tipo: 'hogar', id: h.id };
+    } else if (inmobFirms.length > 0 && i % 10 < 8) {
+      const inf = inmobFirms[i % inmobFirms.length];
+      dueno = { tipo: 'firma', id: inf.id };
+    } else if (empresarios.length > 0) {
+      const ownerNpc = empresarios[i % empresarios.length];
+      dueno = { tipo: 'npc', id: ownerNpc.id };
+    } else {
+      dueno = { tipo: 'estado', id: 'estado' };
+    }
+
+    const zIdx = zonas[parcel.zona]?.demandaAlquilerIndice ?? 1.0;
+    const rent = Number(((def.alquilerBase ?? 12) * zIdx).toFixed(2));
+    const casa: Casa = {
+      id: casaId,
+      tipo: houseType,
+      parcelaId: parcel.id,
+      zona: parcel.zona,
+      capacidad: def.capacidadCasa ?? 4,
+      estado: randInt(rng, 84, 100),
+      dueno,
+      alquiler: rent,
+      hogarId: null,
+      diasVaciaSinMantenimiento: 0,
+      alquilerCobradoPeriodo: 0,
+    };
+
+    parcel.estado = 'ocupada';
+    parcel.edificio = {
+      id: `ed_casa_${cSeq}`,
+      tipo: houseType,
+      parcelaId: parcel.id,
+      dueno: dueno.id,
+      duenoRef: dueno,
+      casaId,
+      estado: 'ocupada',
+      activo: true,
+      estadoSalud: casa.estado,
+      diasObraRestantes: 0,
+      diasObraTotal: 0,
+      zona: parcel.zona,
+    };
+
+    if (h) {
+      casa.hogarId = h.id;
+      h.casaId = casa.id;
+      h.estado = 'con_casa';
+      h.zona = parcel.zona;
+      for (const mid of h.miembros) {
+        const m = npcById.get(mid);
+        if (m) m.zona = parcel.zona;
+      }
+    }
+    casas.push(casa);
+  }
+
+  // Calibrate initial household dinero, despensa & agro stock
+  const totalStockInicial = Math.round(preset.stockAlimentoInicial * scale);
+  const agroFirms = firmas.filter((f) => f.rubro === 'agro');
+  if (agroFirms.length > 0) {
+    const perAgro = totalStockInicial / agroFirms.length;
+    for (const af of agroFirms) af.stock = Number(perAgro.toFixed(2));
+  }
+
+  for (const h of hogares) {
+    const mCount = Math.max(1, h.miembros.length);
+    const workers = h.miembros.filter((id) => {
+      const m = npcById.get(id);
+      return m && ROLE_CATALOG[m.rol].grupo !== 'sin_ingreso';
+    }).length;
+    const baseNetPerPeriod = Math.max(18, workers * 42 + mCount * 10);
+    h.ultimoIngresoNeto = baseNetPerPeriod;
+    h.dinero = Math.round(baseNetPerPeriod * 1.45 + mCount * 18);
+    h.despensa = Number((mCount * 3.1).toFixed(2));
+  }
+
+  // Initial service coverage & integrity per zone
+  const serviceCounts: Record<ServicePublicRoleId, number> = {
     policia: npcs.filter((n) => n.rol === 'policia').length,
     medico: npcs.filter((n) => n.rol === 'medico').length,
     ingeniero: npcs.filter((n) => n.rol === 'ingeniero').length,
   };
-
   const coberturas: Record<ServicePublicRoleId, number> = {
-    policia: clamp(serviceRoleCounts.policia / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.policia), 0, 1),
-    medico: clamp(serviceRoleCounts.medico / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.medico), 0, 1),
-    ingeniero: clamp(serviceRoleCounts.ingeniero / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.ingeniero), 0, 1),
+    policia: clamp(serviceCounts.policia / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.policia), 0, 1),
+    medico: clamp(serviceCounts.medico / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.medico), 0, 1),
+    ingeniero: clamp(serviceCounts.ingeniero / Math.max(1, pop * ECON_CONSTANTS.objetivoCobertura.ingeniero), 0, 1),
   };
 
-  const stockInicial = Math.round(preset.stockAlimentoInicial * scale);
-  const empresarioNpc = npcs.find((n) => n.rol === 'empresario') || null;
-  const comerciantesNpcs = npcs.filter((n) => n.rol === 'comerciante');
+  const integridad: Record<ZoneId, number> = {};
+  const defInit = config.escenarioId === 'zombies' ? 52 : 55;
+  const ultimaDefensaZona: Record<ZoneId, number> = {};
+  const ultimaOrdenZona: Record<ZoneId, number> = {};
+  const ultimaIntegridadZona: Record<ZoneId, number> = {};
+  const golpesPorZonaHistorial: Record<ZoneId, number[]> = {};
+  for (const z of zoneIds) {
+    integridad[z] = 100;
+    ultimaDefensaZona[z] = defInit;
+    ultimaOrdenZona[z] = 95;
+    ultimaIntegridadZona[z] = 100;
+    golpesPorZonaHistorial[z] = [];
+  }
 
   const initialPhenomena: ClimatePhenomenon[] =
-    config.nivelMundo === 'M0'
+    config.nivelMundo === 'M0' || config.nivelMundo === 'M1'
       ? []
-      : config.escenarioId === 'zombies'
-      ? [
-          {
-            id: 'fen_zombie_init',
-            tipo: 'plaga_zombie',
-            nombre: 'Brote Zombie Periférico',
-            intensidad: 10,
-            inicioDia: 1,
-            duracionDias: 185,
-            crecimientoDia: 0.5,
-            origen: 'este',
-            avisoDias: 0,
-          },
-          {
-            id: 'fen_zombie_horda_1',
-            tipo: 'plaga_zombie',
-            nombre: 'Horda Zombie del Oeste',
-            intensidad: 65,
-            inicioDia: 55,
-            duracionDias: 12,
-            origen: 'oeste',
-            avisoDias: 8,
-          },
-          {
-            id: 'fen_zombie_horda_2',
-            tipo: 'plaga_zombie',
-            nombre: 'Horda Zombie del Norte',
-            intensidad: 80,
-            inicioDia: 115,
-            duracionDias: 14,
-            origen: 'norte',
-            avisoDias: 10,
-          },
-        ]
-      : [
-          {
-            id: 'seq_elecciones_verano',
-            tipo: 'sequia',
-            nombre: 'Sequía Estival Anunciada',
-            intensidad: 65,
-            inicioDia: 165,
-            duracionDias: 45,
-            avisoDias: 10,
-          },
-        ];
+      : structuredClone(preset.fenomenosIniciales);
 
-  const satInicial = Number(
-    (npcs.reduce((acc, n) => acc + n.variables.satisfaccion, 0) / Math.max(1, npcs.length)).toFixed(1)
-  );
-  const electores = npcs.filter((n) => n.edad >= 18);
-  const apoyoInicial =
-    electores.length > 0
-      ? Number(((electores.filter((n) => n.variables.lealtad >= 50).length / electores.length) * 100).toFixed(1))
-      : 0;
-  const hambreInicial = Number(
-    ((npcs.filter((n) => n.variables.hambre > 80).length / Math.max(1, npcs.length)) * 100).toFixed(1)
-  );
-  const despensaMediaInicial = Number(
-    (npcs.reduce((acc, n) => acc + n.economia.despensa, 0) / Math.max(1, npcs.length)).toFixed(1)
-  );
-
-  const getMetricValue = (m: 'apoyoPct' | 'hambreCriticaPct' | 'poblacion' | 'poblacionPct') =>
-    m === 'apoyoPct'
-      ? apoyoInicial
-      : m === 'hambreCriticaPct'
-      ? hambreInicial
-      : m === 'poblacionPct'
-      ? 100
-      : pop;
-
-  const initDefense = config.escenarioId === 'zombies' ? 52 : 55;
-  const inflacionInicial = preset.inflacionInicial;
-  const diasStockInicial = Number((stockInicial / (pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(1));
-
-  const estInitialProd = (w: Npc, satGuess = 0.57, saludGuess = 0.99): number => {
-    const lab = w.personalidad.laboriosidad / 100;
-    const sal = saludGuess;
-    const sat = satGuess;
-    const infraFactor = 0.85 + 0.3 * 0.575;
-    const taxRate = ROLE_CATALOG[w.rol].grupo === 'sin_ingreso' ? 0 : initialLevers.impuesto;
-    const fiscalFactor =
-      taxRate <= ECON_CONSTANTS.fiscalUmbral
-        ? 1
-        : Math.max(0.5, 1 - ECON_CONSTANTS.fiscalPendiente * (taxRate - ECON_CONSTANTS.fiscalUmbral));
-    return clamp(
-      (0.35 + 0.65 * lab) * (0.45 + 0.55 * sal) * (0.55 + 0.45 * sat) * infraFactor * fiscalFactor,
-      0,
-      1.35
-    );
-  };
-
-  const initTaxMult = 1 - initialLevers.impuesto / 100;
-  const foodWorkers = npcs.filter((n) => n.rol === 'agricultor' || n.rol === 'tecnico');
-  const foodWageEstPeriodo = Number(
-    (
-      foodWorkers.reduce((acc, w) => {
-        const range = ROLE_CATALOG[w.rol].ingreso!;
-        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * estInitialProd(w, 0.57, 0.99);
-      }, 0) * PERIOD_DAYS
-    ).toFixed(1)
-  );
-  const estFoodSalesPeriodo =
-    pop *
-    ECON_CONSTANTS.consumoPorNpc *
-    ECON_CONSTANTS.precioBaseAlimento *
-    (1 - ECON_CONSTANTS.margenComercialPct / 100) *
-    PERIOD_DAYS;
-  const foodParteSueldos = clamp(
-    Number((foodWageEstPeriodo / Math.max(1, estFoodSalesPeriodo)).toFixed(4)),
-    0.25,
-    0.92
-  );
-  const foodRevEstPeriodo = Number(
-    Math.max(foodWageEstPeriodo / Math.max(0.1, foodParteSueldos), estFoodSalesPeriodo).toFixed(1)
-  );
-  const empNetDiaEst = (Math.max(0, foodRevEstPeriodo - foodWageEstPeriodo) / PERIOD_DAYS) * initTaxMult;
-
-  const comWorkers = npcs.filter((n) => n.rol === 'obrero');
-  const comWageEstPeriodo = Number(
-    (
-      comWorkers.reduce((acc, w) => {
-        const range = ROLE_CATALOG[w.rol].ingreso!;
-        return acc + (range[0] + w.economia.ingresoPos * (range[1] - range[0])) * estInitialProd(w, 0.59, 0.985);
-      }, 0) * PERIOD_DAYS
-    ).toFixed(1)
-  );
-
-  const opBreakdown = computeMaintenanceBreakdown(parcelas, initialLevers.nivelObras, pop, pop);
-  const estOpPeriodo = opBreakdown.operacionTotal;
-  const foodMarginPeriodo =
-    pop *
-    ECON_CONSTANTS.consumoPorNpc *
-    ECON_CONSTANTS.precioBaseAlimento *
-    (ECON_CONSTANTS.margenComercialPct / 100) *
-    PERIOD_DAYS;
-
-  let comNetDiaEst = 9.5;
-  let estComSalesPeriodo = 0;
-  for (let iter = 0; iter < 10; iter++) {
-    let estLivingDia = 0;
-    for (const n of npcs) {
-      if (n.edad < 18) continue;
-      let effNet = n.economia.ultimoIngresoNeto;
-      if (n.rol === 'empresario') {
-        effNet = empNetDiaEst;
-      } else if (n.rol === 'comerciante') {
-        effNet = comNetDiaEst;
-      } else if (n.rol === 'agricultor' || n.rol === 'tecnico' || n.rol === 'periodista') {
-        const range = ROLE_CATALOG[n.rol].ingreso!;
-        effNet =
-          (range[0] + n.economia.ingresoPos * (range[1] - range[0])) *
-          estInitialProd(n, 0.57, 0.99) *
-          initTaxMult;
-      } else if (n.rol === 'obrero') {
-        const range = ROLE_CATALOG[n.rol].ingreso!;
-        effNet =
-          (range[0] + n.economia.ingresoPos * (range[1] - range[0])) *
-          estInitialProd(n, 0.59, 0.985) *
-          initTaxMult;
-      }
-      const baseNet = Math.max(0, effNet - ECON_CONSTANTS.precioBaseAlimento);
-      estLivingDia += (1 + (n.economia.propensionGasto - ECON_CONSTANTS.propensionGastoBase) * 0.25) * baseNet;
-    }
-    estComSalesPeriodo = foodMarginPeriodo + estLivingDia * 0.985 * PERIOD_DAYS + estOpPeriodo;
-    const merchCount = Math.max(1, comerciantesNpcs.length);
-    comNetDiaEst =
-      (Math.max(0, estComSalesPeriodo - comWageEstPeriodo) / merchCount / PERIOD_DAYS) * initTaxMult;
-  }
-
-  const comParteSueldos = clamp(
-    Number((comWageEstPeriodo / Math.max(1, estComSalesPeriodo)).toFixed(4)),
-    0.2,
-    0.9
-  );
-  const comRevEstPeriodo = Number(
-    Math.max(comWageEstPeriodo / Math.max(0.1, comParteSueldos), estComSalesPeriodo).toFixed(1)
-  );
-
-  const colchonInicial =
-    ECON_CONSTANTS.colchonDias * ECON_CONSTANTS.precioBaseAlimento * ECON_CONSTANTS.consumoPorNpc;
-  for (let i = 0; i < npcs.length; i++) {
-    const n = npcs[i];
-    const def = ROLE_CATALOG[n.rol];
-    let netDia = n.economia.ultimoIngresoNeto;
-    if (n.rol === 'empresario') {
-      netDia = Number(empNetDiaEst.toFixed(2));
-    } else if (n.rol === 'comerciante') {
-      netDia = Number(comNetDiaEst.toFixed(2));
-    } else if (n.rol === 'agricultor' || n.rol === 'tecnico' || n.rol === 'periodista') {
-      const range = def.ingreso!;
-      netDia = Number(
-        (
-          (range[0] + n.economia.ingresoPos * (range[1] - range[0])) *
-          estInitialProd(n, 0.57, 0.99) *
-          initTaxMult
-        ).toFixed(2)
-      );
-    } else if (n.rol === 'obrero') {
-      const range = def.ingreso!;
-      netDia = Number(
-        (
-          (range[0] + n.economia.ingresoPos * (range[1] - range[0])) *
-          estInitialProd(n, 0.59, 0.985) *
-          initTaxMult
-        ).toFixed(2)
-      );
-    }
-    n.economia.ultimoIngresoNeto = netDia;
-
-    const netAboveFood = Math.max(0, netDia - ECON_CONSTANTS.precioBaseAlimento);
-    const steadyAvgDinero =
-      colchonInicial +
-      ((1 - n.economia.propensionGasto) * netAboveFood) / Math.max(0.005, ECON_CONSTANTS.kRiqueza);
-    if (n.rol === 'estudiante') {
-      n.economia.dinero = 0;
-    } else if (n.rol === 'desempleado') {
-      n.economia.dinero = Math.round(initialLevers.ayudaSocial * PERIOD_DAYS);
-    } else if (n.rol === 'jubilado') {
-      n.economia.dinero = Math.round(colchonInicial + netAboveFood * PERIOD_DAYS + netDia * 0.5);
-    } else {
-      n.economia.dinero = Math.round(
-        Math.max(
-          ECON_CONSTANTS.precioBaseAlimento * PERIOD_DAYS,
-          steadyAvgDinero + netDia * PERIOD_DAYS * 0.4
-        )
-      );
-    }
-
-    const objDespensa = clamp(
-      ECON_CONSTANTS.objetivoBaseDias *
-        (1 +
-          ECON_CONSTANTS.kPrudenciaDespensa * (1 - n.personalidad.valentia / 100) +
-          ECON_CONSTANTS.kMiedoDespensa * (n.variables.miedo / 100)),
-      1,
-      ECON_CONSTANTS.despensaMaxDias
-    );
-    const pantryVal =
-      objDespensa - ECON_CONSTANTS.umbralRecompraDias >= 1.0
-        ? i % 2 === 0
-          ? objDespensa - 1.0
-          : objDespensa - 2.0
-        : objDespensa - 1.0;
-    n.economia.despensa = Number(clamp(pantryVal, 1.5, ECON_CONSTANTS.despensaMaxDias).toFixed(2));
-  }
-
-  const initialComVentasAcum = Number(estOpPeriodo.toFixed(2));
   const initialReserva = Math.round(preset.reservaInicial * scale);
-  const initMoneyTotal = Number(
-    (npcs.reduce((acc, n) => acc + n.economia.dinero, 0) + initialReserva + initialComVentasAcum).toFixed(2)
+  const satMedia = Number(
+    (npcs.reduce((s, n) => s + n.variables.satisfaccion, 0) / Math.max(1, pop)).toFixed(1)
   );
+  const apoyoInit = Number(
+    ((npcs.filter((n) => n.variables.lealtad >= 50).length / Math.max(1, pop)) * 100).toFixed(1)
+  );
+  const edadMedia = Number(
+    (npcs.reduce((s, n) => s + n.edad, 0) / Math.max(1, pop)).toFixed(1)
+  );
+  const calleCount = hogares.filter((h) => h.estado === 'calle').length;
+  const callePct = Number(((calleCount / Math.max(1, hogares.length)) * 100).toFixed(1));
+  const diasStockInit = Number((totalStockInicial / Math.max(1, pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(2));
 
-  return {
+  const state: GameState = {
     versionFormato: SAVE_FORMAT_VERSION,
     semilla,
-    rngState: rng.rngState,
-    idSeq: 0,
     config,
-    esConfigDePrueba: isTestConfig(config),
+    devMode: false,
+    rngState: rng.rngState,
+    rng: subRng,
+    idSeq: npcSeq + hSeq + cSeq + fSeq + 50,
     reloj: {
-      tick: 0,
       dia: 1,
       anio: 1,
       periodo: 1,
       diasEnPeriodo: 0,
+      tick: 0,
+      ticksPorDia: 120,
+      velocidad: 1,
+      pausado: false,
     },
+    zonas,
     npcs,
+    hogares,
+    casas,
+    firmas,
+    alimento: {
+      stock: totalStockInicial,
+      produccionDiaria: Math.round(pop * 1.15),
+      consumoDiario: pop * ECON_CONSTANTS.consumoPorNpc,
+      diasStock: diasStockInit,
+      siloDias: ECON_CONSTANTS.siloDias,
+      precio: ECON_CONSTANTS.precioBaseAlimento,
+      precioMercado: ECON_CONSTANTS.precioBaseAlimento,
+    },
+    empresas: {
+      alimento: {
+        id: 'alimento',
+        nombre: 'Agroalimentaria',
+        dueno: empresarios[0]?.id ?? null,
+        socios: [],
+        ventasAcum: 0,
+        parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
+        factor: 1,
+        stock: totalStockInicial,
+        siloDias: ECON_CONSTANTS.siloDias,
+        periodosFactorAlto: 0,
+        periodosFactorBajo: 0,
+        ultimoTramo: 'normal',
+        despidosPendientes: 0,
+        refPorEmpleado: {},
+        ultimoIngresoPeriodo: 0,
+        ultimoSueldosPeriodo: 0,
+        ultimaGanancia: 0,
+      },
+      comercio: {
+        id: 'comercio',
+        nombre: 'Comercio y Servicios',
+        dueno: null,
+        socios: comerciantes.map((c) => c.id),
+        ventasAcum: 0,
+        parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
+        factor: 1,
+        periodosFactorAlto: 0,
+        periodosFactorBajo: 0,
+        ultimoTramo: 'normal',
+        despidosPendientes: 0,
+        refPorEmpleado: {},
+        ultimoIngresoPeriodo: 0,
+        ultimoSueldosPeriodo: 0,
+        ultimaGanancia: 0,
+      },
+    },
     gobierno: {
       reserva: initialReserva,
-      inflacion: inflacionInicial,
-      finanzas: {
-        ingresos: 0,
-        nomina: 0,
-        pensiones: 0,
-        garantiaAlimentaria: 0,
-        garantiaImpaga: 0,
-        comidaMenores: 0,
-        ayudaSocial: 0,
-        mantenimiento: 0,
-        operacionObras: 0,
-        operacion: 0,
-        obras: 0,
-        prensa: 0,
-        saldo: 0,
-        emision: 0,
-        importaciones: 0,
-        exportaciones: 0,
-        impago: false,
-        alcanzaNomina: false,
-        prorrateoDiscrecional: 1,
-        prorrateoNomina: 1,
-        prorrateoPensionGarantia: 1,
+      inflacion: preset.inflacionInicial,
+      cuposFijos,
+      indicadores: {
+        seguridad: defInit,
+        salud: 64,
+        infraestructura: 58,
       },
+      coberturas,
+      integridad,
+      palancasVigentes: structuredClone(initialLevers),
+      palancasObjetivo: structuredClone(initialLevers),
       acumuladoPeriodo: {
         dias: 0,
         impuestos: 0,
@@ -808,98 +1060,53 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         garantiaAlimentaria: 0,
         garantiaImpaga: 0,
         comidaMenores: 0,
+        acogidaMenores: 0,
         mantenimiento: 0,
         operacionObras: 0,
         operacion: 0,
         obras: 0,
-        operacionPorArea: {
-          seguridad: 0,
-          salud: 0,
-          infraestructura: 0,
-        },
+        operacionPorArea: { seguridad: 0, salud: 0, infraestructura: 0 },
         prensa: 0,
         importaciones: 0,
         exportaciones: 0,
       },
-      indicadores: {
-        seguridad: initDefense,
-        salud: 62,
-        infraestructura: 56,
-      },
-      integridad: {
-        centro: 100,
-        norte: 100,
-        este: 100,
-        sur: 100,
-        oeste: 100,
-      },
-      coberturas,
-      cuposFijos,
-      palancasVigentes: structuredClone(initialLevers),
-      palancasObjetivo: structuredClone(initialLevers),
-    },
-    empresas: {
-      alimento: {
-        id: 'alimento',
-        dueno: empresarioNpc ? empresarioNpc.id : null,
-        stock: stockInicial,
-        diasStock: diasStockInicial,
-        siloDias: ECON_CONSTANTS.siloDias,
-        ventasAcum: 0,
-        parteSueldos: foodParteSueldos,
-        factor: 1,
-        periodosFactorAlto: 0,
-        periodosFactorBajo: 0,
-        ultimoTramo: 'normal',
-        despidosPendientes: 0,
-        refPorEmpleado: {},
-        ultimaGanancia: Number(Math.max(0, foodRevEstPeriodo - foodWageEstPeriodo).toFixed(1)),
-        ultimoIngresoPeriodo: foodRevEstPeriodo,
-        ultimoSueldosPeriodo: foodWageEstPeriodo,
-      },
-      comercio: {
-        id: 'comercio',
-        socios: comerciantesNpcs.map((c) => c.id),
-        ventasAcum: initialComVentasAcum,
-        parteSueldos: comParteSueldos,
-        factor: 1,
-        periodosFactorAlto: 0,
-        periodosFactorBajo: 0,
-        ultimoTramo: 'normal',
-        despidosPendientes: 0,
-        refPorEmpleado: {},
-        ultimaGanancia: Number(Math.max(0, comRevEstPeriodo - comWageEstPeriodo).toFixed(1)),
-        ultimoIngresoPeriodo: comRevEstPeriodo,
-        ultimoSueldosPeriodo: comWageEstPeriodo,
+      finanzas: {
+        ingresos: 0,
+        nomina: 0,
+        pensiones: 0,
+        garantiaAlimentaria: 0,
+        garantiaImpaga: 0,
+        comidaMenores: 0,
+        acogidaMenores: 0,
+        ayudaSocial: 0,
+        mantenimiento: 0,
+        operacionObras: 0,
+        operacion: 0,
+        obras: 0,
+        prensa: 0,
+        saldo: 0,
+        emision: 0,
+        importaciones: 0,
+        exportaciones: 0,
+        impago: false,
+        alcanzaNomina: true,
+        prorrateoDiscrecional: 1,
+        prorrateoNomina: 1,
+        prorrateoPensionGarantia: 1,
       },
     },
-    alimento: {
-      stock: stockInicial,
-      consumoPorNpc: ECON_CONSTANTS.consumoPorNpc,
-      diasStock: diasStockInicial,
-      siloDias: ECON_CONSTANTS.siloDias,
-      precio: ECON_CONSTANTS.precioBaseAlimento,
-      precioMercado: ECON_CONSTANTS.precioBaseAlimento,
-      precioBase: ECON_CONSTANTS.precioBaseAlimento,
-      produccionDiaria: (() => {
-        const agWorkers = npcs.filter((n) => n.rol === 'agricultor');
-        const tecWorkers = npcs.filter((n) => n.rol === 'tecnico');
-        const baseProd = agWorkers.reduce(
-          (acc, w) => acc + ECON_CONSTANTS.produccionBaseAgricultor * estInitialProd(w),
-          0
-        );
-        const effTecs = Math.min(
-          tecWorkers.reduce((acc, w) => acc + estInitialProd(w), 0),
-          agWorkers.length * ECON_CONSTANTS.tecnicosPorAgricultor
-        );
-        const techMult = agWorkers.length > 0 ? 1 + (effTecs / agWorkers.length) * ECON_CONSTANTS.kTecnificacion : 1;
-        return Number((baseProd * techMult).toFixed(1));
-      })(),
-      consumoDiario: pop * ECON_CONSTANTS.consumoPorNpc,
-    },
+    parcelas,
+    hitosCumplidos: [],
+    demandasActivas: [],
+    medidasVigentes: [],
+    bloqueosPalanca: [],
+    cooldownActorDemanda: {},
     clima: {
       fenomenos: initialPhenomena,
-      proximoEventoDia: config.nivelMundo === 'M0' ? 999999 : config.escenarioId === 'zombies' ? 28 : 22,
+      proximoEventoDia:
+        config.nivelMundo === 'M0' || config.nivelMundo === 'M1'
+          ? 999999
+          : preset.proximoEventoDiaInicial,
     },
     medios,
     noticias: [
@@ -910,101 +1117,96 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         medioNombre: medios[0].nombre,
         autorId: medios[0].columnistas[0] || npcs[0].id,
         autorNombre:
-          npcs.find((n) => n.id === (medios[0].columnistas[0] || npcs[0].id))?.nombre || 'Redacción',
+          npcs.find((n) => n.id === (medios[0].columnistas[0] || npcs[0].id))?.nombre ||
+          'Redacción',
         tema: 'gobierno',
         tono: 'neutral',
         alcance: medios[0].alcancePct,
         credibilidad: medios[0].credibilidad,
         titulo:
           config.escenarioId === 'zombies'
-            ? 'Asume nuevo gobernador bajo alerta sanitaria en las afueras'
-            : 'Comienza la gestión con cuentas equilibradas y horizonte electoral',
+            ? 'Alerta sanitaria en la periferia al iniciar la gestión'
+            : 'Inicia el mandato en el valle con 9 zonas activas',
         texto:
           config.escenarioId === 'zombies'
-            ? 'Con los primeros reportes de brotes en los límites del valle, la población observa de cerca el refuerzo de la policía y el abastecimiento de alimentos.'
-            : 'El despacho inicia su mandato con almacenes abastecidos y consenso inicial. Los sectores productivos aguardan las primeras señales impositivas y de gasto.',
+            ? 'Los brotes perimetrales ponen a prueba las defensas zonales y la capacidad hospitalaria.'
+            : 'Familias, comercios y campos productivos comienzan la temporada con precios estables.',
         origen: 'sistema:inicio',
         textoOrigen: 'plantilla',
       },
     ],
-    ultimaSalidaEconomica: {
-      accesoComida: Object.fromEntries(npcs.map((n) => [n.id, 1])),
-      poderAdquisitivo: Object.fromEntries(npcs.map((n) => [n.id, 55])),
-      saldoDiarioEstimado: 35,
-      precioAlimento: ECON_CONSTANTS.precioBaseAlimento,
-      inflacion: inflacionInicial,
-    },
+    colaHechosDia: [],
+    ventanasCondicion: [],
+    clasificadorRegistro: [],
     caosTracker: {
       ventanaInicioDia: 1,
       accionesEnVentana: 0,
       respiroActivo: false,
-      ultimoIntentoDia: 1,
     },
-    ventanasCondicion: [],
     cooldownsCondicion: {
       impago: 0,
       descontento: 0,
       hambre: 0,
+      paroFirma: 0,
+      ocupacion: 0,
+      boicot: 0,
     },
-    eventos: [],
-    eventosDiaActual: [],
-    golpesPorZonaHistorial: {
-      centro: [],
-      norte: [],
-      este: [],
-      sur: [],
-      oeste: [],
-    },
-    ultimaDefensaZona: {
-      centro: initDefense,
-      norte: initDefense,
-      este: initDefense,
-      sur: initDefense,
-      oeste: initDefense,
-    },
-    ultimaOrdenZona: {
-      centro: 100,
-      norte: 100,
-      este: 100,
-      sur: 100,
-      oeste: 100,
-    },
-    ultimaIntegridadZona: {
-      centro: 100,
-      norte: 100,
-      este: 100,
-      sur: 100,
-      oeste: 100,
-    },
-    fenomenosIniciadosIds: initialPhenomena.filter((f) => f.inicioDia <= 1).map((f) => f.id),
+    golpesPorZonaHistorial,
     avisosEmitidos: [],
-    auditEntradasDia: 0,
-    auditSalidasDia: 0,
-    ultimoDineroTotal: initMoneyTotal,
-    precioAyer: ECON_CONSTANTS.precioBaseAlimento,
-    hambreAyerPct: hambreInicial,
-    ultimoSaldoCierre: 0,
-    colaHechosDia: [],
+    fenomenosIniciadosIds: initialPhenomena.filter((f) => f.inicioDia <= 1).map((f) => f.id),
+    ultimaIntegridadZona,
+    ultimaDefensaZona,
+    ultimaOrdenZona,
     ultimaVariantePorAccion: {},
-    clasificadorRegistro: [],
-    metricasBaseObjetivo: {
-      victoriaInicial: getMetricValue(preset.victoria.metrica),
-      derrotaInicial: getMetricValue(preset.derrota.metrica),
+    precioAyer: ECON_CONSTANTS.precioBaseAlimento,
+    hambreAyerPct: 0,
+    ultimoSaldoCierre: 0,
+    ultimaSalidaEconomica: {
+      accesoComida: Object.fromEntries(hogares.map((h) => [h.id, 1])),
+      poderAdquisitivo: Object.fromEntries(hogares.map((h) => [h.id, 65])),
+      precioAlimento: Object.fromEntries(zoneIds.map((z) => [z, ECON_CONSTANTS.precioBaseAlimento])),
+      alquilerMedio: Object.fromEntries(zoneIds.map((z) => [z, 13])),
+      cuotaMercado: {},
+      saldoDiarioEstimado: 15,
+      inflacion: preset.inflacionInicial,
+      precioGlobal: ECON_CONSTANTS.precioBaseAlimento,
     },
     metricasPeriodoAnterior: {
-      apoyoPct: apoyoInicial,
-      hambreCriticaPct: hambreInicial,
+      apoyoPct: apoyoInit,
+      hambreCriticaPct: 0,
       poblacion: pop,
-      satisfaccionMedia: satInicial,
+      satisfaccionMedia: satMedia,
     },
-    parcelas,
-    hitosCumplidos: [],
-    hitosRacha: {},
-    demandasActivas: [],
-    bloqueosPalanca: [],
-    medidasVigentes: [],
-    cooldownActorDemanda: {},
-    parcelasRecienHabilitadasDia: 0,
+    mercadoStats: {
+      quiebrasPeriodo: 0,
+      fundacionesPeriodo: 0,
+      comprasPeriodo: 0,
+      construccionesPeriodo: 0,
+      nacimientosAcum: 0,
+      muertesAcum: 0,
+      hogaresEnAcogida: 0,
+      ultimaActualizacionDemogDia: 1,
+    },
+    auditEntradasDia: 0,
+    auditSalidasDia: 0,
+    ultimoDineroTotal: 0,
+    eventosDiaActual: [],
+    eventos: [],
+    historial: [
+      {
+        dia: 1,
+        reserva: initialReserva,
+        inflacion: preset.inflacionInicial,
+        satisfaccion: satMedia,
+        apoyo: apoyoInit,
+        hambreCritica: 0,
+        stockDias: diasStockInit,
+        poblacion: pop,
+        callePct,
+        edadMedia,
+        cuotaMayorPct: 50,
+      },
+    ],
     bitacora: [
       {
         id: 'log_init',
@@ -1012,19 +1214,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         categoria: 'sistema',
         origen: 'sistema:inicio',
         titulo: `Inicio de partida: ${preset.nombre}`,
-        detalle: `Módulo económico: ${config.economiaModulo} · Semilla ${semilla} · ${pop} habitantes (despensa media ${despensaMediaInicial}d).`,
-      },
-    ],
-    historial: [
-      {
-        dia: 1,
-        reserva: Math.round(preset.reservaInicial * scale),
-        inflacion: inflacionInicial,
-        satisfaccion: satInicial,
-        apoyo: apoyoInicial,
-        hambreCritica: hambreInicial,
-        stockDias: diasStockInicial,
-        poblacion: pop,
+        detalle: `Nivel ${config.nivelMundo} · ${pop} habitantes · ${hogares.length} hogares · ${firmas.length} firmas · ${casas.length} casas.`,
       },
     ],
     resultado: {
@@ -1032,4 +1222,9 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       victoriaCumplida: false,
     },
   };
+
+  syncLegacyEnterprisesView(state);
+  state.ultimoDineroTotal = computeTotalWorldMoney(state);
+  void getWorldZones;
+  return state;
 }

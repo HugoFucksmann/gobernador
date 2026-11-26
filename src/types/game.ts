@@ -1,26 +1,57 @@
+export type ScenarioId = 'elecciones' | 'zombies';
+
 export type EconomyModule = 'base' | 'fiscal';
-export type WorldComplexityLevel = 'M0' | 'M1' | 'M2';
+export type WorldComplexityLevel = 'M0' | 'M1' | 'M2' | 'M3' | 'M4';
 export type GovernorComplexityLevel = 'G0' | 'G1' | 'G2' | 'G3';
+export type PriceCapMode = 'libre' | 'moderado' | 'estricto';
+export type ForeignTradeStep = -100 | -50 | 0 | 50 | 100;
+export type ServiceLevel = 0 | 1 | 2 | 3 | 4 | 5;
+export type EnterpriseTramo = 'aumento' | 'normal' | 'recorte' | 'despido';
+export type DemandId =
+  | 'bajen_impuestos'
+  | 'liberen_precio'
+  | 'abran_exportacion'
+  | 'mas_pauta'
+  | 'silencio_pagado'
+  | 'sindicato_salarios'
+  | 'vecinos_comida'
+  | 'vecinos_obras';
 
-export type RoleId =
-  | 'estudiante'
-  | 'agricultor'
-  | 'obrero'
-  | 'policia'
-  | 'estatal'
-  | 'comerciante'
-  | 'empresario'
-  | 'tecnico'
-  | 'docente'
-  | 'periodista'
-  | 'medico'
-  | 'ingeniero'
-  | 'desempleado'
-  | 'jubilado';
+export type ZoneId = string;
 
-export type PublicRoleId = 'policia' | 'estatal' | 'docente' | 'medico' | 'ingeniero';
-export type ServicePublicRoleId = 'policia' | 'medico' | 'ingeniero';
-export type FixedPublicRoleId = 'estatal' | 'docente';
+export type ZoneCharacter = 'centro' | 'comercial' | 'residencial' | 'agricola';
+
+export interface ZoneDefinition {
+  id: ZoneId;
+  nombre: string;
+  caracter: ZoneCharacter;
+  vecinas: ZoneId[];
+  demandaAlquilerIndice: number;
+  rect: { wx: number; wy: number; ww: number; wh: number };
+}
+
+export type DistrictId = 'campos' | 'taller' | 'mercado' | 'civico' | 'residencial';
+
+export type PersonalityTrait =
+  | 'valentia'
+  | 'laboriosidad'
+  | 'codicia'
+  | 'rebeldia'
+  | 'resiliencia';
+
+export type NpcVariable =
+  | 'salud'
+  | 'hambre'
+  | 'miedo'
+  | 'satisfaccion'
+  | 'lealtad';
+
+export type ModifiableKey =
+  | PersonalityTrait
+  | NpcVariable
+  | 'productividad'
+  | 'propensionGasto'
+  | 'propensionEmprender';
 
 export type PrivateRoleId =
   | 'agricultor'
@@ -28,84 +59,142 @@ export type PrivateRoleId =
   | 'comerciante'
   | 'empresario'
   | 'tecnico'
-  | 'periodista';
-export type RoleGroupId = 'agro' | 'industria' | 'comercio' | 'publico' | 'sin_ingreso';
-export type ServiceAreaId = 'seguridad' | 'salud' | 'infraestructura';
-export type ServiceLevel = 0 | 1 | 2 | 3 | 4 | 5;
-export type PriceCapMode = 'libre' | 'moderado' | 'estricto';
-export type ForeignTradeStep = -100 | -50 | 0 | 50 | 100;
+  | 'periodista'
+  | 'constructor'
+  | 'inmobiliario';
 
-export type BuildingType =
+export type PublicRoleId =
+  | 'policia'
+  | 'estatal'
+  | 'docente'
+  | 'medico'
+  | 'ingeniero';
+
+export type FixedPublicRoleId = 'estatal' | 'docente';
+export type ServicePublicRoleId = 'policia' | 'medico' | 'ingeniero';
+export type ServiceAreaId = 'seguridad' | 'salud' | 'infraestructura';
+
+export type NonWorkingRoleId = 'estudiante' | 'desempleado' | 'jubilado';
+
+export type RoleId = PrivateRoleId | PublicRoleId | NonWorkingRoleId;
+
+export interface RoleDefinition {
+  id: RoleId;
+  nombre: string;
+  edadMin: number;
+  edadMax: number | null;
+  educMin: number;
+  afinidad: PersonalityTrait | null;
+  publico: boolean;
+  estudia?: boolean;
+  gerencia?: boolean;
+  rubro?: FirmRubro | 'comercio|construccion';
+  grupo: 'privado' | 'publico' | 'sin_ingreso';
+  ingreso: [number, number] | null;
+  produce: string | null;
+}
+
+export type ParcelTipo =
+  | 'residencial'
+  | 'comercial'
+  | 'agricola'
+  | 'publica'
+  | 'especial';
+
+export type HouseType = 'casa_chica' | 'casa_mediana' | 'casa_grande';
+
+export type PrivateLocalBuildingType =
+  | 'campo'
+  | 'almacen'
+  | 'kiosco'
+  | 'restoran'
+  | 'oficina_constructora'
+  | 'oficina_inmobiliaria'
+  | 'oficina_medio'
+  | 'oficina_banco'
+  | 'local_comercio';
+
+export type PublicBuildingType =
   | 'hospital'
   | 'comisaria'
   | 'escuela'
   | 'oficina_publica'
-  | 'campo'
-  | 'local_comercio'
   | 'muralla'
   | 'silo'
   | 'riego'
   | 'hospital_campana';
 
-export type BuildingCategory = 'publico' | 'suceso' | 'privado';
-export type BuildingOwner = 'estado' | 'alimento' | 'comercio';
+export type SpecialBuildingType = 'plaza' | 'puerto' | 'muelle_comercio';
+
+export type BuildingType =
+  | HouseType
+  | PrivateLocalBuildingType
+  | PublicBuildingType
+  | SpecialBuildingType;
+
+export type BuildingOwner = 'estado' | 'alimento' | 'comercio' | string;
 export type ParcelState = 'bloqueada' | 'libre' | 'en_obra' | 'ocupada';
 
-export type LeverKey =
-  | 'impuesto'
-  | 'salarioPublico'
-  | 'nivelObras'
-  | 'ayudaSocial'
-  | 'garantiaAlimentaria'
-  | 'precioMaximo'
-  | 'comercioExterior'
-  | 'prensa'
-  | 'topeEmision';
+export type OwnerRef = {
+  tipo: 'hogar' | 'npc' | 'firma' | 'estado';
+  id: string;
+};
 
-export type PersonalityTrait = 'valentia' | 'laboriosidad' | 'codicia' | 'rebeldia' | 'resiliencia';
-export type NpcVariable = 'salud' | 'hambre' | 'miedo' | 'satisfaccion' | 'lealtad';
-export type ModifiableKey = PersonalityTrait | NpcVariable | 'productividad' | 'propensionGasto';
-
-export interface RoleDefinition {
-  id: RoleId;
+export interface BuildingDefinition {
+  tipo: BuildingType;
   nombre: string;
-  grupo: RoleGroupId;
-  edadMin: number;
-  edadMax: number | null;
-  educMin: number;
-  estudia?: boolean;
-  publico?: boolean;
-  afinidad?: PersonalityTrait;
-  produce: Partial<
-    Record<
-      | 'alimento'
-      | 'tecnificacion'
-      | 'seguridad'
-      | 'comercio'
-      | 'informacion'
-      | 'salud'
-      | 'infraestructura',
-      number
-    >
-  >;
-  ingreso?: [number, number];
-  color: string;
-  distrito: DistrictId;
+  parcelTipo: ParcelTipo;
+  categoria: 'vivienda' | 'privado' | 'publico' | 'suceso' | 'especial';
+  rubro?: FirmRubro;
+  construibleGobernador: boolean;
+  requiereG2: boolean;
+  costoObra: number;
+  mantenimientoPeriodo: number;
+  diasObra: number;
+  capacidadCasa?: number;
+  alquilerBase?: number;
+  capacidadVentasDiaria?: number;
+  areaServicio?: ServiceAreaId;
+  puestos: Partial<Record<RoleId, number>>;
+  camasHospital?: number;
+  bonusDefensa?: number;
+  defensaMuralla?: number;
+  siloExtraDias?: number;
+  reduccionSequiaPct?: number;
+  diasCampana?: number;
 }
 
-export type ZoneId = 'centro' | 'norte' | 'este' | 'sur' | 'oeste';
+export interface BuildingInstance {
+  id: string;
+  tipo: BuildingType;
+  parcelaId: string;
+  dueno: BuildingOwner;
+  duenoRef?: OwnerRef;
+  firmaId?: string;
+  casaId?: string;
+  estado: 'en_obra' | 'ocupada';
+  activo: boolean;
+  estadoSalud: number; // 0-100
+  diasObraRestantes: number;
+  diasObraTotal: number;
+  diasRestantesCampana?: number;
+  ventasHoy?: number;
+  zona: ZoneId;
+}
 
-export type DistrictId = 'campos' | 'taller' | 'mercado' | 'civico' | 'residencial';
-
-export interface DistrictZone {
-  id: DistrictId;
+export interface Parcela {
+  id: string;
   nombre: string;
-  subtitulo: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  color: string;
+  zona: ZoneId;
+  distrito: DistrictId;
+  tipoParcela: ParcelTipo;
+  orden: number;
+  wx: number;
+  wy: number;
+  ww: number;
+  wh: number;
+  estado: ParcelState;
+  edificio: BuildingInstance | null;
 }
 
 export interface Modifier {
@@ -118,40 +207,30 @@ export interface Modifier {
   texto: string;
 }
 
-export interface CausalStep {
-  id: string;
-  dia: number;
-  tipo: string;
-  titulo: string;
-  detalle: string;
-  zona?: ZoneId;
-  npcId?: string;
-}
-
 export type ActionEffectId =
   | 'fuera_de_puesto'
+  | 'moviliza'
   | 'anima'
   | 'agita'
   | 'acapara'
-  | 'moviliza'
-  | 'decorativa'
+  | 'comparte'
+  | 'cuida'
   | 'gasta'
   | 'ahorra'
-  | 'comparte'
-  | 'difunde'
   | 'repara'
-  | 'cuida'
-  | 'toma';
-
-export type EffectIntensity = 'baja' | 'media' | 'alta';
-export type RumorTheme = 'miedo' | 'descontento' | 'esperanza';
+  | 'toma'
+  | 'difunde'
+  | 'decorativa'
+  | 'ocupa'
+  | 'boicotea'
+  | 'emprendedor';
 
 export interface ActionEffectSpec {
   id: ActionEffectId;
-  intensidad?: EffectIntensity;
+  intensidad?: 'baja' | 'media' | 'alta';
+  alcance?: 'persona' | 'hogar' | 'zona';
   signo?: 1 | -1;
-  alcance?: 'participante' | 'zona';
-  temaRumor?: RumorTheme;
+  temaRumor?: 'miedo' | 'esperanza' | 'descontento';
 }
 
 export interface ActiveNpcAction {
@@ -166,122 +245,188 @@ export interface ActiveNpcAction {
   esFoco: boolean;
   focoNpcId?: string;
   focoEventId?: string;
+  firmaObjetivoId?: string;
+  casaObjetivoId?: string;
   origen: string;
   causa?: string;
   texto: string;
 }
 
-export interface NpcHospitalState {
-  internado: boolean;
-  esperandoCama: boolean;
-  diasInternado: number;
-  edificioId?: string;
-  zonaHospital?: ZoneId;
-}
-
 export interface Npc {
   id: string;
   nombre: string;
+  apellido: string;
   edad: number;
-  cumpleanosDia: number; // 1..365 seeded birthday
+  cumpleanosDia: number;
+  hogarId: string;
+  parejaId: string | null;
+  padresIds: string[];
+  rol: RoleId;
+  empleadorId: string | null;
+  partes: Array<{ firmaId: string; pct: number }>;
+  zona: ZoneId;
+  vivo: boolean;
   educacion: {
-    nivel: number; // 0..3 fixed at worldgen (v1)
+    nivel: number;
+    estudiando: boolean;
   };
   personalidad: Record<PersonalityTrait, number>;
   variables: Record<NpcVariable, number>;
   economia: {
-    ingresoPos: number; // 0..1
-    dinero: number;
+    ingresoPos: number;
+    propensionGasto: number;
+    propensionEmprender: number;
     ultimoIngresoNeto: number;
-    despensa: number; // days of food at home (0..despensaMaxDias)
-    propensionGasto: number; // fraction of net income spent on living expenses
-    noPudoPagarComida?: boolean;
   };
-  rol: RoleId;
-  zona: ZoneId;
-  hospital: NpcHospitalState;
+  hospital: {
+    internado: boolean;
+    esperandoCama: boolean;
+    diasInternado: number;
+    edificioId?: string;
+    zonaHospital?: ZoneId;
+  };
+  accionIa: ActiveNpcAction | null;
+  modificadores: Modifier[];
   ultimoGolpeOrigen?: string;
   ultimoGolpeCausaId?: string;
+  ultimaPerdidaFamiliarDia?: number;
+  extra?: Record<string, number | string | boolean>;
   mapa: {
     x: number;
     y: number;
     destino: { x: number; y: number };
     accion: string;
   };
-  accionIa: ActiveNpcAction | null;
-  modificadores: Modifier[];
-  vivo: boolean;
-  /** Bolsa de estado extensible por nivel: campos nuevos van acá con valor por defecto, así el guardado viejo sigue cargando. */
-  extra?: Record<string, number | string | boolean>;
 }
 
-export type PhenomenonType = 'sequia' | 'plaga' | 'pandemia' | 'plaga_zombie';
-
-export interface ActionDefinition {
+export interface Hogar {
   id: string;
-  nombre: string;
-  descripcion: string;
-  tipo: 'espontanea' | 'condicion';
-  textos: string[];
-  disparador?: {
-    impagoNomina?: boolean;
-    descontentosPctMayorA?: number;
-    hambreCriticaPctMayorA?: number;
-  };
-  requisitos: {
-    etapa?: 'menor' | 'adulto' | 'jubilado';
-    publico?: boolean;
-    rolNoEn?: RoleId[];
-    conEmpleo?: boolean;
-    conDinero?: boolean;
-    conDespensa?: boolean;
-    conHambre?: boolean;
-  };
-  contexto?: {
-    fenomeno?: PhenomenonType;
-    fenomenoAnunciadoOActivo?: PhenomenonType;
-    zonaIntegridadMenorA?: number;
-    vecinoDespensaBaja?: boolean;
-    vecinoSaludBaja?: boolean;
-  };
-  afinidad: Partial<Record<PersonalityTrait, '+' | '-'>>;
-  efectos: ActionEffectSpec[];
-  zonaDestino?: ZoneId;
-  duracionDias: [number, number];
-  contagio: number;
+  miembros: string[];
+  casaId: string | null;
+  dinero: number;
+  despensa: number;
+  estado: 'con_casa' | 'calle' | 'acogida';
+  periodosSinPagar: number;
+  periodosHacinado: number;
+  zona: ZoneId;
+  ultimoIngresoNeto: number;
+  alquilerPagadoPeriodo: number;
+  noPudoPagarComida?: boolean;
+  ocupandoCasaId?: string | null;
+  creditoDeuda?: number;
 }
+
+export interface Casa {
+  id: string;
+  tipo: HouseType;
+  parcelaId: string;
+  zona: ZoneId;
+  capacidad: number;
+  estado: number; // 0-100
+  dueno: OwnerRef;
+  alquiler: number;
+  hogarId: string | null;
+  ocupadaPorAccion?: boolean;
+  diasVaciaSinMantenimiento: number;
+  alquilerCobradoPeriodo: number;
+}
+
+export type FirmRubro =
+  | 'agro'
+  | 'comercio'
+  | 'construccion'
+  | 'inmobiliaria'
+  | 'medio'
+  | 'banco';
+
+export interface FirmPart {
+  tipo: 'npc' | 'firma' | 'estado';
+  id: string;
+  pct: number;
+}
+
+export interface Firma {
+  id: string;
+  rubro: FirmRubro;
+  nombre: string;
+  zona: ZoneId;
+  activa: boolean;
+  partes: FirmPart[];
+  gerenteId: string | null;
+  locales: string[];
+  empleados: string[];
+  ventas: number;
+  caja: number;
+  parteSueldos: number;
+  factor: number;
+  cuotaZona: Record<ZoneId, number>;
+  margenPoder: number;
+  stock?: number;
+  siloDias?: number;
+  periodosEnPerdida: number;
+  periodosSinDueno: number;
+  periodosFactorAlto: number;
+  periodosFactorBajo: number;
+  ultimoTramo: EnterpriseTramo;
+  despidosPendientes: number;
+  refPorEmpleado: Record<string, number>;
+  ultimoIngresoPeriodo: number;
+  ultimoSueldosPeriodo: number;
+  ultimaGanancia: number;
+  historialGanancias: number[];
+  ultimaCausa?: string;
+  esFilialDe?: string | null;
+  creditoDeuda?: number;
+}
+
+export type ClimatePhenomenonType = 'sequia' | 'plaga' | 'pandemia';
+export type PhenomenonType = ClimatePhenomenonType | 'plaga_zombie';
 
 export interface ClimatePhenomenon {
   id: string;
   tipo: PhenomenonType;
   nombre: string;
-  intensidad: number; // 0..100
+  intensidad: number;
   inicioDia: number;
   duracionDias: number;
   avisoDias?: number;
-  crecimientoDia?: number;
   origen?: ZoneId;
+  crecimientoDia?: number;
+}
+
+export interface ClimateState {
+  fenomenos: ClimatePhenomenon[];
+  proximoEventoDia: number;
 }
 
 export interface MediaOutlet {
   id: string;
+  firmaId?: string;
   nombre: string;
+  zona?: ZoneId;
+  activa?: boolean;
+  duenoNpcIds: string[];
+  columnistas: string[];
+  alcancePct: number;
+  credibilidad: number;
+  afinidadBase: number;
   lineaEditorial: {
-    afinidadGobierno: number; // 0..100
-    sensacionalismo: number; // 0..100
+    afinidadGobierno: number;
+    sensacionalismo: number;
   };
-  afinidadBase: number; // 0..100
-  credibilidad: number; // 0..100
-  alcancePct: number; // 0..100
-  columnistas: string[]; // npc ids
+  ingresos: {
+    publicidad: number;
+    fondosEstado: number;
+    dependenciaPct: number;
+  };
   finanzas: {
     ingresosPropios: number;
     fondosEstado: number;
     dependenciaPct: number;
   };
+  caja: number;
+  periodosEnPerdida: number;
 }
-
-export type NewsTone = 'favorable' | 'neutral' | 'critico' | 'alarmista';
 
 export type NewsTopic =
   | 'aviso'
@@ -293,34 +438,18 @@ export type NewsTopic =
   | 'impago'
   | 'conflicto'
   | 'empresas'
+  | 'gobierno'
   | 'obras'
   | 'presiones'
-  | 'gobierno'
   | 'vecinos'
-  | 'objetivo';
+  | 'objetivo'
+  | 'vivienda'
+  | 'firmas'
+  | 'demografia'
+  | 'familia';
 
+export type NewsTone = 'neutral' | 'alarmista' | 'critico' | 'favorable';
 export type PressValence = 'buena' | 'mala' | 'neutra';
-
-export interface PressFactData {
-  zona?: ZoneId;
-  fenomeno?: string;
-  fenomenoId?: string;
-  dias?: number;
-  cifra?: string;
-  empresa?: string;
-  control?: string;
-  palanca?: string;
-  valorAnterior?: string;
-  valorNuevo?: string;
-  edificio?: string;
-  parcela?: string;
-  actor?: string;
-  demanda?: string;
-  medida?: string;
-  hito?: string;
-  esAviso?: boolean;
-  vigenteHastaDia?: number;
-}
 
 export interface PressFact {
   id: string;
@@ -333,17 +462,29 @@ export interface PressFact {
   zona: ZoneId;
   origen: string;
   causa?: string;
-  datos: PressFactData;
-}
-
-export interface ClassifierRecord {
-  dia: number;
-  npcId: string;
-  accionId: string;
-  tipo: 'espontanea' | 'condicion';
-  origen: 'motor' | 'clasificador';
-  latenciaMs?: number;
-  rechazada?: boolean;
+  datos: {
+    zona?: ZoneId;
+    fenomeno?: string;
+    fenomenoId?: string;
+    dias?: number;
+    cifra?: string;
+    empresa?: string;
+    firma?: string;
+    dueno?: string;
+    hogar?: string;
+    familia?: string;
+    control?: string;
+    palanca?: string;
+    valorAnterior?: string;
+    valorNuevo?: string;
+    edificio?: string;
+    parcela?: string;
+    actor?: string;
+    demanda?: string;
+    medida?: string;
+    esAviso?: boolean;
+    vigenteHastaDia?: number;
+  };
 }
 
 export interface NewsArticle {
@@ -356,7 +497,7 @@ export interface NewsArticle {
   tema: NewsTopic;
   tono: NewsTone;
   alcance: number;
-  credibilidad?: number;
+  credibilidad: number;
   titulo: string;
   texto: string;
   origen: string;
@@ -370,217 +511,103 @@ export interface NewsArticle {
 }
 
 export interface GovernorLevers {
-  impuesto: number; // 0..60 (%) flat tax on all income
-  salarioPublico: number; // 50..150 (%)
-  nivelObras: ServiceLevel; // 0..5
-  ayudaSocial: number; // 0..10 ($/day for desempleado & jubilado)
-  garantiaAlimentaria: number; // 0..100 (%)
-  precioMaximo: PriceCapMode; // 'libre' | 'moderado' | 'estricto'
-  comercioExterior: ForeignTradeStep; // -100 | -50 | 0 | 50 | 100
-  prensa: number; // 0..100 ($/period split evenly across outlets)
-  topeEmision: number; // 0..30 (% of period income, fiscal only)
+  impuesto: number;
+  salarioPublico: number;
+  nivelObras: ServiceLevel;
+  ayudaSocial: number;
+  garantiaAlimentaria: number;
+  precioMaximo: PriceCapMode;
+  comercioExterior: ForeignTradeStep;
+  prensa: number;
+  topeEmision: number;
 }
 
-export interface BuildingDefinition {
-  tipo: BuildingType;
-  nombre: string;
-  categoria: BuildingCategory;
-  duenoBase: BuildingOwner;
-  construibleGobernador: boolean;
-  requiereG2?: boolean;
-  costoObra: number;
-  diasObra: number;
-  mantenimientoPeriodo: number;
-  areaServicio?: ServiceAreaId;
-  rolOperario?: ServicePublicRoleId | FixedPublicRoleId;
-  puestosRol?: number;
-  puestosObrero?: number;
-  puestosComerciante?: number;
-  puestosAgricultor?: number;
-  camasHospital?: number;
-  bonusDefensa?: number;
-  defensaMuralla?: number;
-  siloExtraDias?: number;
-  diasCampana?: number;
-  reduccionSequiaPct?: number;
-  educMin?: number;
-  descripcion: string;
-}
-
-export interface BuildingInstance {
-  id: string;
-  tipo: BuildingType;
-  parcelaId: string;
-  dueno: BuildingOwner;
-  estado: 'en_obra' | 'ocupada';
-  activo: boolean;
-  diasObraRestantes: number;
-  diasObraTotal: number;
-  diasRestantesCampana?: number;
-  zona: ZoneId;
-}
-
-export interface Parcela {
-  id: string;
-  nombre: string;
-  zona: ZoneId;
-  distrito: DistrictId;
-  estado: ParcelState;
-  edificio: BuildingInstance | null;
-  wx: number;
-  wy: number;
-  ww: number;
-  wh: number;
-  hitoRequerido?: string;
-  orden: number;
-}
-
-export type HitoMetric =
-  | 'satisfaccionMedia'
-  | 'apoyoPct'
-  | 'desempleoPct'
-  | 'hambreCriticaPct'
-  | 'poblacionPct'
-  | 'ingresosEstado';
-
-export interface HitoDef {
-  id: string;
-  nombre: string;
-  descripcion: string;
-  condicion: {
-    metrica: HitoMetric;
-    op: '>=' | '<=';
-    umbral: number;
-    periodos: number;
-  };
-  habilita: string;
-}
-
-export type ActorId = 'empresarios' | string;
-export type DemandId =
-  | 'sindicato_salarios'
-  | 'vecinos_comida'
-  | 'vecinos_obras'
-  | 'bajen_impuestos'
-  | 'liberen_precio'
-  | 'abran_exportacion'
-  | 'mas_pauta'
-  | 'silencio_pagado';
-
-export interface DemandPedido {
-  palanca: LeverKey;
-  nuevoValor: number | string;
-  etiqueta: string;
-}
-
-export interface ActiveDemand {
-  id: string;
-  actorId: ActorId;
-  actorNombre: string;
-  demandaId: DemandId;
-  titulo: string;
-  razon: string;
-  amenaza: string;
-  pedido: DemandPedido;
-  diaCreada: number;
-  diasRestantes: number;
-  diasCompromiso: number;
-  causaId?: string;
-}
+export type LeverKey = keyof GovernorLevers;
 
 export interface LeverLock {
   palanca: LeverKey;
-  actorId: ActorId;
+  actorId: string;
   actorNombre: string;
   demandaId: DemandId;
   hastaDia: number;
   motivo: string;
 }
 
-export type MeasureType = 'despido_forzado' | 'retencion_stock' | 'sin_inversion' | 'campana';
-
-export interface ActorMeasure {
+export interface ActiveDemand {
   id: string;
-  actorId: ActorId;
+  actorId: string;
   actorNombre: string;
-  tipo: MeasureType;
-  descripcion: string;
-  hastaDia: number;
-  medioId?: string;
-  tema?: NewsTopic;
-  tono?: NewsTone;
-  empresaId?: 'alimento' | 'comercio';
+  demandaId: DemandId;
+  titulo: string;
+  razon: string;
+  amenaza: string;
+  pedido: {
+    palanca: LeverKey;
+    nuevoValor: number | string;
+    etiqueta: string;
+  };
+  diaCreada: number;
+  diasRestantes: number;
+  diasCompromiso: number;
   causaId?: string;
 }
 
-export type EnterpriseTramo = 'aumento' | 'normal' | 'recorte' | 'despido';
+export interface ActorMeasure {
+  id: string;
+  actorId: string;
+  actorNombre: string;
+  tipo: 'retencion_stock' | 'despido_forzado' | 'sin_inversion' | 'campana';
+  descripcion: string;
+  hastaDia: number;
+  empresaId?: 'alimento' | 'comercio' | string;
+  medioId?: string;
+  tema?: NewsTopic;
+  tono?: NewsTone;
+  causaId?: string;
+}
 
-export interface FoodEnterpriseState {
-  id: 'alimento';
+export interface EnterpriseState {
+  id: 'alimento' | 'comercio';
+  nombre: string;
   dueno: string | null;
-  stock: number;
-  diasStock: number;
-  siloDias: number;
+  socios: string[];
   ventasAcum: number;
   parteSueldos: number;
   factor: number;
+  stock?: number;
+  siloDias?: number;
   periodosFactorAlto: number;
   periodosFactorBajo: number;
   ultimoTramo: EnterpriseTramo;
   despidosPendientes: number;
   refPorEmpleado: Record<string, number>;
-  ultimaGanancia: number;
   ultimoIngresoPeriodo: number;
   ultimoSueldosPeriodo: number;
-  ultimaCausa?: string;
-}
-
-export interface CommercialEnterpriseState {
-  id: 'comercio';
-  socios: string[]; // living comerciantes
-  ventasAcum: number;
-  parteSueldos: number;
-  factor: number;
-  periodosFactorAlto: number;
-  periodosFactorBajo: number;
-  ultimoTramo: EnterpriseTramo;
-  despidosPendientes: number;
-  refPorEmpleado: Record<string, number>;
   ultimaGanancia: number;
-  ultimoIngresoPeriodo: number;
-  ultimoSueldosPeriodo: number;
   ultimaCausa?: string;
-}
-
-export interface FiscalLedger {
-  ingresos: number;
-  nomina: number;
-  pensiones: number;
-  garantiaAlimentaria: number;
-  garantiaImpaga: number;
-  comidaMenores: number;
-  ayudaSocial: number;
-  mantenimiento: number;
-  operacionObras: number;
-  operacion: number;
-  obras: number;
-  prensa: number;
-  subsidios?: number;
-  saldo: number;
-  emision: number;
-  importaciones: number; // paid directly from reserva
-  exportaciones: number; // paid directly to food enterprise
-  impago: boolean;
-  alcanzaNomina: boolean;
-  prorrateoDiscrecional: number;
-  prorrateoNomina: number;
-  prorrateoPensionGarantia: number;
 }
 
 export interface GovernmentState {
   reserva: number;
   inflacion: number;
-  finanzas: FiscalLedger;
+  cuposFijos: Record<FixedPublicRoleId, number>;
+  indicadores: {
+    seguridad: number;
+    salud: number;
+    infraestructura: number;
+  };
+  coberturas: {
+    policia: number;
+    medico: number;
+    ingeniero: number;
+  };
+  integridad: Record<ZoneId, number>;
+  palancasVigentes: GovernorLevers;
+  palancasObjetivo: GovernorLevers;
+  extras?: {
+    vigentes: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number };
+    objetivo: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number };
+  };
   acumuladoPeriodo: {
     dias: number;
     impuestos: number;
@@ -594,6 +621,7 @@ export interface GovernmentState {
     garantiaAlimentaria: number;
     garantiaImpaga: number;
     comidaMenores: number;
+    acogidaMenores: number;
     mantenimiento: number;
     operacionObras: number;
     operacion: number;
@@ -604,28 +632,116 @@ export interface GovernmentState {
     importaciones: number;
     exportaciones: number;
   };
-  indicadores: Record<ServiceAreaId, number>;
-  integridad: Record<ZoneId, number>;
-  coberturas: Record<ServicePublicRoleId, number>;
-  cuposFijos: Record<FixedPublicRoleId, number>;
-  palancasVigentes: GovernorLevers;
-  palancasObjetivo: GovernorLevers;
-  /** Palancas del nivel 1.1 (G3): subsidio de alimento, presión y acceso sobre la prensa, nivel de educación. */
-  extras?: {
-    vigentes: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number };
-    objetivo: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number };
+  finanzas: {
+    ingresos: number;
+    nomina: number;
+    pensiones: number;
+    garantiaAlimentaria: number;
+    garantiaImpaga: number;
+    comidaMenores: number;
+    acogidaMenores: number;
+    ayudaSocial: number;
+    mantenimiento: number;
+    operacionObras: number;
+    operacion: number;
+    obras: number;
+    prensa: number;
+    subsidios?: number;
+    saldo: number;
+    emision: number;
+    importaciones: number;
+    exportaciones: number;
+    impago: boolean;
+    alcanzaNomina: boolean;
+    prorrateoDiscrecional: number;
+    prorrateoNomina: number;
+    prorrateoPensionGarantia: number;
   };
 }
 
-export interface EconomyOutput {
-  accesoComida: Record<string, number>; // 0..1
-  poderAdquisitivo: Record<string, number>; // 0..100
-  saldoDiarioEstimado: number;
-  precioAlimento: number;
+export interface HistoryPoint {
+  dia: number;
+  reserva: number;
   inflacion: number;
+  satisfaccion: number;
+  apoyo: number;
+  hambreCritica: number;
+  stockDias: number;
+  poblacion: number;
+  callePct: number;
+  edadMedia: number;
+  cuotaMayorPct: number;
+  semanal?: boolean;
 }
 
-export interface ChaosLimits {
+export interface ActionDefinition {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  tipo: 'espontanea' | 'condicion';
+  requisitos: {
+    etapa?: 'adulto' | 'jubilado' | 'menor';
+    publico?: boolean;
+    conEmpleo?: boolean;
+    conDinero?: boolean;
+    conDespensa?: boolean;
+    conHambre?: boolean;
+    conCasa?: boolean;
+    sinCasa?: boolean;
+    conHogarGrande?: boolean;
+    conJubiladoEnHogar?: boolean;
+    casaEnMalEstado?: boolean;
+    rolNoEn?: RoleId[];
+  };
+  contexto?: {
+    fenomeno?: PhenomenonType;
+    fenomenoAnunciadoOActivo?: PhenomenonType;
+    zonaIntegridadMenorA?: number;
+    vecinoDespensaBaja?: boolean;
+    vecinoSaludBaja?: boolean;
+    vecinoEnCalle?: boolean;
+    firmaEnRecorte?: boolean;
+  };
+  afinidad: Partial<Record<PersonalityTrait, '+' | '-'>>;
+  efectos: ActionEffectSpec[];
+  duracionDias: [number, number];
+  contagio: number;
+  zonaDestino?: ZoneId;
+  textos: string[];
+}
+
+export type ConditionTriggerType =
+  | 'impago'
+  | 'descontento'
+  | 'hambre'
+  | 'paro_firma'
+  | 'ocupacion'
+  | 'boicot';
+
+export interface ConditionWindow {
+  id: string;
+  disparador: ConditionTriggerType;
+  diaInicio: number;
+  diaLimite: number;
+  intensidadCantidad: number;
+  candidatas: ActionDefinition[];
+  npcIds: string[];
+  firmaObjetivoId?: string;
+  estado: 'pendiente' | 'resuelta';
+  causaId?: string;
+}
+
+export interface ClassifierRecord {
+  dia: number;
+  npcId: string;
+  accionId: string;
+  tipo: 'espontanea' | 'condicion';
+  origen: 'clasificador' | 'motor';
+  latenciaMs?: number;
+  rechazada?: boolean;
+}
+
+export interface ChaosSettings {
   maxAccionesPorPeriodo: number;
   periodoDias: number;
   maxPctRolFueraDePuesto: number;
@@ -633,39 +749,44 @@ export interface ChaosLimits {
   respiroSiSatisfaccionMediaMenorA: number;
 }
 
-export interface CommunityDerived {
-  poblacion: number;
-  poblacionPct: number;
-  vivos: number;
-  bajas: number;
-  satisfaccionMedia: number;
-  apoyoPct: number;
-  descontentosPct: number;
-  desempleoPct: number;
-  hambreCriticaPct: number;
-  sinDineroPct: number;
-  despensaMediaDias: number;
-  hospitalOcupacionPct: number;
-  camasHospital: number;
-  capacidadHospitalTotal: number;
-  hospitalesLlenos: number;
-  internados: number;
-  esperandoCama: number;
-  edificiosActivos: number;
-  parcelasLibres: number;
-  defensa: Record<ZoneId, number>;
-  orden: Record<ZoneId, number>;
-  amenazaPercibida: Record<ZoneId, number>;
-  productividadTotal: number;
-  roles: Record<RoleId, number>;
+export interface WorldConfig {
+  escenarioId: ScenarioId;
+  economiaModulo: EconomyModule;
+  nivelMundo: WorldComplexityLevel;
+  nivelGobernador?: GovernorComplexityLevel;
+  cantidadMedios: number;
+  poblacionInicial: number;
+  caos: ChaosSettings;
+  semilla: number;
+  usarIaGemini: boolean;
 }
 
 export interface ObjectiveCondition {
-  metrica: 'apoyoPct' | 'hambreCriticaPct' | 'poblacion' | 'poblacionPct';
+  metrica: 'apoyoPct' | 'hambreCriticaPct' | 'poblacionPct' | 'poblacion';
   op: '>=' | '>' | '<' | '<=';
   umbral: number;
   plazoDia?: number;
   descripcion: string;
+}
+
+export type HitoMetric =
+  | 'satisfaccionMedia'
+  | 'apoyoPct'
+  | 'desempleoPct'
+  | 'hambreCriticaPct'
+  | 'poblacionPct'
+  | 'ingresosEstado';
+
+export interface HitoDefinition {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  parcelaId: string;
+  condicion: {
+    metrica: HitoMetric;
+    op: '>=' | '<=';
+    umbral: number;
+  };
 }
 
 export interface ScenarioParcelDef {
@@ -673,69 +794,58 @@ export interface ScenarioParcelDef {
   nombre: string;
   zona: ZoneId;
   distrito: DistrictId;
-  estadoInicial: 'bloqueada' | 'libre' | 'ocupada';
-  edificioInicial?: BuildingType;
+  tipoParcela?: ParcelTipo;
+  orden: number;
   wx: number;
   wy: number;
   ww: number;
   wh: number;
-  hitoRequerido?: string;
+  estadoInicial: ParcelState;
+  edificioInicial?: BuildingType;
+  duenoInicial?: BuildingOwner;
+  houseType?: HouseType;
 }
 
 export interface ScenarioPreset {
-  id: 'elecciones' | 'zombies';
+  id: ScenarioId;
   nombre: string;
   subtitulo: string;
   historia: string;
-  economiaDefault: EconomyModule;
   poblacionDefault: number;
   mediosDefault: number;
-  inflacionInicial: number;
   reservaInicial: number;
   stockAlimentoInicial: number;
-  topesPrivados: Record<PrivateRoleId, number>;
+  inflacionInicial: number;
+  proporciones: Record<RoleId, number>;
+  topesPrivados: Record<string, number>;
   cuposFijos: Record<FixedPublicRoleId, number>;
   nivelObrasInicial: ServiceLevel;
-  initialLevers: GovernorLevers;
   parcelas: ScenarioParcelDef[];
-  hitos: HitoDef[];
-  zonas: Record<ZoneId, { vecinas: ZoneId[] }>;
+  hitos: HitoDefinition[];
   zonaPorRol: Record<RoleId, ZoneId[]>;
+  zonas: Record<ZoneId, ZoneDefinition>;
+  mediosCatalog: Array<{
+    id: string;
+    nombre: string;
+    afinidadGobierno: number;
+    sensacionalismo: number;
+    credibilidad: number;
+    alcancePct: number;
+    ingresosPropios: number;
+  }>;
+  caosDefault: ChaosSettings;
+  initialLevers: GovernorLevers;
+  fenomenosIniciales: ClimatePhenomenon[];
+  proximoEventoDiaInicial: number;
   victoria: ObjectiveCondition;
   derrota: ObjectiveCondition;
-  /** Otras condiciones de derrota (GOBERNADOR §6: basta con cruzar una). */
   derrotasExtra?: ObjectiveCondition[];
-  caosDefault: ChaosLimits;
-}
-
-export interface WorldConfig {
-  escenarioId: 'elecciones' | 'zombies';
-  economiaModulo: EconomyModule;
-  nivelMundo?: WorldComplexityLevel;
-  nivelGobernador?: GovernorComplexityLevel;
-  cantidadMedios: number; // 1..3
-  poblacionInicial: number;
-  caos: ChaosLimits;
-  semilla: number;
-  usarIaGemini: boolean;
-}
-
-export interface PendingConditionWindow {
-  id: string;
-  disparador: 'impago' | 'descontento' | 'hambre';
-  diaInicio: number;
-  diaLimite: number;
-  intensidadCantidad: number;
-  candidatas: ActionDefinition[];
-  npcIds: string[];
-  estado: 'pendiente' | 'resuelta';
-  causaId?: string;
 }
 
 export interface EventLogEntry {
   id: string;
   dia: number;
-  categoria: 'caos' | 'condicion' | 'economia' | 'clima' | 'prensa' | 'gobernador' | 'sistema';
+  categoria: 'sistema' | 'gobernador' | 'economia' | 'clima' | 'caos' | 'prensa';
   origen: string;
   causa?: string;
   simEventId?: string;
@@ -747,19 +857,32 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
-      tipo: 'contraoferta';
+      tipo: 'control';
       zona: ZoneId;
-      actorId: ActorId;
-      demandaId: DemandId;
-      aceptada: boolean;
+      control: string;
+      palanca?: string;
+      valorAnterior: number | string;
+      valorNuevo: number | string;
       causa?: string;
     }
   | {
       id: string;
       dia: number;
-      tipo: 'agregado';
+      tipo: 'fenomeno_inicio' | 'fenomeno_fin';
       zona: ZoneId;
-      conteos: Record<string, number>;
+      fenomenoId: string;
+      fenomeno: string;
+      zonaOrigen?: ZoneId;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'aviso';
+      zona: ZoneId;
+      fenomeno: string;
+      zonaOrigen?: ZoneId;
+      diasRestantes: number;
       causa?: string;
     }
   | {
@@ -768,7 +891,7 @@ export type SimEvent =
       tipo: 'ataque';
       zona: ZoneId;
       zonaOrigen?: ZoneId;
-      zonaDestino: ZoneId;
+      zonaDestino?: ZoneId;
       resultado: 'repelido' | 'golpe';
       npcId?: string;
       causa?: string;
@@ -789,13 +912,14 @@ export type SimEvent =
       tipo: 'muerte';
       zona: ZoneId;
       npcId: string;
-      causa?: string;
       esperandoCama?: boolean;
+      esNatural?: boolean;
+      causa?: string;
     }
   | {
       id: string;
       dia: number;
-      tipo: 'internacion';
+      tipo: 'internacion' | 'alta';
       zona: ZoneId;
       npcId: string;
       causa?: string;
@@ -803,95 +927,9 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
-      tipo: 'alta';
+      tipo: 'hospital_saturado';
       zona: ZoneId;
-      npcId: string;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'accion_inicio';
-      zona: ZoneId;
-      accion: string;
-      npcIds: string[];
-      zonaDestino: ZoneId;
-      origen?: string;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'accion_fin';
-      zona: ZoneId;
-      accion: string;
-      npcIds: string[];
-      zonaDestino: ZoneId;
-      origen?: string;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'aviso';
-      zona: ZoneId;
-      fenomeno: string;
-      zonaOrigen?: ZoneId;
-      diasRestantes: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'reubicacion';
-      zona: ZoneId;
-      npcs: string[];
-      deZona: ZoneId;
-      aZona: ZoneId;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'defensa';
-      zona: ZoneId;
-      valor: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'orden';
-      zona: ZoneId;
-      valor: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'integridad';
-      zona: ZoneId;
-      valor: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'fenomeno_inicio';
-      zona: ZoneId;
-      fenomenoId: string;
-      fenomeno: string;
-      zonaOrigen?: ZoneId;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'fenomeno_fin';
-      zona: ZoneId;
-      fenomenoId: string;
-      fenomeno: string;
-      zonaOrigen?: ZoneId;
+      ocupacionPct: number;
       causa?: string;
     }
   | {
@@ -913,38 +951,9 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
-      tipo: 'hospital_saturado';
+      tipo: 'empresa_aumento' | 'empresa_recorte';
       zona: ZoneId;
-      ocupacionPct: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'noticia';
-      zona: ZoneId;
-      noticiaId: string;
-      medio: string;
-      tema: string;
-      titulo: string;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'empresa_aumento';
-      zona: ZoneId;
-      empresaId: 'alimento' | 'comercio';
-      factor: number;
-      origen: string;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'empresa_recorte';
-      zona: ZoneId;
-      empresaId: 'alimento' | 'comercio';
+      empresaId: string;
       factor: number;
       origen: string;
       causa?: string;
@@ -954,7 +963,7 @@ export type SimEvent =
       dia: number;
       tipo: 'empresa_despido';
       zona: ZoneId;
-      empresaId: 'alimento' | 'comercio';
+      empresaId: string;
       cantidad: number;
       factor: number;
       origen: string;
@@ -963,18 +972,47 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
-      tipo: 'control';
+      tipo: 'noticia';
       zona: ZoneId;
-      control: string;
-      palanca?: string;
-      valorAnterior: number | string;
-      valorNuevo: number | string;
+      medio: string;
+      tema: NewsTopic;
+      tono: NewsTone;
+      titulo: string;
       causa?: string;
     }
   | {
       id: string;
       dia: number;
-      tipo: 'victoria';
+      tipo: 'accion_inicio' | 'accion_fin';
+      zona: ZoneId;
+      accion: string;
+      npcIds: string[];
+      zonaDestino: ZoneId;
+      origen: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'reubicacion';
+      zona: ZoneId;
+      npcs: string[];
+      deZona: ZoneId;
+      aZona: ZoneId;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'defensa' | 'orden' | 'integridad';
+      zona: ZoneId;
+      valor: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'victoria' | 'objetivo_perdido' | 'fin_partida';
       zona: ZoneId;
       metrica: string;
       valor: number;
@@ -983,41 +1021,13 @@ export type SimEvent =
   | {
       id: string;
       dia: number;
-      tipo: 'objetivo_perdido';
-      zona: ZoneId;
-      metrica: string;
-      valor: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'fin_partida';
-      zona: ZoneId;
-      metrica: string;
-      valor: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'obra_inicio';
+      tipo: 'obra_inicio' | 'obra_fin';
       zona: ZoneId;
       parcelaId: string;
       edificio: BuildingType;
       dueno: BuildingOwner;
-      costo: number;
-      diasObra: number;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'obra_fin';
-      zona: ZoneId;
-      parcelaId: string;
-      edificio: BuildingType;
-      dueno: BuildingOwner;
+      costo?: number;
+      diasObra?: number;
       causa?: string;
     }
   | {
@@ -1053,7 +1063,7 @@ export type SimEvent =
       dia: number;
       tipo: 'demanda';
       zona: ZoneId;
-      actorId: ActorId;
+      actorId: string;
       demandaId: DemandId;
       diasRespuesta: number;
       causa?: string;
@@ -1063,7 +1073,7 @@ export type SimEvent =
       dia: number;
       tipo: 'demanda_aceptada';
       zona: ZoneId;
-      actorId: ActorId;
+      actorId: string;
       demandaId: DemandId;
       palanca: LeverKey;
       causa?: string;
@@ -1073,7 +1083,7 @@ export type SimEvent =
       dia: number;
       tipo: 'demanda_rechazada';
       zona: ZoneId;
-      actorId: ActorId;
+      actorId: string;
       demandaId: DemandId;
       porVencimiento: boolean;
       causa?: string;
@@ -1083,115 +1093,327 @@ export type SimEvent =
       dia: number;
       tipo: 'medida';
       zona: ZoneId;
-      actorId: ActorId;
-      medida: MeasureType;
+      actorId: string;
+      medida: ActorMeasure['tipo'];
       hastaDia: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'contraoferta';
+      zona: ZoneId;
+      actorId: string;
+      demandaId: DemandId;
+      aceptada: boolean;
+      palanca: LeverKey;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'agregado';
+      zona: ZoneId;
+      conteos: Record<string, number>;
+      causa?: string;
+    }
+  // --- V2 Events (CONTROLES_V2 §5) ---
+  | {
+      id: string;
+      dia: number;
+      tipo: 'nacimiento';
+      zona: ZoneId;
+      npcId: string;
+      hogarId: string;
+      padresIds: string[];
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'pareja';
+      zona: ZoneId;
+      npcIds: string[];
+      hogarNuevoId: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'separacion';
+      zona: ZoneId;
+      npcIds: string[];
+      hogarIds: string[];
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'hogar_nuevo';
+      zona: ZoneId;
+      hogarId: string;
+      miembros: string[];
+      motivo: 'independizacion' | 'pareja' | 'hacinamiento' | 'separacion';
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'hogar_disuelto';
+      zona: ZoneId;
+      hogarId: string;
+      herederos: string[];
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'herencia';
+      zona: ZoneId;
+      deNpcId: string;
+      aIds: string[];
+      dinero: number;
+      partes: Array<{ firmaId: string; pct: number }>;
+      casaId?: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'mudanza';
+      zona: ZoneId;
+      hogarId: string;
+      deCasaId: string | null;
+      aCasaId: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'desalojo';
+      zona: ZoneId;
+      hogarId: string;
+      casaId: string;
+      periodosSinPagar: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'calle_inicio' | 'calle_fin';
+      zona: ZoneId;
+      hogarId: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'casa_construida';
+      zona: ZoneId;
+      parcelaId: string;
+      casaId: string;
+      dueno: OwnerRef;
+      tipoCasa: HouseType;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'casa_estado';
+      zona: ZoneId;
+      casaId: string;
+      estado: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'firma_fundada';
+      zona: ZoneId;
+      firmaId: string;
+      rubro: FirmRubro;
+      duenoId: string;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'firma_compra';
+      zona: ZoneId;
+      compradorId: string;
+      firmaId: string;
+      precio: number;
+      modo: 'absorcion' | 'filial';
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'firma_quiebra';
+      zona: ZoneId;
+      firmaId: string;
+      cantidadDespedidos: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'monopolio';
+      zona: ZoneId;
+      rubro: FirmRubro;
+      firmaId: string;
+      cuota: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'medio_cambio_linea';
+      zona: ZoneId;
+      medioId: string;
+      lineaAnterior: { afinidadGobierno: number; sensacionalismo: number };
+      lineaNueva: { afinidadGobierno: number; sensacionalismo: number };
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'medio_cierre';
+      zona: ZoneId;
+      medioId: string;
       causa?: string;
     };
 
-export interface HistoryPoint {
+export interface CausalStep {
+  id: string;
   dia: number;
-  reserva: number;
+  tipo: string;
+  zona?: ZoneId;
+  npcId?: string;
+  titulo: string;
+  detalle: string;
+}
+
+export interface EconomyOutput {
+  accesoComida: Record<string, number>;
+  poderAdquisitivo: Record<string, number>;
+  precioAlimento: Record<ZoneId, number>;
+  alquilerMedio: Record<ZoneId, number>;
+  cuotaMercado: Record<string, { firma: string; cuota: number }>;
+  saldoDiarioEstimado: number;
   inflacion: number;
-  satisfaccion: number;
-  apoyo: number;
-  hambreCritica: number;
-  stockDias: number;
-  poblacion: number;
-  semanal?: boolean;
+  precioGlobal: number;
+}
+
+export interface SubsystemRngState {
+  clima: number;
+  caos: number;
+  vida: number;
+  mercado: number;
+  prensa: number;
 }
 
 export interface GameState {
   versionFormato: number;
   semilla: number;
-  rngState: number;
-  idSeq: number;
   config: WorldConfig;
-  esConfigDePrueba: boolean;
+  devMode?: boolean;
+  rngState: number;
+  rng: SubsystemRngState;
+  idSeq: number;
   reloj: {
-    tick: number;
     dia: number;
     anio: number;
     periodo: number;
     diasEnPeriodo: number;
+    tick: number;
+    ticksPorDia: number;
+    velocidad: 1 | 2 | 4 | 8;
+    pausado: boolean;
   };
+  zonas: Record<ZoneId, ZoneDefinition>;
   npcs: Npc[];
-  gobierno: GovernmentState;
-  empresas: {
-    alimento: FoodEnterpriseState;
-    comercio: CommercialEnterpriseState;
-  };
+  hogares: Hogar[];
+  casas: Casa[];
+  firmas: Firma[];
   alimento: {
     stock: number;
-    consumoPorNpc: number;
+    produccionDiaria: number;
+    consumoDiario: number;
     diasStock: number;
     siloDias: number;
     precio: number;
     precioMercado: number;
-    precioBase: number;
-    produccionDiaria: number;
-    consumoDiario: number;
   };
-  clima: {
-    fenomenos: ClimatePhenomenon[];
-    proximoEventoDia: number;
+  empresas: {
+    alimento: EnterpriseState;
+    comercio: EnterpriseState;
   };
+  gobierno: GovernmentState;
+  parcelas: Parcela[];
+  hitosCumplidos: string[];
+  demandasActivas: ActiveDemand[];
+  medidasVigentes: ActorMeasure[];
+  bloqueosPalanca: LeverLock[];
+  cooldownActorDemanda: Record<string, number>;
+  clima: ClimateState;
   medios: MediaOutlet[];
   noticias: NewsArticle[];
-  ultimaSalidaEconomica: EconomyOutput;
+  colaHechosDia: PressFact[];
+  ventanasCondicion: ConditionWindow[];
+  clasificadorRegistro: ClassifierRecord[];
   caosTracker: {
     ventanaInicioDia: number;
     accionesEnVentana: number;
     respiroActivo: boolean;
-    ultimoIntentoDia: number;
   };
-  ventanasCondicion: PendingConditionWindow[];
   cooldownsCondicion: {
     impago: number;
     descontento: number;
     hambre: number;
+    paroFirma: number;
+    ocupacion: number;
+    boicot: number;
   };
-  eventos: SimEvent[];
-  eventosDiaActual: SimEvent[];
   golpesPorZonaHistorial: Record<ZoneId, number[]>;
-  ultimaDefensaZona: Record<ZoneId, number>;
-  ultimaOrdenZona: Record<ZoneId, number>;
-  ultimaIntegridadZona: Record<ZoneId, number>;
-  fenomenosIniciadosIds: string[];
   avisosEmitidos: string[];
-  ultimaCausaPalanca?: string;
-  ultimoEventoClimaId?: string;
-  ultimoEventoEmpresaId?: string;
+  fenomenosIniciadosIds: string[];
+  ultimaIntegridadZona: Record<ZoneId, number>;
+  ultimaDefensaZona: Record<ZoneId, number>;
+  ultimaOrdenZona?: Record<ZoneId, number>;
+  ultimaVariantePorAccion?: Record<string, number>;
   hospitalSaturadoDia?: number;
-  auditEntradasDia: number;
-  auditSalidasDia: number;
-  ultimoDineroTotal?: number;
   precioAyer: number;
   hambreAyerPct: number;
   ultimoSaldoCierre: number;
-  colaHechosDia: PressFact[];
-  ultimaVariantePorAccion: Record<string, number>;
-  clasificadorRegistro: ClassifierRecord[];
-  metricasBaseObjetivo: {
-    victoriaInicial: number;
-    derrotaInicial: number;
-  };
+  ultimoEventoClimaId?: string;
+  ultimoEventoEmpresaId?: string;
+  ultimaCausaPalanca?: string;
+  ultimaSalidaEconomica: EconomyOutput;
   metricasPeriodoAnterior: {
     apoyoPct: number;
     hambreCriticaPct: number;
     poblacion: number;
     satisfaccionMedia: number;
   };
-  parcelas: Parcela[];
-  hitosCumplidos: string[];
-  hitosRacha: Record<string, number>;
-  demandasActivas: ActiveDemand[];
-  bloqueosPalanca: LeverLock[];
-  medidasVigentes: ActorMeasure[];
-  cooldownActorDemanda: Record<string, number>;
-  parcelasRecienHabilitadasDia: number;
-  bitacora: EventLogEntry[];
+  mercadoStats: {
+    quiebrasPeriodo: number;
+    fundacionesPeriodo: number;
+    comprasPeriodo: number;
+    construccionesPeriodo: number;
+    nacimientosAcum: number;
+    muertesAcum: number;
+    hogaresEnAcogida: number;
+    ultimaActualizacionDemogDia: number;
+  };
+  autopilotLastBuildDay?: number;
+  auditEntradasDia: number;
+  auditSalidasDia: number;
+  ultimoDineroTotal: number;
+  eventosDiaActual: SimEvent[];
+  eventos: SimEvent[];
   historial: HistoryPoint[];
+  bitacora: EventLogEntry[];
   resultado: {
     estado: 'jugando' | 'victoria' | 'derrota';
     victoriaCumplida?: boolean;
@@ -1199,4 +1421,58 @@ export interface GameState {
     razon?: string;
     diaFinal?: number;
   };
+}
+
+export interface CommunityDerived {
+  poblacion: number;
+  poblacionPct: number;
+  vivos: number;
+  bajas: number;
+  satisfaccionMedia: number;
+  apoyoPct: number;
+  descontentosPct: number;
+  desempleoPct: number;
+  hambreCriticaPct: number;
+  sinDineroPct: number;
+  despensaMediaDias: number;
+  hospitalOcupacionPct: number;
+  camasHospital: number;
+  capacidadHospitalTotal: number;
+  hospitalesLlenos: number;
+  internados: number;
+  esperandoCama: number;
+  edificiosActivos: number;
+  parcelasLibres: number;
+  hogares: number;
+  callePct: number;
+  hacinamientoPct: number;
+  alquilerCargaMediaPct: number;
+  natalidad: number;
+  mortalidad: number;
+  edadMedia: number;
+  pctMenores: number;
+  pctJubilados: number;
+  defensa: Record<ZoneId, number>;
+  orden: Record<ZoneId, number>;
+  amenazaPercibida: Record<ZoneId, number>;
+  productividadTotal: number;
+  roles: Record<RoleId, number>;
+  mercado: {
+    firmas: number;
+    cuotaMayorPct: number;
+    quiebrasPeriodo: number;
+    fundacionesPeriodo: number;
+  };
+}
+
+export interface WorldCreationOptions {
+  escenarioId: ScenarioId;
+  economiaModulo: EconomyModule;
+  nivelMundo?: WorldComplexityLevel;
+  nivelGobernador?: GovernorComplexityLevel;
+  cantidadMedios: number;
+  poblacionInicial: number;
+  caos: ChaosSettings;
+  semilla: number;
+  usarIaGemini: boolean;
 }
