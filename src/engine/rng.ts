@@ -42,21 +42,20 @@ export function randInt(state: { rngState: number }, min: number, max: number): 
 }
 
 export function nextSubRand(
-  state: { rng: SubsystemRngState; rngState: number },
+  state: { rng?: SubsystemRngState; rngState: number },
   sub: SubsystemName
 ): number {
-  const cur = typeof state.rng?.[sub] === 'number' ? state.rng[sub] : state.rngState;
-  const step = mulberry32Step(cur);
-  if (state.rng) {
-    state.rng[sub] = step.nextState;
-  } else {
-    state.rngState = step.nextState;
+  if (!state.rng) {
+    state.rng = initSubsystemRng(state.rngState || 1);
   }
+  const cur = typeof state.rng[sub] === 'number' ? state.rng[sub] : state.rngState;
+  const step = mulberry32Step(cur);
+  state.rng[sub] = step.nextState;
   return step.value;
 }
 
 export function subRandRange(
-  state: { rng: SubsystemRngState; rngState: number },
+  state: { rng?: SubsystemRngState; rngState: number },
   sub: SubsystemName,
   min: number,
   max: number
@@ -65,7 +64,7 @@ export function subRandRange(
 }
 
 export function subRandInt(
-  state: { rng: SubsystemRngState; rngState: number },
+  state: { rng?: SubsystemRngState; rngState: number },
   sub: SubsystemName,
   min: number,
   max: number

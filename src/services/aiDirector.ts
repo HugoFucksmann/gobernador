@@ -4,7 +4,7 @@ import {
   ROLE_CATALOG,
   ZONE_IDS,
 } from '../data/catalogs';
-import { nextRand, nextSeqId } from '../engine/rng';
+import { nextSeqId, nextSubRand, SubsystemName } from '../engine/rng';
 import {
   applyActionToNpc,
   applyPressArticleEffects,
@@ -29,6 +29,7 @@ import {
   NewsArticle,
   Npc,
   PressFact,
+  SubsystemRngState,
 } from '../types/game';
 import { AiStatus } from '../types/ui';
 
@@ -94,10 +95,14 @@ function shouldDisableAi(status: number, errMessage?: string): boolean {
   );
 }
 
-function shuffleArray<T>(items: T[], rng: { rngState: number }): T[] {
+function shuffleArray<T>(
+  items: T[],
+  rng: { rng?: SubsystemRngState; rngState: number },
+  sub: SubsystemName = 'caos'
+): T[] {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(nextRand(rng) * (i + 1));
+    const j = Math.floor(nextSubRand(rng, sub) * (i + 1));
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
@@ -106,8 +111,9 @@ function shuffleArray<T>(items: T[], rng: { rngState: number }): T[] {
 function pickWeightedCandidate(
   candidatas: ActionDefinition[],
   npc: Npc | null,
-  rng: { rngState: number },
-  normalizedProbs?: Map<string, number>
+  rng: { rng?: SubsystemRngState; rngState: number },
+  normalizedProbs?: Map<string, number>,
+  sub: SubsystemName = 'caos'
 ): ActionDefinition {
   if (candidatas.length === 1) return candidatas[0];
 
@@ -121,10 +127,10 @@ function pickWeightedCandidate(
 
   const total = weights.reduce((acc, w) => acc + w, 0);
   if (total <= 0) {
-    return candidatas[Math.floor(nextRand(rng) * candidatas.length)];
+    return candidatas[Math.floor(nextSubRand(rng, sub) * candidatas.length)];
   }
 
-  let r = nextRand(rng) * total;
+  let r = nextSubRand(rng, sub) * total;
   for (let i = 0; i < candidatas.length; i++) {
     r -= weights[i];
     if (r <= 0) return candidatas[i];
@@ -378,7 +384,11 @@ export async function dispatchPressJob(
   options?: { allowManualFallback?: boolean; signal?: AbortSignal }
 ): Promise<AiDirectorResult | null> {
   if (state.medios.length === 0) return null;
-  const rng = { rngState: state.rngState, idSeq: state.idSeq };
+  const rng = {
+    rngState: state.rngState,
+    rng: structuredClone(state.rng),
+    idSeq: state.idSeq,
+  };
 
   let planningState = state;
   if (state.colaHechosDia.length === 0 && options?.allowManualFallback) {
@@ -418,6 +428,7 @@ export async function dispatchPressJob(
       status: 'plantilla',
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         s.idSeq = Math.max(s.idSeq, rng.idSeq);
         s.colaHechosDia = [];
         for (const art of articles) {
@@ -527,6 +538,7 @@ export async function dispatchPressJob(
     status: lastStatus,
     apply: (s) => {
       s.rngState = rng.rngState;
+      if (rng.rng) s.rng = rng.rng;
       s.idSeq = Math.max(s.idSeq, rng.idSeq);
       s.colaHechosDia = [];
       for (const art of articles) {
@@ -544,14 +556,20 @@ export async function dispatchSpontaneousActionJob(
   const gate = canTriggerSpontaneousChaos(state);
   if (!gate.allowed) return null;
 
-  const rng = { rngState: state.rngState, idSeq: state.idSeq };
-  const probeState = Object.assign({}, state, { rngState: rng.rngState });
+  const rng = {
+    rngState: state.rngState,
+    rng: structuredClone(state.rng),
+    idSeq: state.idSeq,
+  };
+  const probeState = Object.assign({}, state, { rngState: rng.rngState, rng: rng.rng });
   const npc = pickChaosCandidateNpc(probeState);
   rng.rngState = probeState.rngState;
+  rng.rng = probeState.rng;
   if (!npc) return null;
 
   const candidatas = selectCandidateActions(npc, probeState);
   rng.rngState = probeState.rngState;
+  rng.rng = probeState.rng;
   if (candidatas.length === 0) return null;
 
   const dispatchedDay = state.reloj.dia;
@@ -605,6 +623,7 @@ export async function dispatchSpontaneousActionJob(
       status: 'plantilla',
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         return applySelectedAction(s, chosen, 'motor');
       },
     };
@@ -654,6 +673,7 @@ export async function dispatchSpontaneousActionJob(
         status,
         apply: (s) => {
           s.rngState = rng.rngState;
+          if (rng.rng) s.rng = rng.rng;
           return applySelectedAction(s, chosen, 'motor', latencyMs, false);
         },
       };
@@ -670,6 +690,7 @@ export async function dispatchSpontaneousActionJob(
         status,
         apply: (s) => {
           s.rngState = rng.rngState;
+          if (rng.rng) s.rng = rng.rng;
           return applySelectedAction(s, chosen, 'motor', latencyMs, true);
         },
       };
@@ -684,6 +705,7 @@ export async function dispatchSpontaneousActionJob(
       status,
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         return applySelectedAction(s, chosen, 'clasificador', latencyMs, false);
       },
     };
@@ -698,6 +720,7 @@ export async function dispatchSpontaneousActionJob(
       status,
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         return applySelectedAction(s, chosen, 'motor', latencyMs, false);
       },
     };
@@ -712,7 +735,7 @@ export async function dispatchConditionJob(
   const pending = state.ventanasCondicion.find((w) => w.estado === 'pendiente');
   if (!pending) return null;
 
-  const rng = { rngState: state.rngState };
+  const rng = { rngState: state.rngState, rng: structuredClone(state.rng) };
   const affectedIdSet = new Set(pending.npcIds);
   const sampleParts: string[] = [];
   for (const n of state.npcs) {
@@ -754,6 +777,7 @@ export async function dispatchConditionJob(
       status: 'plantilla',
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
         recordCond(s, chosen.id, 'motor');
       },
@@ -802,6 +826,7 @@ export async function dispatchConditionJob(
         status,
         apply: (s) => {
           s.rngState = rng.rngState;
+          if (rng.rng) s.rng = rng.rng;
           resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
           recordCond(s, chosen.id, 'motor', latencyMs, false);
         },
@@ -819,6 +844,7 @@ export async function dispatchConditionJob(
         status,
         apply: (s) => {
           s.rngState = rng.rngState;
+          if (rng.rng) s.rng = rng.rng;
           resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
           recordCond(s, chosen.id, 'motor', latencyMs, true);
         },
@@ -833,6 +859,7 @@ export async function dispatchConditionJob(
       status,
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'clasificador');
         recordCond(s, chosen.id, 'clasificador', latencyMs, false);
       },
@@ -848,6 +875,7 @@ export async function dispatchConditionJob(
       status,
       apply: (s) => {
         s.rngState = rng.rngState;
+        if (rng.rng) s.rng = rng.rng;
         resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
         recordCond(s, chosen.id, 'motor', latencyMs, false);
       },

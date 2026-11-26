@@ -32,7 +32,7 @@ import {
 } from '../types/game';
 import { AiStatus } from '../types/ui';
 import { DEFAULT_WORLD_CONFIG } from './policies';
-import { nextSeqId, normalizeSeed } from './rng';
+import { initSubsystemRng, nextSeqId, normalizeSeed } from './rng';
 import {
   computeTotalWorldMoney,
   counterOfferDemand,
@@ -426,6 +426,10 @@ export class GameController {
   setDevMode(enabled: boolean): void {
     if (this.devMode === enabled) return;
     this.devMode = enabled;
+    this.state = {
+      ...this.state,
+      devMode: enabled,
+    };
     if (!enabled && this.speed > 2) {
       this.speed = 2;
     }
@@ -524,6 +528,9 @@ export class GameController {
     loaded.semilla = normalizeSeed(loaded.semilla ?? loaded.config.semilla ?? 1);
     loaded.config.semilla = loaded.semilla;
     loaded.rngState = normalizeSeed(loaded.rngState ?? loaded.semilla);
+    if (!loaded.rng) {
+      loaded.rng = initSubsystemRng(loaded.rngState || loaded.semilla || 1);
+    }
     if (typeof loaded.idSeq !== 'number') {
       loaded.idSeq = 0;
     }
@@ -546,9 +553,33 @@ export class GameController {
     if (!Array.isArray(loaded.tramos) || loaded.tramos.length === 0) {
       loaded.tramos = structuredClone(DEFAULT_TRAMOS);
     }
-    if (!loaded.distanciasZonas || Object.keys(loaded.distanciasZonas).length === 0) {
+    if (
+      !loaded.distanciasZonas ||
+      Object.keys(loaded.distanciasZonas).length < Object.keys(loaded.zonas).length
+    ) {
       recomputeRoadDistances(loaded);
     }
+    if (!Array.isArray(loaded.hogares)) {
+      loaded.hogares = [];
+    }
+    if (!Array.isArray(loaded.casas)) {
+      loaded.casas = [];
+    }
+    if (!Array.isArray(loaded.firmas)) {
+      loaded.firmas = [];
+    }
+    loaded.mercadoStats = {
+      quiebrasPeriodo: loaded.mercadoStats?.quiebrasPeriodo ?? 0,
+      fundacionesPeriodo: loaded.mercadoStats?.fundacionesPeriodo ?? 0,
+      comprasPeriodo: loaded.mercadoStats?.comprasPeriodo ?? 0,
+      construccionesPeriodo: loaded.mercadoStats?.construccionesPeriodo ?? 0,
+      nacimientosAcum: loaded.mercadoStats?.nacimientosAcum ?? 0,
+      muertesAcum: loaded.mercadoStats?.muertesAcum ?? 0,
+      hogaresEnAcogida:
+        loaded.mercadoStats?.hogaresEnAcogida ??
+        loaded.hogares.filter((h) => h.estado === 'acogida').length,
+      ultimaActualizacionDemogDia: loaded.mercadoStats?.ultimaActualizacionDemogDia ?? 0,
+    };
     if (!loaded.demandaSuelo) {
       loaded.demandaSuelo = computeDemandaSuelo(loaded);
     }
@@ -594,10 +625,13 @@ export class GameController {
       acogidaMenores: Number(legacyFin.acogidaMenores ?? 0),
       ayudaSocial: Number(legacyFin.ayudaSocial ?? 0),
       mantenimiento: Number(legacyFin.mantenimiento ?? 0),
+      mantenimientoVias: Number(legacyFin.mantenimientoVias ?? 0),
+      mantenimientoEdificios: Number(legacyFin.mantenimientoEdificios ?? 0),
       operacionObras: Number(legacyFin.operacionObras ?? 0),
       operacion: Number(legacyFin.operacion ?? legacyFin.presupuestoAsignado ?? 0),
       obras: Number(legacyFin.obras ?? 0),
       prensa: Number(legacyFin.prensa ?? legacyFin.prensaAsignada ?? 0),
+      subsidios: Number(legacyFin.subsidios ?? 0),
       saldo: Number(legacyFin.saldo ?? legacyFin.disponible ?? 0),
       emision: Number(legacyFin.emision ?? 0),
       importaciones: Number(legacyFin.importaciones ?? legacyFin.comprasAlimento ?? 0),
@@ -625,6 +659,7 @@ export class GameController {
       comidaMenores: Number(legacyAcum.comidaMenores ?? 0),
       acogidaMenores: Number(legacyAcum.acogidaMenores ?? 0),
       mantenimiento: Number(legacyAcum.mantenimiento ?? 0),
+      mantenimientoVias: Number(legacyAcum.mantenimientoVias ?? 0),
       operacionObras: Number(legacyAcum.operacionObras ?? 0),
       operacion: Number(legacyAcum.operacion ?? 0),
       obras: Number(legacyAcum.obras ?? 0),
@@ -634,6 +669,7 @@ export class GameController {
         infraestructura: 0,
       },
       prensa: Number(legacyAcum.prensa ?? 0),
+      subsidios: Number(legacyAcum.subsidios ?? 0),
       importaciones: Number(legacyAcum.importaciones ?? legacyAcum.comprasAlimento ?? 0),
       exportaciones: Number(legacyAcum.exportaciones ?? legacyAcum.ventasAlimento ?? 0),
     };
@@ -655,6 +691,8 @@ export class GameController {
         cuotaMercado: {},
         inflacion: loaded.gobierno.inflacion ?? 0,
         precioGlobal: loaded.alimento.precio,
+        bienesImportadosDia: 0,
+        industriaExportDia: 0,
       };
     } else {
       if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
@@ -670,6 +708,8 @@ export class GameController {
       loaded.ultimaSalidaEconomica.alquilerMedio ??= fallbackRent;
       loaded.ultimaSalidaEconomica.cuotaMercado ??= {};
       loaded.ultimaSalidaEconomica.precioGlobal ??= loaded.alimento.precio;
+      loaded.ultimaSalidaEconomica.bienesImportadosDia ??= 0;
+      loaded.ultimaSalidaEconomica.industriaExportDia ??= 0;
     }
 
     if (!loaded.ultimaOrdenZona) {
@@ -714,6 +754,9 @@ export class GameController {
       ocupacion: loaded.cooldownsCondicion?.ocupacion ?? 0,
       boicot: loaded.cooldownsCondicion?.boicot ?? 0,
     };
+    if (typeof loaded.alimento.siloDias !== 'number') {
+      loaded.alimento.siloDias = ECON_CONSTANTS.siloDias;
+    }
     if (typeof loaded.alimento.precioMercado !== 'number') {
       loaded.alimento.precioMercado = loaded.alimento.precio;
     }

@@ -287,7 +287,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               <input
                 type="range"
                 aria-label="Medios de prensa"
-                min={1}
+                min={0}
                 max={3}
                 value={config.cantidadMedios}
                 onChange={(e) => setConfig({ ...config, cantidadMedios: Number(e.target.value) })}

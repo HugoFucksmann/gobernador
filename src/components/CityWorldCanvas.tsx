@@ -1829,7 +1829,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           });
 
           // Active Role & Hospital Lookup for Status Badges
-          const activeRoleCounts: Partial<Record<RoleId, number>> = {};
+          const activeRoleCounts: Partial<Record<RoleId, number>> = Object.create(null);
           for (const n of st.npcs) {
             if (n.vivo && !n.hospital.internado && !n.accionIa?.fueraDePuesto) {
               activeRoleCounts[n.rol] = (activeRoleCounts[n.rol] ?? 0) + 1;

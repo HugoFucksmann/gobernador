@@ -95,9 +95,9 @@ export function getActiveBuildings(parcelas: Parcela[]): BuildingInstance[] {
 
 export function getBuildingRoleCapacity(b: BuildingInstance): Partial<Record<RoleId, number>> {
   const def = BUILDING_CATALOG[b.tipo];
-  if (!def) return {};
+  if (!def) return Object.create(null);
   const healthFactor = b.estadoSalud < 40 ? 0.5 : 1;
-  const result: Partial<Record<RoleId, number>> = {};
+  const result: Partial<Record<RoleId, number>> = Object.create(null);
   for (const [role, count] of Object.entries(def.puestos)) {
     if (typeof count === 'number' && count > 0) {
       result[role as RoleId] = Math.max(1, Math.round(count * healthFactor));
@@ -153,7 +153,7 @@ export function getBuildingJobCaps(
     tecnico += caps.tecnico ?? 0;
     obrero += caps.obrero ?? 0;
     comerciante += caps.comerciante ?? 0;
-    constructor += caps.constructor ?? 0;
+    constructor += Object.hasOwn(caps, 'constructor') && typeof caps.constructor === 'number' ? caps.constructor : 0;
     inmobiliario += caps.inmobiliario ?? 0;
     periodista += caps.periodista ?? 0;
   }
@@ -265,7 +265,7 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
       const factor = f ? f.factor : 1;
       if (def.ingreso) {
         baseTaxableGrossDia +=
-          (def.ingreso[0] + n.economia.ingresoPos * (def.ingreso[1] - def.ingreso[0])) *
+          (def.ingreso[0] + (n.economia.ingresoPos / 100) * (def.ingreso[1] - def.ingreso[0])) *
           0.65 *
           factor;
       }

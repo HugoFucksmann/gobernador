@@ -56,21 +56,30 @@ import {
   ServiceLevel,
   ServicePublicRoleId,
   SimEvent,
+  SubsystemRngState,
   ZoneId,
 } from '../types/game';
 import {
   getActiveBuildings,
   getObrasTargetJobs,
 } from './policies';
-import { nextRand, nextSeqId, randInt } from './rng';
+import {
+  nextRand,
+  nextSeqId,
+  nextSubRand,
+  subRandInt,
+  SubsystemName,
+} from './rng';
 import {
   getCityErrandPosition,
   getZoneCanvasPosition,
+  isTestConfig,
 } from './worldGenerator';
 import {
   checkEngineInvariants,
   clamp,
   compactEvents,
+  computeAmenazaPercibida,
   computeDemandaSuelo,
   computeHospitalFacilities as computeHospitalFacilitiesRaw,
   computeTotalWorldMoney,
@@ -131,6 +140,22 @@ function drawRand(state?: { rngState: number }): number {
   return state ? nextRand(state) : Math.random();
 }
 
+function drawSubRand(
+  state: { rng?: SubsystemRngState; rngState: number } | undefined,
+  sub: SubsystemName
+): number {
+  return state ? nextSubRand(state, sub) : Math.random();
+}
+
+function drawSubInt(
+  state: { rng?: SubsystemRngState; rngState: number } | undefined,
+  sub: SubsystemName,
+  min: number,
+  max: number
+): number {
+  return state ? subRandInt(state, sub, min, max) : min + Math.floor(Math.random() * (max - min + 1));
+}
+
 function makeSeqId(state: { idSeq: number } | undefined, prefix: string): string {
   return state ? nextSeqId(state, prefix) : `${prefix}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -147,50 +172,6 @@ function shortestZonePath(
   zonas: GameState['zonas']
 ): ZoneId[] {
   return shortestZonePathByZones(zonas, from, to);
-}
-
-function computeAmenazaPercibida(state: GameState): Record<ZoneId, number> {
-  const dia = state.reloj.dia;
-  const zones = getWorldZones(state);
-  const minHitDay = dia - ECON_CONSTANTS.golpeAmenazaVentanaDias;
-
-  const result: Record<ZoneId, number> = {};
-  for (const z of zones) result[z] = 0;
-
-  const trackedPhenomena = state.clima.fenomenos.filter((f) => {
-    const aviso = f.avisoDias ?? 0;
-    return f.origen && dia >= f.inicioDia - aviso && dia < f.inicioDia + f.duracionDias;
-  });
-
-  const medioCredById = new Map<string, number>();
-  for (const m of state.medios) {
-    medioCredById.set(m.id, m.credibilidad);
-  }
-
-  for (const z of zones) {
-    let avisoVal = 0;
-    const hasPhenomInZone = trackedPhenomena.some((f) => f.origen === z);
-    if (hasPhenomInZone) {
-      for (const n of state.noticias) {
-        if (
-          n.esAviso &&
-          n.zonaOrigen === z &&
-          (n.vigenteHastaDia === undefined || dia < n.vigenteHastaDia)
-        ) {
-          const cred = n.credibilidad ?? medioCredById.get(n.medioId) ?? 60;
-          const score = (n.alcance * cred) / 100;
-          if (score > avisoVal) avisoVal = score;
-        }
-      }
-    }
-
-    const hits = (state.golpesPorZonaHistorial[z] || []).filter((d) => d > minHitDay && d <= dia).length;
-    const golpesVal = Math.min(100, ECON_CONSTANTS.golpeAmenazaPeso * hits);
-
-    result[z] = Number(Math.max(avisoVal, golpesVal).toFixed(1));
-  }
-
-  return result;
 }
 
 function computePoliceSplitAndMetrics(state: GameState): {
@@ -1684,9 +1665,10 @@ function applyInstantModifierToNpc(
 export function pickActionText(
   action: ActionDefinition,
   npcName: string,
-  state?: GameState | { rngState: number; ultimaVariantePorAccion?: Record<string, number> },
+  state?: GameState | { rng?: SubsystemRngState; rngState: number; ultimaVariantePorAccion?: Record<string, number> },
   roleName?: string,
-  zoneName?: string
+  zoneName?: string,
+  sub: SubsystemName = 'caos'
 ): string {
   const pool = action.textos && action.textos.length > 0 ? action.textos : [`{nombre}: ${action.nombre}`];
   const lastIdx =
@@ -1700,9 +1682,9 @@ export function pickActionText(
     for (let i = 0; i < pool.length; i++) {
       if (i !== lastIdx) candidates.push(i);
     }
-    chosenIdx = candidates[Math.floor(drawRand(state) * candidates.length)];
+    chosenIdx = candidates[Math.floor(drawSubRand(state, sub) * candidates.length)];
   } else {
-    chosenIdx = Math.floor(drawRand(state) * pool.length);
+    chosenIdx = Math.floor(drawSubRand(state, sub) * pool.length);
   }
 
   if (state && 'ultimaVariantePorAccion' in state && state.ultimaVariantePorAccion) {
@@ -1741,8 +1723,8 @@ function createEligibilityContext(state: GameState): EligibilityContext {
   const zonesCount = getWorldZones(state).length;
   const activePhenomTypes = new Set(getActivePhenomena(state).map((f) => f.tipo));
   const announcedPhenomTypes = new Set(getAnnouncedPhenomena(state).map((f) => f.tipo));
-  const roleTotal: Partial<Record<RoleId, number>> = {};
-  const roleOut: Partial<Record<RoleId, number>> = {};
+  const roleTotal: Partial<Record<RoleId, number>> = Object.create(null);
+  const roleOut: Partial<Record<RoleId, number>> = Object.create(null);
   const lowPantryCountByZone: Partial<Record<ZoneId, number>> = {};
   const lowHealthCountByZone: Partial<Record<ZoneId, number>> = {};
   const hogaresById = new Map<string, Hogar>();
@@ -1909,7 +1891,19 @@ function applyActionEffectsToNpc(
         const casa = state.casas.find((c) => c.id === hogar.casaId);
         if (casa) {
           const spec = EFFECT_CATALOG.repara[ef.intensidad ?? 'media'];
+          const prevEstado = casa.estado;
           casa.estado = clamp(Number((casa.estado + spec.pesoReparador * 5).toFixed(1)), 0, 100);
+          if (casa.estado !== prevEstado) {
+            emitSimEvent(state, {
+              id: nextSeqId(state, `ev_${state.reloj.dia}`),
+              dia: state.reloj.dia,
+              tipo: 'casa_estado',
+              zona: casa.zona,
+              casaId: casa.id,
+              estado: casa.estado,
+              causa: causaId || 'vivienda:remodelacion',
+            });
+          }
         }
       }
       continue;
@@ -2096,7 +2090,7 @@ export function applyActionToNpc(
   const [minD, maxD] = action.duracionDias;
   const maxAllowed = action.tipo === 'espontanea' ? state.config.caos.duracionMaxDias : maxD;
   const duracion = clamp(
-    Math.round(minD + drawRand(state) * (maxD - minD)),
+    Math.round(minD + drawSubRand(state, 'caos') * (maxD - minD)),
     1,
     maxAllowed
   );
@@ -2248,12 +2242,15 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
 
     for (const other of zoneCandidates) {
       if (other.accionIa) continue;
+      if (action.id === 'paro_firma' && focusAct.firmaObjetivoId && other.empleadorId !== focusAct.firmaObjetivoId) {
+        continue;
+      }
       if (!isNpcEligibleForAction(other, action, state, ctx)) continue;
       if (requiresOutOfPostCap && !canRoleLeavePost(state, other.rol, ctx)) continue;
 
       const affinityFactor = clamp(scoreActionAffinity(other, action) / 100, 0.3, 1.5);
       const prob = clamp(action.contagio * exposure * brake * affinityFactor, 0, 0.95);
-      if (drawRand(state) >= prob) continue;
+      if (drawSubRand(state, 'caos') >= prob) continue;
 
       const zoneName = other.zona || 'centro';
       const copyText = pickActionText(
@@ -2261,7 +2258,8 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
         other.nombre,
         state,
         ROLE_CATALOG[other.rol].nombre.toLowerCase(),
-        zoneName
+        zoneName,
+        'caos'
       );
       other.accionIa = {
         id: action.id,
@@ -2270,6 +2268,7 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
         efectos: action.efectos,
         fueraDePuesto: outOfPost,
         zonaDestino,
+        firmaObjetivoId: focusAct.firmaObjetivoId,
         diasRestantes: focusAct.diasRestantes,
         duracionTotal: focusAct.duracionTotal,
         esFoco: false,
@@ -2521,11 +2520,11 @@ export function selectCandidateActions(
   for (let i = 0; i < limit && pool.length > 0; i++) {
     const totalW = pool.reduce((acc, item) => acc + item.w, 0);
     if (totalW <= 0) {
-      const idx = Math.floor(drawRand(state) * pool.length);
+      const idx = Math.floor(drawSubRand(state, 'caos') * pool.length);
       picked.push(pool.splice(idx, 1)[0].a);
       continue;
     }
-    let r = drawRand(state) * totalW;
+    let r = drawSubRand(state, 'caos') * totalW;
     let chosenIdx = pool.length - 1;
     for (let k = 0; k < pool.length; k++) {
       r -= pool[k].w;
@@ -2621,9 +2620,9 @@ export function pickChaosCandidateNpc(state: GameState): Npc | null {
 
   const totalInterest = weighted.reduce((acc, item) => acc + item.interest, 0);
   if (totalInterest <= 0) {
-    return weighted[Math.floor(drawRand(state) * weighted.length)].n;
+    return weighted[Math.floor(drawSubRand(state, 'caos') * weighted.length)].n;
   }
-  let r = drawRand(state) * totalInterest;
+  let r = drawSubRand(state, 'caos') * totalInterest;
   for (const item of weighted) {
     r -= item.interest;
     if (r <= 0) return item.n;
@@ -2719,7 +2718,7 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
       const rebPref = (1 - medio.lineaEditorial.afinidadGobierno / 100) * rebeldia * 20;
       const sensPref =
         (medio.lineaEditorial.sensacionalismo / 100) * (10 + rebeldia * 10 + (1 - valentia) * 10);
-      return { n, score: 100 - affinityDiff + rebPref + sensPref + drawRand(state) * 25 };
+      return { n, score: 100 - affinityDiff + rebPref + sensPref + drawSubRand(state, 'prensa') * 25 };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, consumersCount)
@@ -3004,13 +3003,13 @@ function runPoliceRelocation(state: GameState): void {
     if (policias.length > 0) {
       const exactMove = policias.length * (ECON_CONSTANTS.reubicacionPoliciasPct / 100);
       const countToMove =
-        Math.floor(exactMove) + (drawRand(state) < exactMove - Math.floor(exactMove) ? 1 : 0);
+        Math.floor(exactMove) + (drawSubRand(state, 'caos') < exactMove - Math.floor(exactMove) ? 1 : 0);
 
       const movedByRoute = new Map<string, string[]>();
       const pool = [...policias];
 
       for (let i = 0; i < countToMove && pool.length > 0; i++) {
-        let r = drawRand(state) * totalNecesidad;
+        let r = drawSubRand(state, 'caos') * totalNecesidad;
         let targetZone: ZoneId = zones[0];
         for (const z of zones) {
           r -= necesidadTotalZona[z] || 0;
@@ -3026,7 +3025,7 @@ function runPoliceRelocation(state: GameState): void {
         }
         if (candidateIdxs.length === 0) continue;
 
-        const pickIdx = candidateIdxs[Math.floor(drawRand(state) * candidateIdxs.length)];
+        const pickIdx = candidateIdxs[Math.floor(drawSubRand(state, 'caos') * candidateIdxs.length)];
         const chosen = pool.splice(pickIdx, 1)[0];
         const deZona = chosen.zona;
         chosen.zona = targetZone;
@@ -3086,20 +3085,17 @@ function runPoliceRelocation(state: GameState): void {
 }
 
 
-function runDailyHealthAndVariablesV2(state: GameState): void {
+function runDailyHealthV2(state: GameState): void {
   const vivos = state.npcs.filter((n) => n.vivo);
   if (vivos.length === 0) return;
 
   const zones = getWorldZones(state);
   const zonesCount = zones.length;
   const defaultZone: ZoneId = zones[0] ?? 'centro';
-  const mod = state.config.economiaModulo;
-  const pal = state.gobierno.palancasVigentes;
   const zonesMap = getZonesMap(state);
   const activePhenomena = getActivePhenomena(state);
   const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
-  const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
-  const { accesoComida, poderAdquisitivo } = state.ultimaSalidaEconomica;
+  const { accesoComida } = state.ultimaSalidaEconomica;
 
   // 1. Hunger update from household food access (economyV2 outputs keyed by hogarId)
   for (const npc of vivos) {
@@ -3141,7 +3137,7 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
         0,
         1
       );
-      if (drawRand(state) >= prob) continue;
+      if (drawSubRand(state, 'clima') >= prob) continue;
 
       let repelledZone: ZoneId | null = null;
       if (cfg.usaProteccion) {
@@ -3151,7 +3147,7 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
             0,
             0.99
           );
-          if (drawRand(state) < repelProb) {
+          if (drawSubRand(state, 'clima') < repelProb) {
             repelledZone = z;
             break;
           }
@@ -3171,7 +3167,7 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
           causa: state.ultimoEventoClimaId || causa,
         });
       } else {
-        let dano = Math.round(cfg.danoMin + drawRand(state) * (cfg.danoMax - cfg.danoMin));
+        let dano = Math.round(cfg.danoMin + drawSubRand(state, 'clima') * (cfg.danoMax - cfg.danoMin));
         if (npc.edad < 18 || npc.edad >= 65) {
           dano = Math.round(dano * ECON_CONSTANTS.kVulnerabilidadEdad);
         }
@@ -3226,12 +3222,12 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
     }
   }
 
-  // 3. Critical hunger & street-living health drain
+  // 3. Critical hunger & actual street-living health drain (squatted casas exempt)
   let hungerDamageCount = 0;
   for (const npc of vivos) {
     if (!npc.vivo) continue;
     const hogar = hogarById.get(npc.hogarId);
-    if (hogar?.estado === 'calle' && !npc.hospital.internado) {
+    if (hogar?.estado === 'calle' && !hogar.ocupandoCasaId && !npc.hospital.internado) {
       applyInstantModifierToNpc(
         npc,
         {
@@ -3478,10 +3474,32 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
       `Hospital +${curaInternadoDia.toFixed(1)} salud; natural +${ECON_CONSTANTS.curaNaturalSalud} salud.`
     );
   }
+}
 
-  // 5. Fear, Satisfaction & Loyalty for surviving NPCs (with housing/household factors)
+function runDailyVariablesV2(state: GameState): void {
+  const vivos = state.npcs.filter((n) => n.vivo);
+  if (vivos.length === 0) return;
+
+  const zonesCount = getWorldZones(state).length;
+  const mod = state.config.economiaModulo;
+  const pal = state.gobierno.palancasVigentes;
+  const zonesMap = getZonesMap(state);
+  const activePhenomena = getActivePhenomena(state);
+  const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
+  const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
+  const { poderAdquisitivo } = state.ultimaSalidaEconomica;
+  const defensa = computeZoneDefense(state);
   const segService = state.gobierno.indicadores.seguridad / 100;
+  const saludService = state.gobierno.indicadores.salud / 100;
   const activeZombies = activePhenomena.filter((f) => f.tipo === 'plaga_zombie');
+  const hospFacilities = computeHospitalFacilitiesRaw(state.parcelas, state.npcs, state.zonas);
+  const totalHospitalBeds = hospFacilities.reduce((s, f) => s + f.camasEfectivas, 0);
+  let internadosCount = 0;
+  for (const n of vivos) {
+    if (n.hospital.internado) internadosCount++;
+  }
+  const hospitalFull = totalHospitalBeds > 0 && internadosCount >= totalHospitalBeds;
+
   const policeLowPenalty =
     state.gobierno.coberturas.policia < ECON_CONSTANTS.coberturaBajaUmbral
       ? (ECON_CONSTANTS.coberturaBajaUmbral - state.gobierno.coberturas.policia) *
@@ -3494,7 +3512,6 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
       : 0;
 
   for (const npc of vivos) {
-    if (!npc.vivo) continue;
     const hogar = hogarById.get(npc.hogarId);
     const casa = hogar?.casaId ? casaById.get(hogar.casaId) : undefined;
     const poder = poderAdquisitivo[npc.hogarId] ?? poderAdquisitivo[npc.id] ?? 50;
@@ -3543,12 +3560,30 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
     const taxDrag = (taxRate / 60) * (12 + 12 * cod);
     const inflDrag = mod === 'fiscal' ? Math.max(0, state.gobierno.inflacion - 10) * 0.35 : 0;
     const desempDrag = npc.rol === 'desempleado' ? 16 : 0;
+    const isActuallyStreet = hogar?.estado === 'calle' && !hogar?.ocupandoCasaId;
+    const isOwner =
+      Boolean(casa && hogar) &&
+      ((casa!.dueno.tipo === 'hogar' && casa!.dueno.id === hogar!.id) ||
+        (casa!.dueno.tipo === 'npc' && hogar!.miembros.includes(casa!.dueno.id)));
+    const rentBurden =
+      hogar && casa && !isOwner && hogar.ultimoIngresoNeto > 0
+        ? casa.alquiler / Math.max(1, hogar.ultimoIngresoNeto)
+        : 0;
     const viviendaDrag =
-      hogar?.estado === 'calle'
+      isActuallyStreet
         ? 14
         : casa && hogar
-        ? (hogar.miembros.length > casa.capacidad ? 8 : 0) + (casa.estado < 40 ? 6 : 0)
+        ? (hogar.miembros.length > casa.capacidad ? 8 : 0) +
+          (casa.estado < HOUSING_CONSTANTS.umbralEstadoCasaMalo ? 6 : 0) +
+          (rentBurden > 0.4 ? clamp((rentBurden - 0.4) * 14, 0, 7) : 0)
         : 0;
+    const viviendaBonus = isOwner ? 3 : 0;
+    const familyBonus = (npc.parejaId ? 1.5 : 0) + (hogar && hogar.miembros.length >= 3 ? 1 : 0);
+    const recentLossPenalty =
+      npc.ultimaPerdidaFamiliarDia && state.reloj.dia - npc.ultimaPerdidaFamiliarDia <= 14
+        ? clamp((14 - (state.reloj.dia - npc.ultimaPerdidaFamiliarDia)) * 0.5, 1, 6)
+        : 0;
+    const hungryKidsPenalty = hogar?.noPudoPagarComida ? 4 : 0;
     const modSat = getModifierDelta(npc, 'satisfaccion') * 0.3;
     const ayudaBoost =
       npc.rol === 'desempleado' || npc.rol === 'jubilado'
@@ -3566,7 +3601,11 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
         taxDrag -
         inflDrag -
         desempDrag -
-        viviendaDrag -
+        viviendaDrag +
+        viviendaBonus +
+        familyBonus -
+        recentLossPenalty -
+        hungryKidsPenalty -
         medicoLowPenalty +
         ayudaBoost +
         modSat,
@@ -3581,7 +3620,11 @@ function runDailyHealthAndVariablesV2(state: GameState): void {
     );
 
     const modLealtad = getModifierDelta(npc, 'lealtad') * 0.25;
-    const targetLealtad = clamp(npc.variables.satisfaccion + modLealtad - reb * 10, 0, 100);
+    const targetLealtad = clamp(
+      npc.variables.satisfaccion + modLealtad - reb * 10 - (hospitalFull ? 2 : 0),
+      0,
+      100
+    );
     const diffLealtad = targetLealtad - npc.variables.lealtad;
     const lagRate = diffLealtad < 0 ? 0.12 * (1 + reb * 0.8) : 0.08;
     npc.variables.lealtad = clamp(npc.variables.lealtad + diffLealtad * lagRate, 0, 100);
@@ -3679,15 +3722,15 @@ function updateClimate(state: GameState, allowRandom = true): void {
   if (allowRandom && dia >= state.clima.proximoEventoDia) {
     const pool: PhenomenonType[] =
       state.config.escenarioId === 'zombies' ? ['sequia', 'plaga'] : ['sequia', 'plaga', 'pandemia'];
-    const tipo = pool[Math.floor(drawRand(state) * pool.length)];
+    const tipo = pool[Math.floor(drawSubRand(state, 'clima') * pool.length)];
     const names: Record<PhenomenonType, string> = {
       sequia: 'Sequía Estacional',
       plaga: 'Plaga de Cultivos',
       pandemia: 'Brote Gripal Comunitario',
       plaga_zombie: 'Oleada Zombie',
     };
-    const duracion = 14 + randInt(state, 0, 13);
-    const intensidad = 35 + randInt(state, 0, 34);
+    const duracion = 14 + drawSubInt(state, 'clima', 0, 13);
+    const intensidad = 35 + drawSubInt(state, 'clima', 0, 34);
     const origenZona = pickRandomZoneSub(state, 'clima');
     const newId = `fen_${dia}`;
     state.clima.fenomenos.push({
@@ -3711,7 +3754,7 @@ function updateClimate(state: GameState, allowRandom = true): void {
       fenomeno: names[tipo],
       zonaOrigen: origenZona,
     });
-    state.clima.proximoEventoDia = dia + duracion + 18 + randInt(state, 0, 19);
+    state.clima.proximoEventoDia = dia + duracion + 18 + drawSubInt(state, 'clima', 0, 19);
     addLog(
       state,
       'clima',
@@ -4141,7 +4184,7 @@ function advanceDay(state: GameState): void {
     state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
   const allowGovernorComplex = govLevel === 'G2' || govLevel === 'G3';
 
-  // 1. Controls take effect, buildings advance/activate, modifiers & actions decay
+  // 1. Controls take effect, buildings & roads advance/activate
   applyLeverChanges(state);
   stepBuildingsDaily(state);
 
@@ -4150,62 +4193,71 @@ function advanceDay(state: GameState): void {
     state.golpesPorZonaHistorial[z] = state.golpesPorZonaHistorial[z].filter((d) => d > minHitKeep);
   }
 
-  for (const npc of state.npcs) {
-    if (!npc.vivo) continue;
-    npc.modificadores = npc.modificadores
-      .map((m) => ({ ...m, diasRestantes: m.diasRestantes - 1 }))
-      .filter((m) => m.diasRestantes > 0);
+  // 2. Climate (en M0 solo corren los fenómenos forzados, sin azar)
+  updateClimate(state, !isM0);
 
-    if (npc.accionIa) {
-      npc.accionIa.diasRestantes -= 1;
-      if (npc.accionIa.diasRestantes <= 0) {
-        const effZone = getEffectiveZone(npc, zonesCount);
-        const ended = npc.accionIa;
-        releaseOcupacionIfUnused(state, npc);
-        npc.accionIa = null;
-        resetNpcIdleLocation(npc, state);
-        emitSimEvent(state, {
-          id: nextSeqId(state, `ev_${state.reloj.dia}`),
-          dia: state.reloj.dia,
-          tipo: 'accion_fin',
-          zona: effZone,
-          accion: ended.id,
-          npcIds: [npc.id],
-          zonaDestino: ended.zonaDestino ?? npc.zona,
-          origen: ended.origen,
-          causa: ended.causa,
-        });
-      }
+  // 3. Daily economy V2 + Level 1.1 daily subsidies/education/media costs
+  updateServiceCoverage(state);
+  applyPantryChaosEffectsV2(state);
+  runDailyEconomyV2(state);
+  runLevel11Daily(state);
+
+  // 4. Health & hospital
+  runDailyHealthV2(state);
+
+  // 5. Life: natural mortality, inheritance, birthdays & stage transitions
+  runDailyLifecycleV2(state);
+
+  // 6. Security: police relocation + zone integrity repair
+  runPoliceRelocation(state);
+  updateZoneIntegrity(state, zonesCount);
+
+  // 7. Chaos: action expirations, orphaned contagion cleanup, window counter, contagion & triggers
+  for (const npc of state.npcs) {
+    if (!npc.vivo || !npc.accionIa) continue;
+    npc.accionIa.diasRestantes -= 1;
+    if (npc.accionIa.diasRestantes <= 0) {
+      const effZone = getEffectiveZone(npc, zonesCount);
+      const ended = npc.accionIa;
+      releaseOcupacionIfUnused(state, npc);
+      npc.accionIa = null;
+      resetNpcIdleLocation(npc, state);
+      emitSimEvent(state, {
+        id: nextSeqId(state, `ev_${state.reloj.dia}`),
+        dia: state.reloj.dia,
+        tipo: 'accion_fin',
+        zona: effZone,
+        accion: ended.id,
+        npcIds: [npc.id],
+        zonaDestino: ended.zonaDestino ?? npc.zona,
+        origen: ended.origen,
+        causa: ended.causa,
+      });
     }
   }
   pruneOrphanedContagions(state, zonesCount);
-
   if (state.reloj.dia - state.caosTracker.ventanaInicioDia >= state.config.caos.periodoDias) {
     state.caosTracker.ventanaInicioDia = state.reloj.dia;
     state.caosTracker.accionesEnVentana = 0;
   }
-
-  // 2. Climate (en M0 solo corren los fenómenos forzados, sin azar)
-  updateClimate(state, !isM0);
-
-  // 3 & 4 & 8. Daily economy V2, health/hospital & NPC variables
-  updateServiceCoverage(state);
-  applyPantryChaosEffectsV2(state);
-  runDailyEconomyV2(state);
-  runDailyHealthAndVariablesV2(state);
-  runLevel11Daily(state);
-
-  // 5. Security: police relocation + zone integrity repair
-  runPoliceRelocation(state);
-  updateZoneIntegrity(state, zonesCount);
-
-  // 6. Caos: contagion + expirations
-  pruneOrphanedContagions(state, zonesCount);
   if (!isM0) {
     runDailyActionContagion(state, zonesCount);
+    const chaosDerived = deriveCommunityStats(state);
+    state.caosTracker.respiroActivo =
+      chaosDerived.satisfaccionMedia < state.config.caos.respiroSiSatisfaccionMediaMenorA;
+    checkConditionTriggers(state, chaosDerived);
   }
 
-  // 9. Payday settlement V2 (firms, housing, M&A, state, media)
+  // 8 & 9. NPC variables & modifier expiration
+  runDailyVariablesV2(state);
+  for (const npc of state.npcs) {
+    if (!npc.vivo || npc.modificadores.length === 0) continue;
+    npc.modificadores = npc.modificadores
+      .map((m) => ({ ...m, diasRestantes: m.diasRestantes - 1 }))
+      .filter((m) => m.diasRestantes > 0);
+  }
+
+  // 10. Payday settlement V2 (firms, rent, maintenance, state, housing, M&A, bankruptcies, construction, autopilot, media)
   let settledThisDay = false;
   if (state.reloj.diasEnPeriodo >= PERIOD_DAYS) {
     runPaydayEconomyV2(state);
@@ -4214,14 +4266,15 @@ function advanceDay(state: GameState): void {
     settledThisDay = true;
   }
 
-  // 10. Lifecycle, aging, job matching & monthly demographic tick (M1+)
-  runDailyLifecycleV2(state);
-  assignRolesAndJobsV2(state);
+  // 11. Demographic period (M1+)
   if (!isM0 && state.reloj.dia >= PERIOD_DAYS_DEMOG && state.reloj.dia % PERIOD_DAYS_DEMOG === 0) {
     runDemographicPeriodV2(state);
   }
 
-  // 11. Derived community stats & period snapshot
+  // 12. Role changes & job matching
+  assignRolesAndJobsV2(state);
+
+  // 13. Derived community stats, period snapshot & history
   const derived = deriveCommunityStats(state);
   if (settledThisDay) {
     state.metricasPeriodoAnterior = {
@@ -4234,11 +4287,7 @@ function advanceDay(state: GameState): void {
   state.caosTracker.respiroActivo =
     derived.satisfaccionMedia < state.config.caos.respiroSiSatisfaccionMediaMenorA;
 
-  if (!isM0) {
-    checkConditionTriggers(state, derived);
-  }
-
-  // 12. Governor layer: hitos, demands & measures, objective/defeat
+  // 14. Governor layer: hitos, demands & measures, objective/defeat
   if (allowGovernorComplex) {
     stepDemandsAndMeasuresDaily(state);
     if (settledThisDay) {
@@ -4251,10 +4300,27 @@ function advanceDay(state: GameState): void {
   }
   evaluateObjective(state, derived);
 
-  // 7 (queue). Collect daily press facts after all events of the day are emitted
+  // Press queue: collect all daily events for next day's press publication
   collectDailyPressFacts(state, derived);
   state.precioAyer = state.alimento.precio;
   state.hambreAyerPct = derived.hambreCriticaPct;
+
+  // Dev / test engine invariants verification BEFORE resetting ultimoDineroTotal
+  if (state.devMode || isTestConfig(state.config)) {
+    const invErrors = checkEngineInvariants(state);
+    if (invErrors.length > 0) {
+      const breakingEvId = state.eventosDiaActual[state.eventosDiaActual.length - 1]?.id;
+      addLog(
+        state,
+        'sistema',
+        'motor:invariante',
+        `Invariante incumplida día ${state.reloj.dia} (${invErrors.length})`,
+        invErrors.slice(0, 4).join(' | '),
+        breakingEvId,
+        breakingEvId
+      );
+    }
+  }
   state.ultimoDineroTotal = computeTotalWorldMoney(state);
 
   state.historial.push({
@@ -4968,7 +5034,7 @@ function drawPressToneForFact(
   state: GameState,
   medio: GameState['medios'][number],
   fact: PressFact,
-  rng: { rngState: number }
+  rng: { rng?: SubsystemRngState; rngState: number }
 ): NewsTone {
   const availableTemplates = NEWS_TEMPLATES[fact.tema] || {};
   const activeCampana = state.medidasVigentes.find(
@@ -5019,7 +5085,7 @@ function drawPressToneForFact(
   ];
 
   const total = weights.reduce((acc, item) => acc + item.w, 0);
-  let r = drawRand(rng) * Math.max(0.001, total);
+  let r = drawSubRand(rng, 'prensa') * Math.max(0.001, total);
   let chosen: NewsTone = 'neutral';
   for (const item of weights) {
     r -= item.w;
@@ -5036,7 +5102,7 @@ function drawPressToneForFact(
 
 export function planDailyPressPublications(
   state: GameState,
-  rng: { rngState: number } = state
+  rng: { rng?: SubsystemRngState; rngState: number } = state
 ): PlannedPressPublication[] {
   if (state.medios.length === 0 || state.colaHechosDia.length === 0) return [];
   const planned: PlannedPressPublication[] = [];
@@ -5077,7 +5143,7 @@ export function planDailyPressPublications(
       });
 
       const totalW = weights.reduce((acc, w) => acc + w, 0);
-      let r = drawRand(rng) * Math.max(0.001, totalW);
+      let r = drawSubRand(rng, 'prensa') * Math.max(0.001, totalW);
       let pickIdx = optionalPool.length - 1;
       for (let i = 0; i < optionalPool.length; i++) {
         r -= weights[i];
@@ -5091,7 +5157,7 @@ export function planDailyPressPublications(
     }
 
     for (const fact of chosenFacts) {
-      const autor = livingCols[Math.floor(drawRand(rng) * livingCols.length)];
+      const autor = livingCols[Math.floor(drawSubRand(rng, 'prensa') * livingCols.length)];
       const tono = drawPressToneForFact(state, medio, fact, rng);
       const variants =
         NEWS_TEMPLATES[fact.tema]?.[tono] ||
@@ -5101,7 +5167,7 @@ export function planDailyPressPublications(
             texto: `{autor} reporta desde {medio} las novedades de la jornada.`,
           },
         ];
-      const variant = variants[Math.floor(drawRand(rng) * variants.length)];
+      const variant = variants[Math.floor(drawSubRand(rng, 'prensa') * variants.length)];
       const zoneNorm = fact.datos.zona ?? fact.zona ?? 'centro';
 
       planned.push({
@@ -5915,7 +5981,7 @@ function runLevel11Daily(state: GameState): void {
       referenciaSueldosAlimento(state) * (v.subsidioAlimento / 100)
     );
     if (pago > 0.001) {
-      state.gobierno.reserva = Number((state.gobierno.reserva - pago).toFixed(2));
+      state.gobierno.reserva = Math.max(0, state.gobierno.reserva - pago);
       const perAgro = pago / activeAgro.length;
       for (const af of activeAgro) af.ventas += perAgro;
       syncLegacyEnterprisesView(state);
@@ -6057,13 +6123,23 @@ function evaluateExtraActors(state: GameState, derived: CommunityDerived): void 
         'salarioPublico', nuevo, `Subir salario público a ${nuevo}%`, state.ultimaCausaPalanca);
     }
   }
-  // Vecinos de una zona: hambre crítica o integridad baja
+  // Vecinos de una zona: hambre crítica o integridad baja (O(N) pre-bucketed)
   const zonas = getWorldZones(state);
+  const popByZone: Partial<Record<ZoneId, number>> = {};
+  const hungryByZone: Partial<Record<ZoneId, number>> = {};
+  for (const n of state.npcs) {
+    if (!n.vivo) continue;
+    const ez = getEffectiveZone(n, zonas.length);
+    popByZone[ez] = (popByZone[ez] ?? 0) + 1;
+    if (n.variables.hambre > 80) {
+      hungryByZone[ez] = (hungryByZone[ez] ?? 0) + 1;
+    }
+  }
   for (const z of zonas) {
     if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) break;
-    const hab = state.npcs.filter((n) => n.vivo && getEffectiveZone(n, zonas.length) === z);
-    if (hab.length < 3) continue;
-    const hambre = (hab.filter((n) => n.variables.hambre > 80).length / hab.length) * 100;
+    const habCount = popByZone[z] ?? 0;
+    if (habCount < 3) continue;
+    const hambre = ((hungryByZone[z] ?? 0) / habCount) * 100;
     if (hambre >= LEVEL11_CONSTANTS.vecinosUmbralHambrePct && vig.garantiaAlimentaria < 100) {
       const nuevo = Math.min(100, vig.garantiaAlimentaria + 15);
       push(`vecinos_${z}`, `Vecinos de ${z}`, 'vecinos_comida', 'Más comida para el barrio',

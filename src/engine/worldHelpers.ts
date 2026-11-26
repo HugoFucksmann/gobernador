@@ -247,9 +247,15 @@ export function getZoneTravelCost(state: GameState, from: ZoneId, to: ZoneId): n
     : Infinity;
 }
 
-export function getCommuteProductivityFactor(state: GameState, npc: Npc): number {
+export function getCommuteProductivityFactor(
+  state: GameState,
+  npc: Npc,
+  firmaById?: Map<string, Firma>
+): number {
   if (!npc.empleadorId) return 1;
-  const firma = state.firmas.find((f) => f.id === npc.empleadorId);
+  const firma = firmaById
+    ? firmaById.get(npc.empleadorId)
+    : state.firmas.find((f) => f.id === npc.empleadorId);
   if (!firma) return 1;
   const cost = getZoneTravelCost(state, npc.zona, firma.zona);
   if (!Number.isFinite(cost)) return 0.65;
@@ -377,7 +383,7 @@ export function getFirmaLocales(state: GameState, firma: Firma): Parcela[] {
 }
 
 export function getFirmaRoleCaps(state: GameState, firma: Firma): Partial<Record<RoleId, number>> {
-  const total: Partial<Record<RoleId, number>> = {};
+  const total: Partial<Record<RoleId, number>> = Object.create(null);
   for (const p of getFirmaLocales(state, firma)) {
     if (!p.edificio) continue;
     const caps = getBuildingRoleCapacity(p.edificio);
@@ -503,24 +509,87 @@ export function computeHospitalFacilities(
   return facilities;
 }
 
+export function computeAmenazaPercibida(state: GameState): Record<ZoneId, number> {
+  const dia = state.reloj.dia;
+  const zones = getWorldZones(state);
+  const minHitDay = dia - ECON_CONSTANTS.golpeAmenazaVentanaDias;
+  const result: Record<ZoneId, number> = {};
+  for (const z of zones) result[z] = 0;
+
+  const hasActiveMedia = state.medios.some((m) => m.activa !== false);
+  const trackedPhenomena = state.clima.fenomenos.filter((f) => {
+    const aviso = f.avisoDias ?? 0;
+    return f.origen && dia >= f.inicioDia - aviso && dia < f.inicioDia + f.duracionDias;
+  });
+
+  const medioCredById = new Map<string, number>();
+  for (const m of state.medios) {
+    medioCredById.set(m.id, m.credibilidad);
+  }
+
+  const phenomZones = new Set<ZoneId>();
+  for (const f of trackedPhenomena) {
+    if (f.origen) phenomZones.add(f.origen);
+  }
+
+  const avisoByZone: Record<ZoneId, number> = {};
+  if (hasActiveMedia && phenomZones.size > 0) {
+    for (const n of state.noticias) {
+      const nz = n.zonaOrigen ?? n.zona;
+      if (
+        n.esAviso &&
+        nz &&
+        phenomZones.has(nz) &&
+        (n.vigenteHastaDia === undefined || dia < n.vigenteHastaDia)
+      ) {
+        const cred = n.credibilidad ?? medioCredById.get(n.medioId) ?? 60;
+        const score = (n.alcance * cred) / 100;
+        if (score > (avisoByZone[nz] ?? 0)) avisoByZone[nz] = score;
+      }
+    }
+  }
+
+  for (const z of zones) {
+    const avisoVal = avisoByZone[z] ?? 0;
+    const hits = (state.golpesPorZonaHistorial[z] || []).filter(
+      (d) => d > minHitDay && d <= dia
+    ).length;
+    const golpesVal = Math.min(100, ECON_CONSTANTS.golpeAmenazaPeso * hits);
+    result[z] = Number(Math.max(avisoVal, golpesVal).toFixed(1));
+  }
+
+  return result;
+}
+
 export function computeNpcVariableTargets(
   npc: Npc,
   hogar: Hogar | undefined,
   casa: Casa | undefined,
-  state: GameState
+  state: GameState,
+  ctx?: { vivosCount?: number; hospitalFull?: boolean }
 ): {
   satisfaccion: number;
   lealtad: number;
 } {
-  const vivosCount = Math.max(1, state.npcs.filter((n) => n.vivo).length);
-  const hospitalCap = computeHospitalFacilities(state.parcelas, state.npcs, state.zonas).reduce(
-    (s, f) => s + f.camasEfectivas,
-    0
-  );
-  const internadosCount = state.npcs.filter((n) => n.vivo && n.hospital.internado).length;
-  const hospitalFull = hospitalCap > 0 && internadosCount >= hospitalCap;
+  let vivosCount = ctx?.vivosCount;
+  let hospitalFull = ctx?.hospitalFull;
+  if (vivosCount === undefined || hospitalFull === undefined) {
+    let alive = 0;
+    let internadosCount = 0;
+    for (const n of state.npcs) {
+      if (!n.vivo) continue;
+      alive++;
+      if (n.hospital.internado) internadosCount++;
+    }
+    vivosCount = Math.max(1, alive);
+    const hospitalCap = computeHospitalFacilities(state.parcelas, state.npcs, state.zonas).reduce(
+      (s, f) => s + f.camasEfectivas,
+      0
+    );
+    hospitalFull = hospitalCap > 0 && internadosCount >= hospitalCap;
+  }
 
-  const isStreet = hogar?.estado === 'calle';
+  const isStreet = hogar?.estado === 'calle' && !hogar?.ocupandoCasaId;
   const isOwner =
     Boolean(casa && hogar) &&
     ((casa!.dueno.tipo === 'hogar' && casa!.dueno.id === hogar!.id) ||
@@ -598,11 +667,18 @@ export function computeNpcVariableTargets(
   return { satisfaccion, lealtad };
 }
 
-export function getNpcProductivity(npc: Npc, state: GameState): number {
+export function getNpcProductivity(
+  npc: Npc,
+  state: GameState,
+  ctx?: { hogarById?: Map<string, Hogar>; firmaById?: Map<string, Firma> }
+): number {
   if (!npc.vivo || npc.hospital.internado || npc.accionIa?.fueraDePuesto) return 0;
-  const hogar = state.hogares.find((h) => h.id === npc.hogarId);
-  const streetFactor = hogar?.estado === 'calle' ? HOUSING_CONSTANTS.calleProdFactor : 1;
-  const commuteFactor = getCommuteProductivityFactor(state, npc);
+  const hogar = ctx?.hogarById
+    ? ctx.hogarById.get(npc.hogarId)
+    : state.hogares.find((h) => h.id === npc.hogarId);
+  const isActuallyStreet = hogar?.estado === 'calle' && !hogar?.ocupandoCasaId;
+  const streetFactor = isActuallyStreet ? HOUSING_CONSTANTS.calleProdFactor : 1;
+  const commuteFactor = getCommuteProductivityFactor(state, npc, ctx?.firmaById);
   const modProd = getModifierDelta(npc, 'productividad');
   const base = clamp(
     (45 + npc.variables.salud * 0.4 + npc.personalidad.laboriosidad * 0.15 - npc.variables.hambre * 0.35) *
@@ -691,6 +767,14 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   for (const h of state.hogares) hogarById.set(h.id, h);
   const casaById = new Map<string, Casa>();
   for (const c of state.casas) casaById.set(c.id, c);
+  const firmaById = new Map<string, Firma>();
+  for (const f of state.firmas) firmaById.set(f.id, f);
+  const prodCtx = { hogarById, firmaById };
+
+  const zoneIds = getWorldZones(state);
+  const zoneCount = zoneIds.length;
+  const vivosByZone = new Map<ZoneId, Npc[]>();
+  for (const z of zoneIds) vivosByZone.set(z, []);
 
   let satSum = 0;
   let apoyoCount = 0;
@@ -715,11 +799,15 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     if (!h || h.dinero <= 1) sinDinero++;
     if (n.hospital.internado) internados++;
     if (n.hospital.esperandoCama) esperandoCama++;
-    prodSum += getNpcProductivity(n, state);
+    prodSum += getNpcProductivity(n, state, prodCtx);
     edadSum += n.edad;
     if (n.edad < 18) menores++;
     else if (n.edad >= 65) jubilados++;
     else if (n.rol !== 'estudiante') laborales++;
+    const ez = getEffectiveZone(n, zoneCount, zoneIds);
+    const zList = vivosByZone.get(ez);
+    if (zList) zList.push(n);
+    else vivosByZone.set(ez, [n]);
   }
 
   const hogCount = Math.max(1, state.hogares.length);
@@ -729,9 +817,15 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   let despensaSum = 0;
   let rentLoadSum = 0;
   let rentLoadCount = 0;
+  const streetByZone = new Map<ZoneId, number>();
 
   for (const h of state.hogares) {
-    if (h.estado === 'calle') calleCount++;
+    if (h.estado === 'calle') {
+      calleCount++;
+      if (!h.ocupandoCasaId) {
+        streetByZone.set(h.zona, (streetByZone.get(h.zona) ?? 0) + 1);
+      }
+    }
     if (h.estado === 'con_casa') {
       conCasaCount++;
       const casa = h.casaId ? casaById.get(h.casaId) : undefined;
@@ -763,38 +857,47 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
       ? 100
       : 0;
 
-  const zoneIds = getWorldZones(state);
   const defensa: Record<ZoneId, number> = {};
   const orden: Record<ZoneId, number> = {};
-  const amenazaPercibida: Record<ZoneId, number> = {};
+  const amenazaPercibida = computeAmenazaPercibida(state);
 
   const activeBuildings = getActiveBuildings(state.parcelas);
-  const zombieActive = getActivePhenomena(state).some((f) => f.tipo === 'plaga_zombie');
+  const comisariaBonusByZone = new Map<ZoneId, number>();
+  const murallaBonusByZone = new Map<ZoneId, number>();
+  for (const b of activeBuildings) {
+    if (b.tipo === 'comisaria') {
+      comisariaBonusByZone.set(
+        b.zona,
+        (comisariaBonusByZone.get(b.zona) ?? 0) + (BUILDING_CATALOG[b.tipo].bonusDefensa ?? 0)
+      );
+    } else if (b.tipo === 'muralla') {
+      murallaBonusByZone.set(
+        b.zona,
+        (murallaBonusByZone.get(b.zona) ?? 0) + (BUILDING_CATALOG[b.tipo].defensaMuralla ?? 0)
+      );
+    }
+  }
 
   for (const z of zoneIds) {
-    const zNpcs = vivos.filter((n) => getEffectiveZone(n, zoneIds.length, zoneIds) === z);
-    const zPol = zNpcs.filter((n) => n.rol === 'policia' && !n.hospital.internado && !n.accionIa?.fueraDePuesto).length;
-    const bonusComisaria = activeBuildings
-      .filter((b) => b.zona === z && b.tipo === 'comisaria')
-      .reduce((s, b) => s + (BUILDING_CATALOG[b.tipo].bonusDefensa ?? 0), 0);
-    const bonusMuralla = activeBuildings
-      .filter((b) => b.zona === z && b.tipo === 'muralla')
-      .reduce((s, b) => s + (BUILDING_CATALOG[b.tipo].defensaMuralla ?? 0), 0);
+    const zNpcs = vivosByZone.get(z) ?? [];
+    let zPol = 0;
+    let zOut = 0;
+    let zFearSum = 0;
+    for (const n of zNpcs) {
+      if (n.rol === 'policia' && !n.hospital.internado && !n.accionIa?.fueraDePuesto) zPol++;
+      if (n.accionIa?.fueraDePuesto) zOut++;
+      zFearSum += n.variables.miedo;
+    }
+    const bonusComisaria = comisariaBonusByZone.get(z) ?? 0;
+    const bonusMuralla = murallaBonusByZone.get(z) ?? 0;
     const integ = state.gobierno.integridad[z] ?? 100;
     defensa[z] = Number(clamp(zPol * 10 + bonusComisaria + bonusMuralla + (integ - 100) * 0.25, 0, 100).toFixed(1));
 
-    const zStreet = state.hogares.filter((h) => h.zona === z && h.estado === 'calle').length;
-    const zOut = zNpcs.filter((n) => n.accionIa?.fueraDePuesto).length;
-    const zFear = zNpcs.length > 0 ? zNpcs.reduce((s, n) => s + n.variables.miedo, 0) / zNpcs.length : 0;
+    const zStreet = streetByZone.get(z) ?? 0;
+    const zFear = zNpcs.length > 0 ? zFearSum / zNpcs.length : 0;
     const neededPol = Math.max(1, zNpcs.length * ECON_CONSTANTS.objetivoOrden);
     const ordRatio = clamp(zPol / neededPol, 0, 1.3);
     orden[z] = Number(clamp(48 + ordRatio * 42 - zOut * 5 - zStreet * 3 - zFear * 0.15, 0, 100).toFixed(1));
-
-    const hits = state.golpesPorZonaHistorial[z] ?? [];
-    const recentHits = hits.filter((d) => state.reloj.dia - d <= ECON_CONSTANTS.golpeAmenazaVentanaDias).length;
-    amenazaPercibida[z] = Number(
-      clamp((zombieActive ? 25 : 0) + recentHits * ECON_CONSTANTS.golpeAmenazaPeso, 0, 100).toFixed(1)
-    );
   }
 
   const activeFirmas = state.firmas.filter((f) => f.activa);

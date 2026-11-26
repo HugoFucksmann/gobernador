@@ -2,6 +2,7 @@ import {
   DEMOG_CONSTANTS,
   ECON_CONSTANTS,
   HOUSING_CONSTANTS,
+  PERIOD_DAYS,
   PERIOD_DAYS_DEMOG,
   ROLE_CATALOG,
   SPANISH_NAMES,
@@ -153,13 +154,12 @@ export function handleNpcDeathV2(
   }
 
   // Detach partner + record family loss grief
-  if (npc.parejaId) {
-    const partner = npcById.get(npc.parejaId);
-    if (partner && partner.vivo) {
-      partner.parejaId = null;
-      partner.ultimaPerdidaFamiliarDia = state.reloj.dia;
-    }
+  const partner = npc.parejaId ? npcById.get(npc.parejaId) : undefined;
+  if (partner && partner.vivo) {
+    partner.parejaId = null;
+    partner.ultimaPerdidaFamiliarDia = state.reloj.dia;
   }
+  npc.parejaId = null;
 
   const hogar = hogarById.get(npc.hogarId);
   if (hogar) {
@@ -172,7 +172,6 @@ export function handleNpcDeathV2(
 
   // Immediate firm share inheritance
   const children = getLivingChildren(npc.id, state.npcs);
-  const partner = npc.parejaId ? npcById.get(npc.parejaId) : undefined;
   const heirs: Npc[] = [];
   if (partner && partner.vivo) heirs.push(partner);
   for (const ch of children) {
@@ -319,15 +318,21 @@ export function handleNpcDeathV2(
         }
       }
 
-      // Release occupied house
+      // Release occupied or squatted house
       if (hogar.casaId) {
         const occHouse = state.casas.find((c) => c.id === hogar.casaId);
         if (occHouse && occHouse.hogarId === hogar.id) {
           occHouse.hogarId = null;
         }
       }
+      if (hogar.ocupandoCasaId) {
+        const squatted = state.casas.find((c) => c.id === hogar.ocupandoCasaId);
+        if (squatted) squatted.ocupadaPorAccion = false;
+        hogar.ocupandoCasaId = null;
+      }
 
       state.hogares = state.hogares.filter((h) => h.id !== hogar.id);
+      state.mercadoStats.hogaresEnAcogida = state.hogares.filter((h) => h.estado === 'acogida').length;
 
       emitSimEvent(state, {
         id: nextSeqId(state, 'ev_hogar_dis'),
@@ -338,6 +343,8 @@ export function handleNpcDeathV2(
         herederos: heirIds,
         causa,
       });
+    } else if (hogar.estado === 'acogida') {
+      state.mercadoStats.hogaresEnAcogida = state.hogares.filter((h) => h.estado === 'acogida').length;
     }
   }
 
@@ -547,9 +554,11 @@ export function runDemographicPeriodV2(state: GameState): void {
       const aFood = hA.miembros.length > 0 ? hA.despensa / Math.max(1, hA.miembros.length) : 0;
       const bFood = hB.miembros.length > 0 ? hB.despensa / Math.max(1, hB.miembros.length) : 0;
 
-      // If both were sole adults in their households, merge cleanly
+      // If both were sole adults in their households, pick larger house cleanly
       let targetHouse: Casa | null = null;
-      if (hAAdults.length === 0 && cA) {
+      if (hAAdults.length === 0 && cA && hBAdults.length === 0 && cB) {
+        targetHouse = cB.capacidad > cA.capacidad ? cB : cA;
+      } else if (hAAdults.length === 0 && cA) {
         targetHouse = cA;
       } else if (hBAdults.length === 0 && cB) {
         targetHouse = cB;
@@ -558,7 +567,7 @@ export function runDemographicPeriodV2(state: GameState): void {
           freeHousesByZone,
           state.zonas,
           zona,
-          Math.max(12, (a.economia.ultimoIngresoNeto + best.economia.ultimoIngresoNeto) * 7 * 0.42)
+          Math.max(12, (a.economia.ultimoIngresoNeto + best.economia.ultimoIngresoNeto) * PERIOD_DAYS * 0.42)
         );
       }
 
@@ -573,6 +582,11 @@ export function runDemographicPeriodV2(state: GameState): void {
         hA.despensa = 0;
         if (cA && cA !== targetHouse) {
           cA.hogarId = null;
+        }
+        if (hA.ocupandoCasaId) {
+          const sq = casaById.get(hA.ocupandoCasaId);
+          if (sq) sq.ocupadaPorAccion = false;
+          hA.ocupandoCasaId = null;
         }
         state.hogares = state.hogares.filter((x) => x.id !== hA.id);
         hogarById.delete(hA.id);
@@ -592,6 +606,11 @@ export function runDemographicPeriodV2(state: GameState): void {
         hB.despensa = 0;
         if (cB && cB !== targetHouse) {
           cB.hogarId = null;
+        }
+        if (hB.ocupandoCasaId) {
+          const sq = casaById.get(hB.ocupandoCasaId);
+          if (sq) sq.ocupadaPorAccion = false;
+          hB.ocupandoCasaId = null;
         }
         state.hogares = state.hogares.filter((x) => x.id !== hB.id);
         hogarById.delete(hB.id);
@@ -613,11 +632,12 @@ export function runDemographicPeriodV2(state: GameState): void {
         periodosSinPagar: 0,
         periodosHacinado: 0,
         zona: targetHouse ? targetHouse.zona : zona,
-        ultimoIngresoNeto: a.economia.ultimoIngresoNeto + best.economia.ultimoIngresoNeto,
+        ultimoIngresoNeto: (a.economia.ultimoIngresoNeto + best.economia.ultimoIngresoNeto) * PERIOD_DAYS,
         alquilerPagadoPeriodo: 0,
       };
       if (targetHouse) {
         targetHouse.hogarId = newHogar.id;
+        targetHouse.ocupadaPorAccion = false;
         if (targetHouse.dueno.tipo === 'hogar' && !hogarById.has(targetHouse.dueno.id)) {
           targetHouse.dueno = { tipo: 'hogar', id: newHogar.id };
         }
@@ -784,7 +804,7 @@ export function runDemographicPeriodV2(state: GameState): void {
     );
 
     if (indepCandidate) {
-      const budget = indepCandidate.economia.ultimoIngresoNeto * 7 * (HOUSING_CONSTANTS.pctAlquilerMax / 100);
+      const budget = indepCandidate.economia.ultimoIngresoNeto * PERIOD_DAYS * (HOUSING_CONSTANTS.pctAlquilerMax / 100);
       const freeHouse = takeFreeHouse(freeHousesByZone, state.zonas, h.zona, budget);
       if (freeHouse) {
         const shareCash = h.dinero / Math.max(2, h.miembros.length);
@@ -803,10 +823,11 @@ export function runDemographicPeriodV2(state: GameState): void {
           periodosSinPagar: 0,
           periodosHacinado: 0,
           zona: freeHouse.zona,
-          ultimoIngresoNeto: indepCandidate.economia.ultimoIngresoNeto * 7,
+          ultimoIngresoNeto: indepCandidate.economia.ultimoIngresoNeto * PERIOD_DAYS,
           alquilerPagadoPeriodo: 0,
         };
         freeHouse.hogarId = newHogar.id;
+        freeHouse.ocupadaPorAccion = false;
         indepCandidate.hogarId = newHogar.id;
         indepCandidate.zona = freeHouse.zona;
         state.hogares.push(newHogar);
@@ -838,7 +859,7 @@ export function runDemographicPeriodV2(state: GameState): void {
           freeHousesByZone,
           state.zonas,
           h.zona,
-          mover.economia.ultimoIngresoNeto * 7 * 0.48
+          mover.economia.ultimoIngresoNeto * PERIOD_DAYS * 0.48
         );
         if (freeHouse) {
           const shareCash = h.dinero / Math.max(2, h.miembros.length);
@@ -858,10 +879,11 @@ export function runDemographicPeriodV2(state: GameState): void {
             periodosSinPagar: 0,
             periodosHacinado: 0,
             zona: freeHouse.zona,
-            ultimoIngresoNeto: mover.economia.ultimoIngresoNeto * 7,
+            ultimoIngresoNeto: mover.economia.ultimoIngresoNeto * PERIOD_DAYS,
             alquilerPagadoPeriodo: 0,
           };
           freeHouse.hogarId = newHogar.id;
+          freeHouse.ocupadaPorAccion = false;
           mover.hogarId = newHogar.id;
           mover.zona = freeHouse.zona;
           state.hogares.push(newHogar);
@@ -897,7 +919,12 @@ export function runDemographicPeriodV2(state: GameState): void {
           a.parejaId = null;
           b.parejaId = null;
 
-          const freeHouse = takeFreeHouse(freeHousesByZone, state.zonas, h.zona, 28);
+          const maxSepRent = Math.max(
+            10,
+            b.economia.ultimoIngresoNeto * PERIOD_DAYS * (HOUSING_CONSTANTS.pctAlquilerMax / 100),
+            h.dinero * 0.25
+          );
+          const freeHouse = takeFreeHouse(freeHousesByZone, state.zonas, h.zona, maxSepRent);
           const halfMoney = h.dinero * 0.5;
           const halfFood = h.despensa * 0.5;
           h.dinero -= halfMoney;
@@ -914,10 +941,13 @@ export function runDemographicPeriodV2(state: GameState): void {
             periodosSinPagar: 0,
             periodosHacinado: 0,
             zona: freeHouse ? freeHouse.zona : h.zona,
-            ultimoIngresoNeto: b.economia.ultimoIngresoNeto * 7,
+            ultimoIngresoNeto: b.economia.ultimoIngresoNeto * PERIOD_DAYS,
             alquilerPagadoPeriodo: 0,
           };
-          if (freeHouse) freeHouse.hogarId = newHogar.id;
+          if (freeHouse) {
+            freeHouse.hogarId = newHogar.id;
+            freeHouse.ocupadaPorAccion = false;
+          }
           b.hogarId = newHogar.id;
           b.zona = newHogar.zona;
           state.hogares.push(newHogar);
@@ -995,15 +1025,17 @@ export function assignRolesAndJobsV2(state: GameState): void {
   // 2. Sync active private firms' employee lists & assign remaining unemployed to open private slots
   const remainingUnemp = unemployedAdults.filter((n) => n.rol === 'desempleado');
   const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
+  const npcById = new Map(vivos.map((n) => [n.id, n]));
+  let remainingUnempCount = remainingUnemp.length;
 
-  if (remainingUnemp.length > 0) {
+  if (remainingUnempCount > 0) {
     const activeFirms = state.firmas.filter((f) => f.activa && f.factor >= 0.85 && f.locales.length > 0);
     for (const f of activeFirms) {
-      if (remainingUnemp.every((u) => u.rol !== 'desempleado')) break;
+      if (remainingUnempCount <= 0) break;
       const roleCaps = getFirmaRoleCaps(state, f);
-      const currentByRole: Partial<Record<RoleId, number>> = {};
+      const currentByRole: Partial<Record<RoleId, number>> = Object.create(null);
       for (const eid of f.empleados) {
-        const emp = vivos.find((n) => n.id === eid);
+        const emp = npcById.get(eid);
         if (emp) currentByRole[emp.rol] = (currentByRole[emp.rol] ?? 0) + 1;
       }
 
@@ -1017,10 +1049,11 @@ export function assignRolesAndJobsV2(state: GameState): void {
 
         // Prefer reachable route within rutaMaxTrabajo, non-calle first
         for (const cand of remainingUnemp) {
-          if (openSlots <= 0 || hiredHere >= ECON_CONSTANTS.maxContratacionesPorPeriodo) break;
+          if (openSlots <= 0 || hiredHere >= ECON_CONSTANTS.maxContratacionesPorPeriodo || remainingUnempCount <= 0) break;
           if (cand.rol !== 'desempleado' || cand.educacion.nivel < educMin) continue;
           const h = hogarById.get(cand.hogarId);
-          if (h?.estado === 'calle' && nextSubRand(state, 'mercado') < 0.35) continue;
+          const isStreet = h?.estado === 'calle' && !h?.ocupandoCasaId;
+          if (isStreet && nextSubRand(state, 'mercado') < 0.35) continue;
           const travelCost = getZoneTravelCost(state, cand.zona, f.zona);
           if (!Number.isFinite(travelCost) || travelCost > VIAL_CONSTANTS.rutaMaxTrabajo) continue;
           const sameOrNeighbor = cand.zona === f.zona || state.zonas[f.zona]?.vecinas.includes(cand.zona);
@@ -1031,6 +1064,7 @@ export function assignRolesAndJobsV2(state: GameState): void {
           f.empleados.push(cand.id);
           openSlots--;
           hiredHere++;
+          remainingUnempCount--;
         }
       }
     }

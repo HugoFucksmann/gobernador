@@ -379,10 +379,10 @@ export function runDailyEconomyV2(state: GameState): void {
       let distributedAgro = 0;
       for (let i = 0; i < agroFirms.length; i++) {
         const a = agroFirms[i];
-        const w =
-          totalAvailStock > 0
-            ? Math.max(0, a.stock ?? 0) / totalAvailStock
-            : 1 / agroFirms.length;
+        const availA = retencionFirms.has(a.id)
+          ? Math.max(0, (a.stock ?? 0) * 0.45)
+          : Math.max(0, a.stock ?? 0);
+        const w = totalAvailStock > 0 ? availA / totalAvailStock : 1 / agroFirms.length;
         const cut = i === agroFirms.length - 1 ? agroShare - distributedAgro : agroShare * w;
         distributedAgro += cut;
         a.ventas += cut;
@@ -436,7 +436,7 @@ export function runDailyEconomyV2(state: GameState): void {
     }
 
     const zPrice = precioPorZona[h.zona] ?? avgPrice;
-    const isStreet = h.estado === 'calle';
+    const isStreet = h.estado === 'calle' && !h.ocupandoCasaId;
     const effPrice = isStreet
       ? zPrice * (1 + HOUSING_CONSTANTS.recargoCalleComidaPct / 100)
       : zPrice;
@@ -596,7 +596,7 @@ export function runDailyEconomyV2(state: GameState): void {
               const localSpend = catSpend * localRatio;
               const importSpend = catSpend - localSpend;
 
-              if (localSpend > 0.005) {
+              if (localSpend > 0 && industriaFirms.length > 0) {
                 const comCut = localSpend * adjMargin;
                 const indCut = localSpend - comCut;
                 catSeller.ventas += comCut;
@@ -607,11 +607,16 @@ export function runDailyEconomyV2(state: GameState): void {
                   const shareCut = idx === industriaFirms.length - 1 ? indCut - distributedInd : indCut * w;
                   distributedInd += shareCut;
                   ind.ventas += shareCut;
-                  ind.stockBienes = Math.max(0, (ind.stockBienes ?? 0) - localUnits * w);
+                  ind.stockBienes =
+                    localUnits >= totalIndStock
+                      ? 0
+                      : Math.max(0, (ind.stockBienes ?? 0) - localUnits * w);
                 }
+              } else if (localSpend > 0) {
+                catSeller.ventas += localSpend;
               }
 
-              if (importSpend > 0.005) {
+              if (importSpend > 0) {
                 const comImportCut = importSpend * Math.min(0.14, adjMargin * 0.6);
                 const importOutflow = importSpend - comImportCut;
                 catSeller.ventas += comImportCut;
@@ -994,9 +999,18 @@ export function runPaydayEconomyV2(state: GameState): void {
     'banco',
   ];
   const cuotaMercadoSalida: EconomyOutput['cuotaMercado'] = {};
+  const activeFirmByRubroZone = new Map<string, Firma[]>();
+  for (const f of state.firmas) {
+    if (!f.activa) continue;
+    const key = `${f.rubro}:${f.zona}`;
+    const list = activeFirmByRubroZone.get(key);
+    if (list) list.push(f);
+    else activeFirmByRubroZone.set(key, [f]);
+  }
   for (const rubro of rubros) {
     for (const z of zones) {
-      const fZone = state.firmas.filter((f) => f.activa && f.rubro === rubro && f.zona === z);
+      const fZone = activeFirmByRubroZone.get(`${rubro}:${z}`) ?? [];
+      if (fZone.length === 0) continue;
       const sumRev = fZone.reduce((s, f) => s + Math.max(0.01, f.ultimoIngresoPeriodo), 0);
       let leader: { firma: string; cuota: number } = { firma: '-', cuota: 0 };
       for (const f of fZone) {
@@ -1445,9 +1459,11 @@ export function runPaydayEconomyV2(state: GameState): void {
       }
       if (toBuild) {
         const def = BUILDING_CATALOG[toBuild];
-        state.gobierno.reserva -= def.costoObra;
-        if (constructoras.length > 0) constructoras[0].ventas += def.costoObra;
-        freePub.estado = 'en_obra';
+        const payee = constructoras[0] ?? state.firmas.find((f) => f.activa);
+        if (payee) {
+          state.gobierno.reserva -= def.costoObra;
+          payee.ventas += def.costoObra;
+          freePub.estado = 'en_obra';
         freePub.edificio = {
           id: nextSeqId(state, 'ed'),
           tipo: toBuild,
@@ -1462,18 +1478,19 @@ export function runPaydayEconomyV2(state: GameState): void {
           zona: freePub.zona,
         };
         state.autopilotLastBuildDay = state.reloj.dia;
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_obra_i'),
-          dia: state.reloj.dia,
-          tipo: 'obra_inicio',
-          zona: freePub.zona,
-          parcelaId: freePub.id,
-          edificio: toBuild,
-          dueno: 'estado',
-          costo: def.costoObra,
-          diasObra: def.diasObra,
-          causa: 'estado:piloto_automatico',
-        });
+          emitSimEvent(state, {
+            id: nextSeqId(state, 'ev_obra_i'),
+            dia: state.reloj.dia,
+            tipo: 'obra_inicio',
+            zona: freePub.zona,
+            parcelaId: freePub.id,
+            edificio: toBuild,
+            dueno: 'estado',
+            costo: def.costoObra,
+            diasObra: def.diasObra,
+            causa: 'estado:piloto_automatico',
+          });
+        }
       }
     }
   }
@@ -1521,28 +1538,34 @@ export function runPaydayEconomyV2(state: GameState): void {
       }
 
       if (bestTramo) {
-        state.gobierno.reserva -= bestTramo.costoObra;
-        if (constructoras.length > 0) constructoras[0].ventas += bestTramo.costoObra;
-        const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
-        const dias = Math.max(2, Math.round(bestTramo.diasObraTotal * diasFactor));
-        bestTramo.enObra = true;
-        bestTramo.diasObraRestantes = dias;
-        state.autopilotLastViaDay = state.reloj.dia;
-        state.demandaSueloRachas[hotEntry[0]] = 0;
+        const payee =
+          constructoras.find((f) => f.zona === bestTramo.zonaA || f.zona === bestTramo.zonaB) ??
+          constructoras[0] ??
+          state.firmas.find((f) => f.activa);
+        if (payee) {
+          state.gobierno.reserva -= bestTramo.costoObra;
+          payee.ventas += bestTramo.costoObra;
+          const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
+          const dias = Math.max(2, Math.round(bestTramo.diasObraTotal * diasFactor));
+          bestTramo.enObra = true;
+          bestTramo.diasObraRestantes = dias;
+          state.autopilotLastViaDay = state.reloj.dia;
+          state.demandaSueloRachas[hotEntry[0]] = 0;
 
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_via_i'),
-          dia: state.reloj.dia,
-          tipo: 'via_inicio',
-          zona: bestTramo.zonaA,
-          tramoId: bestTramo.id,
-          tramoNombre: bestTramo.nombre,
-          tipoVia: bestTramo.tipo,
-          parcelasAbiertas: [...bestTramo.parcelasAbiertas],
-          costo: bestTramo.costoObra,
-          diasObra: dias,
-          causa: 'estado:demanda_suelo',
-        });
+          emitSimEvent(state, {
+            id: nextSeqId(state, 'ev_via_i'),
+            dia: state.reloj.dia,
+            tipo: 'via_inicio',
+            zona: bestTramo.zonaA,
+            tramoId: bestTramo.id,
+            tramoNombre: bestTramo.nombre,
+            tipoVia: bestTramo.tipo,
+            parcelasAbiertas: [...bestTramo.parcelasAbiertas],
+            costo: bestTramo.costoObra,
+            diasObra: dias,
+            causa: 'estado:demanda_suelo',
+          });
+        }
       }
     }
   }
@@ -1624,7 +1647,13 @@ export function runPaydayEconomyV2(state: GameState): void {
         const oldC = casaById.get(prevCasaId);
         if (oldC) oldC.hogarId = null;
       }
+      if (h.ocupandoCasaId) {
+        const oldOccCasa = casaById.get(h.ocupandoCasaId);
+        if (oldOccCasa) oldOccCasa.ocupadaPorAccion = false;
+        h.ocupandoCasaId = null;
+      }
       chosen.hogarId = h.id;
+      chosen.ocupadaPorAccion = false;
       h.casaId = chosen.id;
       h.estado = 'con_casa';
       h.zona = chosen.zona;
@@ -1657,12 +1686,23 @@ export function runPaydayEconomyV2(state: GameState): void {
   }
 
   // Update zonal rent index & drop rent on houses still empty (ECONOMIA_V2 §7)
+  const hogaresNonAcogidaByZone = new Map<ZoneId, Hogar[]>();
+  for (const h of state.hogares) {
+    if (h.estado === 'acogida') continue;
+    const list = hogaresNonAcogidaByZone.get(h.zona);
+    if (list) list.push(h);
+    else hogaresNonAcogidaByZone.set(h.zona, [h]);
+  }
+  const freeHousesCountByZone = new Map<ZoneId, number>();
+  for (const c of freeHouses) {
+    freeHousesCountByZone.set(c.zona, (freeHousesCountByZone.get(c.zona) ?? 0) + 1);
+  }
   for (const z of zones) {
     const zDef = state.zonas[z];
     if (!zDef) continue;
-    const zHog = state.hogares.filter((h) => h.zona === z && h.estado !== 'acogida');
+    const zHog = hogaresNonAcogidaByZone.get(z) ?? [];
     const calleZ = zHog.length > 0 ? zHog.filter((h) => h.estado === 'calle').length / zHog.length : 0;
-    const vacZ = freeHouses.filter((c) => c.zona === z).length;
+    const vacZ = freeHousesCountByZone.get(z) ?? 0;
     if (calleZ > 0.08 && vacZ === 0) {
       zDef.demandaAlquilerIndice = Number(clamp(zDef.demandaAlquilerIndice * 1.04, 0.72, 1.75).toFixed(3));
     } else if (vacZ >= 2) {
@@ -2199,9 +2239,22 @@ export function runPaydayEconomyV2(state: GameState): void {
     // 7c. Private residential construction when calle or crowding spikes & ROI holds
     let housesBuilt = 0;
     const inmobiliarias = state.firmas.filter((f) => f.activa && f.rubro === 'inmobiliaria');
+    const freeResByZone = new Map<ZoneId, Parcela>();
+    for (const p of state.parcelas) {
+      if (p.tipoParcela === 'residencial' && p.estado === 'libre' && !freeResByZone.has(p.zona)) {
+        freeResByZone.set(p.zona, p);
+      }
+    }
+    const buildHogaresByZone = new Map<ZoneId, Hogar[]>();
+    for (const h of state.hogares) {
+      if (h.estado === 'acogida') continue;
+      const list = buildHogaresByZone.get(h.zona);
+      if (list) list.push(h);
+      else buildHogaresByZone.set(h.zona, [h]);
+    }
     for (const z of zones) {
       if (housesBuilt >= FIRM_CONSTANTS.maxConstruccionesPrivadasPeriodo) break;
-      const zHogares = state.hogares.filter((h) => h.zona === z && h.estado !== 'acogida');
+      const zHogares = buildHogaresByZone.get(z) ?? [];
       if (zHogares.length === 0) continue;
       const calleZ = (zHogares.filter((h) => h.estado === 'calle').length / zHogares.length) * 100;
       const conCasaZ = zHogares.filter((h) => h.estado === 'con_casa');
@@ -2234,10 +2287,9 @@ export function runPaydayEconomyV2(state: GameState): void {
         constructoras.find((f) => !sinInversionFirms.has(f.id) && f.caja >= def.costoObra);
       if (!builder) continue;
 
-      const freeRes = state.parcelas.find(
-        (p) => p.tipoParcela === 'residencial' && p.estado === 'libre' && p.zona === z
-      );
+      const freeRes = freeResByZone.get(z);
       if (!freeRes) continue;
+      freeResByZone.delete(z);
 
       builder.caja -= def.costoObra;
       if (constr) constr.ventas += def.costoObra;
@@ -2386,13 +2438,21 @@ export function runPaydayEconomyV2(state: GameState): void {
   }
 
   // Update alquilerMedio & cuotaMercado snapshot
+  const rentSumByZone = new Map<ZoneId, { sum: number; count: number }>();
+  for (const c of state.casas) {
+    const entry = rentSumByZone.get(c.zona);
+    if (entry) {
+      entry.sum += c.alquiler;
+      entry.count++;
+    } else {
+      rentSumByZone.set(c.zona, { sum: c.alquiler, count: 1 });
+    }
+  }
   const alquilerMedio: Record<ZoneId, number> = {};
   for (const z of zones) {
-    const zCasas = state.casas.filter((c) => c.zona === z);
+    const entry = rentSumByZone.get(z);
     alquilerMedio[z] =
-      zCasas.length > 0
-        ? Number((zCasas.reduce((s, c) => s + c.alquiler, 0) / zCasas.length).toFixed(2))
-        : 12;
+      entry && entry.count > 0 ? Number((entry.sum / entry.count).toFixed(2)) : 12;
   }
   state.ultimaSalidaEconomica.alquilerMedio = alquilerMedio;
   state.ultimaSalidaEconomica.cuotaMercado = cuotaMercadoSalida;

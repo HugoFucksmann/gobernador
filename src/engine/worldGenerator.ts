@@ -137,7 +137,8 @@ function buildScaledParcelas(
   escenarioId: ScenarioId,
   nivelMundo: WorldComplexityLevel,
   pop: number,
-  zonas: Record<ZoneId, ZoneDefinition>
+  zonas: Record<ZoneId, ZoneDefinition>,
+  cantidadMedios?: number
 ): Parcela[] {
   const preset = SCENARIO_PRESETS[escenarioId];
   const isM0 = nivelMundo === 'M0';
@@ -171,8 +172,9 @@ function buildScaledParcelas(
         def.edificioInicial === 'oficina_constructora' ||
         def.edificioInicial === 'oficina_inmobiliaria' ||
         def.edificioInicial === 'oficina_banco');
+    const isDisabledMedio = cantidadMedios === 0 && def.edificioInicial === 'oficina_medio';
 
-    if (isM0NonBasePrivate) {
+    if (isM0NonBasePrivate || isDisabledMedio) {
       estadoInicial = 'libre';
     } else if (estadoInicial === 'ocupada' && def.edificioInicial) {
       edificio = {
@@ -411,9 +413,10 @@ export function buildInitialParcelas(
   escenarioId: ScenarioId,
   nivelMundo: WorldComplexityLevel,
   pop = 100,
-  zonas: Record<ZoneId, ZoneDefinition> = DEFAULT_ZONAS
+  zonas: Record<ZoneId, ZoneDefinition> = DEFAULT_ZONAS,
+  cantidadMedios?: number
 ): Parcela[] {
-  return buildScaledParcelas(escenarioId, nivelMundo, pop, zonas);
+  return buildScaledParcelas(escenarioId, nivelMundo, pop, zonas, cantidadMedios);
 }
 
 export function createInitialGameState(rawConfig: WorldConfig): GameState {
@@ -434,8 +437,9 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const activeZoneIds = Object.keys(zonas).filter((z) => zonas[z].estado !== 'no_urbanizada');
   const allZoneIds = Object.keys(zonas);
   const tramos = structuredClone(preset.tramos ?? DEFAULT_TRAMOS);
+  const mediaCount = clamp(config.cantidadMedios ?? preset.mediosDefault, 0, 3);
 
-  const parcelas = buildScaledParcelas(config.escenarioId, config.nivelMundo, pop, zonas);
+  const parcelas = buildScaledParcelas(config.escenarioId, config.nivelMundo, pop, zonas, mediaCount);
   const initialLevers: GovernorLevers = structuredClone(preset.initialLevers);
   const cuposFijos = {
     estatal: Math.max(2, Math.round(preset.cuposFijos.estatal * scale)),
@@ -453,7 +457,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     { rol: 'constructor', count: Math.max(2, jobCaps.constructor) },
     { rol: 'inmobiliario', count: Math.max(1, jobCaps.inmobiliario) },
     { rol: 'empresario', count: Math.max(2, Math.round(3 * scale)) },
-    { rol: 'periodista', count: Math.max(config.cantidadMedios, jobCaps.periodista) },
+    { rol: 'periodista', count: mediaCount === 0 ? 0 : Math.max(mediaCount, jobCaps.periodista) },
     { rol: 'policia', count: jobCaps.policia },
     { rol: 'medico', count: jobCaps.medico },
     { rol: 'ingeniero', count: getObrasTargetJobs(pop, initialLevers.nivelObras) },
@@ -854,10 +858,9 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   }
 
   // 9. Media outlets (as rubro 'medio' firms)
-  const mediaCount = clamp(config.cantidadMedios ?? preset.mediosDefault, 1, 3);
   const medioParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_medio');
   const medios: MediaOutlet[] = [];
-  const fondosPorMedio = Number((initialLevers.prensa / mediaCount).toFixed(1));
+  const fondosPorMedio = mediaCount > 0 ? Number((initialLevers.prensa / mediaCount).toFixed(1)) : 0;
   for (let mIdx = 0; mIdx < mediaCount; mIdx++) {
     const tpl = MEDIA_TEMPLATES[mIdx] ?? MEDIA_TEMPLATES[0];
     const parcel = medioParcels[mIdx];
@@ -910,7 +913,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   // Compute target role vacancies per firm so multi-rubro roles (tecnico, obrero, comerciante) spread cleanly
   const firmRoleCaps = new Map<string, Partial<Record<RoleId, number>>>();
   for (const f of firmas) {
-    const agg: Partial<Record<RoleId, number>> = {};
+    const agg: Partial<Record<RoleId, number>> = Object.create(null);
     for (const pid of f.locales) {
       const p = parcelas.find((x) => x.id === pid);
       if (p?.edificio) {
@@ -1254,32 +1257,35 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
           : preset.proximoEventoDiaInicial,
     },
     medios,
-    noticias: [
-      {
-        id: 'n_init',
-        dia: 1,
-        medioId: medios[0].id,
-        medioNombre: medios[0].nombre,
-        autorId: medios[0].columnistas[0] || npcs[0].id,
-        autorNombre:
-          npcs.find((n) => n.id === (medios[0].columnistas[0] || npcs[0].id))?.nombre ||
-          'Redacción',
-        tema: 'gobierno',
-        tono: 'neutral',
-        alcance: medios[0].alcancePct,
-        credibilidad: medios[0].credibilidad,
-        titulo:
-          config.escenarioId === 'zombies'
-            ? 'Alerta sanitaria en la periferia al iniciar la gestión'
-            : 'Inicia el mandato en el valle con 9 zonas activas',
-        texto:
-          config.escenarioId === 'zombies'
-            ? 'Los brotes perimetrales ponen a prueba las defensas zonales y la capacidad hospitalaria.'
-            : 'Familias, comercios y campos productivos comienzan la temporada con precios estables.',
-        origen: 'sistema:inicio',
-        textoOrigen: 'plantilla',
-      },
-    ],
+    noticias:
+      medios.length > 0
+        ? [
+            {
+              id: 'n_init',
+              dia: 1,
+              medioId: medios[0].id,
+              medioNombre: medios[0].nombre,
+              autorId: medios[0].columnistas[0] || npcs[0].id,
+              autorNombre:
+                npcs.find((n) => n.id === (medios[0].columnistas[0] || npcs[0].id))?.nombre ||
+                'Redacción',
+              tema: 'gobierno',
+              tono: 'neutral',
+              alcance: medios[0].alcancePct,
+              credibilidad: medios[0].credibilidad,
+              titulo:
+                config.escenarioId === 'zombies'
+                  ? 'Alerta sanitaria en la periferia al iniciar la gestión'
+                  : 'Inicia el mandato en el valle con 9 zonas activas',
+              texto:
+                config.escenarioId === 'zombies'
+                  ? 'Los brotes perimetrales ponen a prueba las defensas zonales y la capacidad hospitalaria.'
+                  : 'Familias, comercios y campos productivos comienzan la temporada con precios estables.',
+              origen: 'sistema:inicio',
+              textoOrigen: 'plantilla',
+            },
+          ]
+        : [],
     colaHechosDia: [],
     ventanasCondicion: [],
     clasificadorRegistro: [],
