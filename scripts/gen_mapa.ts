@@ -10,8 +10,9 @@ const mapa = {
   version: 2,
   id: 'elecciones',
   zonas: preset.zonas,
+  tramos: preset.tramos ?? mapaActual.tramos ?? [],
   parcelas: preset.parcelas,
 };
 
 fs.writeFileSync('presets/mapa_elecciones.json', JSON.stringify(mapa, null, 2));
-console.log('ok V2 mapa:', Object.keys(mapa.zonas).length, 'zonas,', mapa.parcelas.length, 'parcelas');
+console.log('ok V2 mapa:', Object.keys(mapa.zonas).length, 'zonas,', mapa.tramos.length, 'tramos,', mapa.parcelas.length, 'parcelas');

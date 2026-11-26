@@ -13,8 +13,8 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { DISTRICTS, ROLE_CATALOG } from '../../data/catalogs';
-import { DistrictId, GameState } from '../../types/game';
+import { ROLE_CATALOG } from '../../data/catalogs';
+import { GameState, ZoneId } from '../../types/game';
 import { MapFilter, MapLens, WindowId } from '../../types/ui';
 import { UiTooltip } from './UiTooltip';
 
@@ -30,7 +30,7 @@ interface BottomDockProps {
   onToggleWindow: (win: WindowId) => void;
   onChangeLens: (lens: MapLens) => void;
   onChangeFilter: (filter: MapFilter) => void;
-  onJumpDistrict: (d: DistrictId | 'all') => void;
+  onJumpZone: (z: ZoneId | 'all') => void;
   onZoom: (delta: number) => void;
   onOpenNewGame: () => void;
   onToggleDevMode: () => void;
@@ -40,6 +40,7 @@ const LENS_OPTIONS: Array<{ id: MapLens; label: string }> = [
   { id: 'ninguna', label: 'Normal' },
   { id: 'roles', label: 'Oficios' },
   { id: 'acciones', label: 'Acciones' },
+  { id: 'vivienda', label: 'Vivienda' },
   { id: 'satisfaccion', label: 'Ánimo' },
   { id: 'hambre', label: 'Hambre' },
   { id: 'lealtad', label: 'Apoyo' },
@@ -55,6 +56,7 @@ const FILTER_OPTIONS: Array<{ id: MapFilter; label: string }> = [
   { id: 'acciones', label: 'En acción' },
   { id: 'descontentos', label: 'Descontentos' },
   { id: 'hambre', label: 'Hambre' },
+  { id: 'calle', label: 'En calle' },
 ];
 
 function getLensLegend(lens: MapLens): Array<{ color: string; label: string }> {
@@ -64,9 +66,18 @@ function getLensLegend(lens: MapLens): Array<{ color: string; label: string }> {
       { color: ROLE_CATALOG.agricultor.color, label: 'Agro' },
       { color: ROLE_CATALOG.obrero.color, label: 'Obrero' },
       { color: ROLE_CATALOG.comerciante.color, label: 'Comercio' },
+      { color: ROLE_CATALOG.constructor.color, label: 'Obra' },
       { color: ROLE_CATALOG.medico.color, label: 'Salud' },
       { color: ROLE_CATALOG.policia.color, label: 'Policía' },
       { color: ROLE_CATALOG.desempleado.color, label: 'Sin emp.' },
+    ];
+  }
+  if (lens === 'vivienda') {
+    return [
+      { color: '#10b981', label: 'Propia' },
+      { color: '#38bdf8', label: 'Alquiler' },
+      { color: '#f59e0b', label: 'Hacinada / mora' },
+      { color: '#ef4444', label: 'En calle' },
     ];
   }
   if (lens === 'acciones') {
@@ -117,7 +128,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   onToggleWindow,
   onChangeLens,
   onChangeFilter,
-  onJumpDistrict,
+  onJumpZone,
   onZoom,
   onOpenNewGame,
   onToggleDevMode,
@@ -136,8 +147,9 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   }, []);
 
   const legendItems = getLensLegend(mapLens);
-  const availableDistricts =
-    state.config.nivelMundo === 'M0' ? DISTRICTS.filter((d) => d.id === 'civico') : DISTRICTS;
+  const allZones = Object.values(state.zonas);
+  const availableZones =
+    state.config.nivelMundo === 'M0' ? allZones.filter((z) => z.id === 'centro') : allZones;
 
   const palancasActive = openWindows.includes('palancas');
   const capasActive = popover === 'capas' || mapLens !== 'ninguna' || mapFilter !== 'todos';
@@ -154,7 +166,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
     >
       {/* Popover: Capas & Cámara */}
       {popover === 'capas' && (
-        <div className="pointer-events-auto w-[340px] max-w-[calc(100vw-24px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl p-4 shadow-2xl space-y-4">
+        <div className="pointer-events-auto w-[360px] max-w-[calc(100vw-24px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl p-4 shadow-2xl space-y-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-zinc-400">Capas del mapa</span>
@@ -191,7 +203,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
 
           <div className="space-y-2 pt-2 border-t border-zinc-800">
             <span className="text-xs font-semibold text-zinc-400 block">Mostrar vecinos</span>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {FILTER_OPTIONS.map((f) => {
                 const active = mapFilter === f.id;
                 return (
@@ -199,7 +211,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
                     key={f.id}
                     type="button"
                     onClick={() => onChangeFilter(f.id)}
-                    className={`px-2.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                    className={`px-2 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap ${
                       active
                         ? 'bg-emerald-600 text-white'
                         : 'bg-zinc-800/90 text-zinc-300 hover:bg-zinc-700 hover:text-white'
@@ -214,7 +226,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
 
           <div className="space-y-2 pt-2 border-t border-zinc-800">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-zinc-400">Cámara y zonas</span>
+              <span className="text-xs font-semibold text-zinc-400">Cámara y zonas ({availableZones.length})</span>
               <div className="flex items-center gap-1">
                 <UiTooltip text="Alejar" placement="top">
                   <button
@@ -245,22 +257,26 @@ export const BottomDock: React.FC<BottomDockProps> = ({
                 </UiTooltip>
               </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
               <button
                 type="button"
-                onClick={() => onJumpDistrict('all')}
-                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                onClick={() => onJumpZone('all')}
+                className="px-2.5 py-1 rounded-xl text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 whitespace-nowrap"
               >
-                Valle
+                Todo el valle
               </button>
-              {availableDistricts.map((d) => (
+              {availableZones.map((z) => (
                 <button
-                  key={d.id}
+                  key={z.id}
                   type="button"
-                  onClick={() => onJumpDistrict(d.id)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                  onClick={() => onJumpZone(z.id)}
+                  className={`px-2.5 py-1 rounded-xl text-xs font-medium whitespace-nowrap transition-colors ${
+                    z.estado === 'no_urbanizada'
+                      ? 'bg-zinc-900 border border-dashed border-zinc-600 text-zinc-400 hover:text-zinc-200'
+                      : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
+                  }`}
                 >
-                  {d.nombre}
+                  {z.nombre}
                 </button>
               ))}
             </div>
@@ -285,7 +301,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
           >
             <span className="flex items-center gap-2.5">
               <TrendingUp className="w-4 h-4 text-amber-400" />
-              Economía
+              Economía y Firmas
             </span>
           </button>
 
@@ -321,7 +337,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
           >
             <span className="flex items-center gap-2.5">
               <Compass className="w-4 h-4 text-emerald-400" />
-              Ciudad
+              Ciudad y Vías
             </span>
             {(moreBadgeCount > 0 || hasConditionAlert) && (
               <span
@@ -369,7 +385,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
 
       {/* Active Lens Legend (only when a layer is active) */}
       {legendItems.length > 0 && popover !== 'capas' && (
-        <div className="pointer-events-none flex items-center gap-3 bg-zinc-900/90 backdrop-blur-sm border border-zinc-700/70 rounded-xl px-3.5 py-1.5 text-xs text-zinc-200 shadow-lg">
+        <div className="pointer-events-none flex flex-wrap items-center justify-center gap-3 bg-zinc-900/90 backdrop-blur-sm border border-zinc-700/70 rounded-xl px-3.5 py-1.5 text-xs text-zinc-200 shadow-lg">
           {legendItems.map((item) => (
             <span key={item.label} className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -384,14 +400,14 @@ export const BottomDock: React.FC<BottomDockProps> = ({
         aria-label="Accesos principales"
         className="pointer-events-auto flex items-center gap-2 bg-zinc-900/92 backdrop-blur-md border border-zinc-700/80 rounded-2xl p-2 shadow-2xl"
       >
-        <UiTooltip text="Parcelas y obras públicas" placement="top">
+        <UiTooltip text="Parcelas, obras públicas y vías" placement="top">
           <button
             type="button"
             onClick={() => {
               setPopover(null);
               onToggleBuild();
             }}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
               sideBuildOpen
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
@@ -409,7 +425,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               setPopover(null);
               onToggleWindow('palancas');
             }}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
               palancasActive
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
@@ -420,11 +436,11 @@ export const BottomDock: React.FC<BottomDockProps> = ({
           </button>
         </UiTooltip>
 
-        <UiTooltip text="Capas del mapa, filtros y cámara" placement="top">
+        <UiTooltip text="Capas del mapa, filtros y zonas" placement="top">
           <button
             type="button"
             onClick={() => setPopover((p) => (p === 'capas' ? null : 'capas'))}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
               capasActive
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
@@ -439,7 +455,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
           <button
             type="button"
             onClick={() => setPopover((p) => (p === 'mas' ? null : 'mas'))}
-            className={`relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+            className={`relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
               popover === 'mas' || moreWindowActive
                 ? 'bg-emerald-600 text-white shadow-md'
                 : hasConditionAlert || moreBadgeCount > 0

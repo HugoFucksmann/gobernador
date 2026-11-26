@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { GameController } from '../engine/gameController';
-import { hasActiveCrisisAlert } from '../engine/policies';
+import { ExtraLeverKey, GameController } from '../engine/gameController';
+import { hasActiveCrisisAlert, sumPeriodExpenses } from '../engine/policies';
+import { getActivePhenomena } from '../engine/simulation';
 import {
   BuildingType,
   DistrictId,
@@ -12,7 +13,25 @@ import {
   WorldConfig,
   ZoneId,
 } from '../types/game';
-import { CameraTarget, CityTab, LandmarkId, MapFilter, MapLens, WindowId } from '../types/ui';
+import {
+  CameraTarget,
+  CityTab,
+  LandmarkId,
+  MapFilter,
+  MapHoverPreview,
+  MapLens,
+  MonthlySummary,
+  PaydaySummary,
+  WindowId,
+} from '../types/ui';
+import {
+  isSoundMuted,
+  playAlertSfx,
+  playDecisionSfx,
+  playDemandSfx,
+  playInaugurationSfx,
+  setSoundMuted,
+} from '../utils/soundFx';
 
 interface CausalInspectTarget {
   title: string;
@@ -35,6 +54,7 @@ export function useGameSession() {
   const [ciudadTabRequest, setCiudadTabRequest] = useState<{ tab: CityTab; seq: number } | null>(null);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
+  const [selectedTramoId, setSelectedTramoId] = useState<string | null>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<LandmarkId | null>(null);
   const [sideBuildOpen, setSideBuildOpen] = useState<boolean>(false);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
@@ -43,10 +63,23 @@ export function useGameSession() {
   const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; seq: number } | null>(null);
   const [hoverInfo, setHoverInfo] = useState<string | null>(null);
+  const [hoveredPreview, setHoveredPreview] = useState<MapHoverPreview | null>(null);
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [milestoneBannerDismissed, setMilestoneBannerDismissed] = useState<boolean>(false);
   const [causalInspect, setCausalInspect] = useState<CausalInspectTarget | null>(null);
+  const [paydaySummary, setPaydaySummary] = useState<PaydaySummary | null>(null);
+  const [monthlySummary, setMonthlySummary] = useState<MonthlySummary | null>(null);
+  const [soundMutedState, setSoundMutedState] = useState<boolean>(() => isSoundMuted());
   const uiSeqRef = useRef(0);
+
+  const prevPeriodoRef = useRef(snapshot.state.reloj.periodo);
+  const prevDiaRef = useRef(snapshot.state.reloj.dia);
+  const prevDemandsRef = useRef(snapshot.state.demandasActivas.length);
+  const prevActiveFenRef = useRef(getActivePhenomena(snapshot.state).length);
+  const prevBuiltCountRef = useRef(
+    snapshot.state.parcelas.filter((p) => p.estado === 'ocupada' && p.edificio).length +
+      snapshot.state.tramos.filter((t) => t.construida).length
+  );
 
   // Start controller paused on Day 1 until player confirms scenario briefing
   useEffect(() => {
@@ -56,6 +89,79 @@ export function useGameSession() {
       controller.destroy();
     };
   }, [controller]);
+
+  // Period close (payday) + 30-day evaluation + subtle audio cues
+  useEffect(() => {
+    const st = snapshot.state;
+    const derived = snapshot.derived;
+    const builtCount =
+      st.parcelas.filter((p) => p.estado === 'ocupada' && p.edificio).length +
+      st.tramos.filter((t) => t.construida).length;
+
+    if (st.reloj.dia !== prevDiaRef.current) {
+      if (st.reloj.dia < prevDiaRef.current) {
+        // New game or loaded save: reset trackers cleanly
+        setPaydaySummary(null);
+        setMonthlySummary(null);
+      } else if (hasStarted && st.resultado.estado === 'jugando') {
+        if (st.reloj.periodo > prevPeriodoRef.current) {
+          const gastos = sumPeriodExpenses(st.gobierno.finanzas);
+          setPaydaySummary({
+            periodo: prevPeriodoRef.current,
+            dia: st.reloj.dia,
+            ingresos: st.gobierno.finanzas.ingresos,
+            gastos,
+            saldo: st.gobierno.finanzas.saldo,
+            reserva: st.gobierno.reserva,
+          });
+        }
+        if (st.reloj.dia >= 30 && st.reloj.dia % 30 === 0) {
+          const positives: string[] = [];
+          const negatives: string[] = [];
+          if (derived.hambreCriticaPct < 5) positives.push('Abasto de alimentos estable');
+          else negatives.push(`Hambre crítica en ${derived.hambreCriticaPct}%`);
+          if (derived.callePct <= 5) positives.push('Cobertura habitacional sólida');
+          else negatives.push(`${derived.callePct}% de hogares sin techo`);
+          if (st.gobierno.finanzas.impago) negatives.push('Atraso de pagos del Tesoro');
+          else if (st.gobierno.finanzas.saldo >= 0) positives.push('Cuentas públicas equilibradas');
+          else negatives.push('Déficit en el último período');
+          if (derived.satisfaccionMedia >= 60) positives.push(`Ánimo ciudadano en ${derived.satisfaccionMedia}%`);
+          else if (derived.satisfaccionMedia < 45) negatives.push(`Ánimo bajo (${derived.satisfaccionMedia}%)`);
+          if (derived.desempleoPct > 18) negatives.push(`Desempleo elevado (${derived.desempleoPct}%)`);
+          else if (derived.desempleoPct <= 8) positives.push('Empleo activo en las firmas');
+          const brokenTramos = st.tramos.filter((t) => t.construida && t.estado <= 0).length;
+          if (brokenTramos > 0) negatives.push(`${brokenTramos} vía(s) cortada(s)`);
+
+          setMonthlySummary({
+            dia: st.reloj.dia,
+            apoyoPct: derived.apoyoPct,
+            poblacion: derived.poblacion,
+            reserva: st.gobierno.reserva,
+            topPositivos: positives.slice(0, 3),
+            topNegativos: negatives.slice(0, 3),
+          });
+        }
+      }
+      prevDiaRef.current = st.reloj.dia;
+    }
+
+    if (hasStarted) {
+      if (st.demandasActivas.length > prevDemandsRef.current) {
+        playDemandSfx();
+      }
+      const activeFenCount = getActivePhenomena(st).length;
+      if (activeFenCount > prevActiveFenRef.current || (st.gobierno.finanzas.impago && st.reloj.periodo > prevPeriodoRef.current)) {
+        playAlertSfx();
+      } else if (builtCount > prevBuiltCountRef.current) {
+        playInaugurationSfx();
+      }
+    }
+
+    prevPeriodoRef.current = st.reloj.periodo;
+    prevDemandsRef.current = st.demandasActivas.length;
+    prevActiveFenRef.current = getActivePhenomena(st).length;
+    prevBuiltCountRef.current = builtCount;
+  }, [snapshot.state, snapshot.derived, hasStarted]);
 
   // Global keyboard shortcuts (Escape closes topmost overlay/window, Space toggles pause)
   useEffect(() => {
@@ -72,6 +178,8 @@ export function useGameSession() {
           setFollowSelected(false);
         } else if (selectedParcelaId) {
           setSelectedParcelaId(null);
+        } else if (selectedTramoId) {
+          setSelectedTramoId(null);
         } else if (selectedLandmark) {
           setSelectedLandmark(null);
         } else if (sideBuildOpen) {
@@ -93,6 +201,7 @@ export function useGameSession() {
     openWindows.length,
     selectedNpcId,
     selectedParcelaId,
+    selectedTramoId,
     selectedLandmark,
     sideBuildOpen,
     showConfigModal,
@@ -110,6 +219,11 @@ export function useGameSession() {
     [snapshot.state.parcelas, selectedParcelaId]
   );
 
+  const selectedTramo = useMemo(
+    () => snapshot.state.tramos.find((t) => t.id === selectedTramoId) || null,
+    [snapshot.state.tramos, selectedTramoId]
+  );
+
   const hasConditionAlert = useMemo(
     () => hasActiveCrisisAlert(snapshot.state, snapshot.derived),
     [snapshot.state, snapshot.derived]
@@ -117,6 +231,7 @@ export function useGameSession() {
 
   const selectNpc = useCallback((npcId: string) => {
     setSelectedParcelaId(null);
+    setSelectedTramoId(null);
     setSelectedLandmark(null);
     setSideBuildOpen(false);
     setSelectedNpcId(npcId);
@@ -130,6 +245,7 @@ export function useGameSession() {
   const selectParcela = useCallback((parcelaId: string) => {
     setSelectedNpcId(null);
     setFollowSelected(false);
+    setSelectedTramoId(null);
     setSelectedLandmark(null);
     setSideBuildOpen(false);
     setSelectedParcelaId(parcelaId);
@@ -139,18 +255,30 @@ export function useGameSession() {
     setSelectedParcelaId(null);
   }, []);
 
-  const clearSidePanel = useCallback(() => {
+  const selectTramo = useCallback((tramoId: string) => {
     setSelectedNpcId(null);
     setFollowSelected(false);
     setSelectedParcelaId(null);
     setSelectedLandmark(null);
     setSideBuildOpen(false);
+    setSelectedTramoId(tramoId);
+  }, []);
+
+  const clearSidePanel = useCallback(() => {
+    setSelectedNpcId(null);
+    setFollowSelected(false);
+    setSelectedParcelaId(null);
+    setSelectedTramoId(null);
+    setSelectedLandmark(null);
+    setSideBuildOpen(false);
+    setHoveredPreview(null);
   }, []);
 
   const toggleBuildPanel = useCallback(() => {
     setSelectedNpcId(null);
     setFollowSelected(false);
     setSelectedParcelaId(null);
+    setSelectedTramoId(null);
     setSelectedLandmark(null);
     setSideBuildOpen((prev) => !prev);
   }, []);
@@ -171,6 +299,10 @@ export function useGameSession() {
   const stepDay = useCallback(() => controller.stepDay(), [controller]);
   const setDevMode = useCallback((enabled: boolean) => controller.setDevMode(enabled), [controller]);
   const setDevPopulation = useCallback((pop: number) => controller.setDevPopulation(pop), [controller]);
+  const setEstadoAutomatico = useCallback(
+    (enabled: boolean) => controller.setEstadoAutomatico(enabled),
+    [controller]
+  );
   const setDevComplexity = useCallback(
     (nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel) =>
       controller.setDevComplexity(nivelMundo, nivelGobernador),
@@ -190,12 +322,15 @@ export function useGameSession() {
       setHasStarted(true);
       setSelectedNpcId(null);
       setSelectedParcelaId(null);
+      setSelectedTramoId(null);
       setSelectedLandmark(null);
       setSideBuildOpen(false);
       setFollowSelected(false);
       setShowConfigModal(false);
       setMilestoneBannerDismissed(true);
       setCausalInspect(null);
+      setPaydaySummary(null);
+      setMonthlySummary(null);
     }
     return ok;
   }, [controller]);
@@ -206,12 +341,15 @@ export function useGameSession() {
       setHasStarted(true);
       setSelectedNpcId(null);
       setSelectedParcelaId(null);
+      setSelectedTramoId(null);
       setSelectedLandmark(null);
       setSideBuildOpen(false);
       setFollowSelected(false);
       setShowConfigModal(false);
       setMilestoneBannerDismissed(true);
       setCausalInspect(null);
+      setPaydaySummary(null);
+      setMonthlySummary(null);
     }
     return ok;
   }, [controller]);
@@ -219,22 +357,62 @@ export function useGameSession() {
   const updateLevers = useCallback(
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
       controller.updateLevers(updater);
+      playDecisionSfx();
+    },
+    [controller]
+  );
+
+  const setExtraLever = useCallback(
+    (key: ExtraLeverKey, value: number) => {
+      const res = controller.setExtraLever(key, value);
+      if (res.ok) playDecisionSfx();
+      return res;
     },
     [controller]
   );
 
   const buildInParcela = useCallback(
-    (parcelaId: string, tipo: BuildingType) => controller.buildInParcela(parcelaId, tipo),
+    (parcelaId: string, tipo: BuildingType) => {
+      const res = controller.buildInParcela(parcelaId, tipo);
+      if (res.ok) playDecisionSfx();
+      return res;
+    },
+    [controller]
+  );
+
+  const buildVia = useCallback(
+    (tramoId: string) => {
+      const res = controller.buildVia(tramoId);
+      if (res.ok) playDecisionSfx();
+      return res;
+    },
     [controller]
   );
 
   const demolishParcela = useCallback(
-    (parcelaId: string) => controller.demolishParcela(parcelaId),
+    (parcelaId: string) => {
+      const res = controller.demolishParcela(parcelaId);
+      if (res.ok) playDecisionSfx();
+      return res;
+    },
     [controller]
   );
 
   const respondDemand = useCallback(
-    (demandId: string, accept: boolean) => controller.respondDemand(demandId, accept),
+    (demandId: string, accept: boolean) => {
+      const res = controller.respondDemand(demandId, accept);
+      if (res.ok) playDecisionSfx();
+      return res;
+    },
+    [controller]
+  );
+
+  const counterOffer = useCallback(
+    (demandId: string) => {
+      const res = controller.counterOffer(demandId);
+      if (res.ok) playDecisionSfx();
+      return res;
+    },
     [controller]
   );
 
@@ -252,6 +430,7 @@ export function useGameSession() {
       }
       setSelectedNpcId(null);
       setSelectedParcelaId(null);
+      setSelectedTramoId(null);
       setSelectedLandmark(null);
       setSideBuildOpen(false);
       setFollowSelected(false);
@@ -259,6 +438,8 @@ export function useGameSession() {
       setOpenWindows([]);
       setMilestoneBannerDismissed(false);
       setCausalInspect(null);
+      setPaydaySummary(null);
+      setMonthlySummary(null);
       setHasStarted(true);
       controller.startNewGame({
         ...current,
@@ -272,6 +453,7 @@ export function useGameSession() {
     (newConfig: WorldConfig) => {
       setSelectedNpcId(null);
       setSelectedParcelaId(null);
+      setSelectedTramoId(null);
       setSelectedLandmark(null);
       setSideBuildOpen(false);
       setFollowSelected(false);
@@ -279,6 +461,8 @@ export function useGameSession() {
       setOpenWindows([]);
       setMilestoneBannerDismissed(false);
       setCausalInspect(null);
+      setPaydaySummary(null);
+      setMonthlySummary(null);
       setHasStarted(true);
       controller.startNewGame(newConfig);
     },
@@ -289,6 +473,12 @@ export function useGameSession() {
     setFollowSelected(false);
     uiSeqRef.current += 1;
     setCameraTarget({ district, seq: uiSeqRef.current });
+  }, []);
+
+  const jumpToZone = useCallback((zone: ZoneId | 'all') => {
+    setFollowSelected(false);
+    uiSeqRef.current += 1;
+    setCameraTarget({ zone, seq: uiSeqRef.current });
   }, []);
 
   const focusWindow = useCallback((winId: WindowId) => {
@@ -329,6 +519,7 @@ export function useGameSession() {
       setSelectedNpcId(null);
       setFollowSelected(false);
       setSelectedParcelaId(null);
+      setSelectedTramoId(null);
       setSideBuildOpen(false);
       setSelectedLandmark(lm);
     },
@@ -354,10 +545,21 @@ export function useGameSession() {
     setMilestoneBannerDismissed(true);
   }, []);
 
+  const dismissPaydaySummary = useCallback(() => setPaydaySummary(null), []);
+  const dismissMonthlySummary = useCallback(() => setMonthlySummary(null), []);
+  const toggleSoundMute = useCallback(() => {
+    setSoundMutedState((prev) => {
+      const next = !prev;
+      setSoundMuted(next);
+      return next;
+    });
+  }, []);
+
   return {
     ...snapshot,
     selectedNpc,
     selectedParcela,
+    selectedTramo,
     selectedLandmark,
     sideBuildOpen,
     hasConditionAlert,
@@ -372,9 +574,13 @@ export function useGameSession() {
     cameraTarget,
     zoomRequest,
     hoverInfo,
+    hoveredPreview,
     showConfigModal,
     milestoneBannerDismissed,
     causalInspect,
+    paydaySummary,
+    monthlySummary,
+    soundMuted: soundMutedState,
 
     // UI setters
     openWindow,
@@ -390,8 +596,12 @@ export function useGameSession() {
     setMapFilter,
     setMapLens,
     setHoverInfo,
+    setHoveredPreview,
     setShowConfigModal,
     dismissMilestoneBanner,
+    dismissPaydaySummary,
+    dismissMonthlySummary,
+    toggleSoundMute,
     openCausalInspect,
     closeCausalInspect,
 
@@ -401,24 +611,30 @@ export function useGameSession() {
     clearSelectedNpc,
     selectParcela,
     clearSelectedParcela,
+    selectTramo,
     selectRoleSample,
     togglePause,
     setSpeed,
     stepDay,
     setDevMode,
     setDevPopulation,
+    setEstadoAutomatico,
     setDevComplexity,
     forceClimatePhenomenon,
     saveManual,
     loadManual,
     loadAutoSave,
     updateLevers,
+    setExtraLever,
     buildInParcela,
+    buildVia,
     demolishParcela,
     respondDemand,
+    counterOffer,
     triggerPressManual,
     startNewGame,
     jumpToDistrict,
+    jumpToZone,
     requestZoom,
   };
 }

@@ -6,10 +6,12 @@ import {
   Crosshair,
   Hammer,
   HeartPulse,
+  Home,
   IdCard,
   Landmark,
   Lock,
   Newspaper,
+  Route,
   Store,
   Trash2,
   User,
@@ -21,9 +23,8 @@ import {
   GOVERNOR_BUILDABLE_TYPES,
   OBRAS_LEVEL_TABLE,
   ROLE_CATALOG,
-  SCENARIO_PRESETS,
 } from '../../data/catalogs';
-import { getNpcDistrictName } from '../../engine/npcInsights';
+import { evaluateNpcTopMoodFactor, getNpcDistrictName } from '../../engine/npcInsights';
 import { getBuildingJobCaps, sumPeriodExpenses } from '../../engine/policies';
 import {
   computeHospitalFacilities,
@@ -34,8 +35,10 @@ import {
   getStage,
   getWorldZones,
 } from '../../engine/simulation';
+import { getRubroDisplayName, isViaConnectableToNetwork } from '../../engine/worldHelpers';
 import {
   ActionEffectId,
+  BuildingDefinition,
   BuildingType,
   CommunityDerived,
   DistrictId,
@@ -43,8 +46,10 @@ import {
   Npc,
   Parcela,
   PersonalityTrait,
+  ViaTramo,
+  ZoneId,
 } from '../../types/game';
-import { LandmarkId, WindowId } from '../../types/ui';
+import { LandmarkId, MapHoverPreview, WindowId } from '../../types/ui';
 import { HintIcon, UiTooltip } from './UiTooltip';
 
 const EFFECT_LABELS: Record<ActionEffectId, string> = {
@@ -61,6 +66,9 @@ const EFFECT_LABELS: Record<ActionEffectId, string> = {
   repara: 'Repara',
   cuida: 'Cuida',
   toma: 'Toma alimento',
+  ocupa: 'Ocupa vivienda',
+  boicotea: 'Boicotea firma',
+  emprendedor: 'Emprende firma',
 };
 
 const TRAIT_LABELS: Record<PersonalityTrait, string> = {
@@ -71,11 +79,28 @@ const TRAIT_LABELS: Record<PersonalityTrait, string> = {
   resiliencia: 'Resiliencia',
 };
 
+function describeBuilding(def: BuildingDefinition): string {
+  const parts: string[] = [];
+  if (def.rubro) parts.push(`Rubro: ${getRubroDisplayName(def.rubro)}`);
+  if (def.capacidadCasa) parts.push(`Capacidad ${def.capacidadCasa} pers.`);
+  if (def.camasHospital) parts.push(`${def.camasHospital} camas`);
+  if (def.bonusDefensa) parts.push(`+${def.bonusDefensa} defensa zonal`);
+  if (def.defensaMuralla) parts.push(`+${def.defensaMuralla} protección muralla`);
+  if (def.siloExtraDias) parts.push(`+${def.siloExtraDias}d de capacidad de silo`);
+  if (def.reduccionSequiaPct) parts.push(`-${def.reduccionSequiaPct}% impacto de sequía`);
+  const roles = Object.entries(def.puestos)
+    .filter(([, count]) => (count ?? 0) > 0)
+    .map(([r, count]) => `${count} ${ROLE_CATALOG[r as keyof typeof ROLE_CATALOG]?.nombre ?? r}`);
+  if (roles.length > 0) parts.push(`Puestos: ${roles.join(', ')}`);
+  return parts.length > 0 ? parts.join(' · ') : def.nombre;
+}
+
 interface SideInspectorPanelProps {
   state: GameState;
   derived: CommunityDerived;
   selectedNpc: Npc | null;
   selectedParcela: Parcela | null;
+  selectedTramo: ViaTramo | null;
   selectedLandmark: LandmarkId | null;
   sideBuildOpen: boolean;
   followSelected: boolean;
@@ -83,10 +108,15 @@ interface SideInspectorPanelProps {
   onToggleFollow: () => void;
   onClosePanel: () => void;
   onSelectParcela: (parcelaId: string) => void;
+  onSelectTramo: (tramoId: string) => void;
   onJumpDistrict: (d: DistrictId | 'all') => void;
+  onJumpZone: (z: ZoneId | 'all') => void;
+  onHoverPreview?: (preview: MapHoverPreview | null) => void;
   onBuildInParcela: (parcelaId: string, tipo: BuildingType) => { ok: boolean; error?: string };
+  onBuildVia: (tramoId: string) => { ok: boolean; error?: string };
   onDemolishParcela: (parcelaId: string) => { ok: boolean; error?: string };
   onRespondDemand: (demandId: string, accept: boolean) => { ok: boolean; error?: string };
+  onCounterOffer: (demandId: string) => { ok: boolean; aceptada?: boolean; error?: string; texto?: string };
   onOpenWindow: (win: WindowId) => void;
   onTriggerPress: () => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
@@ -118,9 +148,9 @@ const CitizenAvatar: React.FC<{ npc: Npc }> = ({ npc }) => {
         </>
       ) : npc.rol === 'policia' ? (
         <path d="M14 19 L34 19 L32 12 L16 12 Z" fill="#3f3f46" />
-      ) : npc.rol === 'ingeniero' ? (
+      ) : npc.rol === 'ingeniero' || npc.rol === 'constructor' ? (
         <path d="M14 19 Q24 9 34 19 Z" fill="#facc15" />
-      ) : npc.rol === 'empresario' ? (
+      ) : npc.rol === 'empresario' || npc.rol === 'inmobiliario' ? (
         <>
           <rect x="13" y="15" width="22" height="3" rx="1" fill="#18181b" />
           <rect x="17" y="9" width="14" height="6" rx="1" fill="#09090b" />
@@ -152,6 +182,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   derived,
   selectedNpc,
   selectedParcela,
+  selectedTramo,
   selectedLandmark,
   sideBuildOpen,
   followSelected,
@@ -159,27 +190,41 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   onToggleFollow,
   onClosePanel,
   onSelectParcela,
-  onJumpDistrict,
+  onSelectTramo,
+  onJumpZone,
+  onHoverPreview,
   onBuildInParcela,
+  onBuildVia,
   onDemolishParcela,
   onRespondDemand,
+  onCounterOffer,
   onOpenWindow,
   onTriggerPress,
   onInspectCausal,
 }) => {
   const [npcTab, setNpcTab] = useState<CitizenTab>('estado');
+  const [buildSection, setBuildSection] = useState<'parcelas' | 'vias'>('parcelas');
   const [buildFilter, setBuildFilter] = useState<'libres' | 'todas'>('libres');
   const [parcelError, setParcelError] = useState<string | null>(null);
+  const [demandNote, setDemandNote] = useState<string | null>(null);
 
   const govLevel =
     state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0';
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
   const isG1 = govLevel === 'G1';
+  const isG3 = govLevel === 'G3';
 
-  const hasPanelOpen = Boolean(selectedNpc || selectedParcela || selectedLandmark || sideBuildOpen);
+  const hasPanelOpen = Boolean(
+    selectedNpc || selectedParcela || selectedTramo || selectedLandmark || sideBuildOpen
+  );
 
   const renderDemandsList = (compact = false) => (
     <div className={`space-y-3 ${compact ? 'max-h-[168px]' : 'max-h-[320px]'} overflow-y-auto pr-1`}>
+      {demandNote && (
+        <div className="bg-zinc-800/80 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-amber-200">
+          {demandNote}
+        </div>
+      )}
       {state.demandasActivas.map((dem) => (
         <div
           key={dem.id}
@@ -198,23 +243,44 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
 
           <div className="text-xs sm:text-sm text-zinc-200 leading-snug">{dem.pedido.etiqueta}</div>
 
-          <div className="grid grid-cols-2 gap-2 pt-0.5">
+          <div className={`grid ${isG3 ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 pt-0.5`}>
             <UiTooltip text={`Aceptar compromiso (${dem.diasCompromiso}d)`} placement="top">
               <button
                 type="button"
                 disabled={isG0}
-                onClick={() => onRespondDemand(dem.id, true)}
-                className="w-full py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+                onClick={() => {
+                  setDemandNote(null);
+                  onRespondDemand(dem.id, true);
+                }}
+                className="w-full py-1.5 px-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
               >
                 Aceptar
               </button>
             </UiTooltip>
+            {isG3 && (
+              <UiTooltip text="Proponer término medio (G3)" placement="top">
+                <button
+                  type="button"
+                  disabled={isG0}
+                  onClick={() => {
+                    const res = onCounterOffer(dem.id);
+                    setDemandNote(res.texto ?? res.error ?? null);
+                  }}
+                  className="w-full py-1.5 px-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
+                >
+                  Contraoferta
+                </button>
+              </UiTooltip>
+            )}
             <UiTooltip text={`Rechazar: ${dem.amenaza}`} placement="top">
               <button
                 type="button"
                 disabled={isG0}
-                onClick={() => onRespondDemand(dem.id, false)}
-                className="w-full py-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+                onClick={() => {
+                  setDemandNote(null);
+                  onRespondDemand(dem.id, false);
+                }}
+                className="w-full py-1.5 px-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
               >
                 Rechazar
               </button>
@@ -225,12 +291,12 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     </div>
   );
 
-  // When no inspector is open, surface only urgent active actor demands cleanly in the same corner
+  // When no inspector is open, surface only urgent active actor demands cleanly
   if (!hasPanelOpen) {
     if (state.demandasActivas.length === 0) return null;
 
     return (
-      <aside className="pointer-events-auto fixed top-20 right-4 z-25 w-[340px] max-w-[calc(100vw-32px)] bg-zinc-900/95 backdrop-blur-md border border-amber-500/50 rounded-2xl p-4 shadow-2xl space-y-3">
+      <aside className="pointer-events-auto fixed top-20 right-4 z-25 w-[350px] max-w-[calc(100vw-32px)] bg-zinc-900/95 backdrop-blur-md border border-amber-500/50 rounded-2xl p-4 shadow-2xl space-y-3">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-2 text-sm font-bold text-amber-300">
             <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -242,21 +308,24 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     );
   }
 
-  // Unified Header metadata for whichever entity opened the single side panel
-  const preset = SCENARIO_PRESETS[state.config.escenarioId];
   let headerTitle = '';
   let headerSub = '';
   let HeaderIcon: React.ReactNode = null;
 
   if (selectedNpc) {
-    headerTitle = selectedNpc.nombre;
+    headerTitle = `${selectedNpc.nombre} ${selectedNpc.apellido}`;
     headerSub = `${ROLE_CATALOG[selectedNpc.rol].nombre} · ${selectedNpc.edad}a`;
     HeaderIcon = <User className="w-4 h-4 text-emerald-400" />;
   } else if (selectedParcela) {
     const distName = DISTRICT_BY_ID[selectedParcela.distrito]?.nombre ?? selectedParcela.distrito;
+    const zName = state.zonas[selectedParcela.zona]?.nombre ?? selectedParcela.zona;
     headerTitle = selectedParcela.nombre;
-    headerSub = `${distName} · Zona ${selectedParcela.zona}`;
+    headerSub = `${zName} · ${distName}`;
     HeaderIcon = <Building2 className="w-4 h-4 text-emerald-400" />;
+  } else if (selectedTramo) {
+    headerTitle = selectedTramo.nombre;
+    headerSub = `Vía (${selectedTramo.tipo}) · ${selectedTramo.zonaA}`;
+    HeaderIcon = <Route className="w-4 h-4 text-amber-400" />;
   } else if (selectedLandmark === 'palacio') {
     headerTitle = 'Palacio de Gobierno';
     headerSub = 'Sede ejecutiva';
@@ -266,8 +335,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     headerSub = `${state.medios.length} medio(s)`;
     HeaderIcon = <Newspaper className="w-4 h-4 text-amber-400" />;
   } else if (selectedLandmark === 'mercado') {
-    headerTitle = 'Plaza del Mercado';
-    headerSub = 'Abasto y comercio';
+    headerTitle = 'Puerto y Mercado';
+    headerSub = 'Abasto, firmas y comercio';
     HeaderIcon = <Store className="w-4 h-4 text-amber-400" />;
   } else {
     headerTitle = 'Construir';
@@ -277,11 +346,16 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
 
   const handleClose = () => {
     setParcelError(null);
+    onHoverPreview?.(null);
     onClosePanel();
   };
 
+  const connectableVias = state.tramos.filter(
+    (t) => !t.construida && !t.enObra && isViaConnectableToNetwork(state, t)
+  );
+
   return (
-    <aside className="pointer-events-auto fixed top-20 right-4 z-25 w-[360px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-176px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <aside className="pointer-events-auto fixed top-20 right-4 z-25 w-[370px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-176px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
       {/* Unified Panel Header */}
       <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -319,23 +393,30 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           const def = ROLE_CATALOG[selectedNpc.rol];
           const stage = getStage(selectedNpc.edad);
           const prod = Math.round(getNpcProductivity(selectedNpc, state) * 100);
-          const districtName = getNpcDistrictName(selectedNpc);
+          const districtName = getNpcDistrictName(selectedNpc, state);
           const zonesCount = getWorldZones(state).length;
           const effZone = getEffectiveZone(selectedNpc, zonesCount);
+          const hogar = state.hogares.find((h) => h.id === selectedNpc.hogarId);
+          const casa = hogar?.casaId ? state.casas.find((c) => c.id === hogar.casaId) : undefined;
+          const topFactor = evaluateNpcTopMoodFactor(selectedNpc, state);
+          const employerFirm = selectedNpc.empleadorId
+            ? state.firmas.find((f) => f.id === selectedNpc.empleadorId)
+            : undefined;
 
           return (
             <div className="space-y-4">
               <div className="flex items-center gap-3.5">
                 <CitizenAvatar npc={selectedNpc} />
                 <div className="min-w-0 flex-1 space-y-1">
-                  <div className="text-xs text-zinc-400 capitalize truncate">
-                    {districtName} · Zona {effZone} · {stage}
+                  <div className="text-xs text-zinc-400 truncate">
+                    {districtName} ({effZone}) · {stage}
                   </div>
                   <div className="text-sm font-medium text-zinc-100 truncate capitalize">
                     {selectedNpc.accionIa ? selectedNpc.accionIa.nombre : selectedNpc.mapa.accion}
                   </div>
+                  <div className="text-xs text-amber-300 truncate">{topFactor}</div>
                   {(selectedNpc.hospital.internado || selectedNpc.hospital.esperandoCama) && (
-                    <div className="text-xs font-semibold text-amber-300">
+                    <div className="text-xs font-semibold text-rose-300">
                       {selectedNpc.hospital.internado
                         ? `Internado (${selectedNpc.hospital.diasInternado}d)`
                         : 'Esperando cama'}
@@ -364,7 +445,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                   [
                     { id: 'estado', label: 'Estado', icon: HeartPulse },
                     { id: 'actividad', label: 'Actividad', icon: Activity },
-                    { id: 'ficha', label: 'Ficha', icon: IdCard },
+                    { id: 'ficha', label: 'Hogar y Ficha', icon: IdCard },
                   ] as Array<{ id: CitizenTab; label: string; icon: React.ComponentType<{ className?: string }> }>
                 ).map((t) => {
                   const Icon = t.icon;
@@ -374,12 +455,12 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       key={t.id}
                       type="button"
                       onClick={() => setNpcTab(t.id)}
-                      className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      className={`flex items-center justify-center gap-1 py-2 px-1 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                         active ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                       }`}
                     >
-                      <Icon className="w-3.5 h-3.5" />
-                      {t.label}
+                      <Icon className="w-3.5 h-3.5 shrink-0" />
+                      <span>{t.label}</span>
                     </button>
                   );
                 })}
@@ -440,7 +521,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       <p className="text-xs text-zinc-200 leading-relaxed">{selectedNpc.accionIa.texto}</p>
                       {selectedNpc.accionIa.efectos && selectedNpc.accionIa.efectos.length > 0 && (
                         <div className="text-xs text-zinc-400">
-                          {selectedNpc.accionIa.efectos.map((ef) => EFFECT_LABELS[ef.id]).join(' · ')}
+                          {selectedNpc.accionIa.efectos.map((ef) => EFFECT_LABELS[ef.id] ?? ef.id).join(' · ')}
                         </div>
                       )}
                     </div>
@@ -497,20 +578,54 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                         ${selectedNpc.economia.ultimoIngresoNeto.toFixed(1)}/d
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="font-sans text-zinc-400">Ahorros</span>
-                      <span className="font-semibold text-white">${selectedNpc.economia.dinero.toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-sans text-zinc-400">Despensa</span>
-                      <span
-                        className={`font-semibold ${
-                          selectedNpc.economia.despensa < 1.5 ? 'text-rose-400' : 'text-emerald-400'
-                        }`}
-                      >
-                        {selectedNpc.economia.despensa.toFixed(1)}d
-                      </span>
-                    </div>
+                    {employerFirm && (
+                      <div className="flex justify-between gap-2">
+                        <span className="font-sans text-zinc-400">Empleador</span>
+                        <span className="font-sans font-semibold text-zinc-200 truncate">
+                          {employerFirm.nombre}
+                        </span>
+                      </div>
+                    )}
+                    {hogar && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="font-sans text-zinc-400">Caja del hogar ({hogar.miembros.length} p.)</span>
+                          <span className="font-semibold text-white">${hogar.dinero.toFixed(1)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-sans text-zinc-400">Despensa hogar</span>
+                          <span
+                            className={`font-semibold ${
+                              hogar.despensa / Math.max(1, hogar.miembros.length) < 1.5
+                                ? 'text-rose-400'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            {(hogar.despensa / Math.max(1, hogar.miembros.length)).toFixed(1)}d/p
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-sans text-zinc-400">Vivienda</span>
+                          <span
+                            className={`font-sans font-semibold ${
+                              hogar.estado === 'calle'
+                                ? 'text-rose-400'
+                                : hogar.estado === 'acogida'
+                                ? 'text-amber-300'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            {hogar.estado === 'calle'
+                              ? 'En calle'
+                              : hogar.estado === 'acogida'
+                              ? 'Acogida'
+                              : casa
+                              ? `${BUILDING_CATALOG[casa.tipo].nombre} (${Math.round(casa.estado)}%)`
+                              : 'Con casa'}
+                          </span>
+                        </div>
+                      </>
+                    )}
                     <div className="flex justify-between">
                       <span className="font-sans text-zinc-400">Acceso comida</span>
                       <span className="font-semibold text-zinc-200">
@@ -521,6 +636,11 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       <span className="font-sans text-zinc-400">Educación</span>
                       <span className="font-semibold text-white">N{selectedNpc.educacion.nivel}/3</span>
                     </div>
+                    {selectedNpc.partes.length > 0 && (
+                      <div className="pt-1 text-xs font-sans text-amber-300">
+                        Participación en {selectedNpc.partes.length} firma(s)
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -554,17 +674,40 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
         {selectedParcela && (() => {
           const b = selectedParcela.edificio;
           const bDef = b ? BUILDING_CATALOG[b.tipo] : null;
-          const hito = selectedParcela.hitoRequerido
-            ? preset.hitos.find((h) => h.id === selectedParcela.hitoRequerido)
-            : undefined;
           const obrasRow = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras];
           const infraFactor = state.gobierno.indicadores.infraestructura < 30 ? 1.35 : 1.0;
+          const openingVia = selectedParcela.tramoAperturaId
+            ? state.tramos.find((t) => t.id === selectedParcela.tramoAperturaId)
+            : undefined;
 
           return (
             <div className="space-y-4">
               {parcelError && (
                 <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl px-3 py-2 text-xs text-rose-200">
                   {parcelError}
+                </div>
+              )}
+
+              {selectedParcela.estado === 'sin_calle' && (
+                <div className="bg-zinc-800/60 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center gap-2 font-semibold text-amber-300">
+                    <Route className="w-4 h-4 shrink-0" />
+                    <span>Requiere acceso vial</span>
+                  </div>
+                  <div className="text-xs text-zinc-300">
+                    {openingVia
+                      ? `Habilita el tramo "${openingVia.nombre}" ($${openingVia.costoObra}) para abrir esta parcela.`
+                      : 'Necesita conexión a la red vial de la zona.'}
+                  </div>
+                  {openingVia && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectTramo(openingVia.id)}
+                      className="px-3.5 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-colors"
+                    >
+                      Inspeccionar vía
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -575,79 +718,84 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     <span>Bloqueada</span>
                   </div>
                   <div className="text-xs text-zinc-300">
-                    {hito ? hito.nombre : 'Se habilita por progreso.'}
+                    Se habilita al avanzar el desarrollo de la zona o cumplir hitos.
                   </div>
-                  {hito && (
-                    <>
-                      <div className="text-xs text-zinc-400">{hito.descripcion}</div>
-                      <div className="font-mono text-xs text-amber-300 tabular-nums pt-1">
-                        Racha: {state.hitosRacha[hito.id] ?? 0}/{hito.condicion.periodos} períodos
-                      </div>
-                    </>
-                  )}
                 </div>
               )}
 
               {selectedParcela.estado === 'libre' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-emerald-400">Parcela disponible</span>
+                    <span className="font-semibold text-emerald-400">
+                      Parcela {selectedParcela.tipoParcela} disponible
+                    </span>
                     <span className="font-mono text-zinc-300 tabular-nums">
                       Caja ${Math.round(state.gobierno.reserva)}
                     </span>
                   </div>
 
-                  {isG0 && (
-                    <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-500/40 rounded-xl p-3">
-                      Modo G0: sin construcción manual.
+                  {selectedParcela.tipoParcela !== 'publica' ? (
+                    <div className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl p-3.5 text-xs text-zinc-300 space-y-1">
+                      <div className="font-semibold text-white">Parcela de iniciativa privada</div>
+                      <div>
+                        Las constructoras, inmobiliarias y emprendedores construyen viviendas y comercios aquí según la demanda zonal ({(state.demandaSuelo[selectedParcela.zona] ?? 1).toFixed(2)}x).
+                      </div>
                     </div>
-                  )}
-
-                  <div className="space-y-2.5">
-                    {GOVERNOR_BUILDABLE_TYPES.map((tipo) => {
-                      const def = BUILDING_CATALOG[tipo];
-                      const gatedG2 = Boolean(def.requiereG2) && isG1;
-                      const noFunds = state.gobierno.reserva < def.costoObra;
-                      const estDays = Math.max(
-                        1,
-                        Math.round(def.diasObra * obrasRow.diasObraFactor * infraFactor)
-                      );
-                      const disabled = isG0 || gatedG2 || noFunds;
-
-                      return (
-                        <div
-                          key={tipo}
-                          className="bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
-                        >
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-white truncate">{def.nombre}</span>
-                              <HintIcon
-                                text={`${def.descripcion} · Mant. $${def.mantenimientoPeriodo}/per${def.requiereG2 ? ' · Requiere G2+' : ''}`}
-                                placement="left"
-                              />
-                            </div>
-                            <div className="font-mono text-xs text-amber-300 tabular-nums">
-                              ${def.costoObra} · {estDays}d
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => {
-                              setParcelError(null);
-                              const res = onBuildInParcela(selectedParcela.id, tipo);
-                              if (!res.ok) setParcelError(res.error ?? 'No se pudo construir.');
-                            }}
-                            className="px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors"
-                          >
-                            {gatedG2 ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
-                          </button>
+                  ) : (
+                    <>
+                      {isG0 && (
+                        <div className="text-xs text-amber-300 bg-amber-950/40 border border-amber-500/40 rounded-xl p-3">
+                          Modo G0 / automático: sin construcción manual.
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
+
+                      <div className="space-y-2.5">
+                        {GOVERNOR_BUILDABLE_TYPES.map((tipo) => {
+                          const def = BUILDING_CATALOG[tipo];
+                          const gatedG2 = Boolean(def.requiereG2) && isG1;
+                          const noFunds = state.gobierno.reserva < def.costoObra;
+                          const estDays = Math.max(
+                            1,
+                            Math.round(def.diasObra * obrasRow.diasObraFactor * infraFactor)
+                          );
+                          const disabled = isG0 || gatedG2 || noFunds;
+
+                          return (
+                            <div
+                              key={tipo}
+                              className="bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
+                            >
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold text-white truncate">{def.nombre}</span>
+                                  <HintIcon
+                                    text={`${describeBuilding(def)} · Mant. $${def.mantenimientoPeriodo}/per${def.requiereG2 ? ' · Requiere G2+' : ''}`}
+                                    placement="left"
+                                  />
+                                </div>
+                                <div className="font-mono text-xs text-amber-300 tabular-nums">
+                                  ${def.costoObra} · {estDays}d · Mant. ${def.mantenimientoPeriodo}/per
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={disabled}
+                                onClick={() => {
+                                  setParcelError(null);
+                                  const res = onBuildInParcela(selectedParcela.id, tipo);
+                                  if (!res.ok) setParcelError(res.error ?? 'No se pudo construir.');
+                                }}
+                                className="px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors whitespace-nowrap"
+                              >
+                                {gatedG2 ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -656,6 +804,11 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 let statusTone = 'text-emerald-400';
                 let staffLine: string | null = null;
                 let bedsLine: string | null = null;
+                const firm = b.firmaId ? state.firmas.find((f) => f.id === b.firmaId) : undefined;
+                const casa = b.casaId ? state.casas.find((c) => c.id === b.casaId) : undefined;
+                const tenantHogar = casa?.hogarId
+                  ? state.hogares.find((h) => h.id === casa.hogarId)
+                  : undefined;
 
                 if (b.estado === 'ocupada') {
                   const caps = getBuildingJobCaps(
@@ -727,32 +880,20 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       statusLabel = 'Sin personal';
                       statusTone = 'text-rose-400';
                     }
-                  } else if (b.tipo === 'campo') {
-                    const active = shareOf(activeByRole('agricultor'));
-                    const cap = shareOf(caps.agricultor);
-                    staffLine = `Agricultores activos: ${active}/${cap}`;
-                    if (active === 0) {
-                      statusLabel = 'Sin personal';
+                  } else if (casa) {
+                    staffLine = tenantHogar
+                      ? `Habitado (${tenantHogar.miembros.length}/${casa.capacidad} pers.) · Alq. $${casa.alquiler.toFixed(1)}/per`
+                      : `Disponible · Alq. $${casa.alquiler.toFixed(1)}/per`;
+                    statusLabel = `Estado vivienda ${Math.round(casa.estado)}%`;
+                    statusTone =
+                      casa.estado < 40 ? 'text-rose-400' : casa.estado < 70 ? 'text-amber-300' : 'text-emerald-400';
+                  } else if (firm) {
+                    staffLine = `${firm.nombre} · ${firm.empleados.length} emp. · Sueldo ${Math.round(firm.factor * 100)}%`;
+                    if (!firm.activa) {
+                      statusLabel = 'Cerrada';
                       statusTone = 'text-rose-400';
-                    } else if (state.alimento.stock <= 0.1) {
-                      statusLabel = 'Sin comida';
-                      statusTone = 'text-rose-400';
-                    } else if (state.empresas.alimento.factor < 0.99) {
-                      statusLabel = `Recortando (${Math.round(state.empresas.alimento.factor * 100)}%)`;
-                      statusTone = 'text-amber-300';
-                    }
-                  } else if (b.tipo === 'local_comercio') {
-                    const active = shareOf(activeByRole('obrero') + activeByRole('comerciante'));
-                    const cap = shareOf(caps.obrero + caps.comerciante);
-                    staffLine = `Personal activo: ${active}/${cap}`;
-                    if (active === 0) {
-                      statusLabel = 'Sin personal';
-                      statusTone = 'text-rose-400';
-                    } else if (state.alimento.stock <= 0.1) {
-                      statusLabel = 'Sin comida';
-                      statusTone = 'text-rose-400';
-                    } else if (state.empresas.comercio.factor < 0.99) {
-                      statusLabel = `Recortando (${Math.round(state.empresas.comercio.factor * 100)}%)`;
+                    } else if (firm.factor < 0.95) {
+                      statusLabel = `Recortando (${Math.round(firm.factor * 100)}%)`;
                       statusTone = 'text-amber-300';
                     }
                   }
@@ -764,10 +905,10 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-bold text-white truncate">{bDef.nombre}</span>
-                          <HintIcon text={bDef.descripcion} placement="left" />
+                          <HintIcon text={describeBuilding(bDef)} placement="left" />
                         </div>
                         <span className="text-xs text-zinc-400 shrink-0">
-                          {b.dueno === 'estado' ? 'Público' : b.dueno === 'alimento' ? 'Alimento' : 'Comercio'}
+                          {b.dueno === 'estado' ? 'Público' : casa ? 'Vivienda' : firm ? getRubroDisplayName(firm.rubro) : 'Privado'}
                         </span>
                       </div>
 
@@ -795,8 +936,13 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       {staffLine && (
                         <div className="font-mono text-xs text-zinc-300 tabular-nums">{staffLine}</div>
                       )}
-
-                      {bDef.mantenimientoPeriodo > 0 && (
+                      {casa && (
+                        <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                          <Home className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Dueño: {casa.dueno.tipo}</span>
+                        </div>
+                      )}
+                      {bDef.mantenimientoPeriodo > 0 && b.dueno === 'estado' && (
                         <div className="font-mono text-xs text-zinc-400 tabular-nums">
                           Mantenimiento: ${bDef.mantenimientoPeriodo}/per
                         </div>
@@ -826,7 +972,103 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           );
         })()}
 
-        {/* 3. LANDMARK EDIFICIO VIEWS (Palacio / Prensa / Mercado) */}
+        {/* 3. VIA TRAMO VIEW */}
+        {selectedTramo && (() => {
+          const connectable = isViaConnectableToNetwork(state, selectedTramo);
+          const canBuild = !selectedTramo.construida && !selectedTramo.enObra && connectable;
+          const viaBlocked = isG0 || isG1;
+          const noFunds = state.gobierno.reserva < selectedTramo.costoObra;
+          const zA = state.zonas[selectedTramo.zonaA]?.nombre ?? selectedTramo.zonaA;
+          const zB = selectedTramo.zonaB
+            ? state.zonas[selectedTramo.zonaB]?.nombre ?? selectedTramo.zonaB
+            : null;
+
+          return (
+            <div className="space-y-4">
+              {parcelError && (
+                <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl px-3 py-2 text-xs text-rose-200">
+                  {parcelError}
+                </div>
+              )}
+
+              <div className="bg-zinc-800/65 rounded-xl p-4 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-white capitalize">{selectedTramo.tipo}</span>
+                  <span
+                    className={`font-mono font-bold ${
+                      selectedTramo.construida
+                        ? selectedTramo.estado <= 0
+                          ? 'text-rose-400'
+                          : selectedTramo.estado < 50
+                          ? 'text-amber-300'
+                          : 'text-emerald-400'
+                        : selectedTramo.enObra
+                        ? 'text-amber-300'
+                        : 'text-zinc-300'
+                    }`}
+                  >
+                    {selectedTramo.construida
+                      ? `Operativa · ${Math.round(selectedTramo.estado)}%`
+                      : selectedTramo.enObra
+                      ? `En obra (${selectedTramo.diasObraRestantes}d)`
+                      : 'Sin construir'}
+                  </span>
+                </div>
+
+                <div className="text-zinc-300">
+                  Conecta: {zA}
+                  {zB ? ` ↔ ${zB}` : ''} · Longitud {selectedTramo.longitud}m
+                </div>
+                {selectedTramo.parcelasAbiertas.length > 0 && (
+                  <div className="text-emerald-300">
+                    Habilita {selectedTramo.parcelasAbiertas.length} parcela(s) privada(s)/pública(s)
+                  </div>
+                )}
+                {selectedTramo.zonaAbierta && (
+                  <div className="text-amber-300">
+                    Abre nueva zona urbanizable: {state.zonas[selectedTramo.zonaAbierta]?.nombre ?? selectedTramo.zonaAbierta}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-700/60 font-mono tabular-nums">
+                  <div>
+                    <span className="font-sans text-zinc-400 block">Costo</span>
+                    <span className="font-bold text-white">${selectedTramo.costoObra}</span>
+                  </div>
+                  <div>
+                    <span className="font-sans text-zinc-400 block">Plazo</span>
+                    <span className="font-bold text-white">{selectedTramo.diasObraTotal}d</span>
+                  </div>
+                  <div>
+                    <span className="font-sans text-zinc-400 block">Mant.</span>
+                    <span className="font-bold text-amber-300">${selectedTramo.mantenimientoPeriodo}/per</span>
+                  </div>
+                </div>
+              </div>
+
+              {canBuild && (
+                <button
+                  type="button"
+                  disabled={viaBlocked || noFunds}
+                  onClick={() => {
+                    setParcelError(null);
+                    const res = onBuildVia(selectedTramo.id);
+                    if (!res.ok) setParcelError(res.error ?? 'No se pudo iniciar la obra vial.');
+                  }}
+                  className="w-full py-2.5 px-4 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+                >
+                  {viaBlocked
+                    ? 'Requiere gobernador G2+'
+                    : noFunds
+                    ? `Sin caja ($${selectedTramo.costoObra})`
+                    : `Construir vía ($${selectedTramo.costoObra})`}
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* 4. LANDMARK EDIFICIO VIEWS */}
         {selectedLandmark === 'palacio' && (() => {
           const fin = state.gobierno.finanzas;
           const lastGastos = sumPeriodExpenses(fin);
@@ -871,12 +1113,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                   </span>
                 </div>
               </div>
-
-              {state.demandasActivas.length > 0 && (
-                <div className="rounded-xl bg-amber-950/35 border border-amber-500/40 p-3 text-xs text-amber-200">
-                  {state.demandasActivas.length} demanda(s) abiertas arriba para responder.
-                </div>
-              )}
 
               <div className="grid grid-cols-2 gap-2.5">
                 <button
@@ -960,16 +1196,12 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 </span>
               </div>
               <div>
-                <span className="font-sans text-xs text-zinc-400 block">Productora</span>
-                <span className="text-xs text-zinc-200">
-                  Sueldos {Math.round(state.empresas.alimento.factor * 100)}%
-                </span>
+                <span className="font-sans text-xs text-zinc-400 block">Firmas activas</span>
+                <span className="text-xs text-zinc-200">{derived.mercado.firmas}</span>
               </div>
               <div>
-                <span className="font-sans text-xs text-zinc-400 block">Comercio</span>
-                <span className="text-xs text-zinc-200">
-                  Sueldos {Math.round(state.empresas.comercio.factor * 100)}%
-                </span>
+                <span className="font-sans text-xs text-zinc-400 block">Cuota mayor</span>
+                <span className="text-xs text-zinc-200">{derived.mercado.cuotaMayorPct}%</span>
               </div>
             </div>
 
@@ -983,8 +1215,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           </div>
         )}
 
-        {/* 4. CONSTRUIR LIST (opened from BottomDock Construir) */}
-        {sideBuildOpen && !selectedNpc && !selectedParcela && !selectedLandmark && (() => {
+        {/* 5. CONSTRUIR LIST (Parcelas + Vías conectables) */}
+        {sideBuildOpen && !selectedNpc && !selectedParcela && !selectedTramo && !selectedLandmark && (() => {
           const sorted = [...state.parcelas].sort((a, b) => a.orden - b.orden);
           const filtered =
             buildFilter === 'libres' ? sorted.filter((p) => p.estado === 'libre') : sorted;
@@ -994,70 +1226,143 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
               <div className="grid grid-cols-2 gap-1.5 bg-zinc-800/80 p-1.5 rounded-xl">
                 <button
                   type="button"
-                  onClick={() => setBuildFilter('libres')}
+                  onClick={() => setBuildSection('parcelas')}
                   className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
-                    buildFilter === 'libres' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                    buildSection === 'parcelas' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  Libres ({derived.parcelasLibres})
+                  Parcelas ({derived.parcelasLibres})
                 </button>
                 <button
                   type="button"
-                  onClick={() => setBuildFilter('todas')}
+                  onClick={() => setBuildSection('vias')}
                   className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
-                    buildFilter === 'todas' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                    buildSection === 'vias' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  Todas ({sorted.length})
+                  Vías ({connectableVias.length})
                 </button>
               </div>
 
-              {filtered.length === 0 ? (
+              {buildSection === 'parcelas' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-1.5 bg-zinc-800/50 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setBuildFilter('libres')}
+                      className={`py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        buildFilter === 'libres' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Libres ({derived.parcelasLibres})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBuildFilter('todas')}
+                      className={`py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        buildFilter === 'todas' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Todas ({sorted.length})
+                    </button>
+                  </div>
+
+                  {filtered.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-zinc-400 bg-zinc-800/40 rounded-xl">
+                      No hay parcelas libres disponibles.
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+                      {filtered.map((p) => {
+                        const b = p.edificio;
+                        const bDef = b ? BUILDING_CATALOG[b.tipo] : null;
+                        const statusText =
+                          p.estado === 'libre'
+                            ? `Libre (${p.tipoParcela})`
+                            : p.estado === 'sin_calle'
+                            ? 'Sin vía de acceso'
+                            : p.estado === 'bloqueada'
+                            ? 'Bloqueada'
+                            : p.estado === 'en_obra' && b && bDef
+                            ? `${bDef.nombre} · ${b.diasObraRestantes}d`
+                            : bDef
+                            ? bDef.nombre
+                            : 'Ocupada';
+                        const statusTone =
+                          p.estado === 'libre'
+                            ? 'text-emerald-400'
+                            : p.estado === 'en_obra'
+                            ? 'text-amber-300'
+                            : p.estado === 'sin_calle' || p.estado === 'bloqueada'
+                            ? 'text-zinc-500'
+                            : 'text-zinc-300';
+
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onMouseEnter={() => onHoverPreview?.({ parcelaId: p.id })}
+                            onMouseLeave={() => onHoverPreview?.(null)}
+                            onClick={() => {
+                              onSelectParcela(p.id);
+                              onJumpZone(p.zona);
+                            }}
+                            className="w-full text-left bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-white truncate">{p.nombre}</div>
+                              <div className={`text-xs mt-0.5 ${statusTone}`}>{statusText}</div>
+                            </div>
+                            <span className="text-xs font-semibold text-emerald-400 shrink-0">
+                              {p.estado === 'libre' ? 'Elegir' : 'Ver'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : connectableVias.length === 0 ? (
                 <div className="py-6 text-center text-xs text-zinc-400 bg-zinc-800/40 rounded-xl">
-                  No hay parcelas libres disponibles.
+                  No hay nuevas vías conectables por abrir en este momento.
                 </div>
               ) : (
-                <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
-                  {filtered.map((p) => {
-                    const b = p.edificio;
-                    const bDef = b ? BUILDING_CATALOG[b.tipo] : null;
-                    const statusText =
-                      p.estado === 'libre'
-                        ? 'Libre'
-                        : p.estado === 'bloqueada'
-                        ? 'Bloqueada'
-                        : p.estado === 'en_obra' && b && bDef
-                        ? `${bDef.nombre} · ${b.diasObraRestantes}d`
-                        : bDef
-                        ? bDef.nombre
-                        : 'Ocupada';
-                    const statusTone =
-                      p.estado === 'libre'
-                        ? 'text-emerald-400'
-                        : p.estado === 'en_obra'
-                        ? 'text-amber-300'
-                        : p.estado === 'bloqueada'
-                        ? 'text-zinc-500'
-                        : 'text-zinc-300';
-
+                <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+                  {connectableVias.map((t) => {
+                    const noFunds = state.gobierno.reserva < t.costoObra;
+                    const viaBlocked = isG0 || isG1;
                     return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          onSelectParcela(p.id);
-                          onJumpDistrict(p.distrito);
-                        }}
-                        className="w-full text-left bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
+                      <div
+                        key={t.id}
+                        onMouseEnter={() => onHoverPreview?.({ tramoId: t.id })}
+                        onMouseLeave={() => onHoverPreview?.(null)}
+                        className="bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
                       >
-                        <div className="min-w-0">
-                          <div className="font-semibold text-white truncate">{p.nombre}</div>
-                          <div className={`text-xs mt-0.5 ${statusTone}`}>{statusText}</div>
-                        </div>
-                        <span className="text-xs font-semibold text-emerald-400 shrink-0">
-                          {p.estado === 'libre' ? 'Elegir' : 'Ver'}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectTramo(t.id);
+                            onJumpZone(t.zonaA);
+                          }}
+                          className="min-w-0 text-left"
+                        >
+                          <div className="font-semibold text-white truncate">{t.nombre}</div>
+                          <div className="text-xs text-amber-300 font-mono tabular-nums mt-0.5">
+                            ${t.costoObra} · {t.diasObraTotal}d · +{t.parcelasAbiertas.length} parc.
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={viaBlocked || noFunds}
+                          onClick={() => {
+                            const res = onBuildVia(t.id);
+                            if (!res.ok) setParcelError(res.error ?? 'No se pudo iniciar vía.');
+                          }}
+                          className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
+                        >
+                          {viaBlocked ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

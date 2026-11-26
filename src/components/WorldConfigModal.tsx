@@ -24,6 +24,14 @@ interface WorldConfigModalProps {
   onClose: () => void;
 }
 
+const WORLD_LEVEL_BUTTONS: Array<{ id: WorldComplexityLevel; label: string }> = [
+  { id: 'M0', label: 'M0 · Base' },
+  { id: 'M1', label: 'M1 · Mundo' },
+  { id: 'M2', label: 'M2 · Hogares' },
+  { id: 'M3', label: 'M3 · Vial' },
+  { id: 'M4', label: 'M4 · Fiscal' },
+];
+
 export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
   initialConfig,
   aiAvailable,
@@ -38,25 +46,29 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
 }) => {
   const [config, setConfig] = useState<WorldConfig>(() => {
     const cloned = structuredClone(initialConfig);
-    cloned.poblacionInicial = SCENARIO_PRESETS[cloned.escenarioId].poblacionDefault;
     const resolved = resolveComplexityConfig(cloned);
     return { ...cloned, ...resolved };
   });
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const testMode = isTestConfig(config);
-  const worldLevel: WorldComplexityLevel = config.nivelMundo ?? 'M1';
+  const worldLevel: WorldComplexityLevel = config.nivelMundo ?? 'M3';
   const govLevel: GovernorComplexityLevel = config.nivelGobernador ?? 'G2';
+  const estadoAuto = Boolean(config.estadoAutomatico);
 
   const handleSelectScenario = (id: 'elecciones' | 'zombies') => {
     const nextPreset = SCENARIO_PRESETS[id];
-    const nextWorld: WorldComplexityLevel = nextPreset.economiaDefault === 'fiscal' ? 'M2' : 'M1';
-    const nextGov: GovernorComplexityLevel = nextWorld === 'M2' ? 'G3' : 'G2';
+    const resolved = resolveComplexityConfig({
+      nivelMundo: config.nivelMundo ?? 'M3',
+      nivelGobernador: config.nivelGobernador ?? 'G2',
+      estadoAutomatico: config.estadoAutomatico ?? false,
+    });
     setConfig({
       escenarioId: id,
-      economiaModulo: nextPreset.economiaDefault,
-      nivelMundo: nextWorld,
-      nivelGobernador: nextGov,
+      economiaModulo: resolved.economiaModulo,
+      nivelMundo: resolved.nivelMundo,
+      nivelGobernador: resolved.nivelGobernador,
+      estadoAutomatico: resolved.estadoAutomatico,
       cantidadMedios: nextPreset.mediosDefault,
       poblacionInicial: nextPreset.poblacionDefault,
       caos: { ...nextPreset.caosDefault },
@@ -101,7 +113,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                 const ok = onSaveManual();
                 setSaveFeedback(ok ? `Guardado en día ${currentDay}.` : 'No se pudo guardar.');
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl"
+              className="flex items-center gap-1.5 px-3.5 py-2 font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl whitespace-nowrap shrink-0"
             >
               <Save className="w-4 h-4" />
               Guardar
@@ -112,7 +124,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               onClick={() => {
                 if (!onLoadManual()) setSaveFeedback('Sin guardado válido.');
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-xl disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3.5 py-2 font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
             >
               <FolderOpen className="w-4 h-4 text-emerald-400" />
               {manualSaveMeta ? `Manual D${manualSaveMeta.dia}` : 'Manual vacío'}
@@ -123,7 +135,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               onClick={() => {
                 if (!onLoadAutoSave()) setSaveFeedback('Sin autoguardado válido.');
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-xl disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3.5 py-2 font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
             >
               <FolderOpen className="w-4 h-4 text-amber-400" />
               {autoSaveMeta ? `Auto D${autoSaveMeta.dia}` : 'Auto vacío'}
@@ -168,20 +180,14 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
-                <span>Nivel de mundo</span>
+                <span>Nivel de mundo (M0–M4)</span>
                 <HintIcon
-                  text="M0: 1 zona sin clima ni caos · M1: 5 zonas, clima, prensa y caos · M2: M1 + emisión monetaria e inflación."
+                  text="M0: 1 zona sin clima ni caos · M1: 9 zonas, clima, prensa y caos · M2: M1 + hogares y viviendas · M3: M2 + red vial y suelo · M4: M3 + emisión e inflación."
                   placement="top"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-1.5 p-1 bg-zinc-800 rounded-xl">
-                {(
-                  [
-                    { id: 'M0', label: 'M0 · Base' },
-                    { id: 'M1', label: 'M1 · Valle' },
-                    { id: 'M2', label: 'M2 · Fiscal' },
-                  ] as Array<{ id: WorldComplexityLevel; label: string }>
-                ).map((m) => (
+              <div className="grid grid-cols-5 gap-1 p-1 bg-zinc-800 rounded-xl">
+                {WORLD_LEVEL_BUTTONS.map((m) => (
                   <button
                     key={m.id}
                     type="button"
@@ -189,26 +195,29 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                       setConfig({
                         ...config,
                         nivelMundo: m.id,
-                        economiaModulo: m.id === 'M2' ? 'fiscal' : 'base',
+                        economiaModulo: m.id === 'M4' ? 'fiscal' : 'base',
                       })
                     }
-                    className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                    className={`py-2 px-1 text-[11px] font-semibold rounded-lg transition-colors whitespace-nowrap ${
                       worldLevel === m.id
                         ? 'bg-emerald-600 text-white'
                         : 'text-zinc-400 hover:text-white'
                     }`}
                   >
-                    {m.label}
+                    {m.id}
                   </button>
                 ))}
+              </div>
+              <div className="text-xs text-zinc-400">
+                {WORLD_LEVEL_BUTTONS.find((w) => w.id === worldLevel)?.label}
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
-                <span>Nivel de gobernador</span>
+                <span>Nivel de gobernador (G0–G3)</span>
                 <HintIcon
-                  text="G0: automático · G1: obras + 3 palancas · G2: 8 palancas + obras de suceso · G3: G2 + emisión."
+                  text="G0: sin intervención manual · G1: parcelas + 3 palancas · G2: palancas completas + obras y vías · G3: G2 + emisión, subsidio, educación, prensa y contraofertas."
                   placement="top"
                 />
               </div>
@@ -225,7 +234,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                     key={g.id}
                     type="button"
                     onClick={() => setConfig({ ...config, nivelGobernador: g.id })}
-                    className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                    className={`py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                       govLevel === g.id
                         ? 'bg-emerald-600 text-white'
                         : 'text-zinc-400 hover:text-white'
@@ -242,8 +251,8 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               <div className="grid grid-cols-2 gap-1.5 p-1 bg-zinc-800 rounded-xl">
                 {(
                   [
-                    { id: 'base', label: 'Base' },
-                    { id: 'fiscal', label: 'Fiscal' },
+                    { id: 'base', label: 'Base (M0–M3)' },
+                    { id: 'fiscal', label: 'Fiscal (M4)' },
                   ] as Array<{ id: EconomyModule; label: string }>
                 ).map((m) => (
                   <button
@@ -253,10 +262,10 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                       setConfig({
                         ...config,
                         economiaModulo: m.id,
-                        nivelMundo: m.id === 'fiscal' ? 'M2' : worldLevel === 'M0' ? 'M0' : 'M1',
+                        nivelMundo: m.id === 'fiscal' ? 'M4' : worldLevel === 'M4' ? 'M3' : worldLevel,
                       })
                     }
-                    className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                    className={`py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                       config.economiaModulo === m.id
                         ? 'bg-emerald-600 text-white'
                         : 'text-zinc-400 hover:text-white'
@@ -287,9 +296,13 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
             </div>
 
             <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="text-zinc-300">Población: <strong className="font-mono text-white">{preset.poblacionDefault}</strong></span>
+              <span className="text-zinc-300">
+                Población: <strong className="font-mono text-white">{preset.poblacionDefault}</strong>
+              </span>
               <div className="flex items-center gap-2">
-                <label htmlFor="world-seed-input" className="text-zinc-300">Semilla</label>
+                <label htmlFor="world-seed-input" className="text-zinc-300">
+                  Semilla
+                </label>
                 <input
                   id="world-seed-input"
                   type="number"
@@ -306,6 +319,20 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
             </div>
 
             <label className="flex items-center gap-2.5 cursor-pointer text-xs pt-1">
+              <input
+                type="checkbox"
+                checked={estadoAuto}
+                onChange={(e) => setConfig({ ...config, estadoAutomatico: e.target.checked })}
+                className="rounded border-zinc-600"
+              />
+              <span className="text-zinc-200 font-medium">Estado automático</span>
+              <HintIcon
+                text="Si está activo, el gobierno ajusta palancas, obras y vías de forma autónoma (como modo observador o asistencia)."
+                placement="top"
+              />
+            </label>
+
+            <label className="flex items-center gap-2.5 cursor-pointer text-xs">
               <input
                 type="checkbox"
                 checked={config.usarIaGemini}
@@ -455,10 +482,10 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
             {testMode ? (
               <span className="flex items-center gap-1.5 text-amber-300 font-medium">
                 <AlertCircle className="w-4 h-4" />
-                Configuración de prueba
+                Configuración personalizada
               </span>
             ) : (
-              <span className="text-zinc-400">Preset estándar</span>
+              <span className="text-zinc-400">Preset estándar ({worldLevel}/{govLevel})</span>
             )}
           </div>
 
@@ -466,14 +493,14 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 rounded-xl transition-colors"
+              className="px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 rounded-xl transition-colors whitespace-nowrap shrink-0"
             >
               Cancelar
             </button>
             <button
               type="button"
               onClick={() => onStartNewGame(config)}
-              className="px-5 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-colors"
+              className="px-5 py-2.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-colors whitespace-nowrap shrink-0"
             >
               Iniciar partida
             </button>

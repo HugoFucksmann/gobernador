@@ -44,7 +44,7 @@
 **Gasto diario del hogar,** en este orden:
 
 1. **Comida:** recompra de despensa (sección 6). Si no alcanza, la garantía paga su % del faltante.
-2. **Gasto de vida** = `propension_gasto` ponderada de sus adultos / 100 × ingreso neto diario del último período + `k_riqueza` × (`dinero` − colchón), con el segundo término solo si es positivo. Colchón = `colchon_dias` × gasto diario en comida. Va a firmas de comercio de su zona o vecina, según precio y cercanía (sección 6).
+2. **Gasto de vida** = `propension_gasto` ponderada de sus adultos / 100 × ingreso neto diario del último período + `k_riqueza` × (`dinero` − colchón), con el segundo término solo si es positivo. Colchón = `colchon_dias` × gasto diario en comida. Se reparte entre categorías de gasto y va a las firmas que las venden, según precio y costo de ruta (sección 6b).
 3. **Ahorro:** lo que sobra queda en `dinero`.
 
 El **alquiler** y el mantenimiento de la casa propia se pagan el día de pago (sección 7). El hogar en **calle** no conserva despensa y paga `recargo_calle` más por la comida.
@@ -65,8 +65,12 @@ Una sola entidad para todos los rubros.
 | Rubro | Qué hace | Puestos que genera |
 |---|---|---|
 | `agro` | Campos: producen comida y la venden o exportan; son dueñas del `stock` | Agricultores, técnicos |
-| `comercio` | Almacenes, kioscos y restoranes: venden comida y gasto de vida | Obreros, comerciantes |
-| `construccion` | Levanta casas, locales y obras; repara casas | Obreros, constructores |
+| `industria` | Fábricas: producen bienes y los venden a comercio o los exportan | Obreros, técnicos |
+| `comercio` | Almacenes, supermercados, tiendas y kioscos: venden comida y bienes | Obreros, comerciantes |
+| `gastronomia` | Restoranes y bares: venden gastronomía | Obreros, comerciantes |
+| `servicios` | Peluquerías, talleres y gimnasios: venden servicios | Obreros, comerciantes |
+| `entretenimiento` | Cines, teatros y clubes: venden entretenimiento | Obreros, comerciantes |
+| `construccion` | Levanta casas, locales, vías y obras; repara casas | Obreros, constructores |
 | `inmobiliaria` | Es dueña de casas y cobra alquiler | Inmobiliarios |
 | `medio` | Publica noticias (CAOS_PRENSA_V2 §7) | Periodistas |
 
@@ -94,7 +98,7 @@ El reparto de ventas de v1 se mantiene, por firma, con una **caja** nueva:
 - **Sin ganancia:** si ventas < sueldos mínimos, la firma paga con su caja el faltante del fondo; si la caja no alcanza, el recorte es el de la tabla.
 - **Producción de agro:** Σ producción de cada agricultor × productividad/100 × (1 + `k_tecnificacion` × técnicos efectivos), con técnicos efectivos = min(técnicos, agricultores × `tecnicos_por_agricultor`). Va al `stock` de la firma que la produjo.
 - **Mantenimiento de locales:** lo paga la firma de su caja el día de pago, a firmas de construcción. Sin pago, el local pierde estado y puestos.
-- **Publicidad:** cada firma de comercio y agro destina `pct_publicidad` de sus ventas a medios, repartido por alcance × credibilidad (CAOS_PRENSA_V2 §7). Es plata que circula.
+- **Publicidad:** cada firma (salvo los medios) destina `pct_publicidad` de sus ventas a medios, repartido por alcance × credibilidad (CAOS_PRENSA_V2 §7). Es plata que circula.
 - **Gerente:** el empresario que dirige. Si no tiene partes, cobra sueldo de gerente de la firma.
 - Cada evento lleva origen `firma:<id>/respuesta` y como causa el evento que más movió las ventas (clima, precio, compra, quiebra de un cliente) o ninguno.
 
@@ -102,12 +106,20 @@ El reparto de ventas de v1 se mantiene, por firma, con una **caja** nueva:
 
 - **Stock:** la producción va al `stock` de cada firma `agro`, con tope `silo_dias` de consumo de la zona; lo que excede se pierde.
 - **Despensa del hogar:** cada persona consume un día por día. Su objetivo = `objetivo_base_dias` × (1 + `k_prudencia` × (1 − valentía/100) + `k_miedo` × miedo/100), con tope `despensa_max_dias`; la acción `acapara` le suma días. Con la despensa bajo `umbral_recompra_dias`, el hogar recompra hasta el objetivo. De acá salen las corridas: miedo → compra de más → stock bajo → precio sube.
-- **Dónde compra:** cada hogar elige vendedor entre las firmas de comercio de su zona y la vecina por precio y cercanía. La firma cobra y paga su parte a las `agro` por la comida que vendió, con `margen_comercial_pct`; el resto es de comercio.
+- **Dónde compra:** cada hogar elige vendedor entre las firmas de comercio de su zona y las cercanas por precio y costo de ruta (MUNDO_V2 §8). La firma cobra y paga su parte a las `agro` por la comida que vendió, con `margen_comercial_pct`; el resto es de comercio.
 - **Precio** de cada firma = min(precio de mercado de su zona, tope), con precio de mercado = `precio_base` × escasez (según días de stock de la zona) × clima × (1 + inflación/100) × (1 + `margen_poder` de la firma). El tope es un control.
 - **Poder de precio:** el `margen_poder` de una firma sube con su cuota en la zona sobre `umbral_poder_precio`, hasta `margen_max`. Es el efecto del monopolio (sección 9).
 - **Competencia:** si una firma sube su precio, los hogares compran más en otras; si el precio de todas sube, caen el gasto de vida y el consumo. Si el margen del rubro es alto, el mercado atrae emprendimientos (sección 8).
 - **Retención:** una medida de actor (ACTORES, capa del gobernador) puede hacer que una firma `agro` venda solo `pct_retencion` de su stock por día.
 - **Quién paga la comida de quien no puede:** el hogar la de sus menores; si no alcanza, el estado; la de los adultos, la garantía en su %.
+
+## 6b. Categorías de gasto y bienes
+
+- **Categorías del gasto de vida:** `bienes`, `gastronomia`, `servicios` y `entretenimiento`. La comida va aparte (sección 6).
+- **Reparto del hogar:** el gasto de vida se reparte con pesos base del preset, desplazados por la riqueza: con más ingreso y `dinero` el hogar gasta más en gastronomía y entretenimiento (`k_lujo`) y menos en bienes básicos. La personalidad lo ajusta (más codicia, más ahorro; más resiliencia, más entretenimiento) **[propuesta]**.
+- **Quién vende cada categoría:** bienes → comercio (tienda, supermercado, kiosco); gastronomía → restoranes y bares; servicios → peluquerías, talleres y gimnasios; entretenimiento → cines, teatros y clubes. Cada hogar elige vendedor por precio y costo de ruta, limitado por la capacidad diaria de ventas de los locales.
+- **Cadena de bienes:** una fábrica produce bienes hasta su capacidad (obreros × productividad × técnicos efectivos) y los vende a comercio con `margen_comercial_pct`, o los exporta. Si la industria local no alcanza, el comercio **importa** bienes al precio externo (el dinero sale del mundo, sección 12). Los servicios, la gastronomía y el entretenimiento no tienen insumos: pagan sueldos y reparten ganancia.
+- **Demanda no cubierta:** la categoría con demanda sin vendedor, o con margen alto y cuota baja, atrae emprendimientos (sección 8). Si una categoría no tiene oferta, el gasto de vida de esa categoría se ahorra.
 
 ## 7. Vivienda: alquiler, compra y mantenimiento
 
@@ -124,7 +136,7 @@ El reparto de ventas de v1 se mantiene, por firma, con una **caja** nueva:
 ## 8. Crecer, emprender y construir
 
 - **Crecer:** una firma con `factor` > 1 durante `periodos_para_invertir` y caja suficiente construye un local o un campo en una parcela libre comercial o agrícola. Lo hace una firma de construcción y la paga su caja.
-- **Emprender:** una persona (adulta, con ahorro sobre `ahorro_min_emprender` y alta `propension_emprender`) abre una firma chica en un rubro con demanda no cubierta (margen alto, cuota baja) en una parcela libre del tipo correcto de su zona o vecina. Ella es la dueña y gerente. Puede ser desempleada, empleada o jubilada.
+- **Emprender:** una persona (adulta, con ahorro sobre `ahorro_min_emprender` y alta `propension_emprender`) abre una firma chica en un rubro con demanda no cubierta (por categoría de gasto, margen alto, cuota baja) en una parcela libre del tipo correcto de su zona o vecina. Ella es la dueña y gerente. Puede ser desempleada, empleada o jubilada.
 - **Construir vivienda:** si `calle_pct` o el hacinamiento de una zona superan su umbral, una firma de construcción o inmobiliaria levanta casas en parcelas residenciales libres, si el alquiler esperado recupera la inversión en `periodos_recupero`. Una firma o un hogar rico construyen también para su propio uso.
 - **Fundar un medio:** una persona con formación de periodista y ahorro, o una firma con caja alta, funda un medio. La línea editorial sale de sus dueños (CAOS_PRENSA_V2 §7).
 - Cada hecho tiene origen y causa (por ejemplo, "abrió un restorán porque la zona tenía un solo almacén y margen alto").
@@ -158,19 +170,21 @@ El reparto de ventas de v1 se mantiene, por firma, con una **caja** nueva:
 Como ECONOMIA_V1 §5 (reserva, nómina, pensiones, ayuda social, garantía, obras, mantenimiento, orden de pago, impago, importación y saldo), con estos cambios:
 
 - **Comida de menores:** la paga el hogar. El estado la paga solo si el hogar no puede o el menor está en acogida (costo diario de acogida).
+- **Obras públicas:** las obras de edificios y de vías (EDIFICIOS_V2 §3 y §3b) se pagan a firmas de construcción, no al comercio como en v1.
+- **Mantenimiento de vías:** sale de la reserva el día de pago, a firmas de construcción, junto con el de los edificios.
 - **Entradas nuevas:** herencias sin herederos, remates de firmas y locales, excedente de firmas sin dueño.
 - **Sin gobernador:** el estado sigue sus reglas del preset y la regla de piloto automático (MUNDO_V2 §9): sostiene servicios y no cambia tasas ni sueldos.
 
 ## 11. Comercio exterior
 
-Como ECONOMIA_V1 §7. El estado importa con la reserva; las firmas `agro` exportan y cobran ellas, sin bajar de `stock_min_exportar_dias`. Capacidad diaria = comerciantes × `intercambio_por_comerciante`. Los medios ya no cobran del exterior: viven de publicidad y fondos del estado.
+Como ECONOMIA_V1 §7. El estado importa comida con la reserva; las firmas `agro` e `industria` exportan y cobran ellas, sin bajar de `stock_min_exportar_dias`. Capacidad diaria = comerciantes × `intercambio_por_comerciante`. Los medios ya no cobran del exterior: viven de publicidad y fondos del estado.
 
 ## 12. Entradas y salidas del mundo
 
 | Entra | Sale |
 |---|---|
-| Exportación | Importación |
-| Emisión (solo `fiscal`) | — |
+| Exportación (agro e industria) | Importación del estado |
+| Emisión (solo `fiscal`) | Importación privada de bienes del comercio |
 
 Todo lo demás circula, incluidos los fondos del estado a los medios, sueldos, alquileres, compras, herencias, publicidad, indemnizaciones y remates. El dinero de un hogar sin herederos y el excedente de una firma sin dueño **no salen del mundo**: pasan a la reserva del estado. Con `fiscal`, la emisión y la inflación entran por la extensión (sección 14).
 
@@ -181,8 +195,11 @@ Las de ECONOMIA_V1 §11 siguen valiendo (recorte que se contagia, auge, pánico,
 - **Calle que se contagia:** desempleo → no paga alquiler → desalojo → calle → salud y productividad bajan → más desempleo.
 - **Burbuja inmobiliaria:** demanda sube → alquiler sube → menos hogares pueden pagar → más calle y hacinamiento → construcción responde → alquiler baja.
 - **Fusión que crece:** firma con caja compra a otras → cuota sube → margen sube → comida cara → hogares gastan menos → nacen competidores.
+- **Industria que se cae:** la fábrica quiebra → el comercio importa bienes más caros → el dinero sale del mundo → menos gasto de vida local.
+- **Ruta cortada:** una vía deteriorada alarga rutas → los hogares compran en otro lado y llegan tarde al trabajo → ventas y productividad bajan en su frente.
 - **Quiebra en cadena:** una firma grande cierra → despidos → menos gasto de vida → otras firmas recortan o quiebran → los dueños pierden sus bienes.
 - **Concentración por herencia:** las partes pasan entre generaciones y la riqueza se concentra o se reparte según las familias (cuántos hijos, quién se queda con qué).
+- **Ciudad que no se expande:** parcelas libres escasas → alquiler y precio del suelo suben → más calle y menos negocios nuevos → el estado abre vías (si le alcanza la reserva) → la oferta de suelo responde.
 - **Baby boom:** buena economía y casas libres → natalidad sube → más menores → más gasto en comida y presión de vivienda.
 - **Emprendimiento anticíclico:** la gente sin empleo abre kioscos → bajan el desempleo y la calle → compiten con firmas grandes.
 - **Medios que quiebran:** menos ventas → menos publicidad → un medio cierra → la gente se informa menos → un aviso llega peor (CAOS_PRENSA_V2).
@@ -215,4 +232,5 @@ El agente de prototipo valida **que el mundo se sostiene**, sin calibrar valores
 - 50 años de juego: población que se sostiene o se ajusta sola, calle acotada, dinero que no deriva.
 - Cada cadena de la sección 13 aparece al forzar su causa.
 - Ninguna firma queda con todo el mercado en pocos años, sin fricción que lo impida.
+- La demanda de suelo dispara la construcción de vías: la ciudad crece cuando hace falta y no se frena sin causa explicable.
 - Los medios sobreviven, o cierran por una causa explicable.

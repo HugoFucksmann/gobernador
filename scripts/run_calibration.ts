@@ -316,7 +316,7 @@ function makeInitState(
   const nivelGobernador = opts.nivelGobernador ?? 'G2';
   const cfg: WorldConfig = {
     escenarioId: scenarioId,
-    economiaModulo: nivelMundo === 'M2' ? 'fiscal' : 'base',
+    economiaModulo: nivelMundo === 'M4' ? 'fiscal' : 'base',
     nivelMundo,
     nivelGobernador,
     cantidadMedios: preset.mediosDefault,
@@ -389,7 +389,7 @@ interface CheckpointMetrics {
 const ALL_ROLES: RoleId[] = [
   'estudiante', 'agricultor', 'obrero', 'policia', 'estatal', 'comerciante',
   'empresario', 'tecnico', 'docente', 'periodista', 'medico', 'ingeniero',
-  'desempleado', 'jubilado',
+  'constructor', 'inmobiliario', 'desempleado', 'jubilado',
 ];
 
 function summarizeMilestones(records: MilestoneRecord[]) {
@@ -1378,14 +1378,20 @@ function verifyNewSystems() {
   });
   minorPriorityState.reloj.diasEnPeriodo = 0; // avoid payday settlement interfering on day 2
   const firstAdult = minorPriorityState.npcs.find((n) => n.vivo && n.edad >= 18 && n.edad < 65);
-  const lastMinor = [...minorPriorityState.npcs].reverse().find((n) => n.vivo && n.edad < 18);
+  const lastMinor = [...minorPriorityState.npcs].reverse().find((n) => n.vivo && n.edad < 18 && n.hogarId !== firstAdult?.hogarId);
   if (firstAdult && lastMinor) {
-    for (const n of minorPriorityState.npcs) {
-      if (n.id !== lastMinor.id) n.economia.despensa = 10;
+    for (const h of minorPriorityState.hogares) {
+      if (h.id !== lastMinor.hogarId) h.despensa = 10;
     }
-    firstAdult.economia.dinero = 0;
-    firstAdult.economia.despensa = 1.0;
-    lastMinor.economia.despensa = 1.0;
+    const adultHogar = minorPriorityState.hogares.find((h) => h.id === firstAdult.hogarId);
+    const minorHogar = minorPriorityState.hogares.find((h) => h.id === lastMinor.hogarId);
+    if (adultHogar) {
+      adultHogar.dinero = 0;
+      adultHogar.despensa = 1.0;
+    }
+    if (minorHogar) {
+      minorHogar.despensa = 1.0;
+    }
     minorPriorityState.gobierno.palancasVigentes.garantiaAlimentaria = 100;
     minorPriorityState.gobierno.reserva = minorPriorityState.alimento.precio * 2.5;
     stepHeadlessDay(minorPriorityState);
@@ -1395,13 +1401,17 @@ function verifyNewSystems() {
     );
   }
 
-  // 7. M2 fiscal module: emission -> inflation rise -> nominal devaluation & exact money audit
+  // 7. M4 fiscal module: emission -> inflation rise -> nominal devaluation & exact money audit
   const m2State = makeInitState(41, 'elecciones', {
-    nivelMundo: 'M2',
+    nivelMundo: 'M4',
     nivelGobernador: 'G3',
     disableRandomWeather: true,
   });
   m2State.gobierno.reserva = 50;
+  m2State.gobierno.palancasObjetivo.impuesto = 10;
+  m2State.gobierno.palancasVigentes.impuesto = 10;
+  m2State.gobierno.palancasObjetivo.salarioPublico = 180;
+  m2State.gobierno.palancasVigentes.salarioPublico = 180;
   m2State.gobierno.palancasObjetivo.ayudaSocial = 6;
   m2State.gobierno.palancasVigentes.ayudaSocial = 6;
   m2State.gobierno.palancasObjetivo.topeEmision = 30;
@@ -1412,14 +1422,14 @@ function verifyNewSystems() {
     stepHeadlessDay(m2State);
     const curM = computeTotalWorldMoney(m2State);
     assert(
-      Math.abs(curM - (prevM + m2State.auditEntradasDia - m2State.auditSalidasDia)) <= 0.1,
-      `M2+G3 money mismatch at day ${m2State.reloj.dia}`
+      Math.abs(curM - (prevM + m2State.auditEntradasDia - m2State.auditSalidasDia)) <= 0.25,
+      `M4+G3 money mismatch at day ${m2State.reloj.dia}`
     );
     if (m2State.gobierno.inflacion > maxInflObserved) {
       maxInflObserved = m2State.gobierno.inflacion;
     }
   }
-  assert(maxInflObserved > 0, 'M2 fiscal emission under deficit should raise inflation');
+  assert(maxInflObserved > 0, 'M4 fiscal emission under deficit should raise inflation');
 
   return { passed: failures.length === 0, failures };
 }

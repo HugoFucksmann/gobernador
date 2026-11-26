@@ -4,9 +4,12 @@ import {
   ECON_CONSTANTS,
   FIRM_CONSTANTS,
   HOUSING_CONSTANTS,
+  LEVEL11_CONSTANTS,
   OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
   ROLE_CATALOG,
+  SPEND_CATEGORY_WEIGHTS,
+  VIAL_CONSTANTS,
 } from '../data/catalogs';
 import {
   BuildingType,
@@ -20,8 +23,8 @@ import {
   MediaOutlet,
   Npc,
   Parcela,
-  PublicRoleId,
   RoleId,
+  SpendCategory,
   ZoneId,
 } from '../types/game';
 import {
@@ -32,22 +35,26 @@ import { nextSeqId, nextSubRand, subRandInt } from './rng';
 import {
   clamp,
   computeDailyFoodPriceForZone,
+  computeDemandaSuelo,
+  emitSimEvent,
   getActivePhenomena,
   getEffectivePropensionEmprender,
   getEffectivePropensionGasto,
   getFirmaRoleCaps,
   getNpcProductivity,
   getWorldZones,
+  getZoneTravelCost,
+  isViaConnectableToNetwork,
+  recomputeRoadDistances,
   syncLegacyEnterprisesView,
 } from './worldHelpers';
-import { emitSimEvent } from './worldHelpers';
 
 export function runDailyEconomyV2(state: GameState): void {
   const isM1Plus = state.config.nivelMundo !== 'M0';
   const vivos = state.npcs.filter((n) => n.vivo);
   const pop = Math.max(1, vivos.length);
   const zones = getWorldZones(state);
-  const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
+  const parcelById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
 
   // 1. Agro production per agro firm
   const agroFirms = state.firmas.filter((f) => f.activa && f.rubro === 'agro');
@@ -105,11 +112,48 @@ export function runDailyEconomyV2(state: GameState): void {
   state.alimento.produccionDiaria = Number(totalProdToday.toFixed(2));
   state.alimento.consumoDiario = Number((pop * ECON_CONSTANTS.consumoPorNpc).toFixed(2));
 
-  // 2. Foreign trade
+  // 1b. Industria bienes production (ECONOMIA_V2 §6b)
+  const industriaFirms = isM1Plus
+    ? state.firmas.filter((f) => f.activa && f.rubro === 'industria')
+    : [];
+  for (const ind of industriaFirms) {
+    let obreros = 0;
+    let tecnicos = 0;
+    let prodSum = 0;
+    for (const eid of ind.empleados) {
+      const emp = npcById.get(eid);
+      if (!emp || emp.hospital.internado || emp.accionIa?.fueraDePuesto) continue;
+      const pFactor = getNpcProductivity(emp, state) / 100;
+      if (emp.rol === 'obrero') {
+        obreros++;
+        prodSum += VIAL_CONSTANTS.produccionBaseObreroBienes * pFactor;
+      } else if (emp.rol === 'tecnico') {
+        tecnicos++;
+      }
+    }
+    const effTech = Math.min(tecnicos, obreros * ECON_CONSTANTS.tecnicosPorAgricultor);
+    const techMult = 1 + ECON_CONSTANTS.kTecnificacion * (effTech / Math.max(1, obreros));
+    let capLoc = 0;
+    for (const pid of ind.locales) {
+      const p = parcelById.get(pid);
+      if (p?.edificio?.activo) {
+        p.edificio.ventasHoy = 0;
+        capLoc += BUILDING_CATALOG[p.edificio.tipo].capacidadVentasDiaria ?? 120;
+      }
+    }
+    const capDiaria = Math.max(40, capLoc);
+    ind.capacidadDiaria = capDiaria;
+    const producedBienes = Math.max(0, prodSum * techMult);
+    ind.stockBienes = Math.min(capDiaria * 10, (ind.stockBienes ?? 0) + producedBienes);
+  }
+
+  // 2. Foreign trade (agro & industria)
   const flujoExt = state.gobierno.palancasVigentes.comercioExterior;
   const merchants = vivos.filter((n) => n.rol === 'comerciante' && !n.accionIa?.fueraDePuesto).length;
   const tradeCap = merchants * ECON_CONSTANTS.intercambioPorComerciante * (Math.abs(flujoExt) / 100);
   const inflFactor = 1 + (state.gobierno.inflacion || 0) / 100;
+  let industriaExportDia = 0;
+  let bienesImportadosDia = 0;
 
   if (flujoExt < 0 && tradeCap > 0 && agroFirms.length > 0) {
     const floorGlobal = pop * ECON_CONSTANTS.stockMinExportarDias;
@@ -148,6 +192,32 @@ export function runDailyEconomyV2(state: GameState): void {
     }
   }
 
+  // Export surplus bienes from industria
+  if (flujoExt < 0 && tradeCap > 0 && industriaFirms.length > 0) {
+    const totalBienes = industriaFirms.reduce((s, f) => s + (f.stockBienes ?? 0), 0);
+    const floorBienes = industriaFirms.reduce((s, f) => s + (f.capacidadDiaria ?? 80) * 1.5, 0);
+    const exportableBienes = Math.max(0, Math.min(tradeCap * 0.7, totalBienes - floorBienes));
+    if (exportableBienes > 0.1) {
+      const unitExportBienes = VIAL_CONSTANTS.precioExternoBienes * inflFactor * 0.92;
+      let exportedInd = 0;
+      for (const ind of industriaFirms) {
+        const share = totalBienes > 0 ? (ind.stockBienes ?? 0) / totalBienes : 0;
+        const units = Math.min(ind.stockBienes ?? 0, exportableBienes * share);
+        if (units > 0) {
+          ind.stockBienes = Math.max(0, (ind.stockBienes ?? 0) - units);
+          const rev = units * unitExportBienes;
+          ind.ventas += rev;
+          exportedInd += rev;
+        }
+      }
+      if (exportedInd > 0) {
+        state.gobierno.acumuladoPeriodo.exportaciones += exportedInd;
+        state.auditEntradasDia += exportedInd;
+        industriaExportDia += exportedInd;
+      }
+    }
+  }
+
   const totalStockAfterTrade = agroFirms.reduce((s, f) => s + (f.stock ?? 0), 0);
   state.alimento.stock = Number(totalStockAfterTrade.toFixed(2));
   state.alimento.diasStock = Number((totalStockAfterTrade / Math.max(1, pop * ECON_CONSTANTS.consumoPorNpc)).toFixed(2));
@@ -164,9 +234,24 @@ export function runDailyEconomyV2(state: GameState): void {
   state.alimento.precio = Number(avgPrice.toFixed(3));
   state.alimento.precioMercado = Number(avgPrice.toFixed(3));
 
-  // Index commerce firms and daily capacity
+  // Road health multiplier per zone (EDIFICIOS_V2 §3b)
+  const tramosList = state.tramos ?? [];
+  const roadCapMultByZone: Record<ZoneId, number> = {};
+  for (const z of zones) {
+    const zTramos = tramosList.filter((t) => t.construida && (t.zonaA === z || t.zonaB === z));
+    if (zTramos.length === 0) {
+      roadCapMultByZone[z] = 1;
+    } else {
+      const avgHealth = zTramos.reduce((s, t) => s + t.estado, 0) / zTramos.length;
+      roadCapMultByZone[z] =
+        avgHealth < VIAL_CONSTANTS.umbralMalEstadoVia
+          ? clamp(0.4 + 0.6 * (avgHealth / VIAL_CONSTANTS.umbralMalEstadoVia), 0.25, 1)
+          : 1;
+    }
+  }
+
+  // Index commerce & category-selling firms and daily capacity
   const comercios = state.firmas.filter((f) => f.activa && f.rubro === 'comercio' && f.locales.length > 0);
-  const parcelById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
   const comCapLeft = new Map<string, number>();
   for (const c of comercios) {
     let cap = 0;
@@ -174,17 +259,57 @@ export function runDailyEconomyV2(state: GameState): void {
       const p = parcelById.get(pid);
       if (p?.edificio?.activo) {
         p.edificio.ventasHoy = 0;
-        cap += BUILDING_CATALOG[p.edificio.tipo].capacidadVentasDiaria ?? 90;
+        const bDef = BUILDING_CATALOG[p.edificio.tipo];
+        if (bDef.vendeComida !== false || !isM1Plus) {
+          cap += bDef.capacidadVentasDiaria ?? 90;
+        }
       }
     }
-    comCapLeft.set(c.id, Math.max(40, cap));
+    const rMult = roadCapMultByZone[c.zona] ?? 1;
+    comCapLeft.set(c.id, Math.max(25, cap * rMult));
   }
 
-  const comByZone = new Map<ZoneId, Firma[]>();
-  for (const c of comercios) {
-    const arr = comByZone.get(c.zona) ?? [];
-    arr.push(c);
-    comByZone.set(c.zona, arr);
+  const sellersByCat: Record<SpendCategory, Firma[]> = {
+    bienes: [],
+    gastronomia: [],
+    servicios: [],
+    entretenimiento: [],
+  };
+  const spendCapLeft = new Map<string, number>();
+  const firmAvgMargenAdj = new Map<string, number>();
+
+  for (const f of state.firmas) {
+    if (!f.activa || f.locales.length === 0) continue;
+    const catCaps: Partial<Record<SpendCategory, number>> = {};
+    let adjSum = 0;
+    let adjCount = 0;
+    for (const pid of f.locales) {
+      const p = parcelById.get(pid);
+      if (!p?.edificio?.activo) continue;
+      p.edificio.ventasHoy = p.edificio.ventasHoy ?? 0;
+      const bDef = BUILDING_CATALOG[p.edificio.tipo];
+      const cat: SpendCategory | undefined =
+        bDef.categoriaGasto ??
+        (f.rubro === 'gastronomia' || f.rubro === 'servicios' || f.rubro === 'entretenimiento'
+          ? f.rubro
+          : f.rubro === 'comercio'
+          ? 'bienes'
+          : undefined);
+      if (!cat) continue;
+      const cVal = bDef.capacidadVentasDiaria ?? 80;
+      catCaps[cat] = (catCaps[cat] ?? 0) + cVal;
+      adjSum += (bDef.margenAjustePct ?? 0) / 100;
+      adjCount++;
+    }
+    firmAvgMargenAdj.set(f.id, adjCount > 0 ? adjSum / adjCount : 0);
+    const rMult = roadCapMultByZone[f.zona] ?? 1;
+    for (const [catStr, rawCap] of Object.entries(catCaps)) {
+      const cat = catStr as SpendCategory;
+      if (typeof rawCap === 'number' && rawCap > 0) {
+        sellersByCat[cat].push(f);
+        spendCapLeft.set(`${cat}:${f.id}`, Math.max(20, rawCap * rMult));
+      }
+    }
   }
 
   // Track retencion measure
@@ -194,17 +319,42 @@ export function runDailyEconomyV2(state: GameState): void {
   }
 
   const pickComercioSeller = (zona: ZoneId, boycottedFirmId?: string): Firma | undefined => {
-    const candidatesZones = [zona, ...(state.zonas[zona]?.vecinas ?? [])];
-    for (const cz of candidatesZones) {
-      const list = (comByZone.get(cz) ?? []).filter(
-        (f) => f.id !== boycottedFirmId && (comCapLeft.get(f.id) ?? 0) > 1
-      );
-      if (list.length > 0) {
-        list.sort((a, b) => a.margenPoder - b.margenPoder);
-        return list[0];
+    let best: Firma | undefined;
+    let bestScore = Infinity;
+    for (const f of comercios) {
+      if (f.id === boycottedFirmId || (comCapLeft.get(f.id) ?? 0) <= 1) continue;
+      const travel = getZoneTravelCost(state, zona, f.zona);
+      if (!Number.isFinite(travel)) continue;
+      const score = travel * 0.14 + f.margenPoder * 22 + (firmAvgMargenAdj.get(f.id) ?? 0) * 15;
+      if (score < bestScore) {
+        bestScore = score;
+        best = f;
       }
     }
-    return comercios.find((f) => f.id !== boycottedFirmId) ?? comercios[0];
+    return best ?? comercios.find((f) => f.id !== boycottedFirmId) ?? comercios[0];
+  };
+
+  const pickCategorySeller = (
+    cat: SpendCategory,
+    zona: ZoneId,
+    boycottedFirmId?: string
+  ): Firma | undefined => {
+    const list = sellersByCat[cat];
+    let best: Firma | undefined;
+    let bestScore = Infinity;
+    for (const f of list) {
+      if (f.id === boycottedFirmId) continue;
+      const left = spendCapLeft.get(`${cat}:${f.id}`) ?? 0;
+      if (left <= 0.5) continue;
+      const travel = getZoneTravelCost(state, zona, f.zona);
+      if (!Number.isFinite(travel)) continue;
+      const score = travel * 0.14 + f.margenPoder * 24 + (firmAvgMargenAdj.get(f.id) ?? 0) * 16;
+      if (score < bestScore) {
+        bestScore = score;
+        best = f;
+      }
+    }
+    return best;
   };
 
   // Helper to route food purchase proceeds strictly without creating or losing money
@@ -249,6 +399,12 @@ export function runDailyEconomyV2(state: GameState): void {
   const guaranteePct = clamp(state.gobierno.palancasVigentes.garantiaAlimentaria, 0, 100) / 100;
   const accesoComida: Record<string, number> = {};
   const poderAdquisitivo: Record<string, number> = {};
+  const gastoVidaPorCategoria: Record<SpendCategory, number> = {
+    bienes: 0,
+    gastronomia: 0,
+    servicios: 0,
+    entretenimiento: 0,
+  };
 
   // 4 & 5 & 6. Daily Household food purchase, living spend & consumption
   for (const h of state.hogares) {
@@ -370,21 +526,103 @@ export function runDailyEconomyV2(state: GameState): void {
       h.despensa += unitsBought;
     }
 
-    // Gasto de vida (only if not starving / has money left)
+    // Gasto de vida en 4 categorias (ECONOMIA_V2 §6b)
     const adults = members.filter((m) => m.edad >= 18);
     if (adults.length > 0 && h.dinero > effPrice * count) {
       const avgProp =
         adults.reduce((s, a) => s + getEffectivePropensionGasto(a), 0) / adults.length / 100;
+      const avgCodicia = adults.reduce((s, a) => s + a.personalidad.codicia, 0) / adults.length / 100;
+      const avgResil = adults.reduce((s, a) => s + a.personalidad.resiliencia, 0) / adults.length / 100;
       const dailyNetIncome = h.ultimoIngresoNeto / PERIOD_DAYS;
       const colchon = ECON_CONSTANTS.colchonDias * (count * effPrice);
       const wealthTerm = h.dinero > colchon ? ECON_CONSTANTS.kRiqueza * (h.dinero - colchon) : 0;
-      const targetSpend = Math.max(0, avgProp * dailyNetIncome + wealthTerm);
+      const codiciaCut = 1 - Math.max(0, avgCodicia - 0.5) * 0.14;
+      const targetSpend = Math.max(0, (avgProp * dailyNetIncome + wealthTerm) * codiciaCut);
       const actualSpend = Math.min(Math.max(0, h.dinero - count * effPrice * 0.5), targetSpend);
 
-      if (actualSpend > 0.01 && seller) {
-        h.dinero -= actualSpend;
-        seller.ventas += actualSpend;
-        comCapLeft.set(seller.id, Math.max(0, (comCapLeft.get(seller.id) ?? 0) - actualSpend));
+      if (actualSpend > 0.01) {
+        if (!isM1Plus) {
+          if (seller) {
+            h.dinero -= actualSpend;
+            seller.ventas += actualSpend;
+            comCapLeft.set(seller.id, Math.max(0, (comCapLeft.get(seller.id) ?? 0) - actualSpend));
+            gastoVidaPorCategoria.bienes += actualSpend;
+          }
+        } else {
+          const luxShift = clamp((h.dinero - colchon) / Math.max(40, colchon * 2), 0, 1) * VIAL_CONSTANTS.kLujo;
+          const wBienes = Math.max(0.22, SPEND_CATEGORY_WEIGHTS.bienes - luxShift * 0.35);
+          const wGastro = SPEND_CATEGORY_WEIGHTS.gastronomia + luxShift * 0.2;
+          const wServ = SPEND_CATEGORY_WEIGHTS.servicios;
+          const wEntret = SPEND_CATEGORY_WEIGHTS.entretenimiento + luxShift * 0.15 + Math.max(0, avgResil - 0.5) * 0.08;
+          const wSum = wBienes + wGastro + wServ + wEntret;
+
+          const catWeights: Array<[SpendCategory, number]> = [
+            ['bienes', wBienes / wSum],
+            ['gastronomia', wGastro / wSum],
+            ['servicios', wServ / wSum],
+            ['entretenimiento', wEntret / wSum],
+          ];
+
+          for (const [cat, weight] of catWeights) {
+            const catWanted = actualSpend * weight;
+            if (catWanted <= 0.01) continue;
+            const catSeller = pickCategorySeller(cat, h.zona, boycotted);
+            if (!catSeller) continue; // unserved category -> household saves that portion
+            const capAvail = spendCapLeft.get(`${cat}:${catSeller.id}`) ?? 0;
+            const catSpend = Math.min(catWanted, capAvail, h.dinero);
+            if (catSpend <= 0.01) continue;
+
+            h.dinero -= catSpend;
+            spendCapLeft.set(`${cat}:${catSeller.id}`, Math.max(0, capAvail - catSpend));
+            gastoVidaPorCategoria[cat] += catSpend;
+
+            const firstLoc = parcelById.get(catSeller.locales[0]);
+            if (firstLoc?.edificio) {
+              firstLoc.edificio.ventasHoy = (firstLoc.edificio.ventasHoy ?? 0) + catSpend;
+            }
+
+            if (cat === 'bienes') {
+              const adjMargin = clamp(
+                ECON_CONSTANTS.margenComercialPct / 100 + (firmAvgMargenAdj.get(catSeller.id) ?? 0),
+                0.08,
+                0.35
+              );
+              const unitBienesPrice =
+                VIAL_CONSTANTS.precioExternoBienes * inflFactor * (1 + catSeller.margenPoder);
+              const unitsWanted = catSpend / Math.max(0.4, unitBienesPrice);
+              const totalIndStock = industriaFirms.reduce((s, f) => s + Math.max(0, f.stockBienes ?? 0), 0);
+              const localUnits = Math.min(unitsWanted, totalIndStock);
+              const localRatio = unitsWanted > 0 ? localUnits / unitsWanted : 0;
+              const localSpend = catSpend * localRatio;
+              const importSpend = catSpend - localSpend;
+
+              if (localSpend > 0.005) {
+                const comCut = localSpend * adjMargin;
+                const indCut = localSpend - comCut;
+                catSeller.ventas += comCut;
+                let distributedInd = 0;
+                for (let idx = 0; idx < industriaFirms.length; idx++) {
+                  const ind = industriaFirms[idx];
+                  const w = totalIndStock > 0 ? Math.max(0, ind.stockBienes ?? 0) / totalIndStock : 0;
+                  const shareCut = idx === industriaFirms.length - 1 ? indCut - distributedInd : indCut * w;
+                  distributedInd += shareCut;
+                  ind.ventas += shareCut;
+                  ind.stockBienes = Math.max(0, (ind.stockBienes ?? 0) - localUnits * w);
+                }
+              }
+
+              if (importSpend > 0.005) {
+                const comImportCut = importSpend * Math.min(0.14, adjMargin * 0.6);
+                const importOutflow = importSpend - comImportCut;
+                catSeller.ventas += comImportCut;
+                state.auditSalidasDia += importOutflow;
+                bienesImportadosDia += importOutflow;
+              }
+            } else {
+              catSeller.ventas += catSpend;
+            }
+          }
+        }
       }
     }
 
@@ -438,6 +676,14 @@ export function runDailyEconomyV2(state: GameState): void {
   state.ultimaSalidaEconomica.precioAlimento = precioPorZona;
   state.ultimaSalidaEconomica.precioGlobal = state.alimento.precio;
   state.ultimaSalidaEconomica.inflacion = state.gobierno.inflacion;
+  state.ultimaSalidaEconomica.gastoVidaPorCategoria = {
+    bienes: Number(gastoVidaPorCategoria.bienes.toFixed(2)),
+    gastronomia: Number(gastoVidaPorCategoria.gastronomia.toFixed(2)),
+    servicios: Number(gastoVidaPorCategoria.servicios.toFixed(2)),
+    entretenimiento: Number(gastoVidaPorCategoria.entretenimiento.toFixed(2)),
+  };
+  state.ultimaSalidaEconomica.bienesImportadosDia = Number(bienesImportadosDia.toFixed(2));
+  state.ultimaSalidaEconomica.industriaExportDia = Number(industriaExportDia.toFixed(2));
 
   if (!isM1Plus) {
     // Keep legacy view synced in M0 too
@@ -466,7 +712,11 @@ export function runPaydayEconomyV2(state: GameState): void {
   }
 
   let taxCollectedTotal = 0;
-  const creditNetToNpc = (npc: Npc, gross: number, taxable: boolean) => {
+  const creditNetAmountToHogarOrNpc = (
+    npc: Npc | undefined,
+    gross: number,
+    taxable: boolean
+  ) => {
     if (gross <= 0) return;
     const tax = taxable ? gross * taxRate : 0;
     const net = gross - tax;
@@ -474,15 +724,19 @@ export function runPaydayEconomyV2(state: GameState): void {
       state.gobierno.reserva += tax;
       taxCollectedTotal += tax;
     }
-    const h = hogarById.get(npc.hogarId);
+    const h = npc ? hogarById.get(npc.hogarId) : undefined;
     if (h) {
       h.dinero += net;
       h.ultimoIngresoNeto += net;
     } else {
       state.gobierno.reserva += net;
     }
-    npc.economia.ultimoIngresoNeto += net / PERIOD_DAYS;
+    if (npc && npc.vivo) {
+      npc.economia.ultimoIngresoNeto += net / PERIOD_DAYS;
+    }
   };
+  const creditNetToNpc = (npc: Npc, gross: number, taxable: boolean) =>
+    creditNetAmountToHogarOrNpc(npc, gross, taxable);
 
   // ====================================================================
   // 1. FIRMS SETTLEMENT: ads -> payroll -> hiring -> manager -> profit
@@ -497,14 +751,14 @@ export function runPaydayEconomyV2(state: GameState): void {
     m.ingresos.fondosEstado = 0;
   }
 
-  // Advertising outflow from agro & comercio into medio firms
+  // Advertising outflow from all active non-medio firms into medio firms (ECONOMIA_V2 §5)
   if (isM1Plus && medioFirmaPairs.length > 0) {
     const totalWeight = medioFirmaPairs.reduce(
       (s, { m }) => s + Math.max(1, m.alcancePct * m.credibilidad),
       0
     );
     for (const f of state.firmas) {
-      if (!f.activa || (f.rubro !== 'comercio' && f.rubro !== 'agro') || f.ventas <= 0) continue;
+      if (!f.activa || f.rubro === 'medio' || f.ventas <= 0) continue;
       const adBudget = f.ventas * FIRM_CONSTANTS.pctPublicidad;
       f.ventas -= adBudget;
       let distributed = 0;
@@ -581,9 +835,13 @@ export function runPaydayEconomyV2(state: GameState): void {
         const def = ROLE_CATALOG[role];
         const estCost = ((def.ingreso?.[0] ?? 8) + (def.ingreso?.[1] ?? 10)) * 0.5 * PERIOD_DAYS * 0.65;
         while (vac > 0 && hired < ECON_CONSTANTS.maxContratacionesPorPeriodo && wageFund >= totalRef + estCost) {
-          const cand = unempPool.find(
-            (u) => u.rol === 'desempleado' && u.educacion.nivel >= def.educMin
-          );
+          const cand = unempPool
+            .filter((u) => {
+              if (u.rol !== 'desempleado' || u.educacion.nivel < def.educMin) return false;
+              const d = getZoneTravelCost(state, u.zona, f.zona);
+              return Number.isFinite(d) && d <= VIAL_CONSTANTS.rutaMaxTrabajo;
+            })
+            .sort((a, b) => getZoneTravelCost(state, a.zona, f.zona) - getZoneTravelCost(state, b.zona, f.zona))[0];
           if (!cand) break;
           cand.rol = role;
           cand.empleadorId = f.id;
@@ -647,6 +905,16 @@ export function runPaydayEconomyV2(state: GameState): void {
             const owner = npcById.get(part.id);
             if (owner && owner.vivo) creditNetToNpc(owner, cut, true);
             else state.gobierno.reserva += cut;
+          } else if (part.tipo === 'hogar') {
+            const oh = hogarById.get(part.id);
+            if (oh) {
+              const tax = cut * taxRate;
+              state.gobierno.reserva += tax;
+              taxCollectedTotal += tax;
+              oh.dinero += cut - tax;
+            } else {
+              state.gobierno.reserva += cut;
+            }
           } else if (part.tipo === 'firma') {
             const parent = firmaById.get(part.id);
             if (parent && parent.activa) parent.caja += cut;
@@ -712,8 +980,19 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   }
 
-  // Update market share cuotaZona & monopoly pricing power
-  const rubros: FirmRubro[] = ['agro', 'comercio', 'construccion', 'inmobiliaria', 'medio', 'banco'];
+  // Update market share cuotaZona & monopoly pricing power (all 10 rubros)
+  const rubros: FirmRubro[] = [
+    'agro',
+    'industria',
+    'comercio',
+    'gastronomia',
+    'servicios',
+    'entretenimiento',
+    'construccion',
+    'inmobiliaria',
+    'medio',
+    'banco',
+  ];
   const cuotaMercadoSalida: EconomyOutput['cuotaMercado'] = {};
   for (const rubro of rubros) {
     for (const z of zones) {
@@ -773,26 +1052,29 @@ export function runPaydayEconomyV2(state: GameState): void {
           occ.periodosSinPagar = 0;
           c.alquilerCobradoPeriodo = c.alquiler;
 
-          const rentTax = c.alquiler * taxRate;
-          const rentNet = c.alquiler - rentTax;
-          state.gobierno.reserva += rentTax;
-          taxCollectedTotal += rentTax;
-
           if (c.dueno.tipo === 'hogar') {
+            const rentTax = c.alquiler * taxRate;
+            const rentNet = c.alquiler - rentTax;
+            state.gobierno.reserva += rentTax;
+            taxCollectedTotal += rentTax;
             const ownerH = hogarById.get(c.dueno.id);
             if (ownerH) ownerH.dinero += rentNet;
             else state.gobierno.reserva += rentNet;
           } else if (c.dueno.tipo === 'npc') {
+            const rentTax = c.alquiler * taxRate;
+            const rentNet = c.alquiler - rentTax;
+            state.gobierno.reserva += rentTax;
+            taxCollectedTotal += rentTax;
             const ownerNpc = npcById.get(c.dueno.id);
             const ownerH = ownerNpc ? hogarById.get(ownerNpc.hogarId) : undefined;
             if (ownerH) ownerH.dinero += rentNet;
             else state.gobierno.reserva += rentNet;
           } else if (c.dueno.tipo === 'firma') {
             const ownerFirm = firmaById.get(c.dueno.id);
-            if (ownerFirm && ownerFirm.activa) ownerFirm.caja += rentNet;
-            else state.gobierno.reserva += rentNet;
+            if (ownerFirm && ownerFirm.activa) ownerFirm.ventas += c.alquiler;
+            else state.gobierno.reserva += c.alquiler;
           } else {
-            state.gobierno.reserva += rentNet;
+            state.gobierno.reserva += c.alquiler;
           }
         } else {
           occ.periodosSinPagar += 1;
@@ -803,7 +1085,8 @@ export function runPaydayEconomyV2(state: GameState): void {
       else occ.periodosHacinado = 0;
     }
 
-    // House decay & maintenance paid by owner to constructora
+    // House decay & maintenance paid by owner to constructora (into ventas!)
+    const prevCasaEstado = c.estado;
     const decay = c.hogarId
       ? HOUSING_CONSTANTS.decaimientoEstadoCasaPeriodo
       : HOUSING_CONSTANTS.estadoCasaSinMantVacia;
@@ -813,13 +1096,13 @@ export function runPaydayEconomyV2(state: GameState): void {
 
     const mantCost = BUILDING_CATALOG[c.tipo].mantenimientoPeriodo;
     const constr = pickConstructora(c.zona);
+    let paid = false;
     if (c.estado < 96 && constr && mantCost > 0) {
-      let paid = false;
       if (c.dueno.tipo === 'hogar') {
         const oh = hogarById.get(c.dueno.id);
         if (oh && oh.dinero >= mantCost * 1.5) {
           oh.dinero -= mantCost;
-          constr.caja += mantCost;
+          constr.ventas += mantCost;
           paid = true;
         }
       } else if (c.dueno.tipo === 'npc') {
@@ -827,22 +1110,63 @@ export function runPaydayEconomyV2(state: GameState): void {
         const oh = on ? hogarById.get(on.hogarId) : undefined;
         if (oh && oh.dinero >= mantCost * 1.5) {
           oh.dinero -= mantCost;
-          constr.caja += mantCost;
+          constr.ventas += mantCost;
           paid = true;
         }
       } else if (c.dueno.tipo === 'firma') {
         const ofirm = firmaById.get(c.dueno.id);
         if (ofirm && ofirm.activa && ofirm.caja >= mantCost) {
           ofirm.caja -= mantCost;
-          constr.caja += mantCost;
+          constr.ventas += mantCost;
           paid = true;
         }
       }
       if (paid) c.estado = clamp(c.estado + decay + 2, 0, 100);
     }
+
+    // Venta forzada (ECONOMIA_V2 §7): unmaintained degraded house sold to inmobiliaria/hogar
+    if (!paid && isM1Plus && c.estado < HOUSING_CONSTANTS.umbralEstadoCasaMalo && c.dueno.tipo !== 'estado') {
+      const forcedPrice = Math.max(80, c.alquiler * HOUSING_CONSTANTS.multiploCasa * 0.65);
+      const inmoBuyer = state.firmas.find(
+        (f) => f.activa && f.rubro === 'inmobiliaria' && f.id !== c.dueno.id && f.caja >= forcedPrice + 80
+      );
+      if (inmoBuyer) {
+        inmoBuyer.caja -= forcedPrice;
+        if (c.dueno.tipo === 'hogar') {
+          const oh = hogarById.get(c.dueno.id);
+          if (oh) oh.dinero += forcedPrice;
+          else state.gobierno.reserva += forcedPrice;
+        } else if (c.dueno.tipo === 'npc') {
+          const on = npcById.get(c.dueno.id);
+          const oh = on ? hogarById.get(on.hogarId) : undefined;
+          if (oh) oh.dinero += forcedPrice;
+          else state.gobierno.reserva += forcedPrice;
+        } else if (c.dueno.tipo === 'firma') {
+          const ofirm = firmaById.get(c.dueno.id);
+          if (ofirm) ofirm.caja += forcedPrice;
+          else state.gobierno.reserva += forcedPrice;
+        }
+        c.dueno = { tipo: 'firma', id: inmoBuyer.id };
+      }
+    }
+
+    if (
+      Math.abs(c.estado - prevCasaEstado) >= 3 ||
+      (prevCasaEstado >= HOUSING_CONSTANTS.umbralEstadoCasaMalo && c.estado < HOUSING_CONSTANTS.umbralEstadoCasaMalo)
+    ) {
+      emitSimEvent(state, {
+        id: nextSeqId(state, 'ev_cest'),
+        dia: state.reloj.dia,
+        tipo: 'casa_estado',
+        zona: c.zona,
+        casaId: c.id,
+        estado: Number(c.estado.toFixed(1)),
+        causa: paid ? 'vivienda:reparacion' : 'vivienda:deterioro',
+      });
+    }
   }
 
-  // Private firm local maintenance
+  // Private firm local maintenance (into constr.ventas!)
   const parcelById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
   for (const f of state.firmas) {
     if (!f.activa || f.rubro === 'construccion') continue;
@@ -854,7 +1178,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       const mant = BUILDING_CATALOG[p.edificio.tipo].mantenimientoPeriodo;
       if (mant > 0 && f.caja >= mant) {
         f.caja -= mant;
-        constr.caja += mant;
+        constr.ventas += mant;
         p.edificio.estadoSalud = clamp(p.edificio.estadoSalud + 2, 0, 100);
       } else if (mant > 0) {
         p.edificio.estadoSalud = clamp(p.edificio.estadoSalud - 4, 20, 100);
@@ -863,7 +1187,7 @@ export function runPaydayEconomyV2(state: GameState): void {
   }
 
   // ====================================================================
-  // 3. STATE SETTLEMENT & AUTOPILOT (M2+ & G0)
+  // 3. STATE SETTLEMENT & AUTOPILOT (M2+ & G0 / estadoAutomatico)
   // ====================================================================
   const acum = state.gobierno.acumuladoPeriodo;
   const fin = state.gobierno.finanzas;
@@ -871,7 +1195,8 @@ export function runPaydayEconomyV2(state: GameState): void {
     state.parcelas,
     state.gobierno.palancasVigentes.nivelObras,
     Math.max(1, state.npcs.filter((n) => n.vivo).length),
-    state.config.poblacionInicial
+    state.config.poblacionInicial,
+    state.tramos ?? []
   );
 
   const nominaDue = acum.nominaDevengada;
@@ -887,9 +1212,15 @@ export function runPaydayEconomyV2(state: GameState): void {
   const nomPaid = nominaDue * ratioNom;
   if (nomPaid > 0 && nominaDue > 0) {
     state.gobierno.reserva -= nomPaid;
+    let credited = 0;
     for (const [nid, amt] of Object.entries(acum.nominaPorNpc)) {
+      const share = amt * ratioNom;
+      credited += share;
       const npc = npcById.get(nid);
-      if (npc && npc.vivo) creditNetToNpc(npc, amt * ratioNom, true);
+      creditNetAmountToHogarOrNpc(npc, share, true);
+    }
+    if (Math.abs(nomPaid - credited) > 0.0001) {
+      state.gobierno.reserva += nomPaid - credited;
     }
   }
 
@@ -898,9 +1229,15 @@ export function runPaydayEconomyV2(state: GameState): void {
   const pensPaid = pensDue * ratioPens;
   if (pensPaid > 0 && pensDue > 0) {
     state.gobierno.reserva -= pensPaid;
+    let credited = 0;
     for (const [nid, amt] of Object.entries(acum.pensionesPorNpc)) {
+      const share = amt * ratioPens;
+      credited += share;
       const npc = npcById.get(nid);
-      if (npc && npc.vivo) creditNetToNpc(npc, amt * ratioPens, false);
+      creditNetAmountToHogarOrNpc(npc, share, false);
+    }
+    if (Math.abs(pensPaid - credited) > 0.0001) {
+      state.gobierno.reserva += pensPaid - credited;
     }
   }
 
@@ -913,36 +1250,96 @@ export function runPaydayEconomyV2(state: GameState): void {
 
   if (ayuPaid > 0 && ayuDue > 0) {
     state.gobierno.reserva -= ayuPaid;
+    let credited = 0;
     for (const [nid, amt] of Object.entries(acum.ayudaPorNpc)) {
+      const share = amt * ratioDisc;
+      credited += share;
       const npc = npcById.get(nid);
-      if (npc && npc.vivo) creditNetToNpc(npc, amt * ratioDisc, false);
+      creditNetAmountToHogarOrNpc(npc, share, false);
+    }
+    if (Math.abs(ayuPaid - credited) > 0.0001) {
+      state.gobierno.reserva += ayuPaid - credited;
     }
   }
 
-  // Operation maintenance feeds constructora if active (zero leak!)
+  // Operation maintenance feeds constructora ventas if active (zero leak!)
   if (opPaid > 0) {
     if (constructoras.length > 0) {
       state.gobierno.reserva -= opPaid;
       const share = opPaid / constructoras.length;
-      for (const cf of constructoras) cf.caja += share;
+      for (const cf of constructoras) cf.ventas += share;
     } else {
       const anyActive = state.firmas.find((f) => f.activa);
       if (anyActive) {
         state.gobierno.reserva -= opPaid;
-        anyActive.caja += opPaid;
+        anyActive.ventas += opPaid;
       }
     }
   }
 
-  // Press budget split evenly to active media firms
+  // Press budget split evenly to active media firms' ventas
   if (prensaPaid > 0 && medioFirmaPairs.length > 0) {
     state.gobierno.reserva -= prensaPaid;
     const perM = prensaPaid / medioFirmaPairs.length;
     for (const { m, f } of medioFirmaPairs) {
-      f.caja += perM;
+      f.ventas += perM;
       m.ingresos.fondosEstado += perM;
       m.finanzas.fondosEstado += perM;
     }
+  }
+
+  // Road maintenance condition update (EDIFICIOS_V2 §3b)
+  const roadMantFailed = state.gobierno.palancasVigentes.nivelObras === 0 || ratioDisc < 0.75;
+  let roadTopologyChanged = false;
+  for (const t of state.tramos ?? []) {
+    if (!t.construida) continue;
+    const prevEst = t.estado;
+    if (roadMantFailed) {
+      t.estado = clamp(t.estado - VIAL_CONSTANTS.decaimientoViaSinMant, 0, 100);
+      if (Math.abs(t.estado - prevEst) >= 2) {
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_vest'),
+          dia: state.reloj.dia,
+          tipo: 'via_estado',
+          zona: t.zonaA,
+          tramoId: t.id,
+          estado: Number(t.estado.toFixed(1)),
+          causa: ratioDisc < 0.75 ? 'estado:impago' : 'estado:sin_obras',
+        });
+      }
+      if (prevEst > 0 && t.estado <= 0) {
+        roadTopologyChanged = true;
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_rcort'),
+          dia: state.reloj.dia,
+          tipo: 'ruta_cortada',
+          zona: t.zonaA,
+          tramoId: t.id,
+          parcelasAisladas: [...t.parcelasAbiertas],
+          causa: ratioDisc < 0.75 ? 'estado:impago' : 'estado:sin_obras',
+        });
+      }
+    } else if (t.estado < 100) {
+      const recov =
+        VIAL_CONSTANTS.recuperacionViaConMant *
+        (state.gobierno.palancasVigentes.nivelObras >= 3 ? 1.25 : 1);
+      t.estado = clamp(t.estado + recov, 0, 100);
+      if (prevEst <= 0 && t.estado > 0) roadTopologyChanged = true;
+      if (Math.abs(t.estado - prevEst) >= 2) {
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_vest'),
+          dia: state.reloj.dia,
+          tipo: 'via_estado',
+          zona: t.zonaA,
+          tramoId: t.id,
+          estado: Number(t.estado.toFixed(1)),
+          causa: 'estado:mantenimiento',
+        });
+      }
+    }
+  }
+  if (roadTopologyChanged || roadMantFailed) {
+    recomputeRoadDistances(state);
   }
 
   // Update finanzas ledger
@@ -954,9 +1351,13 @@ export function runPaydayEconomyV2(state: GameState): void {
   fin.garantiaImpaga = Number(acum.garantiaImpaga.toFixed(2));
   fin.comidaMenores = Number(acum.comidaMenores.toFixed(2));
   fin.acogidaMenores = Number(acum.acogidaMenores.toFixed(2));
+  fin.mantenimientoVias = Number(opBreak.mantenimientoVias.toFixed(2));
+  fin.mantenimientoEdificios = Number(opBreak.mantenimientoEdificios.toFixed(2));
   fin.mantenimiento = Number(opBreak.mantenimientoTotal.toFixed(2));
   fin.operacionObras = Number(opBreak.operacionObras.toFixed(2));
   fin.operacion = Number(opPaid.toFixed(2));
+  fin.obras = Number((acum.obras ?? 0).toFixed(2));
+  fin.subsidios = Number((acum.subsidios ?? 0).toFixed(2));
   fin.prensa = Number(prensaPaid.toFixed(2));
   fin.importaciones = Number(acum.importaciones.toFixed(2));
   fin.exportaciones = Number(acum.exportaciones.toFixed(2));
@@ -968,6 +1369,8 @@ export function runPaydayEconomyV2(state: GameState): void {
     fin.comidaMenores +
     fin.acogidaMenores +
     fin.operacion +
+    fin.obras +
+    fin.subsidios +
     fin.prensa;
   fin.saldo = Number((fin.ingresos - totalOut).toFixed(2));
   state.ultimoSaldoCierre = fin.saldo;
@@ -1013,12 +1416,15 @@ export function runPaydayEconomyV2(state: GameState): void {
   acum.comidaMenores = 0;
   acum.acogidaMenores = 0;
   acum.operacion = 0;
+  acum.obras = 0;
+  acum.subsidios = 0;
   acum.prensa = 0;
   acum.importaciones = 0;
   acum.exportaciones = 0;
 
-  // Autopilot public service build when G0 + M2+
-  if (isM2Plus && state.config.nivelGobernador === 'G0') {
+  // Autopilot public service & road builds when estadoAutomatico is enabled (MUNDO_V2 §9)
+  const autoState = state.config.estadoAutomatico ?? state.config.nivelGobernador === 'G0';
+  if (isM2Plus && autoState) {
     const vivosCount = state.npcs.filter((n) => n.vivo).length;
     const caps = getBuildingJobCaps(
       state.parcelas,
@@ -1040,7 +1446,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       if (toBuild) {
         const def = BUILDING_CATALOG[toBuild];
         state.gobierno.reserva -= def.costoObra;
-        if (constructoras.length > 0) constructoras[0].caja += def.costoObra;
+        if (constructoras.length > 0) constructoras[0].ventas += def.costoObra;
         freePub.estado = 'en_obra';
         freePub.edificio = {
           id: nextSeqId(state, 'ed'),
@@ -1067,6 +1473,75 @@ export function runPaydayEconomyV2(state: GameState): void {
           costo: def.costoObra,
           diasObra: def.diasObra,
           causa: 'estado:piloto_automatico',
+        });
+      }
+    }
+  }
+
+  // Update demandaSuelo streaks & trigger road autopilot when exceeded (MUNDO_V2 §9)
+  const newDemanda = computeDemandaSuelo(state);
+  state.demandaSuelo = newDemanda;
+  for (const [k, val] of Object.entries(newDemanda)) {
+    if (val >= VIAL_CONSTANTS.umbralDemandaSuelo) {
+      state.demandaSueloRachas[k] = (state.demandaSueloRachas[k] ?? 0) + 1;
+    } else {
+      state.demandaSueloRachas[k] = 0;
+    }
+  }
+
+  if (
+    isM1Plus &&
+    autoState &&
+    (!state.autopilotLastViaDay || state.reloj.dia - state.autopilotLastViaDay >= 14)
+  ) {
+    const hotEntry = Object.entries(state.demandaSueloRachas)
+      .filter(([, streak]) => streak >= VIAL_CONSTANTS.periodosDemandaSuelo)
+      .sort((a, b) => (newDemanda[b[0]] ?? 0) - (newDemanda[a[0]] ?? 0))[0];
+
+    if (hotEntry) {
+      const [hotZone, hotTipo] = hotEntry[0].split(':');
+      const connectable = (state.tramos ?? []).filter((t) => isViaConnectableToNetwork(state, t));
+      let bestTramo: (typeof connectable)[number] | null = null;
+      let bestScore = Infinity;
+
+      for (const t of connectable) {
+        if (state.gobierno.reserva < t.costoObra * 1.35) continue;
+        const opensMatchingType = t.parcelasAbiertas.filter((pid) => {
+          const p = parcelById.get(pid);
+          return p && (p.zona === hotZone || t.zonaAbierta === p.zona) && p.tipoParcela === hotTipo;
+        }).length;
+        const touchesHot = t.zonaA === hotZone || t.zonaB === hotZone;
+        const totalOpen = Math.max(1, t.parcelasAbiertas.length);
+        const relevance = opensMatchingType > 0 ? 0.45 : touchesHot ? 0.8 : 1.3;
+        const score = (t.costoObra / totalOpen) * relevance;
+        if (score < bestScore) {
+          bestScore = score;
+          bestTramo = t;
+        }
+      }
+
+      if (bestTramo) {
+        state.gobierno.reserva -= bestTramo.costoObra;
+        if (constructoras.length > 0) constructoras[0].ventas += bestTramo.costoObra;
+        const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
+        const dias = Math.max(2, Math.round(bestTramo.diasObraTotal * diasFactor));
+        bestTramo.enObra = true;
+        bestTramo.diasObraRestantes = dias;
+        state.autopilotLastViaDay = state.reloj.dia;
+        state.demandaSueloRachas[hotEntry[0]] = 0;
+
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_via_i'),
+          dia: state.reloj.dia,
+          tipo: 'via_inicio',
+          zona: bestTramo.zonaA,
+          tramoId: bestTramo.id,
+          tramoNombre: bestTramo.nombre,
+          tipoVia: bestTramo.tipo,
+          parcelasAbiertas: [...bestTramo.parcelasAbiertas],
+          costo: bestTramo.costoObra,
+          diasObra: dias,
+          causa: 'estado:demanda_suelo',
         });
       }
     }
@@ -1181,11 +1656,32 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   }
 
-  // Lower rent slightly on houses still empty
-  for (const c of freeHouses) {
+  // Update zonal rent index & drop rent on houses still empty (ECONOMIA_V2 §7)
+  for (const z of zones) {
+    const zDef = state.zonas[z];
+    if (!zDef) continue;
+    const zHog = state.hogares.filter((h) => h.zona === z && h.estado !== 'acogida');
+    const calleZ = zHog.length > 0 ? zHog.filter((h) => h.estado === 'calle').length / zHog.length : 0;
+    const vacZ = freeHouses.filter((c) => c.zona === z).length;
+    if (calleZ > 0.08 && vacZ === 0) {
+      zDef.demandaAlquilerIndice = Number(clamp(zDef.demandaAlquilerIndice * 1.04, 0.72, 1.75).toFixed(3));
+    } else if (vacZ >= 2) {
+      zDef.demandaAlquilerIndice = Number(clamp(zDef.demandaAlquilerIndice * 0.97, 0.72, 1.75).toFixed(3));
+    }
+  }
+
+  for (const c of state.casas) {
     const base = BUILDING_CATALOG[c.tipo].alquilerBase ?? 12;
+    const zIdx = state.zonas[c.zona]?.demandaAlquilerIndice ?? 1;
+    const targetAlq = base * (0.4 + 0.6 * (c.estado / 100)) * zIdx;
     const floor = base * HOUSING_CONSTANTS.alquilerPisoFactor;
-    c.alquiler = Number(Math.max(floor, c.alquiler * (1 - HOUSING_CONSTANTS.pasoAlquilerPct / 100)).toFixed(2));
+    if (!c.hogarId) {
+      c.alquiler = Number(
+        Math.max(floor, Math.min(c.alquiler * (1 - HOUSING_CONSTANTS.pasoAlquilerPct / 100), targetAlq)).toFixed(2)
+      );
+    } else {
+      c.alquiler = Number(Math.max(floor, c.alquiler * 0.7 + targetAlq * 0.3).toFixed(2));
+    }
   }
 
   // Home purchase by wealthy renter households
@@ -1236,26 +1732,34 @@ export function runPaydayEconomyV2(state: GameState): void {
   if (isM1Plus) {
     let buys = 0;
     const buyers = state.firmas
-      .filter((f) => f.activa && f.caja >= 500 && f.factor >= 1.05)
+      .filter((f) => f.activa && f.caja >= 460 && f.factor >= 1.04)
       .sort((a, b) => b.caja - a.caja);
     const targets = state.firmas.filter(
-      (f) => f.activa && f.caja < 40 && f.periodosEnPerdida >= 1 && f.locales.length > 0
+      (f) => f.activa && f.caja < 45 && f.periodosEnPerdida >= 1 && f.locales.length > 0
     );
     for (const buyer of buyers) {
       if (buys >= FIRM_CONSTANTS.maxComprasPorPeriodo) break;
-      const target = targets.find(
-        (t) =>
-          t.activa &&
-          t.id !== buyer.id &&
-          t.rubro === buyer.rubro &&
-          (t.zona === buyer.zona || state.zonas[buyer.zona]?.vecinas.includes(t.zona))
-      );
+      const target =
+        targets.find(
+          (t) =>
+            t.activa &&
+            t.id !== buyer.id &&
+            t.rubro === buyer.rubro &&
+            Number.isFinite(getZoneTravelCost(state, buyer.zona, t.zona))
+        ) ??
+        targets.find(
+          (t) =>
+            t.activa &&
+            t.id !== buyer.id &&
+            !t.esFilialDe &&
+            Number.isFinite(getZoneTravelCost(state, buyer.zona, t.zona))
+        );
       if (!target) continue;
       const avgProf =
         target.historialGanancias.length > 0
           ? target.historialGanancias.reduce((s, g) => s + g, 0) / target.historialGanancias.length
           : 0;
-      const price = Math.max(120, avgProf * FIRM_CONSTANTS.multiploCompraFirma + target.locales.length * 140);
+      const price = Math.max(120, avgProf * FIRM_CONSTANTS.multiploCompraFirma + target.locales.length * 130);
       if (buyer.caja < price + 150) continue;
 
       buyer.caja -= price;
@@ -1272,6 +1776,10 @@ export function runPaydayEconomyV2(state: GameState): void {
             if (oh) oh.dinero += cut;
             else state.gobierno.reserva += cut;
             if (o) o.partes = o.partes.filter((x) => x.firmaId !== target.id);
+          } else if (p.tipo === 'hogar') {
+            const oh = hogarById.get(p.id);
+            if (oh) oh.dinero += cut;
+            else state.gobierno.reserva += cut;
           } else if (p.tipo === 'firma') {
             const pf = firmaById.get(p.id);
             if (pf) pf.caja += cut;
@@ -1284,27 +1792,38 @@ export function runPaydayEconomyV2(state: GameState): void {
         state.gobierno.reserva += price;
       }
 
-      // Absorb target into buyer (preserve caja cleanly!)
-      buyer.caja += target.caja;
-      target.caja = 0;
-      buyer.locales.push(...target.locales);
-      for (const pid of target.locales) {
-        const p = parcelById.get(pid);
-        if (p?.edificio) {
-          p.edificio.firmaId = buyer.id;
-          p.edificio.dueno = buyer.id;
+      const isSameRubro = target.rubro === buyer.rubro;
+      if (isSameRubro) {
+        // Absorb target into buyer (preserve caja + ventas cleanly!)
+        buyer.caja += target.caja;
+        buyer.ventas += target.ventas;
+        target.caja = 0;
+        target.ventas = 0;
+        buyer.locales.push(...target.locales);
+        for (const pid of target.locales) {
+          const p = parcelById.get(pid);
+          if (p?.edificio) {
+            p.edificio.firmaId = buyer.id;
+            p.edificio.dueno = buyer.id;
+          }
         }
-      }
-      target.locales = [];
-      for (const eid of target.empleados) {
-        const emp = npcById.get(eid);
-        if (emp && emp.vivo) {
-          emp.empleadorId = buyer.id;
-          buyer.empleados.push(eid);
+        target.locales = [];
+        for (const eid of target.empleados) {
+          const emp = npcById.get(eid);
+          if (emp && emp.vivo) {
+            emp.empleadorId = buyer.id;
+            buyer.empleados.push(eid);
+          }
         }
+        target.empleados = [];
+        target.activa = false;
+      } else {
+        // Subsidiary acquisition (filial)
+        target.partes = [{ tipo: 'firma', id: buyer.id, pct: 100 }];
+        target.esFilialDe = buyer.id;
+        target.periodosEnPerdida = 0;
       }
-      target.empleados = [];
-      target.activa = false;
+
       buys++;
       state.mercadoStats.comprasPeriodo++;
 
@@ -1316,7 +1835,7 @@ export function runPaydayEconomyV2(state: GameState): void {
         compradorId: buyer.id,
         firmaId: target.id,
         precio: Number(price.toFixed(2)),
-        modo: 'absorcion',
+        modo: isSameRubro ? 'absorcion' : 'filial',
         causa: target.ultimaCausa,
       });
     }
@@ -1336,6 +1855,11 @@ export function runPaydayEconomyV2(state: GameState): void {
         }
 
         const empCount = f.empleados.length;
+        // Fold any un-settled ventas into dissolution estate cleanly
+        if (f.ventas > 0) {
+          f.caja += f.ventas;
+          f.ventas = 0;
+        }
         // Severance from positive remaining caja if any
         if (f.caja > 0 && empCount > 0) {
           const perEmp = f.caja / empCount;
@@ -1371,10 +1895,28 @@ export function runPaydayEconomyV2(state: GameState): void {
         }
         f.partes = [];
 
-        // Release locales back to libre
+        // Auction locales to solvent peer firm or release to libre
         for (const pid of f.locales) {
           const p = parcelById.get(pid);
-          if (p) {
+          if (!p) continue;
+          const auctionBuyer = p.edificio
+            ? state.firmas.find(
+                (peer) =>
+                  peer.activa &&
+                  peer.id !== f.id &&
+                  peer.rubro === f.rubro &&
+                  peer.caja >= 260 &&
+                  BUILDING_CATALOG[p.edificio!.tipo]?.rubro === peer.rubro
+              )
+            : undefined;
+          if (auctionBuyer && p.edificio) {
+            auctionBuyer.caja -= 100;
+            state.gobierno.reserva += 100;
+            auctionBuyer.locales.push(pid);
+            p.edificio.firmaId = auctionBuyer.id;
+            p.edificio.dueno = auctionBuyer.id;
+            p.edificio.duenoRef = { tipo: 'firma', id: auctionBuyer.id };
+          } else {
             p.estado = 'libre';
             p.edificio = null;
           }
@@ -1417,15 +1959,28 @@ export function runPaydayEconomyV2(state: GameState): void {
   // ====================================================================
   if (isM1Plus) {
     const constr = pickConstructora(zones[0] ?? 'centro');
+    const sinInversionFirms = new Set(
+      state.medidasVigentes.filter((m) => m.tipo === 'sin_inversion' && m.empresaId).map((m) => m.empresaId!)
+    );
 
-    // 7a. Existing firms expand onto free commercial/agricultural parcels
+    // 7a. Existing firms expand onto free parcels matching their rubro
     for (const f of state.firmas) {
-      if (!f.activa || f.periodosFactorAlto < FIRM_CONSTANTS.periodosParaInvertir) continue;
+      if (!f.activa || sinInversionFirms.has(f.id) || f.periodosFactorAlto < FIRM_CONSTANTS.periodosParaInvertir) {
+        continue;
+      }
       const targetBuilding: BuildingType | null =
         f.rubro === 'agro'
           ? 'campo'
+          : f.rubro === 'industria'
+          ? 'fabrica'
           : f.rubro === 'comercio'
-          ? 'almacen'
+          ? 'tienda'
+          : f.rubro === 'gastronomia'
+          ? 'bar_cafe'
+          : f.rubro === 'servicios'
+          ? 'taller'
+          : f.rubro === 'entretenimiento'
+          ? 'cine_teatro'
           : f.rubro === 'construccion'
           ? 'oficina_constructora'
           : f.rubro === 'inmobiliaria'
@@ -1435,12 +1990,15 @@ export function runPaydayEconomyV2(state: GameState): void {
       const def = BUILDING_CATALOG[targetBuilding];
       if (f.caja < def.costoObra * 1.4) continue;
       const freeParcel = state.parcelas.find(
-        (p) => p.tipoParcela === def.parcelTipo && p.estado === 'libre' && (p.zona === f.zona || state.zonas[f.zona]?.vecinas.includes(p.zona))
+        (p) =>
+          p.tipoParcela === def.parcelTipo &&
+          p.estado === 'libre' &&
+          Number.isFinite(getZoneTravelCost(state, f.zona, p.zona))
       );
       if (!freeParcel) continue;
 
       f.caja -= def.costoObra;
-      if (constr) constr.caja += def.costoObra;
+      if (constr) constr.ventas += def.costoObra;
       else state.gobierno.reserva += def.costoObra;
 
       freeParcel.estado = 'en_obra';
@@ -1477,7 +2035,17 @@ export function runPaydayEconomyV2(state: GameState): void {
       break;
     }
 
-    // 7b. Entrepreneurship (emprender)
+    // 7b. Demand-driven entrepreneurship (ECONOMIA_V2 §6b & §8)
+    const activeCatFirmsCount: Record<SpendCategory, number> = {
+      bienes: state.firmas.filter((f) => f.activa && f.rubro === 'comercio').length,
+      gastronomia: state.firmas.filter((f) => f.activa && f.rubro === 'gastronomia').length,
+      servicios: state.firmas.filter((f) => f.activa && f.rubro === 'servicios').length,
+      entretenimiento: state.firmas.filter((f) => f.activa && f.rubro === 'entretenimiento').length,
+    };
+    const neediestCategory = (Object.entries(activeCatFirmsCount) as Array<[SpendCategory, number]>).sort(
+      (a, b) => a[1] - b[1]
+    )[0][0];
+
     let founded = 0;
     const candidates = state.npcs.filter(
       (n) =>
@@ -1492,19 +2060,43 @@ export function runPaydayEconomyV2(state: GameState): void {
       if (!h || h.dinero < FIRM_CONSTANTS.ahorroMinEmprender) continue;
       if (nextSubRand(state, 'mercado') >= DEMOG_CONSTANTS.probEmprenderBase) continue;
 
-      const buildingType: BuildingType =
-        cand.rol === 'periodista' ? 'oficina_medio' : 'kiosco';
+      let buildingType: BuildingType;
+      let founderCause = 'mercado:emprendimiento';
+      if (cand.rol === 'periodista') {
+        buildingType = 'oficina_medio';
+      } else if (
+        !state.firmas.some((f) => f.activa && f.rubro === 'industria') &&
+        state.parcelas.some((p) => p.tipoParcela === 'industrial' && p.estado === 'libre')
+      ) {
+        buildingType = 'fabrica';
+        founderCause = 'mercado:demanda_industria';
+      } else if (neediestCategory === 'gastronomia') {
+        buildingType = 'bar_cafe';
+        founderCause = 'mercado:demanda_gastronomia';
+      } else if (neediestCategory === 'servicios') {
+        buildingType = 'peluqueria';
+        founderCause = 'mercado:demanda_servicios';
+      } else if (neediestCategory === 'entretenimiento') {
+        buildingType = 'club';
+        founderCause = 'mercado:demanda_entretenimiento';
+      } else {
+        buildingType = 'kiosco';
+      }
+
       const def = BUILDING_CATALOG[buildingType];
       const rubro = def.rubro ?? 'comercio';
       if (h.dinero < def.costoObra + 40) continue;
 
       const freeP = state.parcelas.find(
-        (p) => p.tipoParcela === def.parcelTipo && p.estado === 'libre' && (p.zona === cand.zona || state.zonas[cand.zona]?.vecinas.includes(p.zona))
+        (p) =>
+          p.tipoParcela === def.parcelTipo &&
+          p.estado === 'libre' &&
+          Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
       );
       if (!freeP) continue;
 
       h.dinero -= def.costoObra + 35;
-      if (constr) constr.caja += def.costoObra;
+      if (constr) constr.ventas += def.costoObra;
       else state.gobierno.reserva += def.costoObra;
 
       const newFirmId = nextSeqId(state, 'f');
@@ -1535,12 +2127,17 @@ export function runPaydayEconomyV2(state: GameState): void {
         ultimoSueldosPeriodo: 0,
         ultimaGanancia: 0,
         historialGanancias: [],
-        ultimaCausa: 'mercado:emprendimiento',
+        ultimaCausa: founderCause,
       };
       state.firmas.push(newFirm);
       cand.partes.push({ firmaId: newFirmId, pct: 100 });
       if (cand.rol === 'desempleado') {
-        cand.rol = rubro === 'medio' ? 'periodista' : 'comerciante';
+        cand.rol =
+          rubro === 'medio'
+            ? 'periodista'
+            : rubro === 'industria'
+            ? 'obrero'
+            : 'comerciante';
         cand.empleadorId = newFirmId;
         newFirm.empleados.push(cand.id);
       }
@@ -1595,11 +2192,11 @@ export function runPaydayEconomyV2(state: GameState): void {
         firmaId: newFirmId,
         rubro,
         duenoId: cand.id,
-        causa: 'mercado:emprendimiento',
+        causa: founderCause,
       });
     }
 
-    // 7c. Private residential construction when calle or crowding spikes
+    // 7c. Private residential construction when calle or crowding spikes & ROI holds
     let housesBuilt = 0;
     const inmobiliarias = state.firmas.filter((f) => f.activa && f.rubro === 'inmobiliaria');
     for (const z of zones) {
@@ -1607,11 +2204,34 @@ export function runPaydayEconomyV2(state: GameState): void {
       const zHogares = state.hogares.filter((h) => h.zona === z && h.estado !== 'acogida');
       if (zHogares.length === 0) continue;
       const calleZ = (zHogares.filter((h) => h.estado === 'calle').length / zHogares.length) * 100;
-      if (calleZ < HOUSING_CONSTANTS.umbralCalleConstruirPct) continue;
+      const conCasaZ = zHogares.filter((h) => h.estado === 'con_casa');
+      const hacinZ =
+        conCasaZ.length > 0
+          ? (conCasaZ.filter((h) => {
+              const c = h.casaId ? casaById.get(h.casaId) : undefined;
+              return Boolean(c && h.miembros.length > c.capacidad);
+            }).length /
+              conCasaZ.length) *
+            100
+          : 0;
+      if (
+        calleZ < HOUSING_CONSTANTS.umbralCalleConstruirPct &&
+        hacinZ < HOUSING_CONSTANTS.umbralHacinamientoConstruirPct
+      ) {
+        continue;
+      }
+
+      const houseType: HouseType = calleZ >= 12 ? 'casa_chica' : 'casa_mediana';
+      const def = BUILDING_CATALOG[houseType];
+      const zDem = state.zonas[z]?.demandaAlquilerIndice ?? 1;
+      const expectedRent = (def.alquilerBase ?? 12) * zDem;
+      if (expectedRent * HOUSING_CONSTANTS.periodosRecuperoInversionCasa < def.costoObra * 0.75) {
+        continue;
+      }
 
       const builder =
-        inmobiliarias.find((f) => f.caja >= BUILDING_CATALOG.casa_mediana.costoObra) ??
-        constructoras.find((f) => f.caja >= BUILDING_CATALOG.casa_mediana.costoObra);
+        inmobiliarias.find((f) => !sinInversionFirms.has(f.id) && f.caja >= def.costoObra) ??
+        constructoras.find((f) => !sinInversionFirms.has(f.id) && f.caja >= def.costoObra);
       if (!builder) continue;
 
       const freeRes = state.parcelas.find(
@@ -1619,10 +2239,8 @@ export function runPaydayEconomyV2(state: GameState): void {
       );
       if (!freeRes) continue;
 
-      const houseType: HouseType = 'casa_mediana';
-      const def = BUILDING_CATALOG[houseType];
       builder.caja -= def.costoObra;
-      if (constr) constr.caja += def.costoObra;
+      if (constr) constr.ventas += def.costoObra;
       else state.gobierno.reserva += def.costoObra;
 
       freeRes.estado = 'en_obra';
@@ -1648,6 +2266,9 @@ export function runPaydayEconomyV2(state: GameState): void {
   // ====================================================================
   // 8. MEDIA DEPENDENCY, CREDIBILITY & EDITORIAL DRIFT
   // ====================================================================
+  const extrasPresion = state.gobierno.extras?.vigentes?.presion ?? 0;
+  const extrasAcceso = state.gobierno.extras?.vigentes?.acceso ?? 0;
+
   for (const m of activeMedios) {
     const f = m.firmaId ? firmaById.get(m.firmaId) : undefined;
     if (f) {
@@ -1661,7 +2282,7 @@ export function runPaydayEconomyV2(state: GameState): void {
     m.finanzas.fondosEstado = Number(m.ingresos.fondosEstado.toFixed(1));
     m.finanzas.dependenciaPct = m.ingresos.dependenciaPct;
 
-    // Credibility moves with dependency & monopoly sensationalism
+    // Credibility moves with dependency, monopoly sensationalism, G3 press pressure & press office access
     if (dep > ECON_CONSTANTS.umbralDependenciaPrensaPct) {
       m.credibilidad = clamp(m.credibilidad - 2.2, 15, 98);
     } else {
@@ -1670,12 +2291,29 @@ export function runPaydayEconomyV2(state: GameState): void {
     if (activeMedios.length === 1 && m.lineaEditorial.sensacionalismo > 60) {
       m.credibilidad = clamp(m.credibilidad - 1.2, 15, 98);
     }
+    if (extrasPresion > LEVEL11_CONSTANTS.presionUmbral) {
+      m.credibilidad = clamp(
+        m.credibilidad - (extrasPresion - LEVEL11_CONSTANTS.presionUmbral) * LEVEL11_CONSTANTS.presionCredPorPunto,
+        15,
+        98
+      );
+    }
+    if (extrasAcceso > 0) {
+      m.credibilidad = clamp(m.credibilidad + extrasAcceso * LEVEL11_CONSTANTS.accesoCredPorPunto, 15, 98);
+    }
+    m.credibilidad = Number(m.credibilidad.toFixed(1));
 
-    // Reach adjusts gently with total revenue
-    const targetReach = clamp(25 + Math.sqrt(Math.max(0, totalRev)) * 5.2, 18, 92);
+    // Reach adjusts gently with total revenue & G3 press access
+    const targetReach = clamp(
+      25 + Math.sqrt(Math.max(0, totalRev)) * 5.2 + extrasAcceso * LEVEL11_CONSTANTS.accesoAlcancePorPunto,
+      18,
+      95
+    );
     m.alcancePct = Number((m.alcancePct * 0.82 + targetReach * 0.18).toFixed(1));
 
-    // Editorial drift toward owners' political loyalty & traits
+    // Editorial drift toward owners' political loyalty & G3 press pressure
+    const prevAff = m.lineaEditorial.afinidadGobierno;
+    const prevSens = m.lineaEditorial.sensacionalismo;
     if (f && f.partes.length > 0) {
       let avgLoy = 0;
       let avgSens = 0;
@@ -1691,28 +2329,40 @@ export function runPaydayEconomyV2(state: GameState): void {
         }
       }
       if (weightSum > 0) {
-        const ownerTargetAff = clamp(avgLoy / weightSum + (dep > 35 ? 10 : 0), 10, 95);
+        const ownerTargetAff = clamp(
+          avgLoy / weightSum + (dep > 35 ? 10 : 0) + extrasPresion * LEVEL11_CONSTANTS.presionAfinidadPorPunto,
+          10,
+          96
+        );
         const ownerTargetSens = clamp(avgSens / weightSum, 15, 95);
-        const prevAff = m.lineaEditorial.afinidadGobierno;
-        const prevSens = m.lineaEditorial.sensacionalismo;
         m.lineaEditorial.afinidadGobierno = Number(
           (prevAff + (ownerTargetAff - prevAff) * FIRM_CONSTANTS.kLineaEditorial).toFixed(1)
         );
         m.lineaEditorial.sensacionalismo = Number(
           (prevSens + (ownerTargetSens - prevSens) * FIRM_CONSTANTS.kLineaEditorial).toFixed(1)
         );
-        if (Math.abs(m.lineaEditorial.afinidadGobierno - prevAff) >= 3) {
-          emitSimEvent(state, {
-            id: nextSeqId(state, 'ev_mlin'),
-            dia: state.reloj.dia,
-            tipo: 'medio_cambio_linea',
-            zona: m.zona ?? zones[0] ?? 'centro',
-            medioId: m.id,
-            lineaAnterior: { afinidadGobierno: prevAff, sensacionalismo: prevSens },
-            lineaNueva: { ...m.lineaEditorial },
-          });
-        }
+      } else if (extrasPresion > 0) {
+        const targetAff = clamp(m.afinidadBase + extrasPresion * LEVEL11_CONSTANTS.presionAfinidadPorPunto, 10, 96);
+        m.lineaEditorial.afinidadGobierno = Number(
+          (prevAff + (targetAff - prevAff) * FIRM_CONSTANTS.kLineaEditorial).toFixed(1)
+        );
       }
+    } else if (extrasPresion > 0) {
+      const targetAff = clamp(m.afinidadBase + extrasPresion * LEVEL11_CONSTANTS.presionAfinidadPorPunto, 10, 96);
+      m.lineaEditorial.afinidadGobierno = Number(
+        (prevAff + (targetAff - prevAff) * FIRM_CONSTANTS.kLineaEditorial).toFixed(1)
+      );
+    }
+    if (Math.abs(m.lineaEditorial.afinidadGobierno - prevAff) >= 3) {
+      emitSimEvent(state, {
+        id: nextSeqId(state, 'ev_mlin'),
+        dia: state.reloj.dia,
+        tipo: 'medio_cambio_linea',
+        zona: m.zona ?? zones[0] ?? 'centro',
+        medioId: m.id,
+        lineaAnterior: { afinidadGobierno: prevAff, sensacionalismo: prevSens },
+        lineaNueva: { ...m.lineaEditorial },
+      });
     }
   }
 

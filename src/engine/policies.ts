@@ -17,6 +17,7 @@ import {
   ServiceAreaId,
   ServiceLevel,
   ServicePublicRoleId,
+  ViaTramo,
   WorldConfig,
 } from '../types/game';
 
@@ -25,6 +26,7 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   economiaModulo: 'base',
   nivelMundo: 'M2',
   nivelGobernador: 'G2',
+  estadoAutomatico: false,
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,
   caos: { ...SCENARIO_PRESETS.elecciones.caosDefault },
@@ -40,6 +42,8 @@ export interface PeriodBudgetEstimate {
   comidaMenoresEst: number;
   ayudaSocialEst: number;
   mantenimientoEst: number;
+  mantenimientoViasEst: number;
+  mantenimientoEdificiosEst: number;
   operacionObrasEst: number;
   operacionEst: number;
   prensaEst: number;
@@ -174,9 +178,12 @@ export function computeMaintenanceBreakdown(
   parcelas: Parcela[],
   nivelObras: ServiceLevel,
   vivosCount: number,
-  _poblacionInicial: number
+  _poblacionInicial: number,
+  tramos: ViaTramo[] = []
 ): {
   mantenimientoPorArea: Record<ServiceAreaId, number>;
+  mantenimientoEdificios: number;
+  mantenimientoVias: number;
   mantenimientoTotal: number;
   operacionObras: number;
   operacionTotal: number;
@@ -198,15 +205,27 @@ export function computeMaintenanceBreakdown(
     }
   }
 
-  const mantenimientoTotal =
+  const mantenimientoEdificios =
     mantenimientoPorArea.seguridad +
     mantenimientoPorArea.salud +
     mantenimientoPorArea.infraestructura;
+
+  let mantenimientoVias = 0;
+  for (const t of tramos) {
+    if (t.construida && t.mantenimientoPeriodo > 0) {
+      mantenimientoVias += t.mantenimientoPeriodo;
+    }
+  }
+  mantenimientoPorArea.infraestructura += mantenimientoVias;
+
+  const mantenimientoTotal = mantenimientoEdificios + mantenimientoVias;
   const operacionObras = (OBRAS_LEVEL_TABLE[nivelObras].operacionPeriodo * Math.max(1, vivosCount)) / 100;
   mantenimientoPorArea.infraestructura += operacionObras;
 
   return {
     mantenimientoPorArea,
+    mantenimientoEdificios: Number(mantenimientoEdificios.toFixed(2)),
+    mantenimientoVias: Number(mantenimientoVias.toFixed(2)),
     mantenimientoTotal: Number(mantenimientoTotal.toFixed(2)),
     operacionObras: Number(operacionObras.toFixed(2)),
     operacionTotal: Number((mantenimientoTotal + operacionObras).toFixed(2)),
@@ -306,9 +325,12 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     state.parcelas,
     levers.nivelObras,
     pop,
-    state.config.poblacionInicial
+    state.config.poblacionInicial,
+    state.tramos ?? []
   );
   const mantenimientoEst = opBreakdown.mantenimientoTotal;
+  const mantenimientoViasEst = opBreakdown.mantenimientoVias;
+  const mantenimientoEdificiosEst = opBreakdown.mantenimientoEdificios;
   const operacionObrasEst = opBreakdown.operacionObras;
   const operacionEst = opBreakdown.operacionTotal;
 
@@ -375,6 +397,8 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     comidaMenoresEst: Number(comidaMenoresEst.toFixed(1)),
     ayudaSocialEst: Number(ayudaSocialEst.toFixed(1)),
     mantenimientoEst: Number(mantenimientoEst.toFixed(1)),
+    mantenimientoViasEst: Number(mantenimientoViasEst.toFixed(1)),
+    mantenimientoEdificiosEst: Number(mantenimientoEdificiosEst.toFixed(1)),
     operacionObrasEst: Number(operacionObrasEst.toFixed(1)),
     operacionEst: Number(operacionEst.toFixed(1)),
     prensaEst: Number(prensaEst.toFixed(1)),

@@ -2,8 +2,8 @@ import {
   BUILDING_CATALOG,
   ECON_CONSTANTS,
   HOUSING_CONSTANTS,
-  PERIOD_DAYS,
   ROLE_CATALOG,
+  VIAL_CONSTANTS,
 } from '../data/catalogs';
 import {
   BuildingInstance,
@@ -18,12 +18,14 @@ import {
   Modifier,
   Npc,
   Parcela,
+  ParcelTipo,
   PersonalityTrait,
   RoleId,
   SimEvent,
+  ViaTramo,
   ZoneId,
 } from '../types/game';
-import { getActiveBuildings, getBuildingRoleCapacity } from './policies';
+import { computeMaintenanceBreakdown, getActiveBuildings, getBuildingRoleCapacity } from './policies';
 import { nextSeqId } from './rng';
 
 export function clamp(val: number, min: number, max: number): number {
@@ -37,6 +39,13 @@ export function getStage(edad: number): 'menor' | 'adulto' | 'jubilado' {
 }
 
 export function getWorldZones(state: Pick<GameState, 'zonas'>): ZoneId[] {
+  const keys = Object.keys(state.zonas || {}).filter(
+    (z) => state.zonas[z]?.estado !== 'no_urbanizada'
+  );
+  return keys.length > 0 ? keys : ['centro'];
+}
+
+export function getAllZoneIds(state: Pick<GameState, 'zonas'>): ZoneId[] {
   const keys = Object.keys(state.zonas || {});
   return keys.length > 0 ? keys : ['centro'];
 }
@@ -134,6 +143,177 @@ export function buildZoneStepMap(
     }
   }
   return dist;
+}
+
+export function getViaTramoCost(tramo: ViaTramo): number {
+  if (!tramo.construida || tramo.estado <= 0) return Infinity;
+  return tramo.longitud * (1 + VIAL_CONSTANTS.kVial * (1 - clamp(tramo.estado, 0, 100) / 100));
+}
+
+export function getBuiltNetworkNodes(state: Pick<GameState, 'zonas' | 'tramos'>): Set<string> {
+  const nodes = new Set<string>();
+  for (const [zId, z] of Object.entries(state.zonas || {})) {
+    if (z.estado !== 'no_urbanizada') {
+      nodes.add(z.nodoPrincipal ?? `n_${zId}`);
+    }
+  }
+  for (const t of state.tramos || []) {
+    if (t.construida && t.estado > 0) {
+      nodes.add(t.nodoA);
+      nodes.add(t.nodoB);
+    }
+  }
+  return nodes;
+}
+
+export function isViaConnectableToNetwork(
+  state: Pick<GameState, 'zonas' | 'tramos'>,
+  tramo: ViaTramo
+): boolean {
+  if (tramo.construida || tramo.enObra) return false;
+  const builtNodes = getBuiltNetworkNodes(state);
+  return builtNodes.has(tramo.nodoA) || builtNodes.has(tramo.nodoB);
+}
+
+export function recomputeRoadDistances(state: GameState): void {
+  const adj: Record<string, Array<{ to: string; cost: number }>> = {};
+  const addEdge = (a: string, b: string, cost: number) => {
+    if (!adj[a]) adj[a] = [];
+    adj[a].push({ to: b, cost });
+  };
+
+  for (const t of state.tramos || []) {
+    const cost = getViaTramoCost(t);
+    if (!Number.isFinite(cost)) continue;
+    addEdge(t.nodoA, t.nodoB, cost);
+    addEdge(t.nodoB, t.nodoA, cost);
+  }
+
+  const zoneIds = Object.keys(state.zonas || {});
+  const matrix: Record<ZoneId, Record<ZoneId, number>> = {};
+
+  for (const zA of zoneIds) {
+    matrix[zA] = {};
+    const startNode = state.zonas[zA]?.nodoPrincipal ?? `n_${zA}`;
+    const distNode: Record<string, number> = { [startNode]: 0 };
+    const visited = new Set<string>();
+    const queue: string[] = [startNode];
+
+    while (queue.length > 0) {
+      let bestIdx = 0;
+      for (let i = 1; i < queue.length; i++) {
+        if ((distNode[queue[i]] ?? Infinity) < (distNode[queue[bestIdx]] ?? Infinity)) {
+          bestIdx = i;
+        }
+      }
+      const u = queue.splice(bestIdx, 1)[0];
+      if (visited.has(u)) continue;
+      visited.add(u);
+      const du = distNode[u] ?? Infinity;
+      for (const edge of adj[u] ?? []) {
+        const nd = du + edge.cost;
+        if (nd < (distNode[edge.to] ?? Infinity)) {
+          distNode[edge.to] = nd;
+          queue.push(edge.to);
+        }
+      }
+    }
+
+    for (const zB of zoneIds) {
+      if (zA === zB) {
+        matrix[zA][zB] = VIAL_CONSTANTS.costoInternoZona;
+      } else {
+        const endNode = state.zonas[zB]?.nodoPrincipal ?? `n_${zB}`;
+        const d = distNode[endNode];
+        matrix[zA][zB] =
+          typeof d === 'number' && Number.isFinite(d)
+            ? Number((d + VIAL_CONSTANTS.costoInternoZona).toFixed(2))
+            : Infinity;
+      }
+    }
+  }
+
+  state.distanciasZonas = matrix;
+}
+
+export function getZoneTravelCost(state: GameState, from: ZoneId, to: ZoneId): number {
+  if (from === to) return VIAL_CONSTANTS.costoInternoZona;
+  const cached = state.distanciasZonas?.[from]?.[to];
+  if (typeof cached === 'number') return cached;
+  const steps = buildZoneStepMap(state.zonas);
+  const stepDist = steps[from]?.[to];
+  return typeof stepDist === 'number'
+    ? stepDist * 10 + VIAL_CONSTANTS.costoInternoZona
+    : Infinity;
+}
+
+export function getCommuteProductivityFactor(state: GameState, npc: Npc): number {
+  if (!npc.empleadorId) return 1;
+  const firma = state.firmas.find((f) => f.id === npc.empleadorId);
+  if (!firma) return 1;
+  const cost = getZoneTravelCost(state, npc.zona, firma.zona);
+  if (!Number.isFinite(cost)) return 0.65;
+  const extra = Math.max(0, cost - VIAL_CONSTANTS.costoInternoZona);
+  return clamp(1 - extra * VIAL_CONSTANTS.kTraslado, 0.72, 1);
+}
+
+export function computeDemandaSuelo(state: GameState): Record<string, number> {
+  const result: Record<string, number> = {};
+  const activeZones = getWorldZones(state);
+  const parcelTipos: ParcelTipo[] = ['residencial', 'comercial', 'industrial', 'agricola'];
+
+  const casaById = new Map(state.casas.map((c) => [c.id, c]));
+  const freeCountByZoneTipo = new Map<string, number>();
+  for (const p of state.parcelas) {
+    if (p.estado === 'libre') {
+      const k = `${p.zona}:${p.tipoParcela}`;
+      freeCountByZoneTipo.set(k, (freeCountByZoneTipo.get(k) ?? 0) + 1);
+    }
+  }
+
+  for (const z of activeZones) {
+    const zHogares = state.hogares.filter((h) => h.zona === z);
+    const streetOrCrowded = zHogares.filter(
+      (h) => h.estado === 'calle' || isHogarHacinado(h, h.casaId ? casaById.get(h.casaId) : undefined)
+    ).length;
+
+    const expandingCom = state.firmas.filter(
+      (f) =>
+        f.activa &&
+        f.zona === z &&
+        f.rubro !== 'agro' &&
+        f.rubro !== 'industria' &&
+        f.rubro !== 'medio' &&
+        f.factor > 1.02 &&
+        f.caja >= 220
+    ).length;
+
+    const expandingAgro = state.firmas.filter(
+      (f) => f.activa && f.zona === z && f.rubro === 'agro' && f.factor > 1.02 && f.caja >= 260
+    ).length;
+
+    const expandingInd = state.firmas.filter(
+      (f) => f.activa && f.zona === z && f.rubro === 'industria' && f.factor > 1.02 && f.caja >= 340
+    ).length;
+
+    const demandByTipo: Record<ParcelTipo, number> = {
+      residencial: streetOrCrowded,
+      comercial: expandingCom,
+      industrial: expandingInd,
+      agricola: expandingAgro,
+      publica: 0,
+      especial: 0,
+    };
+
+    for (const pt of parcelTipos) {
+      const key = `${z}:${pt}`;
+      const libres = freeCountByZoneTipo.get(key) ?? 0;
+      const dem = demandByTipo[pt];
+      result[key] = Number((dem / Math.max(0.5, libres)).toFixed(2));
+    }
+  }
+
+  return result;
 }
 
 export function computeTotalWorldMoney(state: GameState): number {
@@ -422,10 +602,12 @@ export function getNpcProductivity(npc: Npc, state: GameState): number {
   if (!npc.vivo || npc.hospital.internado || npc.accionIa?.fueraDePuesto) return 0;
   const hogar = state.hogares.find((h) => h.id === npc.hogarId);
   const streetFactor = hogar?.estado === 'calle' ? HOUSING_CONSTANTS.calleProdFactor : 1;
+  const commuteFactor = getCommuteProductivityFactor(state, npc);
   const modProd = getModifierDelta(npc, 'productividad');
   const base = clamp(
     (45 + npc.variables.salud * 0.4 + npc.personalidad.laboriosidad * 0.15 - npc.variables.hambre * 0.35) *
-      streetFactor +
+      streetFactor *
+      commuteFactor +
       modProd,
     15,
     125
@@ -631,6 +813,35 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     ((state.mercadoStats.muertesAcum / Math.max(1, vivosCount)) * 100 / Math.max(0.2, yearsElapsed)).toFixed(2)
   );
 
+  const tramos = state.tramos ?? [];
+  const parcelasSinCalle = state.parcelas.filter((p) => p.estado === 'sin_calle').length;
+  const zonasNoUrbanizadas = Object.values(state.zonas).filter(
+    (z) => z.estado === 'no_urbanizada'
+  ).length;
+  const tramosEnMalEstado = tramos.filter(
+    (t) => t.construida && t.estado > 0 && t.estado < VIAL_CONSTANTS.umbralMalEstadoVia
+  ).length;
+  const tramosCortados = tramos.filter((t) => t.construida && t.estado <= 0).length;
+  const maint = computeMaintenanceBreakdown(
+    state.parcelas,
+    state.gobierno.palancasVigentes.nivelObras,
+    vivosCount,
+    state.config.poblacionInicial,
+    tramos
+  );
+  const constrFirms = activeFirmas.filter((f) => f.rubro === 'construccion');
+  const constructoraSalud = {
+    firmas: constrFirms.length,
+    ventasPeriodo: Number(
+      constrFirms.reduce((s, f) => s + (f.ultimoIngresoPeriodo || f.ventas || 0), 0).toFixed(1)
+    ),
+    factorMedio:
+      constrFirms.length > 0
+        ? Number((constrFirms.reduce((s, f) => s + f.factor, 0) / constrFirms.length).toFixed(2))
+        : 0,
+    empleos: constrFirms.reduce((s, f) => s + f.empleados.length, 0),
+  };
+
   return {
     poblacion: vivosCount,
     poblacionPct: Number(((vivosCount / total) * 100).toFixed(1)),
@@ -652,6 +863,11 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     esperandoCama,
     edificiosActivos: activeBuildings.length,
     parcelasLibres: state.parcelas.filter((p) => p.estado === 'libre').length,
+    parcelasSinCalle,
+    zonasNoUrbanizadas,
+    tramosEnMalEstado,
+    tramosCortados,
+    mantenimientoTotalPeriodo: maint.mantenimientoTotal,
     hogares: state.hogares.length,
     callePct: Number(((calleCount / hogCount) * 100).toFixed(1)),
     hacinamientoPct:
@@ -674,6 +890,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
       quiebrasPeriodo: state.mercadoStats.quiebrasPeriodo,
       fundacionesPeriodo: state.mercadoStats.fundacionesPeriodo,
     },
+    constructoraSalud,
   };
 }
 
@@ -749,14 +966,42 @@ export function compactEvents(state: GameState): void {
     });
   }
 
-  kept.sort((a, b) => b.dia - a.dia);
-  state.eventos = kept.slice(0, 1500);
+  const pinnedRoots: SimEvent[] = [];
+  const aggEvents: SimEvent[] = [];
+  const recentOthers: SimEvent[] = [];
+
+  for (const ev of kept) {
+    if (ROOT_EVENT_TYPES.has(ev.tipo) || pinned.has(ev.id)) {
+      pinnedRoots.push(ev);
+    } else if (ev.tipo === 'agregado') {
+      aggEvents.push(ev);
+    } else {
+      recentOthers.push(ev);
+    }
+  }
+
+  pinnedRoots.sort((a, b) => b.dia - a.dia);
+  aggEvents.sort((a, b) => b.dia - a.dia);
+  recentOthers.sort((a, b) => b.dia - a.dia);
+
+  const maxEvents = 1500;
+  const keptRoots = pinnedRoots.slice(0, maxEvents);
+  const remainingAfterRoots = Math.max(0, maxEvents - keptRoots.length);
+  const minAggReserve = Math.min(aggEvents.length, Math.min(600, remainingAfterRoots));
+  const recentBudget = Math.max(0, remainingAfterRoots - minAggReserve);
+  const keptRecent = recentOthers.slice(0, recentBudget);
+  const aggBudget = Math.max(minAggReserve, remainingAfterRoots - keptRecent.length);
+  const keptAgg = aggEvents.slice(0, aggBudget);
+
+  const finalEvents = [...keptRoots, ...keptRecent, ...keptAgg];
+  finalEvents.sort((a, b) => b.dia - a.dia);
+  state.eventos = finalEvents;
 }
 
 export function emitSimEvent(state: GameState, event: SimEvent): void {
   state.eventosDiaActual.push(event);
   state.eventos.unshift(event);
-  if (state.eventos.length > 2800) {
+  if (state.eventos.length > 1500) {
     compactEvents(state);
   }
 }
@@ -835,6 +1080,12 @@ export function checkEngineInvariants(state: GameState): string[] {
     }
   }
 
+  for (const p of state.parcelas) {
+    if (p.estado === 'sin_calle' && p.edificio) {
+      errors.push(`Parcela sin calle ${p.id} tiene edificio`);
+    }
+  }
+
   void casaById;
   return errors;
 }
@@ -843,8 +1094,16 @@ export function getRubroDisplayName(rubro: FirmRubro): string {
   switch (rubro) {
     case 'agro':
       return 'Agroalimentaria';
+    case 'industria':
+      return 'Industria';
     case 'comercio':
       return 'Comercio';
+    case 'gastronomia':
+      return 'Gastronomía';
+    case 'servicios':
+      return 'Servicios';
+    case 'entretenimiento':
+      return 'Entretenimiento';
     case 'construccion':
       return 'Construcción';
     case 'inmobiliaria':

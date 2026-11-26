@@ -17,6 +17,8 @@ import {
   ScenarioPreset,
   ServiceLevel,
   ServicePublicRoleId,
+  SpendCategory,
+  ViaTramo,
   ZoneDefinition,
   ZoneId,
 } from '../types/game';
@@ -27,12 +29,24 @@ export const SAVE_FORMAT_VERSION = 5;
 export const PERIOD_DAYS = 7;
 export const PERIOD_DAYS_DEMOG = 30;
 
+const puestos = (
+  p: Partial<Record<Exclude<RoleId, 'constructor'>, number>>,
+  constructorCount?: number
+): Partial<Record<RoleId, number>> => ({
+  ...p,
+  ...(constructorCount ? { constructor: constructorCount } : {}),
+});
+
 export const DEFAULT_ZONAS: Record<ZoneId, ZoneDefinition> = Object.fromEntries(
   Object.entries(MAPA_ELECCIONES.zonas).map(([k, v]) => {
     const raw = v as unknown as {
       id?: string;
       nombre?: string;
       caracter?: ZoneDefinition['caracter'];
+      estado?: ZoneDefinition['estado'];
+      viaAperturaId?: string;
+      nodoPrincipal?: string;
+      barreraNatural?: boolean;
       vecinas: string[];
       demandaAlquilerIndice?: number;
       rect?: { wx: number; wy: number; ww: number; wh: number };
@@ -43,6 +57,10 @@ export const DEFAULT_ZONAS: Record<ZoneId, ZoneDefinition> = Object.fromEntries(
         id: raw.id ?? k,
         nombre: raw.nombre ?? k,
         caracter: raw.caracter ?? 'residencial',
+        estado: raw.estado ?? 'activa',
+        viaAperturaId: raw.viaAperturaId,
+        nodoPrincipal: raw.nodoPrincipal ?? `n_${raw.id ?? k}`,
+        barreraNatural: raw.barreraNatural,
         vecinas: [...raw.vecinas],
         demandaAlquilerIndice: raw.demandaAlquilerIndice ?? 1.0,
         rect: raw.rect ?? { wx: 415, wy: 270, ww: 370, wh: 225 },
@@ -50,6 +68,10 @@ export const DEFAULT_ZONAS: Record<ZoneId, ZoneDefinition> = Object.fromEntries(
     ];
   })
 );
+
+export const DEFAULT_TRAMOS: ViaTramo[] = (
+  ((MAPA_ELECCIONES as unknown as { tramos?: ViaTramo[] }).tramos ?? [])
+).map((t) => ({ ...t, parcelasAbiertas: [...(t.parcelasAbiertas ?? [])] }));
 
 export const ZONE_IDS: ZoneId[] = Object.keys(DEFAULT_ZONAS);
 
@@ -63,16 +85,18 @@ export const ZONE_TO_DISTRICT: Record<string, DistrictId | 'all'> = {
   suroeste: 'campos',
   oeste: 'campos',
   noroeste: 'campos',
+  poligono: 'taller',
+  ribera: 'residencial',
 };
 
 const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
   agricultor: ['noroeste', 'oeste', 'suroeste', 'sureste'],
-  tecnico: ['noroeste', 'oeste', 'suroeste', 'sureste'],
-  obrero: ['centro', 'este', 'norte', 'sur'],
-  comerciante: ['centro', 'este', 'norte', 'sur', 'noreste'],
+  tecnico: ['noroeste', 'oeste', 'suroeste', 'sureste', 'este'],
+  obrero: ['centro', 'este', 'oeste', 'norte', 'sur'],
+  comerciante: ['centro', 'este', 'norte', 'sur', 'noreste', 'oeste'],
   constructor: ['centro', 'norte', 'este', 'sur'],
   inmobiliario: ['centro', 'este', 'norte', 'sur'],
-  empresario: ['centro', 'este', 'norte', 'sur'],
+  empresario: ['centro', 'este', 'norte', 'sur', 'oeste'],
   periodista: ['centro', 'este', 'norte'],
   policia: ['centro', 'este', 'norte', 'sur'],
   estatal: ['centro'],
@@ -110,7 +134,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     diasObra: 3,
     capacidadCasa: 3,
     alquilerBase: 8.5,
-    puestos: {},
+    puestos: puestos({}),
   },
   casa_mediana: {
     tipo: 'casa_mediana',
@@ -124,7 +148,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     diasObra: 4,
     capacidadCasa: 5,
     alquilerBase: 14.0,
-    puestos: {},
+    puestos: puestos({}),
   },
   casa_grande: {
     tipo: 'casa_grande',
@@ -138,7 +162,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     diasObra: 5,
     capacidadCasa: 8,
     alquilerBase: 22.0,
-    puestos: {},
+    puestos: puestos({}),
   },
 
   // === Privados (EDIFICIOS_V2 §4) ===
@@ -154,7 +178,21 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 8.0,
     diasObra: 3,
     capacidadVentasDiaria: 120,
-    puestos: { agricultor: 5, tecnico: 1 },
+    puestos: puestos({ agricultor: 5, tecnico: 1 }),
+  },
+  fabrica: {
+    tipo: 'fabrica',
+    nombre: 'Fábrica',
+    parcelTipo: 'industrial',
+    categoria: 'privado',
+    rubro: 'industria',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 340,
+    mantenimientoPeriodo: 10.0,
+    diasObra: 4,
+    capacidadVentasDiaria: 140,
+    puestos: puestos({ obrero: 4, tecnico: 1 }),
   },
   almacen: {
     tipo: 'almacen',
@@ -162,13 +200,47 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     parcelTipo: 'comercial',
     categoria: 'privado',
     rubro: 'comercio',
+    vendeComida: true,
     construibleGobernador: false,
     requiereG2: false,
-    costoObra: 240,
-    mantenimientoPeriodo: 7.0,
+    costoObra: 220,
+    mantenimientoPeriodo: 6.5,
     diasObra: 3,
     capacidadVentasDiaria: 95,
-    puestos: { obrero: 3, comerciante: 1 },
+    puestos: puestos({ obrero: 2, comerciante: 1 }),
+  },
+  supermercado: {
+    tipo: 'supermercado',
+    nombre: 'Supermercado',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'comercio',
+    categoriaGasto: 'bienes',
+    vendeComida: true,
+    margenAjustePct: -4,
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 340,
+    mantenimientoPeriodo: 10.0,
+    diasObra: 4,
+    capacidadVentasDiaria: 220,
+    puestos: puestos({ obrero: 4, comerciante: 2 }),
+  },
+  tienda: {
+    tipo: 'tienda',
+    nombre: 'Tienda',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'comercio',
+    categoriaGasto: 'bienes',
+    vendeComida: false,
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 200,
+    mantenimientoPeriodo: 6.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 90,
+    puestos: puestos({ obrero: 2, comerciante: 1 }),
   },
   kiosco: {
     tipo: 'kiosco',
@@ -176,27 +248,122 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     parcelTipo: 'comercial',
     categoria: 'privado',
     rubro: 'comercio',
+    categoriaGasto: 'bienes',
+    vendeComida: false,
     construibleGobernador: false,
     requiereG2: false,
     costoObra: 130,
     mantenimientoPeriodo: 4.0,
     diasObra: 2,
     capacidadVentasDiaria: 45,
-    puestos: { obrero: 1, comerciante: 1 },
+    puestos: puestos({ obrero: 1, comerciante: 1 }),
   },
   restoran: {
     tipo: 'restoran',
     nombre: 'Restorán',
     parcelTipo: 'comercial',
     categoria: 'privado',
-    rubro: 'comercio',
+    rubro: 'gastronomia',
+    categoriaGasto: 'gastronomia',
+    margenAjustePct: 4,
     construibleGobernador: false,
     requiereG2: false,
     costoObra: 300,
     mantenimientoPeriodo: 9.0,
     diasObra: 3,
     capacidadVentasDiaria: 110,
-    puestos: { obrero: 4, comerciante: 1 },
+    puestos: puestos({ obrero: 3, comerciante: 1 }),
+  },
+  bar_cafe: {
+    tipo: 'bar_cafe',
+    nombre: 'Bar / Café',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'gastronomia',
+    categoriaGasto: 'gastronomia',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 165,
+    mantenimientoPeriodo: 4.8,
+    diasObra: 2,
+    capacidadVentasDiaria: 60,
+    puestos: puestos({ obrero: 1, comerciante: 1 }),
+  },
+  peluqueria: {
+    tipo: 'peluqueria',
+    nombre: 'Peluquería',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'servicios',
+    categoriaGasto: 'servicios',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 150,
+    mantenimientoPeriodo: 4.2,
+    diasObra: 2,
+    capacidadVentasDiaria: 55,
+    puestos: puestos({ obrero: 1, comerciante: 1 }),
+  },
+  taller: {
+    tipo: 'taller',
+    nombre: 'Taller de Servicios',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'servicios',
+    categoriaGasto: 'servicios',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 215,
+    mantenimientoPeriodo: 6.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 85,
+    puestos: puestos({ obrero: 2, comerciante: 1 }),
+  },
+  gimnasio: {
+    tipo: 'gimnasio',
+    nombre: 'Gimnasio',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'servicios',
+    categoriaGasto: 'servicios',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 250,
+    mantenimientoPeriodo: 7.0,
+    diasObra: 3,
+    capacidadVentasDiaria: 95,
+    puestos: puestos({ obrero: 2, comerciante: 1 }),
+  },
+  cine_teatro: {
+    tipo: 'cine_teatro',
+    nombre: 'Cine / Teatro',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'entretenimiento',
+    categoriaGasto: 'entretenimiento',
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 290,
+    mantenimientoPeriodo: 8.5,
+    diasObra: 3,
+    capacidadVentasDiaria: 120,
+    puestos: puestos({ obrero: 2, comerciante: 1 }),
+  },
+  club: {
+    tipo: 'club',
+    nombre: 'Club Nocturno',
+    parcelTipo: 'comercial',
+    categoria: 'privado',
+    rubro: 'entretenimiento',
+    categoriaGasto: 'entretenimiento',
+    margenAjustePct: 6,
+    construibleGobernador: false,
+    requiereG2: false,
+    costoObra: 260,
+    mantenimientoPeriodo: 7.5,
+    diasObra: 3,
+    capacidadVentasDiaria: 95,
+    puestos: puestos({ obrero: 2, comerciante: 1 }),
   },
   oficina_constructora: {
     tipo: 'oficina_constructora',
@@ -210,7 +377,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 7.0,
     diasObra: 3,
     capacidadVentasDiaria: 180,
-    puestos: { obrero: 2, constructor: 2 },
+    puestos: puestos({ obrero: 2 }, 2),
   },
   oficina_inmobiliaria: {
     tipo: 'oficina_inmobiliaria',
@@ -224,7 +391,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 6.0,
     diasObra: 3,
     capacidadVentasDiaria: 160,
-    puestos: { inmobiliario: 2 },
+    puestos: puestos({ inmobiliario: 2 }),
   },
   oficina_medio: {
     tipo: 'oficina_medio',
@@ -238,7 +405,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 5.0,
     diasObra: 3,
     capacidadVentasDiaria: 120,
-    puestos: { periodista: 2 },
+    puestos: puestos({ periodista: 2 }),
   },
   oficina_banco: {
     tipo: 'oficina_banco',
@@ -252,21 +419,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 8.0,
     diasObra: 4,
     capacidadVentasDiaria: 200,
-    puestos: { empresario: 1 },
-  },
-  local_comercio: {
-    tipo: 'local_comercio',
-    nombre: 'Local Comercial',
-    parcelTipo: 'comercial',
-    categoria: 'privado',
-    rubro: 'comercio',
-    construibleGobernador: false,
-    requiereG2: false,
-    costoObra: 280,
-    mantenimientoPeriodo: 7.0,
-    diasObra: 3,
-    capacidadVentasDiaria: 100,
-    puestos: { obrero: 4, comerciante: 1 },
+    puestos: puestos({ empresario: 1 }),
   },
 
   // === Públicos (EDIFICIOS_V2 §3) ===
@@ -281,7 +434,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 30,
     diasObra: 4,
     areaServicio: 'salud',
-    puestos: { medico: 4 },
+    puestos: puestos({ medico: 4 }),
     camasHospital: 12,
   },
   comisaria: {
@@ -295,7 +448,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 22,
     diasObra: 3,
     areaServicio: 'seguridad',
-    puestos: { policia: 4 },
+    puestos: puestos({ policia: 4 }),
     bonusDefensa: 14,
   },
   escuela: {
@@ -308,7 +461,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     costoObra: 0,
     mantenimientoPeriodo: 0,
     diasObra: 0,
-    puestos: { docente: 4 },
+    puestos: puestos({ docente: 4 }),
   },
   oficina_publica: {
     tipo: 'oficina_publica',
@@ -320,7 +473,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     costoObra: 0,
     mantenimientoPeriodo: 0,
     diasObra: 0,
-    puestos: { estatal: 4 },
+    puestos: puestos({ estatal: 4 }),
   },
 
   // === Suceso (EDIFICIOS_V2 §5, capa gobernador G2+) ===
@@ -335,7 +488,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 12,
     diasObra: 3,
     areaServicio: 'seguridad',
-    puestos: {},
+    puestos: puestos({}),
     defensaMuralla: 20,
   },
   silo: {
@@ -349,7 +502,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 8,
     diasObra: 3,
     areaServicio: 'infraestructura',
-    puestos: {},
+    puestos: puestos({}),
     siloExtraDias: 10,
   },
   riego: {
@@ -363,7 +516,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 10,
     diasObra: 3,
     areaServicio: 'infraestructura',
-    puestos: {},
+    puestos: puestos({}),
     reduccionSequiaPct: 50,
   },
   hospital_campana: {
@@ -377,7 +530,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 14,
     diasObra: 2,
     areaServicio: 'salud',
-    puestos: {},
+    puestos: puestos({}),
     camasHospital: 8,
     diasCampana: 25,
   },
@@ -393,7 +546,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     costoObra: 0,
     mantenimientoPeriodo: 0,
     diasObra: 0,
-    puestos: {},
+    puestos: puestos({}),
   },
   puerto: {
     tipo: 'puerto',
@@ -405,7 +558,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     costoObra: 0,
     mantenimientoPeriodo: 0,
     diasObra: 0,
-    puestos: {},
+    puestos: puestos({}),
   },
   muelle_comercio: {
     tipo: 'muelle_comercio',
@@ -417,7 +570,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     costoObra: 0,
     mantenimientoPeriodo: 0,
     diasObra: 0,
-    puestos: {},
+    puestos: puestos({}),
   },
 };
 
@@ -620,6 +773,28 @@ export const DEMOG_CONSTANTS = {
   probEmprenderBase: 0.04,
 } as const;
 
+export const VIAL_CONSTANTS = {
+  kVial: 0.85,
+  kTraslado: 0.004,
+  rutaMaxTrabajo: 36,
+  costoInternoZona: 4,
+  decaimientoViaSinMant: 6,
+  recuperacionViaConMant: 4,
+  umbralMalEstadoVia: 50,
+  umbralDemandaSuelo: 1.5,
+  periodosDemandaSuelo: 2,
+  kLujo: 0.28,
+  precioExternoBienes: 3.1,
+  produccionBaseObreroBienes: 5.0,
+} as const;
+
+export const SPEND_CATEGORY_WEIGHTS: Record<SpendCategory, number> = {
+  bienes: 0.42,
+  gastronomia: 0.24,
+  servicios: 0.19,
+  entretenimiento: 0.15,
+};
+
 export const EFFECT_CATALOG = {
   anima: {
     baja: { satisfaccion: 6 },
@@ -743,6 +918,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   estudiante: {
     id: 'estudiante',
     nombre: 'Estudiante',
+    color: ROLE_COLORS.estudiante,
     edadMin: 0,
     edadMax: 24,
     educMin: 0,
@@ -756,6 +932,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   agricultor: {
     id: 'agricultor',
     nombre: 'Agricultor',
+    color: ROLE_COLORS.agricultor,
     edadMin: 18,
     edadMax: 64,
     educMin: 0,
@@ -769,12 +946,13 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   tecnico: {
     id: 'tecnico',
     nombre: 'Técnico',
+    color: ROLE_COLORS.tecnico,
     edadMin: 18,
     edadMax: 64,
     educMin: 2,
     afinidad: 'laboriosidad',
     publico: false,
-    rubro: 'agro',
+    rubro: 'agro|industria',
     grupo: 'privado',
     ingreso: [8.0, 9.0],
     produce: 'tecnificacion',
@@ -782,12 +960,13 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   obrero: {
     id: 'obrero',
     nombre: 'Obrero',
+    color: ROLE_COLORS.obrero,
     edadMin: 18,
     edadMax: 64,
     educMin: 0,
     afinidad: 'laboriosidad',
     publico: false,
-    rubro: 'comercio|construccion',
+    rubro: 'agro|industria|comercio|gastronomia|servicios|entretenimiento|construccion',
     grupo: 'privado',
     ingreso: [8.0, 10.4],
     produce: null,
@@ -795,12 +974,13 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   comerciante: {
     id: 'comerciante',
     nombre: 'Comerciante',
+    color: ROLE_COLORS.comerciante,
     edadMin: 18,
     edadMax: 64,
     educMin: 1,
     afinidad: 'codicia',
     publico: false,
-    rubro: 'comercio',
+    rubro: 'comercio|gastronomia|servicios|entretenimiento',
     grupo: 'privado',
     ingreso: [8.4, 10.6],
     produce: 'comercio',
@@ -808,6 +988,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   constructor: {
     id: 'constructor',
     nombre: 'Constructor',
+    color: ROLE_COLORS.constructor,
     edadMin: 18,
     edadMax: 64,
     educMin: 1,
@@ -821,6 +1002,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   inmobiliario: {
     id: 'inmobiliario',
     nombre: 'Inmobiliario',
+    color: ROLE_COLORS.inmobiliario,
     edadMin: 18,
     edadMax: 64,
     educMin: 2,
@@ -834,6 +1016,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   empresario: {
     id: 'empresario',
     nombre: 'Empresario',
+    color: ROLE_COLORS.empresario,
     edadMin: 18,
     edadMax: 64,
     educMin: 2,
@@ -847,6 +1030,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   periodista: {
     id: 'periodista',
     nombre: 'Periodista',
+    color: ROLE_COLORS.periodista,
     edadMin: 18,
     edadMax: 64,
     educMin: 2,
@@ -860,6 +1044,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   policia: {
     id: 'policia',
     nombre: 'Policía',
+    color: ROLE_COLORS.policia,
     edadMin: 18,
     edadMax: 64,
     educMin: 1,
@@ -872,6 +1057,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   medico: {
     id: 'medico',
     nombre: 'Médico',
+    color: ROLE_COLORS.medico,
     edadMin: 18,
     edadMax: 64,
     educMin: 3,
@@ -884,6 +1070,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   ingeniero: {
     id: 'ingeniero',
     nombre: 'Ingeniero',
+    color: ROLE_COLORS.ingeniero,
     edadMin: 18,
     edadMax: 64,
     educMin: 3,
@@ -896,6 +1083,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   estatal: {
     id: 'estatal',
     nombre: 'Estatal',
+    color: ROLE_COLORS.estatal,
     edadMin: 18,
     edadMax: 64,
     educMin: 1,
@@ -908,6 +1096,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   docente: {
     id: 'docente',
     nombre: 'Docente',
+    color: ROLE_COLORS.docente,
     edadMin: 18,
     edadMax: 64,
     educMin: 2,
@@ -920,6 +1109,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   desempleado: {
     id: 'desempleado',
     nombre: 'Desempleado',
+    color: ROLE_COLORS.desempleado,
     edadMin: 18,
     edadMax: 64,
     educMin: 0,
@@ -932,6 +1122,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
   jubilado: {
     id: 'jubilado',
     nombre: 'Jubilado',
+    color: ROLE_COLORS.jubilado,
     edadMin: 65,
     edadMax: null,
     educMin: 0,
@@ -1563,6 +1754,8 @@ const DEFAULT_PARCELAS: ScenarioParcelDef[] = (
   tipoParcela: p.tipoParcela,
   orden: p.orden ?? idx + 1,
   estadoInicial: p.estadoInicial,
+  tramoAperturaId: p.tramoAperturaId,
+  nodoAcceso: p.nodoAcceso,
   edificioInicial: p.edificioInicial,
   duenoInicial: p.duenoInicial,
   houseType: p.houseType,
@@ -1703,6 +1896,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     hitos: structuredClone(HITOS_ELECCIONES),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     zonas: structuredClone(DEFAULT_ZONAS),
+    tramos: structuredClone(DEFAULT_TRAMOS),
     mediosCatalog: structuredClone(MEDIA_TEMPLATES),
     caosDefault: { ...DEFAULT_CHAOS_LIMITS },
     initialLevers: {
@@ -1771,6 +1965,7 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     hitos: structuredClone(HITOS_ZOMBIES),
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     zonas: structuredClone(DEFAULT_ZONAS),
+    tramos: structuredClone(DEFAULT_TRAMOS),
     mediosCatalog: structuredClone(MEDIA_TEMPLATES),
     caosDefault: { ...DEFAULT_CHAOS_LIMITS },
     initialLevers: {

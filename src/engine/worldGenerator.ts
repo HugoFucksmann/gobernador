@@ -1,9 +1,10 @@
 import {
   BUILDING_CATALOG,
+  DEFAULT_TRAMOS,
+  DEFAULT_ZONAS,
   ECON_CONSTANTS,
   FIRM_CONSTANTS,
   MEDIA_TEMPLATES,
-  PERIOD_DAYS,
   ROLE_CATALOG,
   ROLE_DISTRICTS,
   SAVE_FORMAT_VERSION,
@@ -29,18 +30,21 @@ import {
   Parcela,
   ParcelTipo,
   RoleId,
+  ScenarioId,
   ServicePublicRoleId,
   WorldComplexityLevel,
   WorldConfig,
   ZoneDefinition,
   ZoneId,
 } from '../types/game';
-import { getBuildingJobCaps, getObrasTargetJobs } from './policies';
+import { getBuildingJobCaps, getBuildingRoleCapacity, getObrasTargetJobs } from './policies';
 import { initSubsystemRng, nextRand, normalizeSeed, randInt, randRange } from './rng';
 import {
   clamp,
+  computeDemandaSuelo,
   computeTotalWorldMoney,
   getWorldZones,
+  recomputeRoadDistances,
   syncLegacyEnterprisesView,
 } from './worldHelpers';
 
@@ -107,6 +111,7 @@ export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
   nivelMundo: WorldComplexityLevel;
   nivelGobernador: GovernorComplexityLevel;
   economiaModulo: EconomyModule;
+  estadoAutomatico: boolean;
 } {
   const defaultWorld: WorldComplexityLevel =
     raw.economiaModulo === 'fiscal' ? 'M4' : 'M3';
@@ -114,7 +119,8 @@ export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
   const economiaModulo: EconomyModule = nivelMundo === 'M4' ? 'fiscal' : 'base';
   const defaultGov: GovernorComplexityLevel = nivelMundo === 'M4' ? 'G3' : 'G2';
   const nivelGobernador: GovernorComplexityLevel = raw.nivelGobernador ?? defaultGov;
-  return { nivelMundo, nivelGobernador, economiaModulo };
+  const estadoAutomatico = raw.estadoAutomatico ?? nivelGobernador === 'G0';
+  return { nivelMundo, nivelGobernador, economiaModulo, estadoAutomatico };
 }
 
 export function isTestConfig(config: WorldConfig): boolean {
@@ -128,12 +134,13 @@ export function isTestConfig(config: WorldConfig): boolean {
 }
 
 function buildScaledParcelas(
-  escenarioId: 'elecciones' | 'zombies',
+  escenarioId: ScenarioId,
   nivelMundo: WorldComplexityLevel,
   pop: number,
   zonas: Record<ZoneId, ZoneDefinition>
 ): Parcela[] {
   const preset = SCENARIO_PRESETS[escenarioId];
+  const isM0 = nivelMundo === 'M0';
   const base: Parcela[] = preset.parcelas.map((def, idx) => {
     const tipoParcela: ParcelTipo =
       def.tipoParcela ??
@@ -141,6 +148,8 @@ function buildScaledParcelas(
         ? 'residencial'
         : def.edificioInicial === 'campo'
         ? 'agricola'
+        : def.edificioInicial === 'fabrica'
+        ? 'industrial'
         : def.edificioInicial === 'plaza' || def.edificioInicial === 'puerto' || def.edificioInicial === 'muelle_comercio'
         ? 'especial'
         : def.edificioInicial === 'hospital' ||
@@ -153,8 +162,19 @@ function buildScaledParcelas(
         : 'comercial');
 
     const zona = def.zona;
+    let estadoInicial = def.estadoInicial;
     let edificio: BuildingInstance | null = null;
-    if (def.estadoInicial === 'ocupada' && def.edificioInicial) {
+    const isM0NonBasePrivate =
+      isM0 &&
+      def.edificioInicial &&
+      (def.edificioInicial === 'fabrica' ||
+        def.edificioInicial === 'oficina_constructora' ||
+        def.edificioInicial === 'oficina_inmobiliaria' ||
+        def.edificioInicial === 'oficina_banco');
+
+    if (isM0NonBasePrivate) {
+      estadoInicial = 'libre';
+    } else if (estadoInicial === 'ocupada' && def.edificioInicial) {
       edificio = {
         id: `ed_init_${idx + 1}`,
         tipo: def.edificioInicial,
@@ -180,22 +200,26 @@ function buildScaledParcelas(
       wy: def.wy,
       ww: def.ww,
       wh: def.wh,
-      estado: def.estadoInicial,
+      estado: estadoInicial,
+      tramoAperturaId: def.tramoAperturaId,
+      nodoAcceso: def.nodoAcceso,
       edificio,
     };
   });
 
-  // Dynamically expand parcels for larger population targets (150..5000)
+  // Dynamically expand parcels for larger population targets (120..5000) across active zones only
   const scale = Math.max(1, pop / 100);
   if (scale > 1.2) {
-    const zoneList = Object.keys(zonas);
+    const zoneList = Object.keys(zonas).filter((z) => zonas[z].estado !== 'no_urbanizada');
     const neededHouses = Math.ceil(pop / 2.6) + 12;
-    const currentRes = base.filter((p) => p.tipoParcela === 'residencial').length;
+    const currentRes = base.filter(
+      (p) => p.tipoParcela === 'residencial' && p.estado !== 'sin_calle'
+    ).length;
     const extraRes = Math.max(0, neededHouses - currentRes);
 
     const resZones = zoneList.filter((z) => zonas[z].caracter === 'residencial' || zonas[z].caracter === 'centro');
     for (let i = 0; i < extraRes; i++) {
-      const z = resZones[i % resZones.length] ?? 'norte';
+      const z = resZones[i % Math.max(1, resZones.length)] ?? 'norte';
       const rect = zonas[z].rect;
       const col = i % 7;
       const row = Math.floor(i / 7) % 4;
@@ -218,7 +242,7 @@ function buildScaledParcelas(
     const extraFields = Math.max(0, Math.round(6 * (scale - 1)));
     const agroZones = zoneList.filter((z) => zonas[z].caracter === 'agricola');
     for (let i = 0; i < extraFields; i++) {
-      const z = agroZones[i % agroZones.length] ?? 'noroeste';
+      const z = agroZones[i % Math.max(1, agroZones.length)] ?? 'noroeste';
       const rect = zonas[z].rect;
       const pid = `p_campo_ext_${i + 1}`;
       base.push({
@@ -248,16 +272,19 @@ function buildScaledParcelas(
       });
     }
 
+    const v2ShopCycle: BuildingType[] = isM0
+      ? ['almacen', 'supermercado', 'tienda', 'kiosco']
+      : ['supermercado', 'tienda', 'restoran', 'bar_cafe', 'taller', 'cine_teatro', 'almacen', 'gimnasio'];
     const extraShops = Math.max(0, Math.round(6 * (scale - 1)));
     const comZones = zoneList.filter((z) => zonas[z].caracter !== 'agricola');
     for (let i = 0; i < extraShops; i++) {
-      const z = comZones[i % comZones.length] ?? 'centro';
+      const z = comZones[i % Math.max(1, comZones.length)] ?? 'centro';
       const rect = zonas[z].rect;
       const pid = `p_com_ext_${i + 1}`;
-      const tipo: BuildingType = i % 3 === 0 ? 'restoran' : i % 3 === 1 ? 'almacen' : 'kiosco';
+      const tipo: BuildingType = v2ShopCycle[i % v2ShopCycle.length];
       base.push({
         id: pid,
-        nombre: `Comercio ${z} ${i + 1}`,
+        nombre: `${BUILDING_CATALOG[tipo].nombre} ${z} ${i + 1}`,
         zona: z,
         distrito: 'mercado',
         tipoParcela: 'comercial',
@@ -271,7 +298,7 @@ function buildScaledParcelas(
           id: `ed_com_ext_${i + 1}`,
           tipo,
           parcelaId: pid,
-          dueno: 'comercio',
+          dueno: BUILDING_CATALOG[tipo].rubro ?? 'comercio',
           estado: 'ocupada',
           activo: true,
           estadoSalud: 100,
@@ -280,6 +307,41 @@ function buildScaledParcelas(
           zona: z,
         },
       });
+    }
+
+    if (!isM0) {
+      const extraFactories = Math.max(0, Math.floor((pop - 120) / 180));
+      const indZones = ['este', 'oeste'];
+      for (let i = 0; i < extraFactories; i++) {
+        const z = indZones[i % indZones.length];
+        const rect = zonas[z]?.rect ?? zonas.este.rect;
+        const pid = `p_fab_ext_${i + 1}`;
+        base.push({
+          id: pid,
+          nombre: `Fábrica Expandida ${i + 1}`,
+          zona: z,
+          distrito: 'taller',
+          tipoParcela: 'industrial',
+          orden: 350 + i,
+          wx: rect.wx + 32 + (i % 4) * 74,
+          wy: rect.wy + 160,
+          ww: 58,
+          wh: 42,
+          estado: 'ocupada',
+          edificio: {
+            id: `ed_fab_ext_${i + 1}`,
+            tipo: 'fabrica',
+            parcelaId: pid,
+            dueno: 'industria',
+            estado: 'ocupada',
+            activo: true,
+            estadoSalud: 100,
+            diasObraRestantes: 0,
+            diasObraTotal: 0,
+            zona: z,
+          },
+        });
+      }
     }
 
     const extraHosp = Math.max(0, Math.floor((pop - 120) / 140));
@@ -342,8 +404,16 @@ function buildScaledParcelas(
     }
   }
 
-  void nivelMundo;
   return base;
+}
+
+export function buildInitialParcelas(
+  escenarioId: ScenarioId,
+  nivelMundo: WorldComplexityLevel,
+  pop = 100,
+  zonas: Record<ZoneId, ZoneDefinition> = DEFAULT_ZONAS
+): Parcela[] {
+  return buildScaledParcelas(escenarioId, nivelMundo, pop, zonas);
 }
 
 export function createInitialGameState(rawConfig: WorldConfig): GameState {
@@ -361,7 +431,9 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const pop = clamp(Math.round(config.poblacionInicial || 100), 50, 5000);
   const scale = pop / 100;
   const zonas = structuredClone(preset.zonas);
-  const zoneIds = Object.keys(zonas);
+  const activeZoneIds = Object.keys(zonas).filter((z) => zonas[z].estado !== 'no_urbanizada');
+  const allZoneIds = Object.keys(zonas);
+  const tramos = structuredClone(preset.tramos ?? DEFAULT_TRAMOS);
 
   const parcelas = buildScaledParcelas(config.escenarioId, config.nivelMundo, pop, zonas);
   const initialLevers: GovernorLevers = structuredClone(preset.initialLevers);
@@ -418,13 +490,16 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   let npcSeq = 0;
   for (const item of roleDistribution) {
     const def = ROLE_CATALOG[item.rol];
-    const allowedZ = preset.zonaPorRol[item.rol] ?? zoneIds;
+    const allowedZ = (preset.zonaPorRol[item.rol] ?? activeZoneIds).filter(
+      (z) => zonas[z] && zonas[z].estado !== 'no_urbanizada'
+    );
+    const zonePool = allowedZ.length > 0 ? allowedZ : activeZoneIds;
     for (let i = 0; i < item.count; i++) {
       npcSeq++;
       const id = `npc_${String(npcSeq).padStart(3, '0')}`;
       const nombre = SPANISH_NAMES[(npcSeq - 1) % SPANISH_NAMES.length];
       const apellido = SPANISH_LAST_NAMES[(npcSeq * 7 + randInt(rng, 0, 10)) % SPANISH_LAST_NAMES.length];
-      const zona = allowedZ[i % allowedZ.length] ?? 'centro';
+      const zona = zonePool[i % zonePool.length] ?? 'centro';
       const edad =
         item.rol === 'estudiante'
           ? randInt(rng, 3, 17)
@@ -591,11 +666,14 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     h.miembros.push(ch.id);
   }
 
-  // Build Firms by Rubro (V2 generic Firma model)
+  // Build Firms by Rubro (V2 generic Firma model: 2 fixed in M0, all 9+1 rubros in M1+)
   const firmas: Firma[] = [];
   let fSeq = 0;
   const privateParcels = parcelas.filter(
-    (p) => p.estado === 'ocupada' && p.edificio && (p.tipoParcela === 'agricola' || p.tipoParcela === 'comercial')
+    (p) =>
+      p.estado === 'ocupada' &&
+      p.edificio &&
+      (p.tipoParcela === 'agricola' || p.tipoParcela === 'comercial' || p.tipoParcela === 'industrial')
   );
 
   const createFirma = (
@@ -604,7 +682,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     zona: ZoneId,
     locales: string[],
     owners: Npc[],
-    initCaja: number
+    initCaja: number,
+    initVentas = 0
   ): Firma => {
     fSeq++;
     const fid = `f_${fSeq}`;
@@ -620,6 +699,14 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       if (o) o.partes.push({ firmaId: fid, pct: p.pct });
     }
 
+    let capDiaria = 0;
+    for (const pid of locales) {
+      const parcel = parcelas.find((x) => x.id === pid);
+      if (parcel?.edificio) {
+        capDiaria += BUILDING_CATALOG[parcel.edificio.tipo].capacidadVentasDiaria ?? 80;
+      }
+    }
+
     const f: Firma = {
       id: fid,
       rubro,
@@ -630,13 +717,15 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       gerenteId: validOwners[0]?.id ?? null,
       locales: [...locales],
       empleados: [],
-      ventas: 0,
+      ventas: initVentas,
       caja: initCaja,
       parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
       factor: 1.0,
       cuotaZona: {},
       margenPoder: 0,
       stock: rubro === 'agro' ? 0 : undefined,
+      stockBienes: rubro === 'industria' ? Math.round(160 * scale) : undefined,
+      capacidadDiaria: capDiaria > 0 ? capDiaria : 90,
       siloDias: rubro === 'agro' ? ECON_CONSTANTS.siloDias : undefined,
       periodosEnPerdida: 0,
       periodosSinDueno: 0,
@@ -645,10 +734,10 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       ultimoTramo: 'normal',
       despidosPendientes: 0,
       refPorEmpleado: {},
-      ultimoIngresoPeriodo: 120,
-      ultimoSueldosPeriodo: 75,
-      ultimaGanancia: 35,
-      historialGanancias: [35],
+      ultimoIngresoPeriodo: Math.max(90, initVentas),
+      ultimoSueldosPeriodo: 65,
+      ultimaGanancia: 25,
+      historialGanancias: [25],
     };
 
     for (const pid of locales) {
@@ -676,7 +765,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     createFirma('agro', 'Productora de Alimento', 'centro', agroParcels, empresarios.slice(0, 1), 360);
     createFirma('comercio', 'Comercio y Servicios', 'centro', comParcels, comerciantes.slice(0, 2), 340);
   } else {
-    // Group agricultural fields into 2-4 agro firms
+    // 1. Agro firms (2-4 competing farms grouped by zone)
     const agroParcels = privateParcels.filter((p) => p.edificio?.tipo === 'campo');
     const agroGroups = Math.max(2, Math.min(4, Math.ceil(agroParcels.length / 2)));
     for (let g = 0; g < agroGroups; g++) {
@@ -693,51 +782,78 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       );
     }
 
-    // Commerce firms (each shop/kiosco/restoran parcel or pair is a competing comercio firm)
-    const comParcels = privateParcels.filter(
-      (p) =>
-        p.edificio &&
-        (p.edificio.tipo === 'almacen' ||
-          p.edificio.tipo === 'kiosco' ||
-          p.edificio.tipo === 'restoran' ||
-          p.edificio.tipo === 'local_comercio')
-    );
-    comParcels.forEach((p, idx) => {
-      const owner = comerciantes[idx % Math.max(1, comerciantes.length)] ?? empresarios[0];
-      createFirma(
-        'comercio',
-        p.nombre,
-        p.zona,
-        [p.id],
-        owner ? [owner] : [],
-        220
-      );
+    // 2. Industria firms (each fabrica parcel)
+    const indParcels = privateParcels.filter((p) => p.edificio?.tipo === 'fabrica');
+    indParcels.forEach((p, idx) => {
+      const owner = empresarios[(idx + 1) % Math.max(1, empresarios.length)] ?? comerciantes[0];
+      createFirma('industria', p.nombre, p.zona, [p.id], owner ? [owner] : [], 340);
     });
 
-    // Constructora firms
+    // 3..6. Commerce, Gastronomia, Servicios, Entretenimiento (grouped cleanly by building rubro)
+    const consumerParcels = privateParcels.filter((p) => {
+      const r = p.edificio ? BUILDING_CATALOG[p.edificio.tipo].rubro : undefined;
+      return r === 'comercio' || r === 'gastronomia' || r === 'servicios' || r === 'entretenimiento';
+    });
+    consumerParcels.forEach((p, idx) => {
+      const r = BUILDING_CATALOG[p.edificio!.tipo].rubro!;
+      const owner = comerciantes[idx % Math.max(1, comerciantes.length)] ?? empresarios[0];
+      createFirma(r, p.nombre, p.zona, [p.id], owner ? [owner] : [], 240);
+    });
+
+    // 7. Constructora firms (seed initial period ventas so Period 1 payroll closes cleanly)
     const constrParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_constructora');
     if (constrParcels.length > 0) {
       constrParcels.forEach((p, idx) => {
         const owner = constructores[idx % Math.max(1, constructores.length)] ?? empresarios[0];
-        createFirma('construccion', p.nombre, p.zona, [p.id], owner ? [owner] : [], 380);
+        createFirma('construccion', p.nombre, p.zona, [p.id], owner ? [owner] : [], 360, Math.round(160 * scale));
       });
     } else {
-      createFirma('construccion', 'Constructora del Valle', 'centro', [], constructores.slice(0, 1), 380);
+      createFirma('construccion', 'Constructora del Valle', 'centro', [], constructores.slice(0, 1), 360, Math.round(160 * scale));
     }
 
-    // Inmobiliaria firms
+    // 8. Inmobiliaria firms
     const inmobParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_inmobiliaria');
     if (inmobParcels.length > 0) {
       inmobParcels.forEach((p, idx) => {
         const owner = inmobiliarios[idx % Math.max(1, inmobiliarios.length)] ?? empresarios[0];
-        createFirma('inmobiliaria', p.nombre, p.zona, [p.id], owner ? [owner] : [], 360);
+        createFirma('inmobiliaria', p.nombre, p.zona, [p.id], owner ? [owner] : [], 320, Math.round(130 * scale));
       });
     } else {
-      createFirma('inmobiliaria', 'Inmobiliaria del Valle', 'centro', [], inmobiliarios.slice(0, 1), 360);
+      createFirma('inmobiliaria', 'Inmobiliaria del Valle', 'centro', [], inmobiliarios.slice(0, 1), 320, Math.round(130 * scale));
+    }
+
+    // 10. Banco in M4
+    if (config.nivelMundo === 'M4' || config.economiaModulo === 'fiscal') {
+      const bankParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_banco');
+      if (bankParcels.length > 0) {
+        bankParcels.forEach((p, idx) => {
+          const owner = empresarios[idx % Math.max(1, empresarios.length)];
+          createFirma('banco', p.nombre, p.zona, [p.id], owner ? [owner] : [], 420, Math.round(110 * scale));
+        });
+      } else {
+        const freeCom = parcelas.find((p) => p.tipoParcela === 'comercial' && p.estado === 'libre' && p.zona === 'centro');
+        const locs = freeCom ? [freeCom.id] : [];
+        if (freeCom) {
+          freeCom.estado = 'ocupada';
+          freeCom.edificio = {
+            id: 'ed_banco_init',
+            tipo: 'oficina_banco',
+            parcelaId: freeCom.id,
+            dueno: 'banco',
+            estado: 'ocupada',
+            activo: true,
+            estadoSalud: 100,
+            diasObraRestantes: 0,
+            diasObraTotal: 0,
+            zona: freeCom.zona,
+          };
+        }
+        createFirma('banco', 'Banco del Valle', 'centro', locs, empresarios.slice(0, 1), 420, Math.round(110 * scale));
+      }
     }
   }
 
-  // Media outlets (as rubro 'medio' firms)
+  // 9. Media outlets (as rubro 'medio' firms)
   const mediaCount = clamp(config.cantidadMedios ?? preset.mediosDefault, 1, 3);
   const medioParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_medio');
   const medios: MediaOutlet[] = [];
@@ -752,7 +868,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       parcel?.zona ?? 'centro',
       parcel ? [parcel.id] : [],
       owner ? [owner] : [],
-      180
+      180,
+      Math.round(65 + fondosPorMedio)
     );
     const cols = periodistas.filter((_, j) => j % mediaCount === mIdx).map((n) => n.id);
     if (cols.length === 0 && periodistas[0]) cols.push(periodistas[0].id);
@@ -790,18 +907,34 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     });
   }
 
-  // Assign private workers to firms
+  // Compute target role vacancies per firm so multi-rubro roles (tecnico, obrero, comerciante) spread cleanly
+  const firmRoleCaps = new Map<string, Partial<Record<RoleId, number>>>();
+  for (const f of firmas) {
+    const agg: Partial<Record<RoleId, number>> = {};
+    for (const pid of f.locales) {
+      const p = parcelas.find((x) => x.id === pid);
+      if (p?.edificio) {
+        const caps = getBuildingRoleCapacity(p.edificio);
+        for (const [r, cnt] of Object.entries(caps)) {
+          if (typeof cnt === 'number' && cnt > 0) {
+            agg[r as RoleId] = (agg[r as RoleId] ?? 0) + cnt;
+          }
+        }
+      }
+    }
+    firmRoleCaps.set(f.id, agg);
+  }
+
   const firmsByRoleMatch = (rol: RoleId): Firma[] => {
     const def = ROLE_CATALOG[rol];
-    if (def.rubro === 'agro') return firmas.filter((f) => f.rubro === 'agro');
-    if (def.rubro === 'comercio') return firmas.filter((f) => f.rubro === 'comercio');
-    if (def.rubro === 'construccion') return firmas.filter((f) => f.rubro === 'construccion');
-    if (def.rubro === 'comercio|construccion') {
-      return firmas.filter((f) => f.rubro === 'comercio' || f.rubro === 'construccion');
-    }
-    if (def.rubro === 'inmobiliaria') return firmas.filter((f) => f.rubro === 'inmobiliaria');
-    if (def.rubro === 'medio') return firmas.filter((f) => f.rubro === 'medio');
-    return [];
+    const allowedRubros = new Set(
+      (def.rubro ?? '')
+        .split('|')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    if (allowedRubros.size === 0) return [];
+    return firmas.filter((f) => allowedRubros.has(f.rubro) && f.locales.length > 0);
   };
 
   for (const n of npcs) {
@@ -809,8 +942,13 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     if (def.grupo !== 'privado' || def.gerencia) continue;
     const pool = firmsByRoleMatch(n.rol);
     if (pool.length === 0) continue;
-    // Pick same zone firm if possible, balanced by fewest employees
+
     pool.sort((a, b) => {
+      const aOpen = (firmRoleCaps.get(a.id)?.[n.rol] ?? 0) - a.empleados.filter((id) => npcById.get(id)?.rol === n.rol).length;
+      const bOpen = (firmRoleCaps.get(b.id)?.[n.rol] ?? 0) - b.empleados.filter((id) => npcById.get(id)?.rol === n.rol).length;
+      const aHasSlot = aOpen > 0 ? 0 : 1;
+      const bHasSlot = bOpen > 0 ? 0 : 1;
+      if (aHasSlot !== bHasSlot) return aHasSlot - bHasSlot;
       const aZone = a.zona === n.zona ? 0 : 1;
       const bZone = b.zona === n.zona ? 0 : 1;
       if (aZone !== bZone) return aZone - bZone;
@@ -821,10 +959,10 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     chosen.empleados.push(n.id);
   }
 
-  // Allocate Houses to Residential Parcels & Households
+  // Allocate Houses to accessible Residential Parcels (exclude sin_calle!)
   const casas: Casa[] = [];
   let cSeq = 0;
-  const resParcels = parcelas.filter((p) => p.tipoParcela === 'residencial');
+  const resParcels = parcelas.filter((p) => p.tipoParcela === 'residencial' && p.estado === 'libre');
   const inmobFirms = firmas.filter((f) => f.rubro === 'inmobiliaria');
   const sortedHogares = [...hogares].sort((a, b) => b.miembros.length - a.miembros.length);
 
@@ -937,7 +1075,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const ultimaOrdenZona: Record<ZoneId, number> = {};
   const ultimaIntegridadZona: Record<ZoneId, number> = {};
   const golpesPorZonaHistorial: Record<ZoneId, number[]> = {};
-  for (const z of zoneIds) {
+  for (const z of allZoneIds) {
     integridad[z] = 100;
     ultimaDefensaZona[z] = defInit;
     ultimaOrdenZona[z] = 95;
@@ -983,6 +1121,10 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       pausado: false,
     },
     zonas,
+    tramos,
+    distanciasZonas: {},
+    demandaSuelo: {},
+    demandaSueloRachas: {},
     npcs,
     hogares,
     casas,
@@ -1062,6 +1204,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         comidaMenores: 0,
         acogidaMenores: 0,
         mantenimiento: 0,
+        mantenimientoVias: 0,
         operacionObras: 0,
         operacion: 0,
         obras: 0,
@@ -1080,6 +1223,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         acogidaMenores: 0,
         ayudaSocial: 0,
         mantenimiento: 0,
+        mantenimientoVias: 0,
+        mantenimientoEdificios: 0,
         operacionObras: 0,
         operacion: 0,
         obras: 0,
@@ -1164,12 +1309,20 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     ultimaSalidaEconomica: {
       accesoComida: Object.fromEntries(hogares.map((h) => [h.id, 1])),
       poderAdquisitivo: Object.fromEntries(hogares.map((h) => [h.id, 65])),
-      precioAlimento: Object.fromEntries(zoneIds.map((z) => [z, ECON_CONSTANTS.precioBaseAlimento])),
-      alquilerMedio: Object.fromEntries(zoneIds.map((z) => [z, 13])),
+      precioAlimento: Object.fromEntries(activeZoneIds.map((z) => [z, ECON_CONSTANTS.precioBaseAlimento])),
+      alquilerMedio: Object.fromEntries(activeZoneIds.map((z) => [z, 13])),
       cuotaMercado: {},
       saldoDiarioEstimado: 15,
       inflacion: preset.inflacionInicial,
       precioGlobal: ECON_CONSTANTS.precioBaseAlimento,
+      gastoVidaPorCategoria: {
+        bienes: 0,
+        gastronomia: 0,
+        servicios: 0,
+        entretenimiento: 0,
+      },
+      bienesImportadosDia: 0,
+      industriaExportDia: 0,
     },
     metricasPeriodoAnterior: {
       apoyoPct: apoyoInit,
@@ -1223,6 +1376,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
   };
 
+  recomputeRoadDistances(state);
+  state.demandaSuelo = computeDemandaSuelo(state);
   syncLegacyEnterprisesView(state);
   state.ultimoDineroTotal = computeTotalWorldMoney(state);
   void getWorldZones;

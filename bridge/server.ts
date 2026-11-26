@@ -238,6 +238,16 @@ function handle(ws: WebSocket, cmd: Cmd) {
       if (r.ok) pushState();
       return ack(ws, cmd, r.ok, { error: r.error });
     }
+    case 'construir_via': {
+      const r = controller.buildVia(String(cmd.tramo));
+      if (r.ok) pushState();
+      return ack(ws, cmd, r.ok, { error: r.error });
+    }
+    case 'estado_automatico': {
+      controller.setEstadoAutomatico(Boolean(cmd.valor));
+      pushState(undefined, false);
+      return ack(ws, cmd, true);
+    }
     case 'demoler': {
       const r = controller.demolishParcela(String(cmd.parcela));
       if (r.ok) pushState();
@@ -263,17 +273,23 @@ function handle(ws: WebSocket, cmd: Cmd) {
     case 'nueva_partida': {
       const esc = String(cmd.escenario ?? 'elecciones') === 'zombies' ? 'zombies' : 'elecciones';
       const preset = SCENARIO_PRESETS[esc];
+      const nivelMundo = cmd.nivelMundo ? String(cmd.nivelMundo) : DEFAULT_WORLD_CONFIG.nivelMundo;
       const cfg = {
         ...structuredClone(DEFAULT_WORLD_CONFIG),
         escenarioId: esc,
-        economiaModulo: preset.economiaDefault,
-        poblacionInicial: Math.min(1000, Math.max(20, Math.round(Number(cmd.poblacion ?? preset.poblacionDefault)))),
+        economiaModulo: cmd.economiaModulo
+          ? String(cmd.economiaModulo)
+          : nivelMundo === 'M4'
+          ? 'fiscal'
+          : 'base',
+        poblacionInicial: Math.min(5000, Math.max(20, Math.round(Number(cmd.poblacion ?? preset.poblacionDefault)))),
         cantidadMedios: Math.min(3, Math.max(1, Math.round(Number(cmd.medios ?? preset.mediosDefault)))),
         semilla: Math.round(Number(cmd.semilla ?? Date.now() % 100000)) || 1,
         caos: structuredClone(preset.caosDefault),
         usarIaGemini: false,
-        ...(cmd.nivelMundo ? { nivelMundo: String(cmd.nivelMundo) } : {}),
+        nivelMundo,
         ...(cmd.nivelGobernador ? { nivelGobernador: String(cmd.nivelGobernador) } : {}),
+        ...(cmd.estadoAutomatico !== undefined ? { estadoAutomatico: Boolean(cmd.estadoAutomatico) } : {}),
       };
       controller.startNewGame(cfg as never);
       controller.setPaused(true);

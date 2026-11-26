@@ -7,6 +7,8 @@ import {
 } from '../services/aiDirector';
 import {
   ACTION_TABLE,
+  DEFAULT_TRAMOS,
+  DEFAULT_ZONAS,
   DIRECTOR_CONSTANTS,
   ECON_CONSTANTS,
   SAVE_FORMAT_VERSION,
@@ -40,6 +42,7 @@ import {
   emitSimEvent,
   MAX_BITACORA_ENTRIES,
   orderBuildInParcela,
+  orderBuildVia,
   orderDemolishParcela,
   respondToDemand,
   stepSimulation,
@@ -48,9 +51,11 @@ import {
 import {
   buildInitialParcelas,
   createInitialGameState,
-  isTestConfig,
   resolveComplexityConfig,
 } from './worldGenerator';
+import { computeDemandaSuelo, recomputeRoadDistances } from './worldHelpers';
+
+export type { ExtraLeverKey };
 
 export interface SaveSlotMeta {
   dia: number;
@@ -232,7 +237,8 @@ export class GameController {
   private computeDerivedKey(s: GameState): string {
     const objetivoPerdido = s.eventos.some((e) => e.tipo === 'objetivo_perdido') ? 1 : 0;
     const parcelSig = s.parcelas.map((p) => `${p.estado}:${p.edificio?.tipo ?? '-'}:${p.edificio?.activo ? 1 : 0}`).join(',');
-    return `${s.reloj.dia}|${s.noticias.length}|${s.bitacora.length}|${s.resultado.estado}|${s.resultado.victoriaCumplida ? 1 : 0}|${objetivoPerdido}|${s.gobierno.finanzas.saldo}|${s.demandasActivas.length}|${s.bloqueosPalanca.length}|${s.medidasVigentes.length}|${parcelSig}`;
+    const tramoSig = (s.tramos ?? []).map((t) => `${t.construida ? 1 : 0}:${t.enObra ? 1 : 0}:${Math.round(t.estado)}`).join(',');
+    return `${s.reloj.dia}|${s.noticias.length}|${s.bitacora.length}|${s.resultado.estado}|${s.resultado.victoriaCumplida ? 1 : 0}|${objetivoPerdido}|${s.gobierno.finanzas.saldo}|${s.demandasActivas.length}|${s.bloqueosPalanca.length}|${s.medidasVigentes.length}|${parcelSig}|${tramoSig}`;
   }
 
   private buildSnapshot(): GameControllerSnapshot {
@@ -429,11 +435,22 @@ export class GameController {
 
   setDevPopulation(poblacionInicial: number): void {
     if (!this.devMode) return;
-    const clampedPop = Math.min(1000, Math.max(20, Math.round(poblacionInicial)));
+    const clampedPop = Math.min(5000, Math.max(20, Math.round(poblacionInicial)));
     this.startNewGame({
       ...this.state.config,
       poblacionInicial: clampedPop,
     });
+  }
+
+  setEstadoAutomatico(enabled: boolean): void {
+    this.state = {
+      ...this.state,
+      config: {
+        ...this.state.config,
+        estadoAutomatico: enabled,
+      },
+    };
+    this.commit();
   }
 
   setDevComplexity(nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel): void {
@@ -486,7 +503,7 @@ export class GameController {
     this.paused = false;
     this.resetAiLifecycle();
 
-    // Migrate v1/v2 saves cleanly to v3 schema (ESTADOS §13)
+    // Migrate saves cleanly to v2 schema
     const preset = SCENARIO_PRESETS[loaded.config.escenarioId] || SCENARIO_PRESETS.elecciones;
     loaded.config.escenarioId = preset.id;
     loaded.versionFormato = SAVE_FORMAT_VERSION;
@@ -498,9 +515,9 @@ export class GameController {
     loaded.config.nivelMundo = resolvedComplexity.nivelMundo;
     loaded.config.nivelGobernador = resolvedComplexity.nivelGobernador;
     loaded.config.economiaModulo = resolvedComplexity.economiaModulo;
-    if (typeof loaded.esConfigDePrueba !== 'boolean') {
-      loaded.esConfigDePrueba = isTestConfig(loaded.config);
-    }
+    loaded.config.estadoAutomatico = Boolean(
+      loaded.config.estadoAutomatico ?? resolvedComplexity.estadoAutomatico
+    );
     if ('disturbiosActivos' in (loaded.config as unknown as Record<string, unknown>)) {
       delete (loaded.config as unknown as Record<string, unknown>).disturbiosActivos;
     }
@@ -518,7 +535,26 @@ export class GameController {
       anio: Number(rawClock.anio ?? 1),
       periodo: Number(rawClock.periodo ?? rawClock.periodoFiscal ?? 1),
       diasEnPeriodo: Number(rawClock.diasEnPeriodo ?? rawClock.diasEnPeriodoFiscal ?? 0),
+      ticksPorDia: Number(rawClock.ticksPorDia ?? TICKS_PER_DAY),
+      velocidad: ((rawClock.velocidad as 1 | 2 | 4 | 8) ?? 1),
+      pausado: Boolean(rawClock.pausado ?? false),
     };
+
+    if (!loaded.zonas || Object.keys(loaded.zonas).length === 0) {
+      loaded.zonas = structuredClone(DEFAULT_ZONAS);
+    }
+    if (!Array.isArray(loaded.tramos) || loaded.tramos.length === 0) {
+      loaded.tramos = structuredClone(DEFAULT_TRAMOS);
+    }
+    if (!loaded.distanciasZonas || Object.keys(loaded.distanciasZonas).length === 0) {
+      recomputeRoadDistances(loaded);
+    }
+    if (!loaded.demandaSuelo) {
+      loaded.demandaSuelo = computeDemandaSuelo(loaded);
+    }
+    if (!loaded.demandaSueloRachas) {
+      loaded.demandaSueloRachas = {};
+    }
 
     loaded.gobierno.palancasVigentes = migrateLegacyLevers(loaded.gobierno.palancasVigentes, preset.id);
     loaded.gobierno.palancasObjetivo = migrateLegacyLevers(loaded.gobierno.palancasObjetivo, preset.id);
@@ -543,7 +579,8 @@ export class GameController {
       ingeniero: loaded.gobierno.coberturas?.ingeniero ?? 1,
     };
     if (!loaded.gobierno.integridad) {
-      loaded.gobierno.integridad = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
+      loaded.gobierno.integridad = {};
+      for (const z of Object.keys(loaded.zonas)) loaded.gobierno.integridad[z] = 100;
     }
 
     const legacyFin = loaded.gobierno.finanzas as unknown as Record<string, unknown>;
@@ -554,6 +591,7 @@ export class GameController {
       garantiaAlimentaria: Number(legacyFin.garantiaAlimentaria ?? 0),
       garantiaImpaga: Number(legacyFin.garantiaImpaga ?? 0),
       comidaMenores: Number(legacyFin.comidaMenores ?? 0),
+      acogidaMenores: Number(legacyFin.acogidaMenores ?? 0),
       ayudaSocial: Number(legacyFin.ayudaSocial ?? 0),
       mantenimiento: Number(legacyFin.mantenimiento ?? 0),
       operacionObras: Number(legacyFin.operacionObras ?? 0),
@@ -585,6 +623,7 @@ export class GameController {
       garantiaAlimentaria: Number(legacyAcum.garantiaAlimentaria ?? 0),
       garantiaImpaga: Number(legacyAcum.garantiaImpaga ?? 0),
       comidaMenores: Number(legacyAcum.comidaMenores ?? 0),
+      acogidaMenores: Number(legacyAcum.acogidaMenores ?? 0),
       mantenimiento: Number(legacyAcum.mantenimiento ?? 0),
       operacionObras: Number(legacyAcum.operacionObras ?? 0),
       operacion: Number(legacyAcum.operacion ?? 0),
@@ -600,30 +639,54 @@ export class GameController {
     };
 
     const legacyOut = (loaded.ultimaSalidaEconomica ?? {}) as unknown as Record<string, unknown>;
+    const fallbackPrices: Record<ZoneId, number> = {};
+    const fallbackRent: Record<ZoneId, number> = {};
+    for (const z of Object.keys(loaded.zonas)) {
+      fallbackPrices[z] = loaded.alimento.precio;
+      fallbackRent[z] = 12;
+    }
     if (!loaded.ultimaSalidaEconomica) {
       loaded.ultimaSalidaEconomica = {
         accesoComida: {},
         poderAdquisitivo: {},
         saldoDiarioEstimado: 0,
-        precioAlimento: loaded.alimento.precio,
+        precioAlimento: fallbackPrices,
+        alquilerMedio: fallbackRent,
+        cuotaMercado: {},
         inflacion: loaded.gobierno.inflacion ?? 0,
+        precioGlobal: loaded.alimento.precio,
       };
-    } else if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
-      loaded.ultimaSalidaEconomica.saldoDiarioEstimado = Number(legacyOut.disponibleDiarioEstimado ?? 0);
-      delete legacyOut.disponibleDiarioEstimado;
+    } else {
+      if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
+        loaded.ultimaSalidaEconomica.saldoDiarioEstimado = Number(legacyOut.disponibleDiarioEstimado ?? 0);
+        delete legacyOut.disponibleDiarioEstimado;
+      }
+      if (typeof loaded.ultimaSalidaEconomica.precioAlimento === 'number') {
+        const pNum = loaded.ultimaSalidaEconomica.precioAlimento as unknown as number;
+        const map: Record<ZoneId, number> = {};
+        for (const z of Object.keys(loaded.zonas)) map[z] = pNum;
+        loaded.ultimaSalidaEconomica.precioAlimento = map;
+      }
+      loaded.ultimaSalidaEconomica.alquilerMedio ??= fallbackRent;
+      loaded.ultimaSalidaEconomica.cuotaMercado ??= {};
+      loaded.ultimaSalidaEconomica.precioGlobal ??= loaded.alimento.precio;
     }
 
     if (!loaded.ultimaOrdenZona) {
-      loaded.ultimaOrdenZona = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
+      loaded.ultimaOrdenZona = {};
+      for (const z of Object.keys(loaded.zonas)) loaded.ultimaOrdenZona[z] = 100;
     }
     if (!loaded.ultimaDefensaZona) {
-      loaded.ultimaDefensaZona = { centro: 55, norte: 55, este: 55, sur: 55, oeste: 55 };
+      loaded.ultimaDefensaZona = {};
+      for (const z of Object.keys(loaded.zonas)) loaded.ultimaDefensaZona[z] = 55;
     }
     if (!loaded.ultimaIntegridadZona) {
-      loaded.ultimaIntegridadZona = { centro: 100, norte: 100, este: 100, sur: 100, oeste: 100 };
+      loaded.ultimaIntegridadZona = {};
+      for (const z of Object.keys(loaded.zonas)) loaded.ultimaIntegridadZona[z] = 100;
     }
     if (!loaded.golpesPorZonaHistorial) {
-      loaded.golpesPorZonaHistorial = { centro: [], norte: [], este: [], sur: [], oeste: [] };
+      loaded.golpesPorZonaHistorial = {};
+      for (const z of Object.keys(loaded.zonas)) loaded.golpesPorZonaHistorial[z] = [];
     }
     if (!Array.isArray(loaded.fenomenosIniciadosIds)) {
       loaded.fenomenosIniciadosIds = [];
@@ -647,6 +710,9 @@ export class GameController {
       impago: loaded.cooldownsCondicion?.impago ?? 0,
       descontento: loaded.cooldownsCondicion?.descontento ?? 0,
       hambre: loaded.cooldownsCondicion?.hambre ?? 0,
+      paroFirma: loaded.cooldownsCondicion?.paroFirma ?? 0,
+      ocupacion: loaded.cooldownsCondicion?.ocupacion ?? 0,
+      boicot: loaded.cooldownsCondicion?.boicot ?? 0,
     };
     if (typeof loaded.alimento.precioMercado !== 'number') {
       loaded.alimento.precioMercado = loaded.alimento.precio;
@@ -676,8 +742,8 @@ export class GameController {
       if ('progreso' in (npc.educacion as unknown as Record<string, unknown>)) {
         delete (npc.educacion as unknown as Record<string, unknown>).progreso;
       }
-      if (typeof npc.economia.despensa !== 'number') {
-        npc.economia.despensa = ECON_CONSTANTS.objetivoBaseDias;
+      if ('despensa' in (npc.economia as unknown as Record<string, unknown>)) {
+        delete (npc.economia as unknown as Record<string, unknown>).despensa;
       }
       if (typeof npc.economia.propensionGasto !== 'number') {
         npc.economia.propensionGasto = ECON_CONSTANTS.propensionGastoBase;
@@ -718,9 +784,10 @@ export class GameController {
     loaded.empresas = {
       alimento: {
         id: 'alimento',
+        nombre: (rawFood.nombre as string | undefined) ?? 'Sector Agroalimentario',
         dueno: (rawFood.dueno as string | null | undefined) ?? (emp ? emp.id : null),
+        socios: (rawFood.socios as string[] | undefined) ?? [],
         stock: Number(rawFood.stock ?? loaded.alimento.stock),
-        diasStock: Number(rawFood.diasStock ?? loaded.alimento.diasStock),
         siloDias: Number(rawFood.siloDias ?? loaded.alimento.siloDias),
         ventasAcum: Number(rawFood.ventasAcum ?? rawFood.ingresosAcum ?? 0),
         parteSueldos: Number(rawFood.parteSueldos ?? 0.78),
@@ -737,6 +804,8 @@ export class GameController {
       },
       comercio: {
         id: 'comercio',
+        nombre: (rawCom.nombre as string | undefined) ?? 'Red Comercial',
+        dueno: null,
         socios: liveComerciantes,
         ventasAcum: Number(rawCom.ventasAcum ?? rawCom.ingresosAcum ?? 0),
         parteSueldos: Number(rawCom.parteSueldos ?? 0.78),
@@ -759,9 +828,6 @@ export class GameController {
     if (!Array.isArray(loaded.hitosCumplidos)) {
       loaded.hitosCumplidos = [];
     }
-    if (!loaded.hitosRacha || typeof loaded.hitosRacha !== 'object') {
-      loaded.hitosRacha = {};
-    }
     if (!Array.isArray(loaded.demandasActivas)) {
       loaded.demandasActivas = [];
     }
@@ -773,9 +839,6 @@ export class GameController {
     }
     if (!loaded.cooldownActorDemanda || typeof loaded.cooldownActorDemanda !== 'object') {
       loaded.cooldownActorDemanda = {};
-    }
-    if (typeof loaded.parcelasRecienHabilitadasDia !== 'number') {
-      loaded.parcelasRecienHabilitadasDia = 0;
     }
 
     loaded.auditEntradasDia = 0;
@@ -830,22 +893,6 @@ export class GameController {
     }
 
     const tempDerived = deriveCommunityStats(loaded);
-    if (!loaded.metricasBaseObjetivo) {
-      loaded.metricasBaseObjetivo = {
-        victoriaInicial:
-          preset.victoria.metrica === 'apoyoPct'
-            ? tempDerived.apoyoPct
-            : preset.victoria.metrica === 'poblacionPct'
-            ? tempDerived.poblacionPct
-            : tempDerived.poblacion,
-        derrotaInicial:
-          preset.derrota.metrica === 'hambreCriticaPct'
-            ? tempDerived.hambreCriticaPct
-            : preset.derrota.metrica === 'poblacionPct'
-            ? tempDerived.poblacionPct
-            : tempDerived.poblacion,
-      };
-    }
     if (!loaded.metricasPeriodoAnterior) {
       loaded.metricasPeriodoAnterior = {
         apoyoPct: tempDerived.apoyoPct,
@@ -994,6 +1041,17 @@ export class GameController {
     const prevGov = this.state.gobierno;
     const next = structuredClone(this.state);
     const res = orderBuildInParcela(next, parcelaId, tipo);
+    if (!res.ok) return res;
+    this.state = next;
+    this.syncDerivedAndGovCheck(next, prevGov);
+    this.commit();
+    return res;
+  }
+
+  buildVia(tramoId: string): { ok: boolean; error?: string } {
+    const prevGov = this.state.gobierno;
+    const next = structuredClone(this.state);
+    const res = orderBuildVia(next, tramoId);
     if (!res.ok) return res;
     this.state = next;
     this.syncDerivedAndGovCheck(next, prevGov);

@@ -12,7 +12,7 @@
 
 ## 2. Orden de cálculo diario [propuesta]
 
-1. Entran en vigencia los cambios de control pendientes (evento `control`). Avanzan las obras; las terminadas se activan (`obra_fin`, `casa_construida`).
+1. Entran en vigencia los cambios de control pendientes (evento `control`). Avanzan las obras (edificios y vías); las terminadas se activan (`obra_fin`, `casa_construida`, `via_fin`; las parcelas que abre una vía pasan a `libre`).
 2. Clima: intensidades, avisos, ataques y golpes.
 3. Economía diaria: producción de las firmas `agro`, comercio exterior, precio por zona, compras de comida de los hogares, gasto de vida, consumo.
 4. Salud: hambre crítica, internación, cura.
@@ -21,7 +21,7 @@
 7. Caos: contagio, acciones de condición, ofertas del director, vencimientos.
 8. Prensa: cola de hechos, publicación y efectos.
 9. Variables de las personas y vencimiento de modificadores.
-10. **Si es día de pago:** firmas (sueldos, ganancia, contratación) → alquileres y mantenimiento → estado → mercado de vivienda (asignación, mudanzas, desalojos) → mercado de compras → quiebras → inversión, emprendimientos y construcción → medios (ingresos, línea, cierre) → impago.
+10. **Si es día de pago:** firmas (sueldos, ganancia, contratación) → alquileres y mantenimiento → estado → mercado de vivienda (asignación, mudanzas, desalojos) → mercado de compras → quiebras → inversión, emprendimientos y construcción → estado en piloto automático (servicios y vías según la demanda de suelo) → medios (ingresos, línea, cierre) → impago.
 11. **Si es período demográfico:** parejas → nacimientos → independizaciones y separaciones.
 12. Cambios de rol y asignación de puestos (vacantes, desempleados que buscan, emprendedores).
 13. Derivados de la comunidad e historial.
@@ -33,7 +33,7 @@ Las órdenes del jugador se validan y ejecutan en el momento, también en pausa.
 
 - Sin IA, una partida es determinista dada la semilla. **Un generador de azar por subsistema** (clima, caos, vida, mercado, prensa) para que agregar eventos de un subsistema no cambie los de otro **[propuesta]**.
 - Con IA, cada elección del clasificador y cada texto generativo se guardan con su día, y la partida se reproduce sin llamar al modelo.
-- **Guardado:** un archivo por guardado, JSON versionado y comprimido, independiente del lenguaje. Contiene: versión de formato, semilla, población inicial, configuración efectiva (preset y marcas de configuración de prueba) y todo el estado que no se recalcula: **personas** (con genealogía), **hogares**, **casas**, **firmas** (partes, caja, factor, cuotas, locales), estado, clima, medios, integridad de zonas, parcelas y edificios (obras en curso), ofertas de compra pendientes, generadores de azar, elecciones y textos de la IA, eventos e historial.
+- **Guardado:** un archivo por guardado, JSON versionado y comprimido, independiente del lenguaje. Contiene: versión de formato, semilla, población inicial, configuración efectiva (preset y marcas de configuración de prueba) y todo el estado que no se recalcula: **personas** (con genealogía), **hogares**, **casas**, **firmas** (partes, caja, factor, cuotas, locales), estado, clima, medios, integridad de zonas, parcelas (incluido el suelo `sin_calle`), tramos de la red vial, zonas no urbanizadas y edificios (obras en curso), ofertas de compra pendientes, generadores de azar, elecciones y textos de la IA, eventos e historial.
 - Se retoma desde esa foto, sin reproducir la partida. La foto se toma al cierre de un día y se escribe en segundo plano a un archivo temporal que se renombra al terminar.
 - **Registro de eventos:** los hechos raíz no se descartan nunca: `control`, `obra_inicio`, `demolicion`, `fenomeno_inicio`, `aviso`, `muerte`, `nacimiento`, `pareja`, `herencia`, `desalojo`, `firma_fundada`, `firma_compra`, `firma_quiebra`, `monopolio`, `impago`. Los de alta frecuencia (`ataque`, `golpe`, `internacion`, `alta`, `casa_estado`, cambios diarios de zona) se guardan uno por uno los últimos `ventana_eventos_dias` y, más atrás, agregados por día y zona.
 - Cada partida tiene un guardado manual y un autoguardado periódico. Un guardado de otra versión se migra o se rechaza con un aviso claro.
@@ -46,6 +46,7 @@ Como MOTOR_V1 §4: consultas asíncronas que nunca bloquean el juego, versión m
 
 - **O(N) por día.** Ninguna regla compara todos contra todos. Las búsquedas (casas libres, firmas con vacante, postulantes) usan **índices por zona** que se actualizan cuando cambian, no se recalculan.
 - **Lo caro corre por período:** mercado de vivienda, mercado de compras, parejas, nacimientos, emprendimientos y construcción corren en día de pago o período demográfico, por zona, nunca por persona cada día.
+- **Red vial:** la distancia entre zonas se precomputa y se actualiza solo cuando un tramo cambia de estado o se construye; la distancia entre parcelas es la de su zona más un costo interno. La demanda de suelo por zona y tipo se mantiene como contador y se evalúa solo el día de pago.
 - **Hogares como unidad de cómputo** de comida y gasto, no la persona; la comida se calcula una vez por hogar.
 - **Firmas como unidad** de ventas y sueldos; los empleados cobran por lote.
 - **Eventos agregados** cuando son masivos: un mismo día, muchas compras de comida o muchas muertes, se emiten por zona o por hogar.

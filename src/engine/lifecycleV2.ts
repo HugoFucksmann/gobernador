@@ -5,6 +5,7 @@ import {
   PERIOD_DAYS_DEMOG,
   ROLE_CATALOG,
   SPANISH_NAMES,
+  VIAL_CONSTANTS,
 } from '../data/catalogs';
 import {
   Casa,
@@ -13,7 +14,6 @@ import {
   GameState,
   Hogar,
   Npc,
-  OwnerRef,
   PersonalityTrait,
   PublicRoleId,
   RoleId,
@@ -25,8 +25,7 @@ import {
   clamp,
   emitSimEvent,
   getFirmaRoleCaps,
-  getStage,
-  getWorldZones,
+  getZoneTravelCost,
 } from './worldHelpers';
 
 const TRAITS: PersonalityTrait[] = [
@@ -1016,14 +1015,16 @@ export function assignRolesAndJobsV2(state: GameState): void {
         if (openSlots <= 0) continue;
         const educMin = ROLE_CATALOG[role].educMin;
 
-        // Prefer same zone / neighbor zone, non-calle first (calle reduces hiring chance slightly)
+        // Prefer reachable route within rutaMaxTrabajo, non-calle first
         for (const cand of remainingUnemp) {
           if (openSlots <= 0 || hiredHere >= ECON_CONSTANTS.maxContratacionesPorPeriodo) break;
           if (cand.rol !== 'desempleado' || cand.educacion.nivel < educMin) continue;
           const h = hogarById.get(cand.hogarId);
           if (h?.estado === 'calle' && nextSubRand(state, 'mercado') < 0.35) continue;
-          const zoneMatch = cand.zona === f.zona || state.zonas[f.zona]?.vecinas.includes(cand.zona);
-          if (!zoneMatch && nextSubRand(state, 'mercado') < 0.5) continue;
+          const travelCost = getZoneTravelCost(state, cand.zona, f.zona);
+          if (!Number.isFinite(travelCost) || travelCost > VIAL_CONSTANTS.rutaMaxTrabajo) continue;
+          const sameOrNeighbor = cand.zona === f.zona || state.zonas[f.zona]?.vecinas.includes(cand.zona);
+          if (!sameOrNeighbor && travelCost > 20 && nextSubRand(state, 'mercado') < 0.35) continue;
 
           cand.rol = role;
           cand.empleadorId = f.id;

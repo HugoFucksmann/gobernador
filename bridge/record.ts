@@ -32,7 +32,7 @@ const preset = SCENARIO_PRESETS[esc];
 const cfg: WorldConfig = {
   ...structuredClone(DEFAULT_WORLD_CONFIG),
   escenarioId: esc,
-  economiaModulo: preset.economiaDefault,
+  economiaModulo: DEFAULT_WORLD_CONFIG.economiaModulo,
   poblacionInicial: npcs,
   cantidadMedios: preset.mediosDefault,
   semilla,

@@ -25,11 +25,12 @@ import {
   getEffectiveZone,
   TICKS_PER_DAY,
 } from '../src/engine/simulation';
+import { getAllZoneIds } from '../src/engine/worldHelpers';
 import { estimatePeriodBudget, getActiveBuildings, getBuildingJobCaps } from '../src/engine/policies';
-import type { CommunityDerived, GameState, Npc, Parcela, SimEvent } from '../src/types/game';
+import type { BuildingDefinition, CommunityDerived, GameState, Npc, Parcela, SimEvent } from '../src/types/game';
 import MAPA_ELECCIONES from '../presets/mapa_elecciones.json';
 
-export const PROTO = 1;
+export const PROTO = 2;
 
 export const ROLE_IDS = Object.keys(ROLE_CATALOG);
 export const ACTION_IDS = ACTION_TABLE.map((a) => a.id);
@@ -41,16 +42,20 @@ export const NPC_COLS = [
 ];
 // flags: 1 vivo · 2 internado · 4 esperando cama · 8 fuera de puesto · 16 accion foco · 32 sin dinero para comida
 
-export function zoneIndex(z: string | undefined): number {
-  const i = ZONE_IDS.indexOf(z as never);
+export function zoneIndex(z: string | undefined, zoneIds: string[] = ZONE_IDS): number {
+  const i = zoneIds.indexOf(z as never);
   return i < 0 ? -1 : i;
+}
+
+function sumBuildingPuestos(b: BuildingDefinition): number {
+  return Object.values(b.puestos ?? {}).reduce((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
 }
 
 export function buildHello(extra: Record<string, unknown> = {}) {
   return {
     t: 'hello',
     proto: PROTO,
-    motor: 'gobernador-ts',
+    motor: 'gobernador-ts-v2',
     formatoGuardado: SAVE_FORMAT_VERSION,
     ticksPorDia: TICKS_PER_DAY,
     diasPorPeriodo: PERIOD_DAYS,
@@ -65,15 +70,15 @@ export function buildHello(extra: Record<string, unknown> = {}) {
       tipo: b.tipo,
       nombre: b.nombre,
       categoria: b.categoria,
+      rubro: b.rubro ?? null,
       costo: b.costoObra,
       diasObra: b.diasObra,
       mantenimientoPeriodo: b.mantenimientoPeriodo,
       areaServicio: b.areaServicio ?? null,
       construible: b.construibleGobernador && GOVERNOR_BUILDABLE_TYPES.includes(b.tipo),
       requiereG2: !!b.requiereG2,
-      descripcion: b.descripcion,
       camas: b.camasHospital ?? 0,
-      puestos: b.puestosRol ?? b.puestosObrero ?? b.puestosAgricultor ?? 0,
+      puestos: sumBuildingPuestos(b),
       bonusDefensa: b.bonusDefensa ?? b.defensaMuralla ?? 0,
     })),
     palancas: {
@@ -101,20 +106,17 @@ export function buildHello(extra: Record<string, unknown> = {}) {
 }
 
 // ───────── Lugares de rutina (CONTROLES §4): solo para la vista ─────────
-function pickByZone(list: Parcela[], npc: Npc, salt: number): number {
-  if (list.length === 0) return -1;
-  const same = list.filter((p) => p.zona === npc.zona);
-  const pool = same.length > 0 ? same : list;
-  return pool[salt % pool.length].orden;
-}
-
 export function computeRoutinePlaces(state: GameState): Map<string, { trabajo: number; compras: number }> {
   const out = new Map<string, { trabajo: number; compras: number }>();
-  const byType = (t: string) =>
-    state.parcelas.filter((p) => p.edificio && p.edificio.estado === 'ocupada' && p.edificio.activo && p.edificio.tipo === t);
+  const byType = (...types: string[]) =>
+    state.parcelas.filter(
+      (p) => p.edificio && p.edificio.estado === 'ocupada' && p.edificio.activo && types.includes(p.edificio.tipo)
+    );
   const campos = byType('campo');
-  const locales = byType('local_comercio');
-  const hospitales = [...byType('hospital'), ...byType('hospital_campana')];
+  const fabricas = byType('fabrica');
+  const comercios = byType('almacen', 'supermercado', 'tienda', 'kiosco', 'restoran', 'bar_cafe');
+  const oficinasPriv = byType('oficina_constructora', 'oficina_inmobiliaria', 'oficina_medio', 'oficina_banco', 'peluqueria', 'taller', 'gimnasio', 'cine_teatro', 'club');
+  const hospitales = byType('hospital', 'hospital_campana');
   const comisarias = byType('comisaria');
   const escuelas = byType('escuela');
   const oficinas = byType('oficina_publica');
@@ -135,10 +137,13 @@ export function computeRoutinePlaces(state: GameState): Map<string, { trabajo: n
     let trabajo = -1;
     switch (npc.rol) {
       case 'agricultor':
-      case 'tecnico': trabajo = pick(campos); break;
-      case 'obrero':
-      case 'comerciante':
-      case 'empresario': trabajo = pick(locales); break;
+      case 'tecnico': trabajo = pick(campos.length > 0 ? campos : fabricas); break;
+      case 'obrero': trabajo = pick(fabricas.length > 0 ? fabricas : comercios); break;
+      case 'comerciante': trabajo = pick(comercios); break;
+      case 'constructor':
+      case 'inmobiliario':
+      case 'empresario':
+      case 'periodista': trabajo = pick(oficinasPriv.length > 0 ? oficinasPriv : comercios); break;
       case 'policia': trabajo = pick(comisarias); break;
       case 'medico': trabajo = pick(hospitales); break;
       case 'docente':
@@ -147,9 +152,8 @@ export function computeRoutinePlaces(state: GameState): Map<string, { trabajo: n
       case 'ingeniero': trabajo = pick(oficinas); break;
       default: trabajo = -1;
     }
-    out.set(npc.id, { trabajo, compras: pick(locales) });
+    out.set(npc.id, { trabajo, compras: pick(comercios) });
   }
-  void pickByZone;
   return out;
 }
 
@@ -163,8 +167,7 @@ function buildingStaffing(state: GameState, derived: CommunityDerived) {
     state.parcelas, derived.vivos, state.gobierno.palancasVigentes.nivelObras,
     state.config.poblacionInicial, state.gobierno.cuposFijos
   );
-  const medicosActivos = state.npcs.filter((n) => n.vivo && n.rol === 'medico' && !n.hospital.internado && !n.accionIa?.fueraDePuesto).length;
-  const hosp = computeHospitalFacilities(state, medicosActivos);
+  const hosp = computeHospitalFacilities(state);
   const hospById = new Map(hosp.facilities.map((f) => [f.edificioId, f]));
   return { caps, hospById, roles: derived.roles };
 }
@@ -188,9 +191,9 @@ export function projectParcelas(state: GameState, derived: CommunityDerived) {
           case 'hospital':
           case 'hospital_campana': {
             const f = hospById.get(b.id);
-            capacidad = f?.beds ?? 0;
-            usada = f?.occupied ?? 0;
-            personal = b.tipo === 'hospital' ? Math.min(Math.round(caps.medico / countOf('hospital')), roles.medico) : 0;
+            capacidad = f?.camasEfectivas ?? 0;
+            usada = f?.ocupadas ?? 0;
+            personal = f?.medicosAsignados ?? 0;
             sinPersonal = b.tipo === 'hospital' && capacidad <= 0;
             lleno = capacidad <= 0 || usada >= capacidad;
             break;
@@ -198,17 +201,27 @@ export function projectParcelas(state: GameState, derived: CommunityDerived) {
           case 'comisaria': capacidad = Math.round(caps.policia / countOf('comisaria')); personal = Math.min(capacidad, Math.round(roles.policia / countOf('comisaria'))); sinPersonal = personal <= 0; break;
           case 'escuela': capacidad = Math.round(caps.docente / countOf('escuela')); personal = Math.min(capacidad, roles.docente); sinPersonal = personal <= 0; break;
           case 'oficina_publica': capacidad = Math.round(caps.estatal / countOf('oficina_publica')); personal = Math.min(capacidad, roles.estatal); sinPersonal = personal <= 0; break;
-          case 'campo': capacidad = Math.round((def.puestosAgricultor ?? 0) * Math.max(0.5, state.config.poblacionInicial / 100)); personal = Math.min(capacidad, Math.round(roles.agricultor / countOf('campo'))); sinPersonal = personal <= 0; break;
-          case 'local_comercio': capacidad = Math.round((def.puestosObrero ?? 0) * Math.max(0.5, state.config.poblacionInicial / 100)); personal = Math.min(capacidad, Math.round(roles.obrero / countOf('local_comercio'))); sinPersonal = personal <= 0; break;
-          default: break;
+          case 'campo': capacidad = Math.round((def.puestos.agricultor ?? 0) * Math.max(0.5, state.config.poblacionInicial / 100)); personal = Math.min(capacidad, Math.round(roles.agricultor / countOf('campo'))); sinPersonal = personal <= 0; break;
+          default: {
+            capacidad = sumBuildingPuestos(def);
+            if (b.firmaId) {
+              const firma = state.firmas.find((f) => f.id === b.firmaId);
+              personal = firma ? Math.min(capacidad, firma.empleados.length) : 0;
+              sinPersonal = capacidad > 0 && personal <= 0;
+            }
+            break;
+          }
         }
       }
       edificio = {
         id: b.id,
         tipo: b.tipo,
         dueno: b.dueno,
+        firmaId: b.firmaId ?? null,
+        casaId: b.casaId ?? null,
         estado: b.estado,
         activo: b.activo,
+        estadoSalud: b.estadoSalud,
         diasObraRestantes: b.diasObraRestantes,
         diasObraTotal: b.diasObraTotal,
         personal,
@@ -216,10 +229,17 @@ export function projectParcelas(state: GameState, derived: CommunityDerived) {
         usada,
         sinPersonal,
         lleno,
-        stockAgotado: b.tipo === 'local_comercio' ? state.alimento.stock <= 0 : false,
+        stockAgotado: !!def.vendeComida && state.alimento.stock <= 0,
       };
     }
-    return { id: p.id, estado: p.estado, edificio };
+    return {
+      id: p.id,
+      zona: p.zona,
+      tipoParcela: p.tipoParcela,
+      estado: p.estado,
+      tramoAperturaId: p.tramoAperturaId ?? null,
+      edificio,
+    };
   });
 }
 
@@ -253,20 +273,21 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
   const budget = estimatePeriodBudget(state, gov.palancasVigentes);
   const gastoSemana = Math.max(1, budget.gastosEst);
   const places = computeRoutinePlaces(state);
-  const parcelOrder = new Map(state.parcelas.map((p) => [p.orden, p]));
-  void parcelOrder;
-  const parcelIdx = new Map(state.parcelas.map((p) => [p.orden, state.parcelas.indexOf(p)]));
+  const allZoneIds = getAllZoneIds(state);
+  const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
 
   // ── NPCs (filas compactas)
-  const zcount = ZONE_IDS.length;
+  const zcount = allZoneIds.length;
   const rows: number[][] = [];
   const porZona: Record<string, { n: number; sat: number; desc: number; hambre: number; miedo: number }> = {};
-  for (const z of ZONE_IDS) porZona[z] = { n: 0, sat: 0, desc: 0, hambre: 0, miedo: 0 };
+  for (const z of allZoneIds) porZona[z] = { n: 0, sat: 0, desc: 0, hambre: 0, miedo: 0 };
   state.npcs.forEach((npc, i) => {
     const vivo = npc.vivo;
+    const hogar = hogarById.get(npc.hogarId);
     const lugar = vivo ? places.get(npc.id) : undefined;
-    const ez = getEffectiveZone(npc, zcount);
+    const ez = getEffectiveZone(npc, zcount, allZoneIds);
     if (vivo) {
+      if (!porZona[ez]) porZona[ez] = { n: 0, sat: 0, desc: 0, hambre: 0, miedo: 0 };
       const pz = porZona[ez];
       pz.n++;
       pz.sat += npc.variables.satisfaccion;
@@ -281,11 +302,11 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
     if (npc.hospital.esperandoCama && !npc.hospital.internado) flags |= 4;
     if (npc.accionIa?.fueraDePuesto) flags |= 8;
     if (npc.accionIa?.esFoco) flags |= 16;
-    if (npc.economia.noPudoPagarComida) flags |= 32;
+    if (hogar?.noPudoPagarComida) flags |= 32;
     rows.push([
       i,
       ROLE_IDS.indexOf(npc.rol),
-      zoneIndex(npc.zona),
+      zoneIndex(npc.zona, allZoneIds),
       npc.edad,
       Math.round(npc.variables.salud),
       Math.round(npc.variables.hambre),
@@ -294,18 +315,21 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       Math.round(npc.variables.lealtad),
       flags,
       accionIdx,
-      zoneIndex(npc.accionIa?.zonaDestino ?? undefined),
+      zoneIndex(npc.accionIa?.zonaDestino ?? undefined, allZoneIds),
       lugar && lugar.trabajo >= 0 ? lugar.trabajo : -1,
       lugar && lugar.compras >= 0 ? lugar.compras : -1,
-      Math.round(npc.economia.dinero),
+      Math.round(hogar?.dinero ?? 0),
     ]);
   });
-  void parcelIdx;
 
-  const zonas = ZONE_IDS.map((z) => {
-    const pz = porZona[z];
+  const zonas = allZoneIds.map((z: string) => {
+    const pz = porZona[z] ?? { n: 0, sat: 0, desc: 0, hambre: 0, miedo: 0 };
+    const zDef = state.zonas[z];
     return {
       id: z,
+      nombre: zDef?.nombre ?? z,
+      estado: zDef?.estado ?? 'activa',
+      viaAperturaId: zDef?.viaAperturaId ?? null,
       poblacion: pz.n,
       satisfaccion: pz.n ? round1(pz.sat / pz.n) : 0,
       descontentosPct: pz.n ? round1((pz.desc / pz.n) * 100) : 0,
@@ -362,12 +386,12 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
     escenario: state.config.escenarioId,
     config: {
       escenarioId: state.config.escenarioId,
-      nivelMundo: state.config.nivelMundo ?? 'M1',
+      nivelMundo: state.config.nivelMundo ?? 'M2',
       nivelGobernador: state.config.nivelGobernador ?? 'G2',
+      estadoAutomatico: !!state.config.estadoAutomatico,
       poblacionInicial: state.config.poblacionInicial,
       cantidadMedios: state.config.cantidadMedios,
       semilla: state.semilla,
-      esConfigDePrueba: state.esConfigDePrueba,
       economiaModulo: state.config.economiaModulo,
     },
     resultado: state.resultado,
@@ -382,6 +406,8 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
     },
     comunidad: derived,
     zonas,
+    tramos: state.tramos ?? [],
+    demandaSuelo: state.demandaSuelo ?? {},
     finanzas: {
       reserva: Math.round(gov.reserva * 100) / 100,
       semanasCaja: round1(gov.reserva / gastoSemana),
@@ -394,7 +420,7 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       stock: Math.round(state.alimento.stock),
       diasStock: round1(state.alimento.diasStock),
       precio: round1(state.alimento.precio * 100) / 100,
-      precioBase: state.alimento.precioBase,
+      precioBase: ECON_CONSTANTS.precioBaseAlimento,
       produccionDiaria: round1(state.alimento.produccionDiaria),
       consumoDiario: round1(state.alimento.consumoDiario),
       siloDias: state.alimento.siloDias,
@@ -403,6 +429,18 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       id: e.id, factor: e.factor, tramo: e.ultimoTramo, ganancia: e.ultimaGanancia, ventasAcum: e.ventasAcum,
       periodosFactorAlto: e.periodosFactorAlto, periodosFactorBajo: e.periodosFactorBajo, despidosPendientes: e.despidosPendientes,
       empleados: e.id === 'alimento' ? derived.roles.agricultor + derived.roles.tecnico : derived.roles.obrero + derived.roles.comerciante,
+    })),
+    firmas: state.firmas.filter((f) => f.activa).map((f) => ({
+      id: f.id,
+      nombre: f.nombre,
+      rubro: f.rubro,
+      zona: f.zona,
+      empleados: f.empleados.length,
+      locales: f.locales.length,
+      caja: Math.round(f.caja),
+      ventas: Math.round(f.ventas),
+      factor: f.factor,
+      ultimaGanancia: Math.round(f.ultimaGanancia),
     })),
     medios: state.medios.map((m) => ({
       id: m.id, nombre: m.nombre, afinidad: m.lineaEditorial.afinidadGobierno, sensacionalismo: m.lineaEditorial.sensacionalismo,
@@ -419,7 +457,7 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
     },
     demandas: state.demandasActivas,
     medidas: state.medidasVigentes,
-    hitos: { cumplidos: state.hitosCumplidos, racha: state.hitosRacha, defs: preset.hitos },
+    hitos: { cumplidos: state.hitosCumplidos, defs: preset.hitos },
     noticias: state.noticias.slice(0, 30).map((n) => ({
       id: n.id, dia: n.dia, medio: n.medioNombre, medioId: n.medioId, autor: n.autorNombre, tema: n.tema, tono: n.tono,
       alcance: Math.round(n.alcance), credibilidad: n.credibilidad ?? null, titulo: n.titulo, texto: n.texto,
@@ -435,23 +473,30 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
 
 export function npcMeta(state: GameState) {
   return state.npcs.map((n) => ({
-    id: n.id, nombre: n.nombre, cumple: n.cumpleanosDia, educ: n.educacion.nivel,
+    id: n.id, nombre: `${n.nombre} ${n.apellido}`.trim(), cumple: n.cumpleanosDia, educ: n.educacion.nivel,
     pers: [n.personalidad.valentia, n.personalidad.laboriosidad, n.personalidad.codicia, n.personalidad.rebeldia, n.personalidad.resiliencia],
   }));
 }
 
 export function projectNpcFicha(state: GameState, npc: Npc) {
+  const hogar = state.hogares.find((h) => h.id === npc.hogarId);
   return {
     id: npc.id,
-    nombre: npc.nombre,
+    nombre: `${npc.nombre} ${npc.apellido}`.trim(),
     edad: npc.edad,
     rol: npc.rol,
     zona: npc.zona,
     vivo: npc.vivo,
+    hogarId: npc.hogarId,
     educ: npc.educacion.nivel,
     personalidad: npc.personalidad,
     variables: npc.variables,
-    economia: npc.economia,
+    economia: {
+      ...npc.economia,
+      dinero: hogar?.dinero ?? 0,
+      despensa: hogar?.despensa ?? 0,
+      noPudoPagarComida: !!hogar?.noPudoPagarComida,
+    },
     hospital: npc.hospital,
     accion: npc.accionIa
       ? { id: npc.accionIa.id, nombre: npc.accionIa.nombre, diasRestantes: npc.accionIa.diasRestantes, zonaDestino: npc.accionIa.zonaDestino ?? null, origen: npc.accionIa.origen, causa: npc.accionIa.causa ?? null, texto: npc.accionIa.texto }

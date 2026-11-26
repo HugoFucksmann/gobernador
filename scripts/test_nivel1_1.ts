@@ -77,8 +77,9 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
 // ───── 2. Elecciones: segunda condición de derrota (ESCENARIOS §2)
 {
   let s = mk({ seed: 3 });
+  const targetDead = Math.ceil(s.npcs.length * 0.72);
   let n = 0;
-  for (const npc of s.npcs) if (n++ < 55) npc.vivo = false;
+  for (const npc of s.npcs) if (n++ < targetDead) npc.vivo = false;
   s = days(s, 1);
   check('Elecciones: derrota si la población cae bajo el 50% de la inicial', s.resultado.estado === 'derrota' && /50%/.test(s.resultado.razon ?? ''), s.resultado.razon ?? '');
   const z = mk({ esc: 'zombies', seed: 3 });
@@ -181,7 +182,8 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Actores: el sindicato de públicos demanda si los salarios bajan', !!sind, sind ? `día ${sind.dia}` : 'sin demanda');
   let v = mk({ g: 'G3', seed: 6 });
   v.gobierno.palancasVigentes.garantiaAlimentaria = 0; v.gobierno.palancasObjetivo.garantiaAlimentaria = 0;
-  for (const n of v.npcs) if (n.zona === 'este') { n.variables.hambre = 95; n.economia.despensa = 0; n.economia.dinero = 0; }
+  for (const n of v.npcs) if (n.zona === 'este') n.variables.hambre = 95;
+  for (const h of v.hogares) if (h.zona === 'este') { h.despensa = 0; h.dinero = 0; }
   v.demandasActivas = []; v.cooldownActorDemanda = { empresarios: 9999, medio_1: 9999, medio_2: 9999, medio_3: 9999 };
   v = days(v, 4);
   const vec = v.eventos.find((e) => e.tipo === 'demanda' && String((e as { actorId?: string }).actorId).startsWith('vecinos_'));
@@ -215,13 +217,15 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Determinismo: misma semilla y mismas palancas → mismo resultado', run() === run());
 }
 
-// ───── 11. Fiscal (M2): emisión e inflación
+// ───── 11. Fiscal (M4): emisión e inflación
 {
-  let s = mk({ g: 'G3', m: 'M2', fiscal: true, seed: 4 });
+  let s = mk({ g: 'G3', m: 'M4', fiscal: true, seed: 4 });
+  s.gobierno.palancasObjetivo.impuesto = 10;
+  s.gobierno.palancasObjetivo.ayudaSocial = 5;
   s.gobierno.palancasObjetivo.nivelObras = 5;
-  s.gobierno.palancasObjetivo.salarioPublico = 150;
-  s.gobierno.palancasObjetivo.topeEmision = 25;
-  s.gobierno.reserva = 300;
+  s.gobierno.palancasObjetivo.salarioPublico = 180;
+  s.gobierno.palancasObjetivo.topeEmision = 30;
+  s.gobierno.reserva = 50;
   let violations = 0;
   for (let i = 0; i < 70; i++) {
     const before = computeTotalWorldMoney(s);

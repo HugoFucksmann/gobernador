@@ -1,7 +1,9 @@
 import React from 'react';
 import {
   Building2,
+  GraduationCap,
   Lock,
+  Newspaper,
   RotateCcw,
   Shield,
   SlidersHorizontal,
@@ -12,11 +14,13 @@ import {
 import {
   ECON_CONSTANTS,
   FOREIGN_TRADE_STEPS,
+  LEVEL11_CONSTANTS,
   LEVER_BOUNDS,
   OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
   PRICE_CAP_FACTORS,
 } from '../../data/catalogs';
+import type { ExtraLeverKey } from '../../engine/gameController';
 import {
   daysToSettlement,
   estimatePeriodBudget,
@@ -42,6 +46,7 @@ interface LeversWindowProps {
   onFocus: () => void;
   onClose: () => void;
   onUpdateLevers: (updater: (prev: GovernorLevers) => GovernorLevers) => void;
+  onSetExtraLever?: (key: ExtraLeverKey, value: number) => { ok: boolean; error?: string };
   onOpenBuildPanel?: () => void;
 }
 
@@ -128,16 +133,33 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   onFocus,
   onClose,
   onUpdateLevers,
+  onSetExtraLever,
   onOpenBuildPanel,
 }) => {
   const mod = state.config.economiaModulo;
   const govLevel = state.config.nivelGobernador ?? (mod === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0';
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
   const isG1 = govLevel === 'G1';
-  const showTopeEmision = mod === 'fiscal' && govLevel === 'G3';
+  const isG3 = govLevel === 'G3';
+  const showTopeEmision = mod === 'fiscal' && isG3;
+
   const obj = state.gobierno.palancasObjetivo;
   const vig = state.gobierno.palancasVigentes;
+  const extrasObj = state.gobierno.extras?.objetivo ?? {
+    subsidioAlimento: 0,
+    presion: 0,
+    acceso: 0,
+    nivelEducacion: 0,
+  };
+  const extrasVig = state.gobierno.extras?.vigentes ?? {
+    subsidioAlimento: 0,
+    presion: 0,
+    acceso: 0,
+    nivelEducacion: 0,
+  };
+
   const budget = estimatePeriodBudget(state, obj);
+  const vigBudget = estimatePeriodBudget(state, vig);
   const daysLeft = daysToSettlement(state);
 
   const getLockNote = (lever: LeverKey): string | undefined => {
@@ -170,22 +192,36 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   const campanasCount = activeBuildings.filter((b) => b.tipo === 'hospital_campana').length;
   const comisariasCount = activeBuildings.filter((b) => b.tipo === 'comisaria').length;
 
-  const hasPendingChanges =
-    !isG0 &&
-    (Math.abs(obj.impuesto - vig.impuesto) >= 0.01 ||
-      Math.abs(obj.ayudaSocial - vig.ayudaSocial) >= 0.01 ||
-      Math.abs(obj.garantiaAlimentaria - vig.garantiaAlimentaria) >= 0.01 ||
-      (!isG1 &&
-        (Math.abs(obj.salarioPublico - vig.salarioPublico) >= 0.01 ||
-          Math.abs(obj.prensa - vig.prensa) >= 0.01 ||
-          obj.precioMaximo !== vig.precioMaximo ||
-          obj.comercioExterior !== vig.comercioExterior ||
-          obj.nivelObras !== vig.nivelObras)) ||
-      (showTopeEmision && Math.abs(obj.topeEmision - vig.topeEmision) >= 0.01));
+  const hasPendingCore =
+    Math.abs(obj.impuesto - vig.impuesto) >= 0.01 ||
+    Math.abs(obj.ayudaSocial - vig.ayudaSocial) >= 0.01 ||
+    Math.abs(obj.garantiaAlimentaria - vig.garantiaAlimentaria) >= 0.01 ||
+    (!isG1 &&
+      (Math.abs(obj.salarioPublico - vig.salarioPublico) >= 0.01 ||
+        Math.abs(obj.prensa - vig.prensa) >= 0.01 ||
+        obj.precioMaximo !== vig.precioMaximo ||
+        obj.comercioExterior !== vig.comercioExterior ||
+        obj.nivelObras !== vig.nivelObras)) ||
+    (showTopeEmision && Math.abs(obj.topeEmision - vig.topeEmision) >= 0.01);
+
+  const hasPendingExtras =
+    isG3 &&
+    (Math.abs(extrasObj.subsidioAlimento - extrasVig.subsidioAlimento) >= 0.01 ||
+      Math.abs(extrasObj.presion - extrasVig.presion) >= 0.01 ||
+      Math.abs(extrasObj.acceso - extrasVig.acceso) >= 0.01 ||
+      Math.abs(extrasObj.nivelEducacion - extrasVig.nivelEducacion) >= 0.01);
+
+  const hasPendingChanges = !isG0 && (hasPendingCore || hasPendingExtras);
 
   const resetPending = () => {
     if (isG0) return;
     onUpdateLevers(() => ({ ...vig }));
+    if (isG3 && onSetExtraLever) {
+      onSetExtraLever('subsidioAlimento', extrasVig.subsidioAlimento);
+      onSetExtraLever('presion', extrasVig.presion);
+      onSetExtraLever('acceso', extrasVig.acceso);
+      onSetExtraLever('nivelEducacion', extrasVig.nivelEducacion);
+    }
   };
 
   const priceCapOptions: Array<{ mode: PriceCapMode; label: string; capLabel: string }> = [
@@ -193,12 +229,12 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
     {
       mode: 'moderado',
       label: 'Moderado',
-      capLabel: `$${(state.alimento.precioBase * (PRICE_CAP_FACTORS.moderado ?? 1.25)).toFixed(2)}`,
+      capLabel: `$${(ECON_CONSTANTS.precioBaseAlimento * (PRICE_CAP_FACTORS.moderado ?? 1.25)).toFixed(2)}`,
     },
     {
       mode: 'estricto',
       label: 'Estricto',
-      capLabel: `$${(state.alimento.precioBase * (PRICE_CAP_FACTORS.estricto ?? 0.6)).toFixed(2)}`,
+      capLabel: `$${(ECON_CONSTANTS.precioBaseAlimento * (PRICE_CAP_FACTORS.estricto ?? 0.6)).toFixed(2)}`,
     },
   ];
 
@@ -208,7 +244,8 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   const tradeLockNote = getLockNote('comercioExterior');
   const obrasLockNote = getLockNote('nivelObras');
 
-  const budgetTooltip = `Nómina $${budget.nominaEst.toFixed(0)} · Pens. $${budget.pensionesEst.toFixed(0)} · Menores $${budget.comidaMenoresEst.toFixed(0)} · Gar. ~$${budget.garantiaEst.toFixed(0)} · Ayuda $${budget.ayudaSocialEst.toFixed(0)} · Mant. $${budget.mantenimientoEst.toFixed(0)} · Obras $${budget.operacionObrasEst.toFixed(0)} · Prensa $${budget.prensaEst.toFixed(0)}`;
+  const saldoDelta = budget.saldoEst - vigBudget.saldoEst;
+  const budgetTooltip = `Nómina $${budget.nominaEst.toFixed(0)} · Pens. $${budget.pensionesEst.toFixed(0)} · Menores $${budget.comidaMenoresEst.toFixed(0)} · Gar. ~$${budget.garantiaEst.toFixed(0)} · Ayuda $${budget.ayudaSocialEst.toFixed(0)} · Mant. Edif. $${budget.mantenimientoEdificiosEst.toFixed(0)} + Vías $${budget.mantenimientoViasEst.toFixed(0)} · Obras $${budget.operacionObrasEst.toFixed(0)} · Prensa $${budget.prensaEst.toFixed(0)}`;
 
   return (
     <div className="pointer-events-none fixed top-20 left-4" style={{ zIndex }}>
@@ -225,13 +262,15 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
         <div className="p-5 max-h-[calc(100vh-195px)] overflow-y-auto space-y-5">
           {(isG0 || isG1) && (
             <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs text-amber-200">
-              {isG0
+              {state.config.estadoAutomatico
+                ? 'Estado automático activo: el gobierno ajusta las palancas solo.'
+                : govLevel === 'G0'
                 ? 'Modo G0: controles automáticos.'
                 : 'Modo G1: impuesto, ayuda, garantía y parcelas.'}
             </div>
           )}
 
-          {/* Budget Summary Strip */}
+          {/* Budget Summary + Pre-confirm Impact Strip */}
           <UiTooltip text={budgetTooltip} placement="bottom" className="w-full">
             <div className="w-full bg-zinc-800/60 border border-zinc-700/70 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between gap-2 text-xs">
@@ -242,7 +281,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                   <button
                     type="button"
                     onClick={resetPending}
-                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 rounded-lg transition-colors"
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     Revertir
@@ -272,6 +311,18 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                   </span>
                 </div>
               </div>
+
+              <div className="flex items-center justify-between text-xs text-zinc-400 font-mono tabular-nums pt-2 border-t border-zinc-700/60">
+                <span>
+                  Mant.: Edif. ${budget.mantenimientoEdificiosEst.toFixed(0)} · Vías $
+                  {budget.mantenimientoViasEst.toFixed(0)}
+                </span>
+                {Math.abs(saldoDelta) >= 1 && (
+                  <span className={saldoDelta >= 0 ? 'text-emerald-300' : 'text-amber-300'}>
+                    Impacto: {saldoDelta >= 0 ? '+' : ''}${saldoDelta.toFixed(0)}/per
+                  </span>
+                )}
+              </div>
             </div>
           </UiTooltip>
 
@@ -281,7 +332,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
 
             <NumericSlider
               label="Impuesto"
-              tooltip={`Aplica a privados, públicos y ganancias. Recaudación est.: +$${budget.ingresosEst.toFixed(0)}/per. Por encima de ${ECON_CONSTANTS.fiscalUmbral}% frena la actividad.`}
+              tooltip={`Aplica a privados, públicos y firmas. Recaudación est.: +$${budget.ingresosEst.toFixed(0)}/per. Por encima de ${ECON_CONSTANTS.fiscalUmbral}% frena la actividad.`}
               vigente={vig.impuesto}
               objetivo={obj.impuesto}
               min={LEVER_BOUNDS.impuesto.min}
@@ -328,7 +379,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
 
             {!isG1 && (
               <NumericSlider
-                label="Prensa"
+                label="Prensa (pauta)"
                 tooltip={`Reparto parejo entre ${state.medios.length} medio(s): $${(obj.prensa / Math.max(1, state.medios.length)).toFixed(1)}/per cada uno.`}
                 vigente={vig.prensa}
                 objetivo={obj.prensa}
@@ -365,12 +416,12 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
           {/* 2. Obras y Servicios */}
           <section className="pt-3 border-t border-zinc-800 space-y-3.5">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white">Obras</h3>
+              <h3 className="text-sm font-bold text-white">Obras y Servicios</h3>
               {onOpenBuildPanel && (
                 <button
                   type="button"
                   onClick={onOpenBuildPanel}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl transition-colors whitespace-nowrap shrink-0"
                 >
                   <Building2 className="w-3.5 h-3.5" />
                   Parcelas ({derived.parcelasLibres})
@@ -385,7 +436,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                     <Wrench className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span className="font-semibold text-white">Nivel de Obras</span>
                     <HintIcon
-                      text={`${obrasRow.label}: ${derived.roles.ingeniero}/${obrasTarget} ingenieros · velocidad x${obrasRow.diasObraFactor.toFixed(2)} días · reparación zonal.`}
+                      text={`${obrasRow.label}: ${derived.roles.ingeniero}/${obrasTarget} ingenieros · velocidad x${obrasRow.diasObraFactor.toFixed(2)} días · repara vías y edificios.`}
                       placement="top"
                     />
                     {obrasLockNote && (
@@ -495,7 +546,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-white">Precio máximo</span>
                       <HintIcon
-                        text="No cuesta presupuesto. Si queda debajo del costo salarial, la productora recorta sueldos o despide."
+                        text="No cuesta presupuesto. Si queda debajo del costo salarial, las firmas productoras recortan sueldos o despiden."
                         placement="top"
                       />
                       {precioLockNote && (
@@ -538,7 +589,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                           obj.comercioExterior > 0
                             ? `Importar cuesta ~$${budget.importCostDiaEst.toFixed(0)}/d de la reserva.`
                             : obj.comercioExterior < 0
-                            ? `Exportar vende excedente sobre ${ECON_CONSTANTS.stockMinExportarDias}d directo a la Productora.`
+                            ? `Exportar vende excedente sobre ${ECON_CONSTANTS.stockMinExportarDias}d directo desde el agro.`
                             : 'Cerrado (0 u/d).'
                         }`}
                         placement="top"
@@ -583,6 +634,84 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               </>
             )}
           </section>
+
+          {/* 4. Controles G3 avanzados */}
+          {isG3 && onSetExtraLever && (
+            <section className="pt-3 border-t border-zinc-800 space-y-4">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <GraduationCap className="w-4 h-4 text-emerald-400" />
+                <span>Profundidad G3</span>
+              </div>
+
+              <NumericSlider
+                label="Subsidio al alimento"
+                tooltip={`Impulsa +${(LEVEL11_CONSTANTS.subsidioProdPorPunto * 100).toFixed(1)}% producción agro por cada punto porcentual, pagado por el Estado.`}
+                vigente={extrasVig.subsidioAlimento}
+                objetivo={extrasObj.subsidioAlimento}
+                min={0}
+                max={30}
+                step={1}
+                unit="%"
+                disabled={isG0}
+                onChange={(val) => {
+                  onSetExtraLever('subsidioAlimento', val);
+                }}
+              />
+
+              <NumericSlider
+                label="Nivel de educación"
+                tooltip={`Acelera progreso escolar (N0–N5). Costo est.: $${(extrasObj.nivelEducacion * derived.poblacion * LEVEL11_CONSTANTS.educCostoPorNpcPeriodo).toFixed(0)}/per.`}
+                vigente={extrasVig.nivelEducacion}
+                objetivo={extrasObj.nivelEducacion}
+                min={0}
+                max={5}
+                step={1}
+                unit=""
+                valueLabel={`N${extrasObj.nivelEducacion}`}
+                vigenteLabel={`N${extrasVig.nivelEducacion}`}
+                disabled={isG0}
+                onChange={(val) => {
+                  onSetExtraLever('nivelEducacion', val);
+                }}
+              />
+
+              <div className="pt-2 border-t border-zinc-800/80 space-y-4">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
+                  <Newspaper className="w-3.5 h-3.5" />
+                  <span>Relación con medios (G3)</span>
+                </div>
+
+                <NumericSlider
+                  label="Acceso oficial a medios"
+                  tooltip={`Aumenta alcance y credibilidad mediática; costo $${LEVEL11_CONSTANTS.accesoCostoPorPunto}/punto por período.`}
+                  vigente={extrasVig.acceso}
+                  objetivo={extrasObj.acceso}
+                  min={0}
+                  max={100}
+                  step={5}
+                  disabled={isG0}
+                  onChange={(val) => {
+                    onSetExtraLever('acceso', val);
+                  }}
+                />
+
+                <NumericSlider
+                  label="Presión editorial"
+                  tooltip={`Fuerza afinidad editorial, pero sobre ${LEVEL11_CONSTANTS.presionUmbral}% reduce credibilidad de la prensa.`}
+                  vigente={extrasVig.presion}
+                  objetivo={extrasObj.presion}
+                  min={0}
+                  max={100}
+                  step={5}
+                  accent="amber"
+                  disabled={isG0}
+                  onChange={(val) => {
+                    onSetExtraLever('presion', val);
+                  }}
+                />
+              </div>
+            </section>
+          )}
         </div>
       </RctWindow>
     </div>

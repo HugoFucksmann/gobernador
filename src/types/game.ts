@@ -19,12 +19,41 @@ export type DemandId =
 
 export type ZoneId = string;
 
-export type ZoneCharacter = 'centro' | 'comercial' | 'residencial' | 'agricola';
+export type ZoneCharacter = 'centro' | 'comercial' | 'residencial' | 'agricola' | 'industrial';
+export type ZoneState = 'activa' | 'no_urbanizada';
+
+export type ViaTipo = 'calle' | 'camino' | 'puente';
+
+export interface ViaTramo {
+  id: string;
+  nombre: string;
+  tipo: ViaTipo;
+  nodoA: string;
+  nodoB: string;
+  zonaA: ZoneId;
+  zonaB?: ZoneId;
+  longitud: number;
+  estado: number; // 0-100
+  construida: boolean;
+  enObra: boolean;
+  diasObraTotal: number;
+  diasObraRestantes: number;
+  costoObra: number;
+  mantenimientoPeriodo: number;
+  parcelasAbiertas: string[];
+  zonaAbierta?: ZoneId;
+  barreraNatural?: boolean;
+  puntos?: Array<{ wx: number; wy: number }>;
+}
 
 export interface ZoneDefinition {
   id: ZoneId;
   nombre: string;
   caracter: ZoneCharacter;
+  estado?: ZoneState;
+  viaAperturaId?: string;
+  nodoPrincipal?: string;
+  barreraNatural?: boolean;
   vecinas: ZoneId[];
   demandaAlquilerIndice: number;
   rect: { wx: number; wy: number; ww: number; wh: number };
@@ -78,9 +107,12 @@ export type NonWorkingRoleId = 'estudiante' | 'desempleado' | 'jubilado';
 
 export type RoleId = PrivateRoleId | PublicRoleId | NonWorkingRoleId;
 
+export type SpendCategory = 'bienes' | 'gastronomia' | 'servicios' | 'entretenimiento';
+
 export interface RoleDefinition {
   id: RoleId;
   nombre: string;
+  color: string;
   edadMin: number;
   edadMax: number | null;
   educMin: number;
@@ -88,7 +120,7 @@ export interface RoleDefinition {
   publico: boolean;
   estudia?: boolean;
   gerencia?: boolean;
-  rubro?: FirmRubro | 'comercio|construccion';
+  rubro?: string;
   grupo: 'privado' | 'publico' | 'sin_ingreso';
   ingreso: [number, number] | null;
   produce: string | null;
@@ -97,6 +129,7 @@ export interface RoleDefinition {
 export type ParcelTipo =
   | 'residencial'
   | 'comercial'
+  | 'industrial'
   | 'agricola'
   | 'publica'
   | 'especial';
@@ -105,14 +138,22 @@ export type HouseType = 'casa_chica' | 'casa_mediana' | 'casa_grande';
 
 export type PrivateLocalBuildingType =
   | 'campo'
+  | 'fabrica'
   | 'almacen'
+  | 'supermercado'
+  | 'tienda'
   | 'kiosco'
   | 'restoran'
+  | 'bar_cafe'
+  | 'peluqueria'
+  | 'taller'
+  | 'gimnasio'
+  | 'cine_teatro'
+  | 'club'
   | 'oficina_constructora'
   | 'oficina_inmobiliaria'
   | 'oficina_medio'
-  | 'oficina_banco'
-  | 'local_comercio';
+  | 'oficina_banco';
 
 export type PublicBuildingType =
   | 'hospital'
@@ -133,7 +174,7 @@ export type BuildingType =
   | SpecialBuildingType;
 
 export type BuildingOwner = 'estado' | 'alimento' | 'comercio' | string;
-export type ParcelState = 'bloqueada' | 'libre' | 'en_obra' | 'ocupada';
+export type ParcelState = 'sin_calle' | 'bloqueada' | 'libre' | 'en_obra' | 'ocupada';
 
 export type OwnerRef = {
   tipo: 'hogar' | 'npc' | 'firma' | 'estado';
@@ -146,6 +187,9 @@ export interface BuildingDefinition {
   parcelTipo: ParcelTipo;
   categoria: 'vivienda' | 'privado' | 'publico' | 'suceso' | 'especial';
   rubro?: FirmRubro;
+  categoriaGasto?: SpendCategory;
+  vendeComida?: boolean;
+  margenAjustePct?: number;
   construibleGobernador: boolean;
   requiereG2: boolean;
   costoObra: number;
@@ -194,6 +238,8 @@ export interface Parcela {
   ww: number;
   wh: number;
   estado: ParcelState;
+  tramoAperturaId?: string;
+  nodoAcceso?: string;
   edificio: BuildingInstance | null;
 }
 
@@ -333,14 +379,18 @@ export interface Casa {
 
 export type FirmRubro =
   | 'agro'
+  | 'industria'
   | 'comercio'
+  | 'gastronomia'
+  | 'servicios'
+  | 'entretenimiento'
   | 'construccion'
   | 'inmobiliaria'
   | 'medio'
   | 'banco';
 
 export interface FirmPart {
-  tipo: 'npc' | 'firma' | 'estado';
+  tipo: 'npc' | 'hogar' | 'firma' | 'estado';
   id: string;
   pct: number;
 }
@@ -362,6 +412,8 @@ export interface Firma {
   cuotaZona: Record<ZoneId, number>;
   margenPoder: number;
   stock?: number;
+  stockBienes?: number;
+  capacidadDiaria?: number;
   siloDias?: number;
   periodosEnPerdida: number;
   periodosSinDueno: number;
@@ -479,6 +531,9 @@ export interface PressFact {
     valorNuevo?: string;
     edificio?: string;
     parcela?: string;
+    tramo?: string;
+    tipoVia?: string;
+    rubro?: string;
     actor?: string;
     demanda?: string;
     medida?: string;
@@ -623,6 +678,7 @@ export interface GovernmentState {
     comidaMenores: number;
     acogidaMenores: number;
     mantenimiento: number;
+    mantenimientoVias?: number;
     operacionObras: number;
     operacion: number;
     obras: number;
@@ -642,6 +698,8 @@ export interface GovernmentState {
     acogidaMenores: number;
     ayudaSocial: number;
     mantenimiento: number;
+    mantenimientoVias?: number;
+    mantenimientoEdificios?: number;
     operacionObras: number;
     operacion: number;
     obras: number;
@@ -754,6 +812,7 @@ export interface WorldConfig {
   economiaModulo: EconomyModule;
   nivelMundo: WorldComplexityLevel;
   nivelGobernador?: GovernorComplexityLevel;
+  estadoAutomatico?: boolean;
   cantidadMedios: number;
   poblacionInicial: number;
   caos: ChaosSettings;
@@ -801,6 +860,8 @@ export interface ScenarioParcelDef {
   ww: number;
   wh: number;
   estadoInicial: ParcelState;
+  tramoAperturaId?: string;
+  nodoAcceso?: string;
   edificioInicial?: BuildingType;
   duenoInicial?: BuildingOwner;
   houseType?: HouseType;
@@ -824,6 +885,7 @@ export interface ScenarioPreset {
   hitos: HitoDefinition[];
   zonaPorRol: Record<RoleId, ZoneId[]>;
   zonas: Record<ZoneId, ZoneDefinition>;
+  tramos?: ViaTramo[];
   mediosCatalog: Array<{
     id: string;
     nombre: string;
@@ -1282,6 +1344,45 @@ export type SimEvent =
       zona: ZoneId;
       medioId: string;
       causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'via_inicio' | 'via_fin';
+      zona: ZoneId;
+      tramoId: string;
+      tramoNombre: string;
+      tipoVia: ViaTipo;
+      parcelasAbiertas: string[];
+      costo?: number;
+      diasObra?: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'via_estado';
+      zona: ZoneId;
+      tramoId: string;
+      estado: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'ruta_cortada';
+      zona: ZoneId;
+      tramoId: string;
+      parcelasAisladas: string[];
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'zona_abierta';
+      zona: ZoneId;
+      viaId: string;
+      causa?: string;
     };
 
 export interface CausalStep {
@@ -1303,6 +1404,9 @@ export interface EconomyOutput {
   saldoDiarioEstimado: number;
   inflacion: number;
   precioGlobal: number;
+  gastoVidaPorCategoria?: Record<SpendCategory, number>;
+  bienesImportadosDia?: number;
+  industriaExportDia?: number;
 }
 
 export interface SubsystemRngState {
@@ -1332,6 +1436,10 @@ export interface GameState {
     pausado: boolean;
   };
   zonas: Record<ZoneId, ZoneDefinition>;
+  tramos: ViaTramo[];
+  distanciasZonas: Record<ZoneId, Record<ZoneId, number>>;
+  demandaSuelo: Record<string, number>;
+  demandaSueloRachas: Record<string, number>;
   npcs: Npc[];
   hogares: Hogar[];
   casas: Casa[];
@@ -1407,6 +1515,7 @@ export interface GameState {
     ultimaActualizacionDemogDia: number;
   };
   autopilotLastBuildDay?: number;
+  autopilotLastViaDay?: number;
   auditEntradasDia: number;
   auditSalidasDia: number;
   ultimoDineroTotal: number;
@@ -1443,6 +1552,11 @@ export interface CommunityDerived {
   esperandoCama: number;
   edificiosActivos: number;
   parcelasLibres: number;
+  parcelasSinCalle?: number;
+  zonasNoUrbanizadas?: number;
+  tramosEnMalEstado?: number;
+  tramosCortados?: number;
+  mantenimientoTotalPeriodo?: number;
   hogares: number;
   callePct: number;
   hacinamientoPct: number;
@@ -1463,6 +1577,12 @@ export interface CommunityDerived {
     quiebrasPeriodo: number;
     fundacionesPeriodo: number;
   };
+  constructoraSalud?: {
+    firmas: number;
+    ventasPeriodo: number;
+    factorMedio: number;
+    empleos: number;
+  };
 }
 
 export interface WorldCreationOptions {
@@ -1470,6 +1590,7 @@ export interface WorldCreationOptions {
   economiaModulo: EconomyModule;
   nivelMundo?: WorldComplexityLevel;
   nivelGobernador?: GovernorComplexityLevel;
+  estadoAutomatico?: boolean;
   cantidadMedios: number;
   poblacionInicial: number;
   caos: ChaosSettings;

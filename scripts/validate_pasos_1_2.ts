@@ -11,6 +11,7 @@ import {
   computeTotalWorldMoney,
   deriveCommunityStats,
   orderBuildInParcela,
+  orderBuildVia,
   stepHeadlessDay,
 } from '../src/engine/simulation';
 import { createInitialGameState } from '../src/engine/worldGenerator';
@@ -181,10 +182,10 @@ function runCorridaA() {
       maxHambreCritica = Math.max(maxHambreCritica, dsNow.hambreCriticaPct);
       if (s.gobierno.finanzas.impago) daysWithImpago++;
 
-      const npcSum = s.npcs.reduce((acc, n) => acc + n.economia.dinero, 0);
-      if (s.reloj.dia === 64) npcSum64 = npcSum;
-      if (s.reloj.dia >= 57 && s.reloj.dia <= 63) npcWeek9.push(npcSum);
-      if (s.reloj.dia >= 113 && s.reloj.dia <= 119) npcWeek17.push(npcSum);
+      const hogarSum = s.hogares.reduce((acc, h) => acc + h.dinero, 0);
+      if (s.reloj.dia === 64) npcSum64 = hogarSum;
+      if (s.reloj.dia >= 57 && s.reloj.dia <= 63) npcWeek9.push(hogarSum);
+      if (s.reloj.dia >= 113 && s.reloj.dia <= 119) npcWeek17.push(hogarSum);
       if (s.reloj.dia === 8) {
         const fin = s.gobierno.finanzas;
         const gastos =
@@ -206,7 +207,7 @@ function runCorridaA() {
 
     const mEnd = computeTotalWorldMoney(s);
     const driftPct = ((mEnd - m0) / m0) * 100;
-    const npcSum120 = s.npcs.reduce((acc, n) => acc + n.economia.dinero, 0);
+    const npcSum120 = s.hogares.reduce((acc, h) => acc + h.dinero, 0);
     const npcDelta64to120Pct = npcSum64 > 0 ? ((npcSum120 - npcSum64) / npcSum64) * 100 : 0;
     const meanW9 = npcWeek9.reduce((a, b) => a + b, 0) / Math.max(1, npcWeek9.length);
     const meanW17 = npcWeek17.reduce((a, b) => a + b, 0) / Math.max(1, npcWeek17.length);
@@ -470,7 +471,49 @@ function runCorridaB(pandemicIntensity: number, pandemicDuration: number, ahorra
   return out;
 }
 
+function runV2SmokeChecks() {
+  applyPreset();
+  const preset = SCENARIO_PRESETS.elecciones;
+  const s = createInitialGameState({
+    escenarioId: 'elecciones',
+    economiaModulo: 'base',
+    nivelMundo: 'M3',
+    nivelGobernador: 'G2',
+    cantidadMedios: preset.mediosDefault,
+    poblacionInicial: preset.poblacionDefault,
+    caos: { ...preset.caosDefault },
+    semilla: 1,
+    usarIaGemini: false,
+  });
+  s.gobierno.reserva = 6000;
+  let maxDrift = 0;
+  const sinCalleAntes = s.parcelas.filter((p) => p.estado === 'sin_calle').length;
+  const viaCalle = orderBuildVia(s, 'via_calle_norte_ext');
+  const viaPol = orderBuildVia(s, 'via_camino_poligono');
+  for (let d = 1; d <= 30; d++) {
+    const prev = computeTotalWorldMoney(s);
+    stepHeadlessDay(s);
+    const cur = computeTotalWorldMoney(s);
+    maxDrift = Math.max(maxDrift, Math.abs(cur - (prev + s.auditEntradasDia - s.auditSalidasDia)));
+  }
+  const sinCalleDespues = s.parcelas.filter((p) => p.estado === 'sin_calle').length;
+  const industriaActiva = s.firmas.some((f) => f.activa && f.rubro === 'industria');
+  const poligonoActiva = s.zonas.poligono?.estado === 'activa';
+  return {
+    viaCalleOk: viaCalle.ok,
+    viaPolOk: viaPol.ok,
+    poligonoActiva,
+    sinCalleAntes,
+    sinCalleDespues,
+    industriaActiva,
+    maxMoneyDrift: Number(maxDrift.toFixed(4)),
+    passed: viaCalle.ok && viaPol.ok && poligonoActiva && sinCalleDespues < sinCalleAntes && industriaActiva && maxDrift <= 0.25,
+  };
+}
+
 console.log('=== CORRIDA A: M0 + G0 (10 semillas, 120 dias) ===');
 console.log(JSON.stringify(runCorridaA(), null, 2));
 console.log('=== CORRIDA B: M0 + G1 con pandemia forzada desde dia 30 (intensidad=65, duracion=90, 10 semillas, 180 dias) ===');
 console.log(JSON.stringify(runCorridaB(65, 90, 46), null, 2));
+console.log('=== CORRIDA V2: VIAS + ZONAS + INDUSTRIA + CONSERVACION ===');
+console.log(JSON.stringify(runV2SmokeChecks(), null, 2));

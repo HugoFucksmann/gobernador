@@ -9,14 +9,15 @@
 | Tipo | Quién construye | Qué se levanta |
 |---|---|---|
 | `residencial` | Hogares, firmas de construcción e inmobiliarias | Casas |
-| `comercial` | Firmas | Locales de comercio, oficinas de medio, oficinas de construcción e inmobiliaria |
+| `comercial` | Firmas | Locales de comercio, gastronomía, servicios y entretenimiento; oficinas de medio, construcción e inmobiliaria |
 | `agricola` | Firmas `agro` | Campos |
+| `industrial` | Firmas `industria` | Fábricas |
 | `publica` | El estado | Hospital, comisaría, escuela, oficina pública |
 | `especial` | Nadie (la preset) | Plaza, puerto, muelle de comercio exterior |
 
-- Estados: `bloqueada`, `libre`, `en_obra`, `ocupada`. Las parcelas bloqueadas se habilitan más adelante (capa del gobernador).
+- Estados: `sin_calle`, `bloqueada`, `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` espera a que el estado construya la vía que la abre (sección 3b). Las bloqueadas se habilitan más adelante (capa del gobernador).
 - Cada parcela tiene su zona y un lugar fijo. El orden dentro de la zona decide quién ocupa primero.
-- Una parcela solo admite los edificios de su tipo.
+- Una parcela solo admite los edificios de su tipo y solo si tiene calle.
 
 ## 2. Casas
 
@@ -45,18 +46,42 @@
 - Costo de obra (una vez), días de obra y mantenimiento por período, pagados por el estado.
 - **Estado en piloto automático:** construye hospitales y comisarías en parcelas públicas libres según MUNDO_V2 §9. Escuelas y oficinas vienen con el preset.
 
+## 3b. Vías (las construye el estado)
+
+| Tipo | Da | Ubicación |
+|---|---|---|
+| `calle` | Abre las parcelas de su frente dentro de una zona (pasan de `sin_calle` a `libre`) | Zona activa |
+| `camino` | Une dos zonas, o abre una zona `no_urbanizada` y sus parcelas | Entre zonas vecinas |
+| `puente` | Un camino que cruza una barrera natural y abre el terreno del otro lado | Entre zonas separadas por agua o desnivel |
+
+- Cada tramo tiene `longitud`, nodos de unión, `estado` (0-100), **costo de obra** (una vez), **días de obra** (acortados por la infraestructura) y **mantenimiento** por período, pagados por el estado a firmas de construcción.
+- Un tramo solo puede conectarse a la red ya construida.
+- **Sin mantenimiento,** el `estado` baja; con la vía en mal estado baja la `infraestructura` de su zona y la capacidad de venta de los locales de su frente.
+- Las vías no se demuelen en el mundo base. Inaugurar una vía es buena noticia.
+- **Piloto automático:** el estado las construye con la regla de MUNDO_V2 §9. El gobernador las ordenará con `construir_via` (CONTROLES_V2 §3).
+
 ## 4. Privados
 
 | Tipo | Rubro | Da | Parcela |
 |---|---|---|---|
 | `campo` | `agro` | `puestos_por_campo` agricultores y tope de producción | Agrícola |
-| `almacen` | `comercio` | Venta de comida: `puestos_por_almacen` obreros y 1 comerciante; capacidad diaria de ventas | Comercial |
-| `kiosco` | `comercio` | Gasto de vida chico (golosinas, diarios, varios), pocos puestos | Comercial |
-| `restoran` | `comercio` | Gasto de vida y comida, más puestos y más margen | Comercial |
+| `fabrica` | `industria` | Produce **bienes** hasta su capacidad diaria; `puestos_por_fabrica` obreros y técnicos | Industrial |
+| `almacen` | `comercio` | Vende comida; `puestos_por_almacen` obreros y 1 comerciante; capacidad diaria de ventas | Comercial |
+| `supermercado` | `comercio` | Vende comida y bienes; capacidad alta y margen bajo; más puestos | Comercial |
+| `tienda` | `comercio` | Vende bienes (ropa, ferretería, hogar) | Comercial |
+| `kiosco` | `comercio` | Vende bienes chicos (golosinas, diarios, varios); pocos puestos | Comercial |
+| `restoran` | `gastronomia` | Vende gastronomía; más puestos y más margen | Comercial |
+| `bar_cafe` | `gastronomia` | Vende gastronomía de gasto chico; pocos puestos | Comercial |
+| `peluqueria` | `servicios` | Servicios personales; pocos puestos | Comercial |
+| `taller` | `servicios` | Reparaciones y servicios técnicos | Comercial |
+| `gimnasio` | `servicios` | Servicios de salud y bienestar de gasto medio | Comercial |
+| `cine_teatro` | `entretenimiento` | Entretenimiento de gasto medio; capacidad por función | Comercial |
+| `club` | `entretenimiento` | Entretenimiento nocturno; margen alto | Comercial |
 | `oficina_constructora` | `construccion` | Sede de una constructora: capacidad de obra por período | Comercial |
 | `oficina_inmobiliaria` | `inmobiliaria` | Sede de una inmobiliaria: administra casas | Comercial |
 | `oficina_medio` | `medio` | Redacción: columnistas y alcance base | Comercial |
 
+- Cada rubro vende una **categoría de gasto** (ECONOMIA_V2 §6b): almacén y supermercado la comida; tienda, kiosco y supermercado los bienes; restorán y bar la gastronomía; peluquería, taller y gimnasio los servicios; cine y club el entretenimiento.
 - Cada local tiene `estado` y pierde puestos si no se mantiene. El mantenimiento lo paga la firma.
 - La **capacidad diaria de ventas** de un local limita lo que puede vender; una firma con un solo local satura. Es una de las fricciones contra el monopolio.
 - **Obra:** la ordena una firma, la paga con su caja a una constructora y queda en obra `dias_obra_local` días.
@@ -69,4 +94,4 @@ Murallas, silos, riego y hospitales de campaña (v1) **no existen en el mundo ba
 
 ## 6. Fuera del mundo base
 
-Viviendas públicas, refugios, subsidios, puente y dique (piden crecida), edificios con integridad propia (promoción por necesidad, MOTOR_V2 §7) y servicios privados (hospitales y escuelas privados).
+Viviendas públicas, refugios, subsidios, dique (pide crecida), edificios con integridad propia (promoción por necesidad, MOTOR_V2 §7), servicios privados (clínicas y escuelas privadas) y bancos (extensión `fiscal`, ECONOMIA_V2 §14).

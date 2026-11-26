@@ -3,7 +3,6 @@ import {
   ACTOR_CONSTANTS,
   BUILDING_CATALOG,
   DIRECTOR_CONSTANTS,
-  DISTRICT_BY_ID,
   ECON_CONSTANTS,
   EFFECT_CATALOG,
   FIRM_CONSTANTS,
@@ -17,8 +16,6 @@ import {
   PERIOD_DAYS,
   PERIOD_DAYS_DEMOG,
   PRESS_CONSTANTS,
-  PRICE_CAP_FACTORS,
-  PUBLIC_ROLES,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
 } from '../data/catalogs';
@@ -55,29 +52,26 @@ import {
   PressFact,
   PressValence,
   PriceCapMode,
-  PublicRoleId,
   RoleId,
-  ServiceAreaId,
   ServiceLevel,
   ServicePublicRoleId,
   SimEvent,
   ZoneId,
-  ZoneState,
 } from '../types/game';
 import {
   getActiveBuildings,
-  getDevPopScale,
+  getObrasTargetJobs,
 } from './policies';
 import { nextRand, nextSeqId, randInt } from './rng';
 import {
   getCityErrandPosition,
-  getDistrictPosition,
   getZoneCanvasPosition,
 } from './worldGenerator';
 import {
   checkEngineInvariants,
   clamp,
   compactEvents,
+  computeDemandaSuelo,
   computeHospitalFacilities as computeHospitalFacilitiesRaw,
   computeTotalWorldMoney,
   deriveCommunityStats,
@@ -91,13 +85,15 @@ import {
   getStage,
   getWorldZones,
   HospitalFacilityInfo as WorldHospitalFacilityInfo,
+  isViaConnectableToNetwork,
+  recomputeRoadDistances,
   shortestZonePath as shortestZonePathByZones,
+  syncLegacyEnterprisesView,
 } from './worldHelpers';
 import {
   pickRandomZoneSub,
   runDailyEconomyV2,
   runPaydayEconomyV2,
-  syncLegacyEnterprisesView,
 } from './economyV2';
 import {
   assignRolesAndJobsV2,
@@ -139,16 +135,16 @@ function makeSeqId(state: { idSeq: number } | undefined, prefix: string): string
   return state ? nextSeqId(state, prefix) : `${prefix}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function getZonesMap(state: GameState): Record<ZoneId, { vecinas: ZoneId[] }> {
-  return (state.zonas && Object.keys(state.zonas).length > 0
+function getZonesMap(state: GameState): GameState['zonas'] {
+  return state.zonas && Object.keys(state.zonas).length > 0
     ? state.zonas
-    : SCENARIO_PRESETS[state.config.escenarioId].zonas) as Record<ZoneId, { vecinas: ZoneId[] }>;
+    : SCENARIO_PRESETS[state.config.escenarioId].zonas;
 }
 
 function shortestZonePath(
   from: ZoneId,
   to: ZoneId,
-  zonas: Record<ZoneId, { vecinas: ZoneId[] }>
+  zonas: GameState['zonas']
 ): ZoneId[] {
   return shortestZonePathByZones(zonas, from, to);
 }
@@ -629,7 +625,7 @@ function relocateOrDischargePatientsFromBuilding(state: GameState, removedBuildi
       npc.hospital.esperandoCama = npc.variables.salud < ECON_CONSTANTS.umbralHospital;
       npc.mapa.accion =
         npc.rol === 'estudiante' ? 'estudiando' : npc.rol === 'jubilado' || npc.rol === 'desempleado' ? 'paseando' : 'trabajando';
-      npc.mapa.destino = getDistrictPosition(npc.rol, state);
+      npc.mapa.destino = getZoneCanvasPosition(npc.zona, state, state.zonas);
     }
   }
 }
@@ -685,8 +681,7 @@ export function orderBuildInParcela(
   state.gobierno.acumuladoPeriodo.obras = Number(
     (state.gobierno.acumuladoPeriodo.obras + def.costoObra).toFixed(2)
   );
-  // Public construction payment goes directly to an active construction firm (ECONOMIA_V2)
-  payeeFirm.caja = Number((payeeFirm.caja + def.costoObra).toFixed(2));
+  // Public construction payment flows ONLY into payeeFirm.ventas to strictly conserve world money
   payeeFirm.ventas = Number((payeeFirm.ventas + def.costoObra).toFixed(2));
 
   parcela.estado = 'en_obra';
@@ -724,6 +719,89 @@ export function orderBuildInParcela(
     `orden:construir/${tipo}`,
     `Inicio de obra: ${def.nombre}`,
     `En ${parcela.nombre} (${parcela.zona}) · $${def.costoObra} · ${diasObra} días.`,
+    undefined,
+    evId
+  );
+
+  return { ok: true };
+}
+
+export function orderBuildVia(
+  state: GameState,
+  tramoId: string
+): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') {
+    return { ok: false, error: 'La partida ya finalizó.' };
+  }
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  if (govLevel === 'G0') {
+    return { ok: false, error: 'En G0 no hay órdenes del gobernador.' };
+  }
+  const tramo = (state.tramos ?? []).find((t) => t.id === tramoId);
+  if (!tramo) {
+    return { ok: false, error: 'Tramo vial inexistente.' };
+  }
+  if (tramo.construida) {
+    return { ok: false, error: 'Ese tramo ya está construido.' };
+  }
+  if (tramo.enObra) {
+    return { ok: false, error: 'Ese tramo ya está en obra.' };
+  }
+  if (!isViaConnectableToNetwork(state, tramo)) {
+    return { ok: false, error: 'El tramo debe conectar con la red vial activa.' };
+  }
+  if (state.gobierno.reserva < tramo.costoObra) {
+    return { ok: false, error: `Reserva insuficiente ($${tramo.costoObra} requeridos).` };
+  }
+
+  const constructoras = state.firmas.filter((f) => f.activa && f.rubro === 'construccion');
+  const payeeFirm =
+    constructoras.find((f) => f.zona === tramo.zonaA || f.zona === tramo.zonaB) ??
+    constructoras[0] ??
+    state.firmas.find((f) => f.activa);
+  if (!payeeFirm) {
+    return { ok: false, error: 'No hay empresa constructora activa disponible.' };
+  }
+
+  const dia = state.reloj.dia;
+  const diasObra = Math.max(
+    2,
+    Math.round(
+      tramo.diasObraTotal *
+        (OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras]?.diasObraFactor ?? 1)
+    )
+  );
+
+  state.gobierno.reserva = Number((state.gobierno.reserva - tramo.costoObra).toFixed(2));
+  state.gobierno.acumuladoPeriodo.obras = Number(
+    (state.gobierno.acumuladoPeriodo.obras + tramo.costoObra).toFixed(2)
+  );
+  payeeFirm.ventas = Number((payeeFirm.ventas + tramo.costoObra).toFixed(2));
+
+  tramo.enObra = true;
+  tramo.diasObraRestantes = diasObra;
+
+  const evId = nextSeqId(state, `ev_${dia}`);
+  state.ultimaCausaPalanca = evId;
+  emitSimEvent(state, {
+    id: evId,
+    dia,
+    tipo: 'via_inicio',
+    zona: tramo.zonaA,
+    tramoId: tramo.id,
+    tramoNombre: tramo.nombre,
+    tipoVia: tramo.tipo,
+    parcelasAbiertas: [...tramo.parcelasAbiertas],
+    costo: tramo.costoObra,
+    diasObra,
+  });
+  addLog(
+    state,
+    'gobernador',
+    `orden:construir_via/${tramo.tipo}`,
+    `Inicio de obra vial: ${tramo.nombre}`,
+    `${tramo.tipo.toUpperCase()} (${tramo.zonaA}–${tramo.zonaB}) · $${tramo.costoObra} · ${diasObra} días.`,
     undefined,
     evId
   );
@@ -842,7 +920,9 @@ function stepBuildingsDaily(state: GameState): void {
             tipo: 'casa_construida',
             zona: parcela.zona,
             casaId: newCasa.id,
+            parcelaId: parcela.id,
             tipoCasa: newCasa.tipo,
+            dueno: newCasa.dueno,
             causa: evId,
           });
         }
@@ -898,6 +978,91 @@ function stepBuildingsDaily(state: GameState): void {
         );
       }
     }
+  }
+
+  // Advance road/path/bridge construction (MUNDO_V2 §8)
+  let anyViaCompleted = false;
+  for (const tramo of state.tramos ?? []) {
+    if (!tramo.enObra) continue;
+    tramo.diasObraRestantes = Math.max(0, tramo.diasObraRestantes - 1);
+    if (tramo.diasObraRestantes <= 0) {
+      anyViaCompleted = true;
+      tramo.enObra = false;
+      tramo.construida = true;
+      tramo.estado = 100;
+
+      // Activate expansion zone first if this tramo opens it
+      let activatedZone: ZoneId | undefined;
+      if (tramo.zonaAbierta && state.zonas[tramo.zonaAbierta]?.estado === 'no_urbanizada') {
+        activatedZone = tramo.zonaAbierta;
+        state.zonas[activatedZone].estado = 'activa';
+        state.gobierno.integridad[activatedZone] ??= 100;
+        state.ultimaDefensaZona[activatedZone] ??= 55;
+        const ordenMap = (state.ultimaOrdenZona ??= {});
+        for (const z of Object.keys(state.zonas)) {
+          ordenMap[z] ??= 100;
+        }
+        ordenMap[activatedZone] ??= 100;
+        state.ultimaIntegridadZona[activatedZone] ??= 100;
+        state.golpesPorZonaHistorial[activatedZone] ??= [];
+      }
+
+      // Open associated sin_calle parcels
+      for (const pid of tramo.parcelasAbiertas) {
+        const p = state.parcelas.find((x) => x.id === pid);
+        if (p && p.estado === 'sin_calle') {
+          p.estado = 'libre';
+        }
+      }
+
+      const viaEvId = nextSeqId(state, `ev_${dia}`);
+      emitSimEvent(state, {
+        id: viaEvId,
+        dia,
+        tipo: 'via_fin',
+        zona: tramo.zonaA,
+        tramoId: tramo.id,
+        tramoNombre: tramo.nombre,
+        tipoVia: tramo.tipo,
+        parcelasAbiertas: [...tramo.parcelasAbiertas],
+        causa: state.ultimaCausaPalanca,
+      });
+      addLog(
+        state,
+        'gobernador',
+        `via:${tramo.tipo}`,
+        `Vía habilitada: ${tramo.nombre}`,
+        `Se completó ${tramo.tipo} y quedaron disponibles ${tramo.parcelasAbiertas.length} parcela(s).`,
+        state.ultimaCausaPalanca,
+        viaEvId
+      );
+
+      if (activatedZone) {
+        const zEvId = nextSeqId(state, `ev_${dia}`);
+        emitSimEvent(state, {
+          id: zEvId,
+          dia,
+          tipo: 'zona_abierta',
+          zona: activatedZone,
+          viaId: tramo.id,
+          causa: viaEvId,
+        });
+        addLog(
+          state,
+          'gobernador',
+          `zona:abierta`,
+          `Nueva zona habilitada: ${state.zonas[activatedZone]?.nombre ?? activatedZone}`,
+          `Conectada a la red por ${tramo.nombre}.`,
+          viaEvId,
+          zEvId
+        );
+      }
+    }
+  }
+
+  if (anyViaCompleted) {
+    recomputeRoadDistances(state);
+    state.demandaSuelo = computeDemandaSuelo(state);
   }
 }
 
@@ -1669,32 +1834,28 @@ function setNpcActionMovement(
   npc: Npc,
   actionId: string,
   actionName: string,
-  state: { rngState: number }
+  state: GameState
 ): void {
-  if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea'].includes(actionId)) {
-    const plaza = DISTRICT_BY_ID[actionId === 'huelga' ? 'civico' : 'mercado'];
-    npc.mapa.destino = {
-      x: plaza.x + 30 + drawRand(state) * (plaza.w - 60),
-      y: plaza.y + 45 + drawRand(state) * (plaza.h - 70),
-    };
-  } else if (actionId === 'organizar_fiesta' || actionId === 'cantar_en_plaza') {
-    const plaza = DISTRICT_BY_ID.mercado;
-    npc.mapa.destino = {
-      x: plaza.x + 40 + drawRand(state) * (plaza.w - 80),
-      y: plaza.y + 50 + drawRand(state) * (plaza.h - 80),
-    };
+  const targetZone =
+    actionId === 'huelga' || actionId === 'protesta'
+      ? 'civico'
+      : ['saqueo', 'organizar_fiesta', 'cantar_en_plaza', 'organizar_asamblea'].includes(actionId)
+      ? 'mercado'
+      : npc.zona;
+  if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(actionId)) {
+    npc.mapa.destino = getZoneCanvasPosition(state.zonas[targetZone] ? targetZone : npc.zona, state, state.zonas);
   }
   npc.mapa.accion = actionName.toLowerCase();
 }
 
-function resetNpcIdleLocation(npc: Npc, state: { rngState: number }): void {
+function resetNpcIdleLocation(npc: Npc, state: GameState): void {
   npc.mapa.accion =
     npc.rol === 'estudiante'
       ? 'estudiando'
       : npc.rol === 'jubilado' || npc.rol === 'desempleado'
       ? 'paseando'
       : 'trabajando';
-  npc.mapa.destino = getDistrictPosition(npc.rol, state);
+  npc.mapa.destino = getZoneCanvasPosition(npc.zona, state, state.zonas);
 }
 
 function pickNearestZoneNpcs(
@@ -2625,6 +2786,7 @@ function enrichedZoneOrDefault(z: ZoneId | undefined, fallback: ZoneId): ZoneId 
 function stepNpcPositions(state: GameState, dtTicks: number): void {
   const baseSpeed = ((5.6 * 10) / TICKS_PER_DAY) * dtTicks;
   const dayPhase = (state.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY;
+  const firmaZoneById = new Map<string, ZoneId>(state.firmas.map((f) => [f.id, f.zona]));
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
     const isUrgent = Boolean(
@@ -2639,36 +2801,18 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
       npc.mapa.x = npc.mapa.destino.x;
       npc.mapa.y = npc.mapa.destino.y;
       if (drawRand(state) < 0.42) {
-        if (npc.accionIa && ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea'].includes(npc.accionIa.id)) {
-          const zoneId = npc.accionIa.id === 'huelga' ? 'civico' : 'mercado';
-          const zone = DISTRICT_BY_ID[zoneId];
-          npc.mapa.destino = {
-            x: zone.x + 40 + drawRand(state) * (zone.w - 80),
-            y: zone.y + 60 + drawRand(state) * (zone.h - 90),
-          };
-        } else if (npc.accionIa?.id === 'organizar_fiesta') {
-          const zone = DISTRICT_BY_ID.mercado;
-          npc.mapa.destino = {
-            x: zone.x + 40 + drawRand(state) * (zone.w - 80),
-            y: zone.y + 50 + drawRand(state) * (zone.h - 80),
-          };
+        if (npc.accionIa && ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(npc.accionIa.id)) {
+          const zTarget = npc.accionIa.id === 'huelga' || npc.accionIa.id === 'protesta' ? 'civico' : 'mercado';
+          npc.mapa.destino = getZoneCanvasPosition(state.zonas[zTarget] ? zTarget : npc.zona, state, state.zonas);
         } else if (npc.variables.hambre > 75 && drawRand(state) < 0.65) {
-          const market = DISTRICT_BY_ID.mercado;
-          npc.mapa.destino = {
-            x: market.x + 42 + drawRand(state) * (market.w - 84),
-            y: market.y + 66 + drawRand(state) * (market.h - 94),
-          };
+          npc.mapa.destino = getZoneCanvasPosition(state.zonas.mercado ? 'mercado' : npc.zona, state, state.zonas);
           if (!npc.accionIa) npc.mapa.accion = 'buscando alimento';
         } else if (!npc.accionIa && !npc.hospital.internado && dayPhase >= 0.78 && npc.rol !== 'policia') {
-          const home = DISTRICT_BY_ID.residencial;
-          npc.mapa.destino = {
-            x: home.x + 36 + drawRand(state) * (home.w - 72),
-            y: home.y + 240 + drawRand(state) * (home.h - 270),
-          };
+          npc.mapa.destino = getZoneCanvasPosition(npc.zona, state, state.zonas);
           npc.mapa.accion = 'volviendo a casa';
         } else if (!npc.accionIa && !npc.hospital.internado && dayPhase < 0.5 && npc.rol !== 'policia' && npc.rol !== 'periodista' && drawRand(state) < 0.75) {
-          const workPos = getDistrictPosition(npc.rol, state);
-          npc.mapa.destino = { x: workPos.x, y: workPos.y };
+          const workZone = (npc.empleadorId && firmaZoneById.get(npc.empleadorId)) || npc.zona;
+          npc.mapa.destino = getZoneCanvasPosition(workZone, state, state.zonas);
           npc.mapa.accion =
             npc.rol === 'estudiante'
               ? 'estudiando en la escuela'
@@ -2678,7 +2822,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
               ? 'buscando trabajo'
               : 'en su puesto de trabajo';
         } else {
-          const nextSpot = getCityErrandPosition(npc.rol, npc.zona, state);
+          const nextSpot = getCityErrandPosition(npc.rol, npc.zona, state, state.zonas);
           npc.mapa.destino = { x: nextSpot.x, y: nextSpot.y };
           if (!npc.accionIa) {
             npc.mapa.accion = nextSpot.accion;
@@ -2686,24 +2830,8 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
         }
       }
     } else {
-      let moveX = dx / dist;
-      let moveY = dy / dist;
-      if (dist > 140) {
-        const nearAvenueX = Math.abs(npc.mapa.x - 355) < 16 || Math.abs(npc.mapa.x - 665) < 16;
-        const nearAvenueY = Math.abs(npc.mapa.y - 295) < 16;
-        if (!nearAvenueX && !nearAvenueY) {
-          if (Math.abs(dx) > Math.abs(dy)) {
-            moveY *= 1.18;
-          } else {
-            moveX *= 1.18;
-          }
-          const norm = Math.hypot(moveX, moveY) || 1;
-          moveX /= norm;
-          moveY /= norm;
-        }
-      }
-      npc.mapa.x += moveX * speed;
-      npc.mapa.y += moveY * speed;
+      npc.mapa.x += (dx / dist) * speed;
+      npc.mapa.y += (dy / dist) * speed;
     }
   }
 }
@@ -2902,7 +3030,7 @@ function runPoliceRelocation(state: GameState): void {
         const chosen = pool.splice(pickIdx, 1)[0];
         const deZona = chosen.zona;
         chosen.zona = targetZone;
-        chosen.mapa.destino = getZoneCanvasPosition(targetZone, state);
+        chosen.mapa.destino = getZoneCanvasPosition(targetZone, state, state.zonas);
 
         const key = `${deZona}->${targetZone}`;
         const list = movedByRoute.get(key) || [];
@@ -4411,6 +4539,23 @@ function collectDailyPressFacts(state: GameState, preDerived?: CommunityDerived)
           parcela: parcela?.nombre ?? ev.parcelaId,
         },
       });
+    } else if (ev.tipo === 'via_fin' || ev.tipo === 'zona_abierta') {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'obras',
+        relevancia: relMap.obras,
+        valencia: 'buena',
+        esDelGobierno: true,
+        zona: ev.zona,
+        origen: ev.tipo === 'via_fin' ? `via:${ev.tipoVia}` : `zona:${ev.zona}`,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          edificio: ev.tipo === 'via_fin' ? ev.tramoNombre : `zona ${state.zonas[ev.zona]?.nombre ?? ev.zona}`,
+          parcela: ev.tipo === 'via_fin' ? `${ev.parcelasAbiertas.length} parcelas` : ev.zona,
+        },
+      });
     } else if (
       ev.tipo === 'demanda' ||
       ev.tipo === 'demanda_aceptada' ||
@@ -5471,6 +5616,51 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         zona: ev.zona,
         titulo: `Cierre de medio (${ev.medioId})`,
         detalle: `Dejó de operar en ${ev.zona}.`,
+      };
+    case 'via_inicio':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Obra vial iniciada: ${ev.tramoNombre}`,
+        detalle: `${ev.tipoVia.toUpperCase()} (${ev.diasObra ?? 0}d) · Abre ${ev.parcelasAbiertas.length} parcela(s).`,
+      };
+    case 'via_fin':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Vía habilitada: ${ev.tramoNombre}`,
+        detalle: `${ev.tipoVia.toUpperCase()} operativa · Habilitó ${ev.parcelasAbiertas.length} parcela(s).`,
+      };
+    case 'via_estado':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Deterioro de vía (${ev.tramoId})`,
+        detalle: `Estado estructural en ${Math.round(ev.estado)}%.`,
+      };
+    case 'ruta_cortada':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Ruta cortada (${ev.tramoId})`,
+        detalle: `Tramo intransitable · ${ev.parcelasAisladas.length} parcela(s) afectadas.`,
+      };
+    case 'zona_abierta':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Nueva zona habilitada: ${state.zonas[ev.zona]?.nombre ?? ev.zona}`,
+        detalle: `Conectada por la vía ${ev.viaId}.`,
       };
   }
 }

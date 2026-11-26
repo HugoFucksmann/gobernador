@@ -3,8 +3,8 @@ import {
   ACTION_TABLE,
   BUILDING_CATALOG,
   DISTRICT_BY_ID,
-  DISTRICTS,
   ROLE_CATALOG,
+  ZONE_TO_DISTRICT,
 } from '../data/catalogs';
 import {
   evaluateNpcBubbleText,
@@ -17,8 +17,21 @@ import {
   HospitalFacilityInfo,
   TICKS_PER_DAY,
 } from '../engine/simulation';
-import { CommunityDerived, GameState, Npc, Parcela, RoleId, ZoneId } from '../types/game';
-import { CameraTarget, CityTab, MapFilter, MapLens, WindowId } from '../types/ui';
+import { isViaConnectableToNetwork } from '../engine/worldHelpers';
+import {
+  BuildingType,
+  Casa,
+  CommunityDerived,
+  Firma,
+  GameState,
+  Hogar,
+  Npc,
+  Parcela,
+  RoleId,
+  ViaTramo,
+  ZoneDefinition,
+} from '../types/game';
+import { CameraTarget, CityTab, MapFilter, MapHoverPreview, MapLens, WindowId } from '../types/ui';
 
 export type { CameraTarget, MapFilter, MapLens, WindowId };
 
@@ -28,6 +41,8 @@ interface CityWorldCanvasProps {
   paused: boolean;
   selectedNpcId: string | null;
   selectedParcelaId?: string | null;
+  selectedTramoId?: string | null;
+  hoveredPreview?: MapHoverPreview | null;
   filter: MapFilter;
   lens: MapLens;
   followSelected: boolean;
@@ -35,29 +50,34 @@ interface CityWorldCanvasProps {
   zoomRequest: { delta: number; seq: number } | null;
   onSelectNpc: (npcId: string) => void;
   onSelectParcela?: (parcelaId: string) => void;
+  onSelectTramo?: (tramoId: string) => void;
   onOpenSection: (section: WindowId, tabHint?: CityTab) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
 }
 
-// Logical simulation bounds: 0..1000 x 0..580
-const WORLD_W = 1000;
-const WORLD_H = 580;
+// Logical simulation bounds V2: 0..1560 x 0..980
+const WORLD_W = 1560;
+const WORLD_H = 980;
 
-// 2:1 True Isometric Projection centered on town middle (500, 290)
-const ORIGIN_WX = 500;
-const ORIGIN_WY = 290;
-const ISO_X = 1.68;
-const ISO_Y = 0.84;
+// 2:1 True Isometric Projection centered on valley midpoint (780, 490)
+const ORIGIN_WX = WORLD_W / 2;
+const ORIGIN_WY = WORLD_H / 2;
+const ISO_X = 1.45;
+const ISO_Y = 0.725;
 
-// Offscreen static terrain cache covering extended countryside (-240..1240 x -220..800)
-const TERRAIN_W = 4200;
-const TERRAIN_H = 2100;
+// Offscreen static terrain cache covering extended countryside (-220..1780 x -220..1200)
+const TERRAIN_W = 5600;
+const TERRAIN_H = 3000;
 const TERRAIN_CX = TERRAIN_W / 2;
 const TERRAIN_CY = TERRAIN_H / 2;
 
 const MINIMAP_W = 208;
 const MINIMAP_H = 120;
+const MINIMAP_SCALE = 0.048;
+
+const CAM_LIMIT_X = 2150;
+const CAM_LIMIT_Y = 1150;
 
 function worldToIso(wx: number, wy: number): { ix: number; iy: number } {
   const dx = wx - ORIGIN_WX;
@@ -75,6 +95,30 @@ function isoToWorld(ix: number, iy: number): { wx: number; wy: number } {
     wx: (a + b) * 0.5 + ORIGIN_WX,
     wy: (b - a) * 0.5 + ORIGIN_WY,
   };
+}
+
+function clampCamX(v: number): number {
+  return Math.max(-CAM_LIMIT_X, Math.min(CAM_LIMIT_X, v));
+}
+
+function clampCamY(v: number): number {
+  return Math.max(-CAM_LIMIT_Y, Math.min(CAM_LIMIT_Y, v));
+}
+
+function pointToSegmentDist(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 0.0001) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
 interface RenderNpcState {
@@ -111,57 +155,6 @@ interface WorldSpeechBubble {
   expiresAt: number;
 }
 
-interface LandmarkDef {
-  id: string;
-  label: string;
-  hint: string;
-  section: WindowId;
-  tabHint?: CityTab;
-  wx: number;
-  wy: number;
-  ww: number;
-  wh: number;
-  height: number;
-}
-
-const LANDMARKS: LandmarkDef[] = [
-  {
-    id: 'palacio',
-    label: 'Palacio de Gobierno',
-    hint: 'Abrir Palancas de Gobierno',
-    section: 'palancas',
-    wx: 500,
-    wy: 365,
-    ww: 132,
-    wh: 100,
-    height: 44,
-  },
-  {
-    id: 'prensa',
-    label: 'Redacción de Prensa',
-    hint: 'Abrir Gaceta del Valle',
-    section: 'gaceta',
-    wx: 540,
-    wy: 196,
-    ww: 62,
-    wh: 46,
-    height: 26,
-  },
-  {
-    id: 'fuente_mercado',
-    label: 'Fuente de la Plaza',
-    hint: 'Abrir Economía y Empresas',
-    section: 'economia',
-    wx: 486,
-    wy: 140,
-    ww: 48,
-    wh: 44,
-    height: 16,
-  },
-];
-
-const SORTED_LANDMARKS = [...LANDMARKS].sort((a, b) => b.wx + b.wy - (a.wx + a.wy));
-
 const SKIN_TONES = ['#f5d0b5', '#e8b896', '#d49a73', '#b87a56', '#f2c6a7'];
 const HAIR_TONES = ['#27272a', '#451a03', '#713f12', '#1e293b', '#57534e', '#92400e'];
 
@@ -171,6 +164,40 @@ function hashIndex(id: string, len: number): number {
     h = (h * 31 + id.charCodeAt(i)) | 0;
   }
   return Math.abs(h) % len;
+}
+
+function getZonePadColor(z: ZoneDefinition, hasDrought: boolean, hasPlague: boolean): string {
+  if (z.estado === 'no_urbanizada') {
+    return hasDrought ? '#b5a77e' : '#7b8763';
+  }
+  switch (z.caracter) {
+    case 'agricola':
+      return hasDrought ? '#d6c68f' : hasPlague ? '#88996c' : '#92bd69';
+    case 'industrial':
+      return '#94a3b8';
+    case 'comercial':
+      return '#d6cbb5';
+    case 'centro':
+      return '#cbd5e1';
+    default:
+      return hasDrought ? '#c2b98b' : '#8ab86d';
+  }
+}
+
+function getMinimapZoneColor(z: ZoneDefinition): string {
+  if (z.estado === 'no_urbanizada') return '#4b5548';
+  switch (z.caracter) {
+    case 'agricola':
+      return '#65a30d';
+    case 'industrial':
+      return '#64748b';
+    case 'comercial':
+      return '#d97706';
+    case 'centro':
+      return '#0f766e';
+    default:
+      return '#4d7c0f';
+  }
 }
 
 // --- Isometric Geometry Helpers ---
@@ -212,7 +239,7 @@ function drawIsoBox(
   const s = worldToIso(wx + ww, wy + wh);
   const w = worldToIso(wx, wy + wh);
 
-  // Soft cast shadow on ground to the east-south
+  // Soft cast shadow on ground
   ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
   ctx.beginPath();
   ctx.moveTo(e.ix, e.iy);
@@ -258,7 +285,6 @@ function drawIsoBox(
   ctx.fill();
   ctx.stroke();
 
-  // Windows along both visible walls
   if (height >= 16) {
     const winFill =
       litWindows > 0.12
@@ -268,31 +294,29 @@ function drawIsoBox(
     const rows = height >= 30 ? 2 : 1;
     for (let r = 0; r < rows; r++) {
       const zOff = height * (rows === 2 ? (r === 0 ? 0.35 : 0.68) : 0.48);
-      // Left wall windows
       const colsL = Math.max(1, Math.floor(ww / 24));
       for (let c = 0; c < colsL; c++) {
         const t = (c + 0.5) / colsL;
         const px = w.ix + (s.ix - w.ix) * t;
         const py = w.iy + (s.iy - w.iy) * t - zOff;
         ctx.beginPath();
-        ctx.moveTo(px - 3, py - 1.5);
-        ctx.lineTo(px + 3, py + 1.5);
-        ctx.lineTo(px + 3, py + 6.5);
-        ctx.lineTo(px - 3, py + 3.5);
+        ctx.moveTo(px - 2.6, py - 1.3);
+        ctx.lineTo(px + 2.6, py + 1.3);
+        ctx.lineTo(px + 2.6, py + 5.8);
+        ctx.lineTo(px - 2.6, py + 3.2);
         ctx.closePath();
         ctx.fill();
       }
-      // Right wall windows
       const colsR = Math.max(1, Math.floor(wh / 24));
       for (let c = 0; c < colsR; c++) {
         const t = (c + 0.5) / colsR;
         const px = s.ix + (e.ix - s.ix) * t;
         const py = s.iy + (e.iy - s.iy) * t - zOff;
         ctx.beginPath();
-        ctx.moveTo(px - 3, py + 1.5);
-        ctx.lineTo(px + 3, py - 1.5);
-        ctx.lineTo(px + 3, py + 3.5);
-        ctx.lineTo(px - 3, py + 6.5);
+        ctx.moveTo(px - 2.6, py + 1.3);
+        ctx.lineTo(px + 2.6, py - 1.3);
+        ctx.lineTo(px + 2.6, py + 3.2);
+        ctx.lineTo(px - 2.6, py + 5.8);
         ctx.closePath();
         ctx.fill();
       }
@@ -323,7 +347,6 @@ function drawIsoPitchedRoof(
   ctx.strokeStyle = 'rgba(15,23,42,0.28)';
   ctx.lineWidth = 1;
 
-  // Back-left slope
   ctx.fillStyle = slopeDark;
   ctx.beginPath();
   ctx.moveTo(n.ix, n.iy - baseZ);
@@ -333,7 +356,6 @@ function drawIsoPitchedRoof(
   ctx.fill();
   ctx.stroke();
 
-  // Front-left slope
   ctx.fillStyle = slopeLight;
   ctx.beginPath();
   ctx.moveTo(w.ix, w.iy - baseZ);
@@ -343,7 +365,6 @@ function drawIsoPitchedRoof(
   ctx.fill();
   ctx.stroke();
 
-  // Front-right slope
   ctx.fillStyle = slopeDark;
   ctx.beginPath();
   ctx.moveTo(s.ix, s.iy - baseZ);
@@ -353,7 +374,6 @@ function drawIsoPitchedRoof(
   ctx.fill();
   ctx.stroke();
 
-  // Back-right slope
   ctx.fillStyle = slopeLight;
   ctx.beginPath();
   ctx.moveTo(e.ix, e.iy - baseZ);
@@ -364,8 +384,12 @@ function drawIsoPitchedRoof(
   ctx.stroke();
 }
 
-// --- Offscreen Static Terrain Builder (called ONCE per climate mood) ---
-function buildStaticTerrainCanvas(hasDrought: boolean, hasPlague: boolean): HTMLCanvasElement {
+// --- Offscreen Static Terrain Builder ---
+function buildStaticTerrainCanvas(
+  zonas: ZoneDefinition[],
+  hasDrought: boolean,
+  hasPlague: boolean
+): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = TERRAIN_W;
   canvas.height = TERRAIN_H;
@@ -378,12 +402,12 @@ function buildStaticTerrainCanvas(hasDrought: boolean, hasPlague: boolean): HTML
   ctx.fillStyle = hasDrought ? '#cabf95' : '#6fa350';
   ctx.fillRect(-TERRAIN_CX, -TERRAIN_CY, TERRAIN_W, TERRAIN_H);
 
-  // Classic RCT-style checkerboard grass tiles across the whole valley
-  const tile = 40;
+  // Checkerboard valley grass tiles across -220..1780 x -220..1200
+  const tile = 50;
   const grassA = hasDrought ? '#d5ca9e' : '#74aa54';
   const grassB = hasDrought ? '#cbbd8f' : '#699f4b';
-  for (let wx = -240; wx < 1240; wx += tile) {
-    for (let wy = -220; wy < 800; wy += tile) {
+  for (let wx = -220; wx < 1780; wx += tile) {
+    for (let wy = -220; wy < 1200; wy += tile) {
       const even = ((Math.floor(wx / tile) + Math.floor(wy / tile)) & 1) === 0;
       ctx.fillStyle = even ? grassA : grassB;
       isoQuadPath(ctx, wx, wy, tile, tile);
@@ -391,184 +415,88 @@ function buildStaticTerrainCanvas(hasDrought: boolean, hasPlague: boolean): HTML
     }
   }
 
-  // Valley river along the west edge (wx: -90..-15)
-  ctx.fillStyle = hasDrought ? '#7dd3fc' : '#0284c7';
-  isoQuadPath(ctx, -92, -220, 74, 1020);
+  // East River (wx: 1188..1234) separating the valley from Ribera del Este
+  ctx.fillStyle = '#d6c69c';
+  isoQuadPath(ctx, 1182, -220, 60, 1420);
+  ctx.fill();
+  ctx.fillStyle = hasDrought ? '#38bdf8' : '#0284c7';
+  isoQuadPath(ctx, 1188, -220, 48, 1420);
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  isoQuadPath(ctx, -78, -220, 14, 1020);
-  ctx.fill();
-  // Riverbank sand trim
-  ctx.fillStyle = '#d6c69c';
-  isoQuadPath(ctx, -18, -220, 8, 1020);
+  isoQuadPath(ctx, 1200, -220, 12, 1420);
   ctx.fill();
 
-  // Isometric Avenues (running across the whole valley + beyond!)
-  const drawIsoRoadH = (cy: number, x1: number, x2: number) => {
-    ctx.fillStyle = '#94a3b8';
-    isoQuadPath(ctx, x1, cy - 18, x2 - x1, 36);
-    ctx.fill();
-    ctx.fillStyle = '#334155';
-    isoQuadPath(ctx, x1, cy - 13, x2 - x1, 26);
-    ctx.fill();
-    // Dashed center line
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 1.6;
-    ctx.setLineDash([12, 12]);
-    const a = worldToIso(x1, cy);
-    const b = worldToIso(x2, cy);
-    ctx.beginPath();
-    ctx.moveTo(a.ix, a.iy);
-    ctx.lineTo(b.ix, b.iy);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  };
-
-  const drawIsoRoadV = (cx: number, y1: number, y2: number) => {
-    ctx.fillStyle = '#94a3b8';
-    isoQuadPath(ctx, cx - 18, y1, 36, y2 - y1);
-    ctx.fill();
-    ctx.fillStyle = '#334155';
-    isoQuadPath(ctx, cx - 13, y1, 26, y2 - y1);
-    ctx.fill();
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 1.6;
-    ctx.setLineDash([12, 12]);
-    const a = worldToIso(cx, y1);
-    const b = worldToIso(cx, y2);
-    ctx.beginPath();
-    ctx.moveTo(a.ix, a.iy);
-    ctx.lineTo(b.ix, b.iy);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  };
-
-  drawIsoRoadH(295, -240, 1240);
-  drawIsoRoadV(355, -220, 800);
-  drawIsoRoadV(665, -220, 800);
-
-  // Stone Bridge over the west river at y=295
-  ctx.fillStyle = '#cbd5e1';
-  isoQuadPath(ctx, -96, 275, 84, 4);
-  ctx.fill();
-  isoQuadPath(ctx, -96, 311, 84, 4);
+  // Subtle decorative irrigation creek along the far west border (wx: -62..-28)
+  ctx.fillStyle = hasDrought ? '#7dd3fc' : '#0ea5e9';
+  isoQuadPath(ctx, -60, -220, 26, 1420);
   ctx.fill();
 
-  // Intersections & crosswalks
-  for (const inter of [
-    { x: 355, y: 295 },
-    { x: 665, y: 295 },
-  ]) {
-    ctx.fillStyle = '#334155';
-    isoQuadPath(ctx, inter.x - 15, inter.y - 15, 30, 30);
+  // Zone terrain pads from V2 state.zonas
+  for (const z of zonas) {
+    const r = z.rect;
+    if (!r) continue;
+    ctx.save();
+    ctx.fillStyle = getZonePadColor(z, hasDrought, hasPlague);
+    isoQuadPath(ctx, r.wx, r.wy, r.ww, r.wh);
     ctx.fill();
-    ctx.fillStyle = '#f8fafc';
-    for (let i = -9; i <= 9; i += 6) {
-      isoQuadPath(ctx, inter.x + i - 1.5, inter.y - 20, 3, 5);
-      ctx.fill();
-      isoQuadPath(ctx, inter.x + i - 1.5, inter.y + 15, 3, 5);
-      ctx.fill();
-    }
-  }
 
-  // District Terrain Pads
-  for (const d of DISTRICTS) {
-    ctx.fillStyle =
-      d.id === 'campos'
-        ? hasDrought
-          ? '#d6c68f'
-          : '#92bd69'
-        : d.id === 'taller'
-        ? '#94a3b8'
-        : d.id === 'mercado'
-        ? '#d6cbb5'
-        : d.id === 'civico'
-        ? '#cbd5e1'
-        : '#8ab86d';
-    isoQuadPath(ctx, d.x, d.y, d.w, d.h);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(15,23,42,0.22)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
-  // Farmland furrowed plots (Campos)
-  const plotColors = hasDrought
-    ? ['#cbb578', '#bfa665']
-    : hasPlague
-    ? ['#8f9e73', '#7b8a60']
-    : ['#9bc963', '#ceb95c'];
-  const plots = [
-    { x: 40, y: 78, w: 125, h: 78, k: 0 },
-    { x: 180, y: 78, w: 145, h: 78, k: 1 },
-    { x: 40, y: 170, w: 125, h: 94, k: 1 },
-    { x: 180, y: 170, w: 145, h: 94, k: 0 },
-  ];
-  for (const p of plots) {
-    ctx.fillStyle = plotColors[p.k];
-    isoQuadPath(ctx, p.x, p.y, p.w, p.h);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-    ctx.lineWidth = 1.5;
-    for (let fy = p.y + 12; fy < p.y + p.h - 8; fy += 12) {
-      const p1 = worldToIso(p.x + 8, fy);
-      const p2 = worldToIso(p.x + p.w - 8, fy);
-      ctx.beginPath();
-      ctx.moveTo(p1.ix, p1.iy);
-      ctx.lineTo(p2.ix, p2.iy);
+    if (z.estado === 'no_urbanizada') {
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.34)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
       ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Subtle agricultural furrows in agricola zones
+      if (z.caracter === 'agricola') {
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth = 1.2;
+        for (let fy = r.wy + 20; fy < r.wy + r.wh - 14; fy += 18) {
+          const p1 = worldToIso(r.wx + 12, fy);
+          const p2 = worldToIso(r.wx + r.ww - 12, fy);
+          ctx.beginPath();
+          ctx.moveTo(p1.ix, p1.iy);
+          ctx.lineTo(p2.ix, p2.iy);
+          ctx.stroke();
+        }
+      } else if (z.caracter === 'centro') {
+        // Central civic cobblestone accent
+        ctx.strokeStyle = 'rgba(71, 85, 105, 0.16)';
+        ctx.lineWidth = 1;
+        for (let px = r.wx + 24; px < r.wx + r.ww - 12; px += 28) {
+          const a = worldToIso(px, r.wy + 8);
+          const b = worldToIso(px, r.wy + r.wh - 8);
+          ctx.beginPath();
+          ctx.moveTo(a.ix, a.iy);
+          ctx.lineTo(b.ix, b.iy);
+          ctx.stroke();
+        }
+      }
     }
-  }
 
-  // Plaza cobblestone pattern
-  ctx.fillStyle = '#e5dcc8';
-  isoQuadPath(ctx, 410, 74, 200, 178);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(100,116,139,0.22)';
-  ctx.lineWidth = 1;
-  for (let px = 430; px < 610; px += 25) {
-    const a = worldToIso(px, 74);
-    const b = worldToIso(px, 252);
-    ctx.beginPath();
-    ctx.moveTo(a.ix, a.iy);
-    ctx.lineTo(b.ix, b.iy);
-    ctx.stroke();
-  }
-
-  // Schoolyard court
-  ctx.fillStyle = '#fcd34d';
-  isoQuadPath(ctx, 726, 166, 130, 56);
-  ctx.fill();
-  ctx.strokeStyle = '#d97706';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Residential Park & Pond
-  ctx.fillStyle = hasDrought ? '#c7bf89' : '#86efac';
-  isoQuadPath(ctx, 844, 344, 110, 174);
-  ctx.fill();
-  ctx.fillStyle = '#0ea5e9';
-  isoQuadPath(ctx, 872, 405, 56, 44);
-  ctx.fill();
-  ctx.strokeStyle = '#38bdf8';
-  ctx.stroke();
-
-  // District Carved Labels on roadsides
-  for (const d of DISTRICTS) {
-    const pos = worldToIso(d.x + 14, d.y + 18);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
-    ctx.beginPath();
-    ctx.roundRect(pos.ix - 4, pos.iy - 14, 146, 20, 4);
-    ctx.fill();
-    ctx.fillStyle = '#f8fafc';
+    // Zone plaque at north-west corner
+    const lbl = worldToIso(r.wx + 10, r.wy + 12);
+    const labelText =
+      z.estado === 'no_urbanizada' ? `${z.nombre} · Sin urbanizar` : z.nombre;
     ctx.font = '600 10px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(d.nombre, pos.ix + 4, pos.iy);
+    const pw = Math.min(200, ctx.measureText(labelText).width + 14);
+    ctx.fillStyle = z.estado === 'no_urbanizada' ? 'rgba(15, 23, 42, 0.64)' : 'rgba(15, 23, 42, 0.8)';
+    ctx.beginPath();
+    ctx.roundRect(lbl.ix - 4, lbl.iy - 13, pw, 18, 4);
+    ctx.fill();
+    ctx.fillStyle = z.estado === 'no_urbanizada' ? '#cbd5e1' : '#f8fafc';
+    ctx.fillText(labelText, lbl.ix + 3, lbl.iy);
+    ctx.restore();
   }
 
   return canvas;
 }
 
-function buildMinimapBgCanvas(): HTMLCanvasElement {
+function buildMinimapBgCanvas(zonas: ZoneDefinition[]): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = MINIMAP_W;
   c.height = MINIMAP_H;
@@ -578,21 +506,20 @@ function buildMinimapBgCanvas(): HTMLCanvasElement {
   ctx.fillStyle = '#2d4726';
   ctx.fillRect(0, 0, MINIMAP_W, MINIMAP_H);
 
-  // Project entire world (0..1000 x 0..580) nicely centered inside MINIMAP_W x MINIMAP_H
   const mapPoint = (wx: number, wy: number) => {
     const iso = worldToIso(wx, wy);
     return {
-      mx: MINIMAP_W / 2 + iso.ix * 0.068,
-      my: MINIMAP_H / 2 + iso.iy * 0.068,
+      mx: MINIMAP_W / 2 + iso.ix * MINIMAP_SCALE,
+      my: MINIMAP_H / 2 + iso.iy * MINIMAP_SCALE,
     };
   };
 
-  // River
+  // East river
   ctx.fillStyle = '#0284c7';
-  const r1 = mapPoint(-80, -80);
-  const r2 = mapPoint(-20, -80);
-  const r3 = mapPoint(-20, 660);
-  const r4 = mapPoint(-80, 660);
+  const r1 = mapPoint(1185, -80);
+  const r2 = mapPoint(1235, -80);
+  const r3 = mapPoint(1235, 1020);
+  const r4 = mapPoint(1185, 1020);
   ctx.beginPath();
   ctx.moveTo(r1.mx, r1.my);
   ctx.lineTo(r2.mx, r2.my);
@@ -601,21 +528,14 @@ function buildMinimapBgCanvas(): HTMLCanvasElement {
   ctx.closePath();
   ctx.fill();
 
-  for (const d of DISTRICTS) {
-    ctx.fillStyle =
-      d.id === 'campos'
-        ? '#65a30d'
-        : d.id === 'taller'
-        ? '#64748b'
-        : d.id === 'mercado'
-        ? '#d97706'
-        : d.id === 'civico'
-        ? '#0f766e'
-        : '#4d7c0f';
-    const p1 = mapPoint(d.x, d.y);
-    const p2 = mapPoint(d.x + d.w, d.y);
-    const p3 = mapPoint(d.x + d.w, d.y + d.h);
-    const p4 = mapPoint(d.x, d.y + d.h);
+  for (const z of zonas) {
+    const d = z.rect;
+    if (!d) continue;
+    ctx.fillStyle = getMinimapZoneColor(z);
+    const p1 = mapPoint(d.wx, d.wy);
+    const p2 = mapPoint(d.wx + d.ww, d.wy);
+    const p3 = mapPoint(d.wx + d.ww, d.wy + d.wh);
+    const p4 = mapPoint(d.wx, d.wy + d.wh);
     ctx.beginPath();
     ctx.moveTo(p1.mx, p1.my);
     ctx.lineTo(p2.mx, p2.my);
@@ -623,6 +543,11 @@ function buildMinimapBgCanvas(): HTMLCanvasElement {
     ctx.lineTo(p4.mx, p4.my);
     ctx.closePath();
     ctx.fill();
+    if (z.estado === 'no_urbanizada') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
   }
 
   return c;
@@ -757,16 +682,16 @@ function drawIsoNpc(
   } else if (npc.rol === 'policia') {
     c.fillStyle = '#1e3a8a';
     c.fillRect(-3.5, -17 - bob, 7, 2.5);
-  } else if (npc.rol === 'ingeniero') {
-    c.fillStyle = '#facc15';
+  } else if (npc.rol === 'ingeniero' || npc.rol === 'constructor') {
+    c.fillStyle = npc.rol === 'constructor' ? '#f97316' : '#facc15';
     c.beginPath();
     c.arc(0, -14.8 - bob, 3.6, Math.PI, 0);
     c.fill();
-  } else if (npc.rol === 'empresario') {
+  } else if (npc.rol === 'empresario' || npc.rol === 'inmobiliario') {
     c.fillStyle = '#0f172a';
     c.fillRect(-5, -16.3 - bob, 10, 1.5);
     c.fillRect(-3.2, -19.2 - bob, 6.4, 3);
-    c.fillStyle = '#f59e0b';
+    c.fillStyle = npc.rol === 'inmobiliario' ? '#10b981' : '#f59e0b';
     c.fillRect(-3.2, -17 - bob, 6.4, 0.9);
   } else {
     c.fillStyle = npc.rol === 'jubilado' ? '#e2e8f0' : rp.hair;
@@ -797,7 +722,7 @@ function drawIsoNpc(
     const badgeText =
       npc.accionIa.id === 'protesta' || npc.accionIa.id === 'huelga'
         ? '!'
-        : npc.accionIa.id === 'saqueo'
+        : npc.accionIa.id === 'saqueo' || npc.accionIa.id === 'boicotea'
         ? '×'
         : npc.accionIa.id === 'organizar_fiesta'
         ? '♪'
@@ -824,12 +749,274 @@ function drawIsoNpc(
   c.restore();
 }
 
+function drawHouseBuilding(
+  c: CanvasRenderingContext2D,
+  tipo: 'casa_chica' | 'casa_mediana' | 'casa_grande',
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+  duskAmount: number,
+  casa: Casa | undefined
+) {
+  const height = tipo === 'casa_grande' ? 19 : tipo === 'casa_mediana' ? 14 : 11;
+  const peak = tipo === 'casa_grande' ? 11 : tipo === 'casa_mediana' ? 9 : 7;
+  const occupied = Boolean(casa?.hogarId);
+  const roofLight =
+    tipo === 'casa_grande' ? '#0d9488' : tipo === 'casa_mediana' ? '#ea580c' : '#d97706';
+  const roofDark =
+    tipo === 'casa_grande' ? '#115e59' : tipo === 'casa_mediana' ? '#9a3412' : '#92400e';
+  const wallL = occupied ? '#e2d5b5' : '#cbd5e1';
+  const wallR = occupied ? '#f5ebd1' : '#e2e8f0';
+
+  drawIsoBox(c, bx, by, bw, bh, height, '#fef3c7', wallL, wallR, undefined, occupied ? duskAmount : 0);
+  drawIsoPitchedRoof(c, bx - 1.5, by - 1.5, bw + 3, bh + 3, height, peak, roofLight, roofDark);
+}
+
+function drawParcelBuilding(
+  c: CanvasRenderingContext2D,
+  tipo: BuildingType,
+  parcel: Parcela,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+  center: { ix: number; iy: number },
+  duskAmount: number,
+  nowSec: number,
+  casa: Casa | undefined,
+  impago: boolean
+) {
+  if (tipo === 'casa_chica' || tipo === 'casa_mediana' || tipo === 'casa_grande') {
+    drawHouseBuilding(c, tipo, bx, by, bw, bh, duskAmount, casa);
+    return;
+  }
+
+  const labelRoof = (text: string, yOff: number, color = '#ffffff') => {
+    c.fillStyle = color;
+    c.font = '700 7.2px "Plus Jakarta Sans", sans-serif';
+    c.textAlign = 'center';
+    c.fillText(text, center.ix, center.iy - yOff);
+    c.textAlign = 'start';
+  };
+
+  switch (tipo) {
+    case 'hospital': {
+      drawIsoBox(c, bx, by, bw, bh, 26, '#ffffff', '#cbd5e1', '#e2e8f0', undefined, duskAmount);
+      c.fillStyle = '#dc2626';
+      c.fillRect(center.ix - 2.5, center.iy - 34, 5, 14);
+      c.fillRect(center.ix - 7, center.iy - 29.5, 14, 5);
+      break;
+    }
+    case 'hospital_campana': {
+      drawIsoBox(c, bx + 4, by + 4, bw - 8, bh - 8, 13, '#fef2f2', '#94a3b8', '#cbd5e1');
+      drawIsoPitchedRoof(c, bx + 2, by + 2, bw - 4, bh - 4, 13, 9, '#f8fafc', '#cbd5e1');
+      c.fillStyle = '#dc2626';
+      c.fillRect(center.ix - 2, center.iy - 27, 4, 9);
+      c.fillRect(center.ix - 4.5, center.iy - 24.5, 9, 4);
+      if (parcel.edificio?.diasRestantesCampana !== undefined) {
+        labelRoof(`${parcel.edificio.diasRestantesCampana}d`, 4, '#0f172a');
+      }
+      break;
+    }
+    case 'comisaria': {
+      drawIsoBox(c, bx, by, bw, bh, 23, '#1d4ed8', '#172554', '#1e3a8a', undefined, duskAmount);
+      labelRoof('COMISARÍA', 24, '#dbeafe');
+      break;
+    }
+    case 'escuela': {
+      drawIsoBox(c, bx, by, bw, bh, 22, '#e0e7ff', '#a5b4fc', '#c7d2fe', undefined, duskAmount);
+      drawIsoPitchedRoof(c, bx - 2, by - 2, bw + 4, bh + 4, 22, 11, '#4f46e5', '#3730a3');
+      labelRoof('ESCUELA', 22, '#ffffff');
+      break;
+    }
+    case 'oficina_publica': {
+      drawIsoBox(c, bx, by, bw, bh, 28, '#0f766e', '#475569', '#64748b', undefined, duskAmount);
+      drawIsoBox(c, bx + bw * 0.2, by + bh * 0.2, bw * 0.6, bh * 0.6, 12, '#14b8a6', '#0f766e', '#115e59');
+      labelRoof('GOBIERNO', 40, '#ecfeff');
+      if (impago) {
+        c.strokeStyle = `rgba(220, 38, 38, ${(0.55 + Math.sin(nowSec * 5) * 0.35).toFixed(2)})`;
+        c.lineWidth = 2.6;
+        isoQuadPath(c, parcel.wx - 2, parcel.wy - 2, parcel.ww + 4, parcel.wh + 4);
+        c.stroke();
+      }
+      break;
+    }
+    case 'plaza': {
+      c.fillStyle = '#e5dcc8';
+      isoQuadPath(c, parcel.wx + 2, parcel.wy + 2, parcel.ww - 4, parcel.wh - 4);
+      c.fill();
+      c.strokeStyle = '#94a3b8';
+      c.lineWidth = 1.2;
+      c.stroke();
+      c.fillStyle = '#0ea5e9';
+      c.beginPath();
+      c.ellipse(center.ix, center.iy - 1, 16, 8, 0, 0, Math.PI * 2);
+      c.fill();
+      const ripple = ((nowSec * 11) % 12) + 3;
+      c.strokeStyle = 'rgba(255,255,255,0.72)';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.ellipse(center.ix, center.iy - 1, ripple, ripple * 0.5, 0, 0, Math.PI * 2);
+      c.stroke();
+      // Flagpole on Plaza Mayor
+      const flagWave = Math.sin(nowSec * 4) * 2;
+      c.strokeStyle = '#0f172a';
+      c.lineWidth = 1.4;
+      c.beginPath();
+      c.moveTo(center.ix + 14, center.iy);
+      c.lineTo(center.ix + 14, center.iy - 24);
+      c.stroke();
+      c.fillStyle = '#f59e0b';
+      c.beginPath();
+      c.moveTo(center.ix + 14, center.iy - 24);
+      c.lineTo(center.ix + 26, center.iy - 21 + flagWave);
+      c.lineTo(center.ix + 14, center.iy - 17);
+      c.closePath();
+      c.fill();
+      break;
+    }
+    case 'puerto':
+    case 'muelle_comercio': {
+      const isMuelle = tipo === 'muelle_comercio';
+      drawIsoBox(
+        c,
+        bx,
+        by,
+        bw,
+        bh,
+        15,
+        isMuelle ? '#0369a1' : '#0f766e',
+        '#334155',
+        '#475569',
+        undefined,
+        duskAmount
+      );
+      drawIsoBox(c, bx + bw - 14, by + 4, 10, 10, 26, '#f59e0b', '#b45309', '#d97706');
+      labelRoof(isMuelle ? 'MUELLE EXT.' : 'PUERTO', 18, '#e0f2fe');
+      break;
+    }
+    case 'campo': {
+      const barnW = Math.min(34, bw * 0.48);
+      const barnH = Math.min(26, bh * 0.54);
+      drawIsoBox(c, bx + 4, by + 4, barnW, barnH, 14, '#dc2626', '#991b1b', '#b91c1c', undefined, duskAmount);
+      drawIsoPitchedRoof(c, bx + 2, by + 2, barnW + 4, barnH + 4, 14, 9, '#ef4444', '#991b1b');
+      drawIsoBox(c, bx + barnW + 10, by + 8, 11, 11, 22, '#e2e8f0', '#94a3b8', '#cbd5e1');
+      break;
+    }
+    case 'fabrica': {
+      drawIsoBox(c, bx, by, bw, bh, 22, '#64748b', '#334155', '#475569', undefined, duskAmount);
+      drawIsoBox(c, bx + bw - 14, by + 4, 10, 10, 36, '#1e293b', '#0f172a', '#334155');
+      labelRoof('FÁBRICA', 23, '#e2e8f0');
+      break;
+    }
+    case 'supermercado': {
+      drawIsoBox(c, bx, by, bw, bh, 18, '#0284c7', '#1e3a8a', '#0369a1', undefined, duskAmount);
+      labelRoof('SÚPER', 19, '#e0f2fe');
+      break;
+    }
+    case 'almacen': {
+      drawIsoBox(c, bx, by, bw, bh, 17, '#d97706', '#78350f', '#b45309', undefined, duskAmount);
+      labelRoof('ALMACÉN', 18, '#fef3c7');
+      break;
+    }
+    case 'tienda': {
+      drawIsoBox(c, bx, by, bw, bh, 16, '#059669', '#064e3b', '#047857', undefined, duskAmount);
+      labelRoof('TIENDA', 17, '#d1fae5');
+      break;
+    }
+    case 'kiosco': {
+      drawIsoBox(c, bx + 4, by + 4, bw - 8, bh - 8, 12, '#f59e0b', '#92400e', '#b45309');
+      drawIsoPitchedRoof(c, bx + 2, by + 2, bw - 4, bh - 4, 12, 6, '#fbbf24', '#d97706');
+      break;
+    }
+    case 'restoran': {
+      drawIsoBox(c, bx, by, bw, bh, 17, '#e11d48', '#881337', '#be123c', undefined, duskAmount);
+      labelRoof('RESTORÁN', 18, '#ffe4e6');
+      break;
+    }
+    case 'bar_cafe': {
+      drawIsoBox(c, bx, by, bw, bh, 15, '#b45309', '#451a03', '#78350f', undefined, duskAmount);
+      labelRoof('CAFÉ', 16, '#fef3c7');
+      break;
+    }
+    case 'peluqueria': {
+      drawIsoBox(c, bx, by, bw, bh, 15, '#14b8a6', '#115e59', '#0f766e', undefined, duskAmount);
+      labelRoof('PELUQ.', 16, '#ccfbf1');
+      break;
+    }
+    case 'taller': {
+      drawIsoBox(c, bx, by, bw, bh, 18, '#475569', '#1e293b', '#334155', undefined, duskAmount);
+      labelRoof('TALLER', 19, '#e2e8f0');
+      break;
+    }
+    case 'gimnasio': {
+      drawIsoBox(c, bx, by, bw, bh, 19, '#4f46e5', '#312e81', '#3730a3', undefined, duskAmount);
+      labelRoof('GIMNASIO', 20, '#e0e7ff');
+      break;
+    }
+    case 'cine_teatro': {
+      drawIsoBox(c, bx, by, bw, bh, 22, '#7c3aed', '#4c1d95', '#5b21b6', undefined, duskAmount);
+      labelRoof('CINE', 23, '#f3e8ff');
+      break;
+    }
+    case 'club': {
+      drawIsoBox(c, bx, by, bw, bh, 19, '#a21caf', '#4a044e', '#701a75', undefined, duskAmount);
+      labelRoof('CLUB', 20, '#fae8ff');
+      break;
+    }
+    case 'oficina_constructora': {
+      drawIsoBox(c, bx, by, bw, bh, 22, '#ea580c', '#7c2d12', '#9a3412', undefined, duskAmount);
+      labelRoof('CONSTR.', 23, '#ffedd5');
+      break;
+    }
+    case 'oficina_inmobiliaria': {
+      drawIsoBox(c, bx, by, bw, bh, 22, '#10b981', '#064e3b', '#047857', undefined, duskAmount);
+      labelRoof('INMOB.', 23, '#d1fae5');
+      break;
+    }
+    case 'oficina_medio': {
+      drawIsoBox(c, bx, by, bw, bh, 21, '#be185d', '#831843', '#9d174d', undefined, duskAmount);
+      labelRoof('PRENSA', 22, '#fdf2f8');
+      break;
+    }
+    case 'oficina_banco': {
+      drawIsoBox(c, bx, by, bw, bh, 24, '#0f172a', '#1e293b', '#334155', '#f59e0b', duskAmount);
+      labelRoof('BANCO', 25, '#fde68a');
+      break;
+    }
+    case 'muralla': {
+      drawIsoBox(c, bx, by, bw, 10, 20, '#cbd5e1', '#475569', '#64748b');
+      drawIsoBox(c, bx, by + bh - 10, bw, 10, 20, '#cbd5e1', '#475569', '#64748b');
+      drawIsoBox(c, bx, by, 10, bh, 20, '#cbd5e1', '#475569', '#64748b');
+      labelRoof('MURALLA', 22, '#f8fafc');
+      break;
+    }
+    case 'silo': {
+      drawIsoBox(c, bx + 6, by + 6, 16, 16, 30, '#f8fafc', '#94a3b8', '#cbd5e1');
+      drawIsoBox(c, bx + 26, by + 6, 16, 16, 30, '#f8fafc', '#94a3b8', '#cbd5e1');
+      labelRoof('SILO', 31, '#0f172a');
+      break;
+    }
+    case 'riego': {
+      c.fillStyle = '#0284c7';
+      isoQuadPath(c, bx, by + bh * 0.25, bw, bh * 0.5);
+      c.fill();
+      drawIsoBox(c, bx + bw * 0.35, by + bh * 0.15, 18, 18, 14, '#38bdf8', '#0369a1', '#0284c7');
+      labelRoof('RIEGO', 16, '#e0f2fe');
+      break;
+    }
+  }
+}
+
 export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   state,
   derived,
   paused,
   selectedNpcId,
   selectedParcelaId = null,
+  selectedTramoId = null,
+  hoveredPreview = null,
   filter,
   lens,
   followSelected,
@@ -837,7 +1024,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   zoomRequest,
   onSelectNpc,
   onSelectParcela,
-  onOpenSection,
+  onSelectTramo,
   onCancelFollow,
   onHoverInfoChange,
 }) => {
@@ -857,6 +1044,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   selectedIdRef.current = selectedNpcId;
   const selectedParcelaIdRef = useRef(selectedParcelaId);
   selectedParcelaIdRef.current = selectedParcelaId;
+  const selectedTramoIdRef = useRef(selectedTramoId);
+  selectedTramoIdRef.current = selectedTramoId;
+  const hoveredPreviewRef = useRef(hoveredPreview);
+  hoveredPreviewRef.current = hoveredPreview;
   const filterRef = useRef(filter);
   filterRef.current = filter;
   const lensRef = useRef(lens);
@@ -866,24 +1057,24 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   const onHoverInfoRef = useRef(onHoverInfoChange);
   onHoverInfoRef.current = onHoverInfoChange;
 
-  // Start camera zoomed in over Plaza Central & Palacio de Gobierno so the huge isometric world feels expansive!
-  const initialCenter = worldToIso(485, 255);
+  // Start camera framed over Centro Cívico
+  const initialCenter = worldToIso(600, 382);
   const camRef = useRef({
     x: initialCenter.ix,
     y: initialCenter.iy,
-    zoom: 1.08,
+    zoom: 1.04,
     targetX: initialCenter.ix,
     targetY: initialCenter.iy,
-    targetZoom: 1.08,
+    targetZoom: 1.04,
   });
 
   const keysHeldRef = useRef<Set<string>>(new Set());
-  const hoveredLandmarkRef = useRef<LandmarkDef | null>(null);
   const hoveredParcelaIdRef = useRef<string | null>(null);
+  const hoveredTramoIdRef = useRef<string | null>(null);
   const hoveredKeyRef = useRef<string | null>(null);
 
   const [hoverTooltipData, setHoverTooltipData] = useState<{
-    kind: 'npc' | 'landmark' | 'parcela';
+    kind: 'npc' | 'parcela' | 'tramo';
     title: string;
     subtitle: string;
     detail?: string;
@@ -895,11 +1086,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   const seenContagionEventIdsRef = useRef<Set<string>>(new Set());
   const nextBubbleAtRef = useRef<number>(0);
   const vehiclesRef = useRef<AmbientVehicle[]>([
-    { axis: 'v', pos: 110, lane: 349, speed: 28, color: '#d97706' },
-    { axis: 'v', pos: 420, lane: 361, speed: -24, color: '#0284c7' },
-    { axis: 'h', pos: 200, lane: 289, speed: 32, color: '#16a34a' },
-    { axis: 'h', pos: 720, lane: 301, speed: -26, color: '#dc2626' },
-    { axis: 'v', pos: 260, lane: 659, speed: 25, color: '#475569' },
+    { axis: 'h', pos: 260, lane: 130, speed: 34, color: '#d97706' },
+    { axis: 'h', pos: 720, lane: 382, speed: 38, color: '#0284c7' },
+    { axis: 'h', pos: 520, lane: 632, speed: -30, color: '#16a34a' },
+    { axis: 'v', pos: 200, lane: 205, speed: 28, color: '#dc2626' },
+    { axis: 'v', pos: 320, lane: 600, speed: -32, color: '#0f766e' },
+    { axis: 'v', pos: 450, lane: 995, speed: 26, color: '#475569' },
   ]);
 
   const dragRef = useRef({
@@ -918,7 +1110,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     canvas: HTMLCanvasElement;
     key: string;
   } | null>(null);
-  const minimapBgRef = useRef<HTMLCanvasElement | null>(null);
+  const minimapBgRef = useRef<{
+    canvas: HTMLCanvasElement;
+    key: string;
+  } | null>(null);
   const lampSpriteRef = useRef<HTMLCanvasElement | null>(null);
 
   // Keyboard panning (WASD / Arrows)
@@ -926,7 +1121,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     const down = (e: KeyboardEvent) => {
       if (
         document.activeElement?.tagName === 'INPUT' ||
-        document.activeElement?.tagName === 'SELECT'
+        document.activeElement?.tagName === 'SELECT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
       ) {
         return;
       }
@@ -952,21 +1148,46 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     };
   }, [onCancelFollow]);
 
-  // Handle external district jump requests
+  // Handle external zone / district jump requests
   useEffect(() => {
     if (!cameraTarget) return;
-    if (cameraTarget.district === 'all') {
-      const center = worldToIso(500, 290);
+    if (cameraTarget.zone === 'all' || cameraTarget.district === 'all') {
+      const center = worldToIso(780, 490);
       camRef.current.targetX = center.ix;
       camRef.current.targetY = center.iy;
-      camRef.current.targetZoom = 0.56;
-    } else {
+      camRef.current.targetZoom = 0.46;
+      return;
+    }
+    if (cameraTarget.zone) {
+      const zr = stateRef.current.zonas[cameraTarget.zone]?.rect;
+      if (zr) {
+        const p = worldToIso(zr.wx + zr.ww / 2, zr.wy + zr.wh / 2);
+        camRef.current.targetX = p.ix;
+        camRef.current.targetY = p.iy;
+        camRef.current.targetZoom = 1.14;
+        return;
+      }
+    }
+    if (cameraTarget.district) {
+      const matchingZone = Object.values(stateRef.current.zonas).find(
+        (z) => ZONE_TO_DISTRICT[z.id] === cameraTarget.district
+      );
+      if (matchingZone?.rect) {
+        const p = worldToIso(
+          matchingZone.rect.wx + matchingZone.rect.ww / 2,
+          matchingZone.rect.wy + matchingZone.rect.wh / 2
+        );
+        camRef.current.targetX = p.ix;
+        camRef.current.targetY = p.iy;
+        camRef.current.targetZoom = 1.12;
+        return;
+      }
       const d = DISTRICT_BY_ID[cameraTarget.district];
       if (d) {
         const p = worldToIso(d.x + d.w / 2, d.y + d.h / 2);
         camRef.current.targetX = p.ix;
         camRef.current.targetY = p.iy;
-        camRef.current.targetZoom = 1.18;
+        camRef.current.targetZoom = 1.12;
       }
     }
   }, [cameraTarget]);
@@ -975,13 +1196,13 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   useEffect(() => {
     if (!zoomRequest) return;
     if (zoomRequest.delta === 0) {
-      const center = worldToIso(485, 255);
+      const center = worldToIso(600, 382);
       camRef.current.targetX = center.ix;
       camRef.current.targetY = center.iy;
-      camRef.current.targetZoom = 1.08;
+      camRef.current.targetZoom = 1.04;
     } else {
       camRef.current.targetZoom = Math.max(
-        0.48,
+        0.38,
         Math.min(2.4, camRef.current.targetZoom + zoomRequest.delta)
       );
     }
@@ -1023,27 +1244,38 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     let prevSeed = stateRef.current.semilla;
     let prevTick = stateRef.current.reloj.tick;
 
-    // Reusable queue array to minimize GC churn
     const renderQueue: DrawableItem[] = [];
 
-    const matchesFilter = (npc: Npc): boolean => {
-      if (!npc.vivo) return false;
-      if (filterRef.current === 'acciones') return Boolean(npc.accionIa);
-      if (filterRef.current === 'descontentos') return npc.variables.satisfaccion < 30;
-      if (filterRef.current === 'hambre') return npc.variables.hambre > 80;
-      return true;
-    };
-
-    const drawMinimap = (st: GameState, posMap: Map<string, RenderNpcState>) => {
+    const drawMinimap = (st: GameState, posMap: Map<string, RenderNpcState>, zoneKey: string) => {
       const mc = minimapCanvasRef.current;
       if (!mc) return;
       const mctx = mc.getContext('2d');
       if (!mctx) return;
 
-      if (!minimapBgRef.current) {
-        minimapBgRef.current = buildMinimapBgCanvas();
+      if (!minimapBgRef.current || minimapBgRef.current.key !== zoneKey) {
+        minimapBgRef.current = {
+          canvas: buildMinimapBgCanvas(Object.values(st.zonas)),
+          key: zoneKey,
+        };
       }
-      mctx.drawImage(minimapBgRef.current, 0, 0);
+      mctx.drawImage(minimapBgRef.current.canvas, 0, 0);
+
+      // Roads on minimap
+      for (const tramo of st.tramos ?? []) {
+        if (!tramo.puntos || tramo.puntos.length < 2) continue;
+        const p0 = worldToIso(tramo.puntos[0].wx, tramo.puntos[0].wy);
+        const p1 = worldToIso(tramo.puntos[1].wx, tramo.puntos[1].wy);
+        mctx.strokeStyle = !tramo.construida
+          ? 'rgba(245,158,11,0.35)'
+          : tramo.estado <= 0
+          ? '#ef4444'
+          : '#334155';
+        mctx.lineWidth = tramo.construida ? 1.4 : 0.9;
+        mctx.beginPath();
+        mctx.moveTo(MINIMAP_W / 2 + p0.ix * MINIMAP_SCALE, MINIMAP_H / 2 + p0.iy * MINIMAP_SCALE);
+        mctx.lineTo(MINIMAP_W / 2 + p1.ix * MINIMAP_SCALE, MINIMAP_H / 2 + p1.iy * MINIMAP_SCALE);
+        mctx.stroke();
+      }
 
       // NPCs
       const curLens = lensRef.current;
@@ -1054,22 +1286,22 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         const wx = rp ? rp.x : npc.mapa.x;
         const wy = rp ? rp.y : npc.mapa.y;
         const iso = worldToIso(wx, wy);
-        const mx = MINIMAP_W / 2 + iso.ix * 0.068;
-        const my = MINIMAP_H / 2 + iso.iy * 0.068;
+        const mx = MINIMAP_W / 2 + iso.ix * MINIMAP_SCALE;
+        const my = MINIMAP_H / 2 + iso.iy * MINIMAP_SCALE;
         mctx.fillStyle =
           npc.id === selectedIdRef.current
             ? '#ffffff'
             : evaluateNpcLensColor(npc, curLens, st, curDerived);
-        mctx.fillRect(mx - 1, my - 1, 2.5, 2.5);
+        mctx.fillRect(mx - 1, my - 1, 2.2, 2.2);
       }
 
       // Current Camera Viewport Box
       const { w, h } = viewportSizeRef.current;
       const cam = camRef.current;
-      const halfW = (w / 2 / cam.zoom) * 0.068;
-      const halfH = (h / 2 / cam.zoom) * 0.068;
-      const cx = MINIMAP_W / 2 + cam.x * 0.068;
-      const cy = MINIMAP_H / 2 + cam.y * 0.068;
+      const halfW = (w / 2 / cam.zoom) * MINIMAP_SCALE;
+      const halfH = (h / 2 / cam.zoom) * MINIMAP_SCALE;
+      const cx = MINIMAP_W / 2 + cam.x * MINIMAP_SCALE;
+      const cy = MINIMAP_H / 2 + cam.y * MINIMAP_SCALE;
       mctx.strokeStyle = '#ffffff';
       mctx.lineWidth = 1.4;
       mctx.strokeRect(cx - halfW, cy - halfH, halfW * 2, halfH * 2);
@@ -1083,13 +1315,13 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       // Keyboard WASD / Arrow camera pan
       const keys = keysHeldRef.current;
       if (keys.size > 0) {
-        const panSpeed = (520 / camRef.current.zoom) * dt;
+        const panSpeed = (560 / camRef.current.zoom) * dt;
         if (keys.has('a') || keys.has('arrowleft')) camRef.current.targetX -= panSpeed;
         if (keys.has('d') || keys.has('arrowright')) camRef.current.targetX += panSpeed;
         if (keys.has('w') || keys.has('arrowup')) camRef.current.targetY -= panSpeed;
         if (keys.has('s') || keys.has('arrowdown')) camRef.current.targetY += panSpeed;
-        camRef.current.targetX = Math.max(-1450, Math.min(1450, camRef.current.targetX));
-        camRef.current.targetY = Math.max(-760, Math.min(760, camRef.current.targetY));
+        camRef.current.targetX = clampCamX(camRef.current.targetX);
+        camRef.current.targetY = clampCamY(camRef.current.targetY);
       }
 
       const canvas = canvasRef.current;
@@ -1117,6 +1349,14 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           }
           prevSeed = st.semilla;
           prevTick = st.reloj.tick;
+
+          // Build per-frame lookup maps for houses, households, and firms
+          const hogarById = new Map<string, Hogar>();
+          for (const hItem of st.hogares) hogarById.set(hItem.id, hItem);
+          const casaById = new Map<string, Casa>();
+          for (const cItem of st.casas) casaById.set(cItem.id, cItem);
+          const firmaById = new Map<string, Firma>();
+          for (const fItem of st.firmas) firmaById.set(fItem.id, fItem);
 
           // 1. Interpolate NPC positions smoothly & prune dead NPCs
           let aliveCount = 0;
@@ -1177,35 +1417,35 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           cam.y += (cam.targetY - cam.y) * Math.min(1, dt * 9);
           cam.zoom += (cam.targetZoom - cam.zoom) * Math.min(1, dt * 9);
 
-          // 3. Ambient vehicles, smoke, and organic speech bubbles
+          // 3. Ambient vehicles, factory chimney smoke, and speech bubbles
           if (!pausedRef.current) {
             for (const v of vehiclesRef.current) {
               v.pos += v.speed * dt;
               if (v.axis === 'v') {
-                if (v.pos > WORLD_H + 140) v.pos = -140;
-                if (v.pos < -140) v.pos = WORLD_H + 140;
+                if (v.pos > 730) v.pos = 40;
+                if (v.pos < 40) v.pos = 730;
               } else {
-                if (v.pos > WORLD_W + 180) v.pos = -180;
-                if (v.pos < -180) v.pos = WORLD_W + 180;
+                if (v.pos > 1160) v.pos = 40;
+                if (v.pos < 40) v.pos = 1160;
               }
             }
 
             if (Math.random() < 0.16 && smokeRef.current.length < 24) {
-              const chimneys = [
-                { wx: 152, wy: 374, z: 36 },
-                { wx: 304, wy: 374, z: 34 },
-                { wx: 178, wy: 468, z: 36 },
-              ];
-              const ch = chimneys[Math.floor(Math.random() * chimneys.length)];
-              smokeRef.current.push({
-                wx: ch.wx,
-                wy: ch.wy,
-                z: ch.z,
-                r: 3.5 + Math.random() * 2,
-                alpha: 0.44,
-                vz: 14 + Math.random() * 8,
-                vx: 4 + Math.random() * 5,
-              });
+              const chimneys = st.parcelas
+                .filter((p) => p.edificio?.estado === 'ocupada' && p.edificio.tipo === 'fabrica')
+                .map((p) => ({ wx: p.wx + p.ww - 10, wy: p.wy + 10, z: 36 }));
+              if (chimneys.length > 0) {
+                const ch = chimneys[Math.floor(Math.random() * chimneys.length)];
+                smokeRef.current.push({
+                  wx: ch.wx,
+                  wy: ch.wy,
+                  z: ch.z,
+                  r: 3.5 + Math.random() * 2,
+                  alpha: 0.44,
+                  vz: 14 + Math.random() * 8,
+                  vx: 4 + Math.random() * 5,
+                });
+              }
             }
 
             for (const ev of st.eventosDiaActual) {
@@ -1231,7 +1471,9 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 }));
                 const batchIds = new Set(batch.map((b) => b.npcId));
                 bubblesRef.current = [
-                  ...bubblesRef.current.filter((b) => b.expiresAt > nowSec && !batchIds.has(b.npcId)).slice(-3),
+                  ...bubblesRef.current
+                    .filter((b) => b.expiresAt > nowSec && !batchIds.has(b.npcId))
+                    .slice(-3),
                   ...batch,
                 ];
               }
@@ -1250,7 +1492,9 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 ctx.font = '600 10px "Plus Jakarta Sans", sans-serif';
                 const bw = Math.min(170, ctx.measureText(text).width + 14);
                 bubblesRef.current = [
-                  ...bubblesRef.current.filter((b) => b.expiresAt > nowSec && b.npcId !== chosen.id).slice(-5),
+                  ...bubblesRef.current
+                    .filter((b) => b.expiresAt > nowSec && b.npcId !== chosen.id)
+                    .slice(-5),
                   { npcId: chosen.id, text, width: bw, expiresAt: nowSec + 3.4 },
                 ];
               }
@@ -1277,13 +1521,15 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           const hasZombie = activeFens.some((f) => f.tipo === 'plaga_zombie');
 
           const dayPhase = (st.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY;
-          const duskAmount = dayPhase > 0.72 ? Math.sin(((dayPhase - 0.72) / 0.28) * Math.PI) * 0.45 : 0;
+          const duskAmount =
+            dayPhase > 0.72 ? Math.sin(((dayPhase - 0.72) / 0.28) * Math.PI) * 0.45 : 0;
 
-          // Ensure static terrain cache matches climate theme
-          const terrainKey = `${hasDrought ? 1 : 0}_${hasPlague ? 1 : 0}`;
+          const zoneList = Object.values(st.zonas);
+          const zoneStateKey = zoneList.map((z) => `${z.id}:${z.estado}`).join('|');
+          const terrainKey = `${hasDrought ? 1 : 0}_${hasPlague ? 1 : 0}_${zoneStateKey}`;
           if (!terrainCacheRef.current || terrainCacheRef.current.key !== terrainKey) {
             terrainCacheRef.current = {
-              canvas: buildStaticTerrainCanvas(hasDrought, hasPlague),
+              canvas: buildStaticTerrainCanvas(zoneList, hasDrought, hasPlague),
               key: terrainKey,
             };
           }
@@ -1296,10 +1542,9 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           ctx.fillStyle = hasDrought ? '#cabf95' : '#6fa350';
           ctx.fillRect(0, 0, w, h);
 
-          // Calculate Frustum Bounds in Isometric World Space
           const viewHalfW = w / 2 / cam.zoom;
           const viewHalfH = h / 2 / cam.zoom;
-          const margin = 160;
+          const margin = 180;
           const minIx = cam.x - viewHalfW - margin;
           const maxIx = cam.x + viewHalfW + margin;
           const minIy = cam.y - viewHalfH - margin;
@@ -1310,7 +1555,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           ctx.scale(cam.zoom, cam.zoom);
           ctx.translate(-cam.x, -cam.y);
 
-          // Blit ONLY the visible slice of pre-rendered static terrain!
+          // Blit visible slice of pre-rendered terrain
           const srcX = Math.max(0, Math.floor(cam.x - viewHalfW + TERRAIN_CX - 4));
           const srcY = Math.max(0, Math.floor(cam.y - viewHalfH + TERRAIN_CY - 4));
           const srcRight = Math.min(TERRAIN_W, Math.ceil(cam.x + viewHalfW + TERRAIN_CX + 4));
@@ -1331,6 +1576,137 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             );
           }
 
+          // Dynamic Road Network (V2 tramos)
+          const preview = hoveredPreviewRef.current;
+          for (const tramo of st.tramos ?? []) {
+            if (!tramo.puntos || tramo.puntos.length < 2) continue;
+            const p0 = worldToIso(tramo.puntos[0].wx, tramo.puntos[0].wy);
+            const p1 = worldToIso(tramo.puntos[1].wx, tramo.puntos[1].wy);
+            const isSelTramo = selectedTramoIdRef.current === tramo.id;
+            const isHovTramo =
+              hoveredTramoIdRef.current === tramo.id || preview?.tramoId === tramo.id;
+            const connectable = !tramo.construida && !tramo.enObra && isViaConnectableToNetwork(st, tramo);
+            const baseW = tramo.tipo === 'puente' ? 16 : tramo.tipo === 'camino' ? 12 : 9;
+
+            ctx.save();
+            ctx.lineCap = 'round';
+            if (tramo.construida) {
+              // Road shoulder
+              ctx.strokeStyle = tramo.tipo === 'puente' ? '#cbd5e1' : '#94a3b8';
+              ctx.lineWidth = baseW + 4;
+              ctx.beginPath();
+              ctx.moveTo(p0.ix, p0.iy);
+              ctx.lineTo(p1.ix, p1.iy);
+              ctx.stroke();
+
+              // Road surface
+              ctx.strokeStyle =
+                tramo.estado <= 0
+                  ? '#7f1d1d'
+                  : tramo.estado < 50
+                  ? '#57534e'
+                  : '#334155';
+              ctx.lineWidth = baseW;
+              ctx.beginPath();
+              ctx.moveTo(p0.ix, p0.iy);
+              ctx.lineTo(p1.ix, p1.iy);
+              ctx.stroke();
+
+              // Center stripes or cut indicator
+              ctx.strokeStyle =
+                tramo.estado <= 0
+                  ? '#fca5a5'
+                  : tramo.estado < 50
+                  ? '#fbbf24'
+                  : '#e2e8f0';
+              ctx.lineWidth = 1.4;
+              ctx.setLineDash([8, 8]);
+              ctx.beginPath();
+              ctx.moveTo(p0.ix, p0.iy);
+              ctx.lineTo(p1.ix, p1.iy);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            } else if (tramo.enObra) {
+              ctx.strokeStyle = '#d97706';
+              ctx.lineWidth = baseW;
+              ctx.setLineDash([6, 4]);
+              ctx.beginPath();
+              ctx.moveTo(p0.ix, p0.iy);
+              ctx.lineTo(p1.ix, p1.iy);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            } else {
+              ctx.strokeStyle =
+                isHovTramo || isSelTramo
+                  ? 'rgba(20, 184, 166, 0.85)'
+                  : connectable
+                  ? 'rgba(245, 158, 11, 0.45)'
+                  : 'rgba(148, 163, 184, 0.22)';
+              ctx.lineWidth = isHovTramo || isSelTramo ? baseW : 5;
+              ctx.setLineDash([6, 6]);
+              ctx.beginPath();
+              ctx.moveTo(p0.ix, p0.iy);
+              ctx.lineTo(p1.ix, p1.iy);
+              ctx.stroke();
+              ctx.setLineDash([]);
+            }
+
+            if (isSelTramo || isHovTramo) {
+              ctx.strokeStyle = isSelTramo ? '#14b8a6' : '#38bdf8';
+              ctx.lineWidth = baseW + 8;
+              ctx.globalAlpha = 0.35;
+              ctx.beginPath();
+              ctx.moveTo(p0.ix, p0.iy);
+              ctx.lineTo(p1.ix, p1.iy);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+            }
+
+            // Road status badge at midpoint if in obra, cut, bad condition, or hovered connectable
+            const midX = (p0.ix + p1.ix) / 2;
+            const midY = (p0.iy + p1.iy) / 2;
+            let roadTag: { text: string; bg: string; fg: string } | null = null;
+            if (tramo.enObra) {
+              roadTag = { text: `OBRA · ${tramo.diasObraRestantes}d`, bg: '#78350f', fg: '#fde68a' };
+            } else if (tramo.construida && tramo.estado <= 0) {
+              roadTag = { text: 'CORTADA', bg: '#991b1b', fg: '#fee2e2' };
+            } else if (tramo.construida && tramo.estado < 50) {
+              roadTag = { text: `VÍA ${Math.round(tramo.estado)}%`, bg: '#92400e', fg: '#fef3c7' };
+            } else if ((isHovTramo || isSelTramo) && connectable) {
+              roadTag = { text: `CONECTAR $${tramo.costoObra}`, bg: '#065f46', fg: '#ecfdf5' };
+            }
+
+            if (roadTag && midX >= minIx && midX <= maxIx && midY >= minIy && midY <= maxIy) {
+              const tw = roadTag.text.length * 5.2 + 12;
+              ctx.fillStyle = roadTag.bg;
+              ctx.beginPath();
+              ctx.roundRect(midX - tw / 2, midY - 8, tw, 15, 4);
+              ctx.fill();
+              ctx.fillStyle = roadTag.fg;
+              ctx.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(roadTag.text, midX, midY + 2);
+              ctx.textAlign = 'start';
+            }
+            ctx.restore();
+          }
+
+          // Hover Zone Preview Highlight from HUD tables
+          if (preview?.zona) {
+            const pzr = st.zonas[preview.zona]?.rect;
+            if (pzr) {
+              ctx.save();
+              isoQuadPath(ctx, pzr.wx, pzr.wy, pzr.ww, pzr.wh);
+              ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
+              ctx.fill();
+              ctx.strokeStyle = '#38bdf8';
+              ctx.lineWidth = 3;
+              ctx.setLineDash([8, 5]);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+
           // Zone Lens Overlay (defensa / orden / integridad / amenaza)
           const activeLens = lensRef.current;
           if (
@@ -1340,17 +1716,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             activeLens === 'amenaza'
           ) {
             const curDerived = derivedRef.current;
-            const zoneRects: Record<ZoneId, { wx: number; wy: number; ww: number; wh: number }> = {
-              centro: { wx: 366, wy: 24, ww: 288, wh: 532 },
-              norte: { wx: 24, wy: 24, ww: 320, wh: 260 },
-              sur: { wx: 24, wy: 306, ww: 320, wh: 250 },
-              este: { wx: 676, wy: 24, ww: 300, wh: 532 },
-              oeste: { wx: -16, wy: 24, ww: 40, wh: 532 },
-            };
             const zoneKeys = getWorldZones(st);
             ctx.save();
             for (const zk of zoneKeys) {
-              const zr = zoneRects[zk];
+              const zr = st.zonas[zk]?.rect;
               if (!zr) continue;
               const val =
                 activeLens === 'defensa'
@@ -1374,7 +1743,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ctx.globalAlpha = 0.92;
               ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
               ctx.beginPath();
-              ctx.roundRect(lblPos.ix - 48, lblPos.iy - 11, 96, 20, 4);
+              ctx.roundRect(lblPos.ix - 52, lblPos.iy - 11, 104, 20, 4);
               ctx.fill();
               ctx.fillStyle = '#f8fafc';
               ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
@@ -1385,14 +1754,27 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ctx.restore();
           }
 
-          // Interactive Parcel Hover / Selection Footprints
+          // Interactive Parcel Footprints (libre / bloqueada / sin_calle / hovered / selected)
           for (const p of st.parcelas) {
             const isSel = selectedParcelaIdRef.current === p.id;
-            const isHov = hoveredParcelaIdRef.current === p.id;
-            if (p.estado === 'libre' || p.estado === 'bloqueada' || isSel || isHov) {
+            const isHov = hoveredParcelaIdRef.current === p.id || preview?.parcelaId === p.id;
+            if (
+              p.estado === 'libre' ||
+              p.estado === 'bloqueada' ||
+              p.estado === 'sin_calle' ||
+              isSel ||
+              isHov
+            ) {
               ctx.save();
               isoQuadPath(ctx, p.wx, p.wy, p.ww, p.wh);
-              if (p.estado === 'bloqueada') {
+              if (p.estado === 'sin_calle') {
+                ctx.fillStyle = isHov || isSel ? 'rgba(245, 158, 11, 0.22)' : 'rgba(71, 85, 105, 0.14)';
+                ctx.fill();
+                ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#fbbf24' : 'rgba(148, 163, 184, 0.45)';
+                ctx.lineWidth = isSel || isHov ? 2.2 : 1.1;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+              } else if (p.estado === 'bloqueada') {
                 ctx.fillStyle = isHov || isSel ? 'rgba(100,116,139,0.28)' : 'rgba(15,23,42,0.16)';
                 ctx.fill();
                 ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#94a3b8' : 'rgba(100,116,139,0.55)';
@@ -1403,7 +1785,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 ctx.fillStyle = isSel || isHov ? 'rgba(20,184,166,0.24)' : 'rgba(16,185,129,0.12)';
                 ctx.fill();
                 ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#38bdf8' : '#10b981';
-                ctx.lineWidth = isSel || isHov ? 2.6 : 1.6;
+                ctx.lineWidth = isSel || isHov ? 2.6 : 1.5;
                 ctx.setLineDash([6, 4]);
                 ctx.stroke();
               } else if (isSel || isHov) {
@@ -1418,20 +1800,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             }
           }
 
-          // Interactive Landmark Hover Footprint Highlight
-          if (hoveredLandmarkRef.current) {
-            const lm = hoveredLandmarkRef.current;
-            ctx.save();
-            isoQuadPath(ctx, lm.wx - 4, lm.wy - 4, lm.ww + 8, lm.wh + 8);
-            ctx.fillStyle = 'rgba(20, 184, 166, 0.16)';
-            ctx.fill();
-            ctx.strokeStyle = '#14b8a6';
-            ctx.lineWidth = 2.6;
-            ctx.setLineDash([6, 4]);
-            ctx.stroke();
-            ctx.restore();
-          }
-
           // 6. Populate Frustum-Culled Painter's Algorithm Queue
           renderQueue.length = 0;
 
@@ -1441,26 +1809,26 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             renderQueue.push({ kind: 'fn', depth: wx + wy, draw });
           };
 
-          // Rotating Windmill
-          pushItem(168, 162, (c) => {
-            drawIsoBox(c, 160, 154, 16, 16, 26, '#92400e', '#78350f', '#b45309');
-            const top = worldToIso(168, 162);
+          // Rotating Agricultural Windmill in Noroeste
+          pushItem(336, 156, (c) => {
+            drawIsoBox(c, 328, 148, 16, 16, 26, '#92400e', '#78350f', '#b45309');
+            const top = worldToIso(336, 156);
             c.save();
             c.translate(top.ix, top.iy - 28);
             c.rotate(pausedRef.current ? 0.3 : nowSec * 1.1);
             c.strokeStyle = '#f8fafc';
-            c.lineWidth = 2.6;
+            c.lineWidth = 2.4;
             for (let b = 0; b < 4; b++) {
               c.rotate(Math.PI / 2);
               c.beginPath();
               c.moveTo(0, 0);
-              c.lineTo(0, -20);
+              c.lineTo(0, -18);
               c.stroke();
             }
             c.restore();
           });
 
-          // Dynamic Buildings & Construction Plots from state.parcelas
+          // Active Role & Hospital Lookup for Status Badges
           const activeRoleCounts: Partial<Record<RoleId, number>> = {};
           for (const n of st.npcs) {
             if (n.vivo && !n.hospital.internado && !n.accionIa?.fueraDePuesto) {
@@ -1481,18 +1849,34 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             .sort((a, b) => a.orden - b.orden);
           const sinComidaFrame = st.alimento.stock <= 0.1;
 
+          // Dynamic Parcels & Buildings from V2 state.parcelas
           for (const parcel of st.parcelas) {
             const cx = parcel.wx + parcel.ww * 0.5;
             const cy = parcel.wy + parcel.wh * 0.5;
             pushItem(cx, cy, (c) => {
               const center = worldToIso(cx, cy);
+              if (parcel.estado === 'sin_calle') {
+                if (cam.zoom >= 0.72 || hoveredParcelaIdRef.current === parcel.id) {
+                  c.fillStyle = 'rgba(30, 41, 59, 0.76)';
+                  c.beginPath();
+                  c.roundRect(center.ix - 23, center.iy - 8, 46, 15, 4);
+                  c.fill();
+                  c.fillStyle = '#cbd5e1';
+                  c.font = '600 7.5px "Plus Jakarta Sans", sans-serif';
+                  c.textAlign = 'center';
+                  c.fillText('SIN VÍA', center.ix, center.iy + 2);
+                  c.textAlign = 'start';
+                }
+                return;
+              }
+
               if (parcel.estado === 'bloqueada') {
                 c.fillStyle = 'rgba(15, 23, 42, 0.72)';
                 c.beginPath();
                 c.roundRect(center.ix - 28, center.iy - 9, 56, 17, 4);
                 c.fill();
                 c.fillStyle = '#94a3b8';
-                c.font = '600 8.5px "Plus Jakarta Sans", sans-serif';
+                c.font = '600 8px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
                 c.fillText('BLOQUEADA', center.ix, center.iy + 2.5);
                 c.textAlign = 'start';
@@ -1500,17 +1884,17 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               }
 
               if (parcel.estado === 'libre') {
-                c.fillStyle = 'rgba(6, 78, 59, 0.85)';
+                c.fillStyle = 'rgba(6, 78, 59, 0.82)';
                 c.beginPath();
-                c.roundRect(center.ix - 24, center.iy - 9, 48, 17, 4);
+                c.roundRect(center.ix - 22, center.iy - 8, 44, 15, 4);
                 c.fill();
                 c.strokeStyle = '#10b981';
                 c.lineWidth = 1;
                 c.stroke();
                 c.fillStyle = '#ecfdf5';
-                c.font = '700 9px "Plus Jakarta Sans", sans-serif';
+                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
-                c.fillText('+ SOLAR', center.ix, center.iy + 2.5);
+                c.fillText('+ SOLAR', center.ix, center.iy + 2);
                 c.textAlign = 'start';
                 return;
               }
@@ -1518,114 +1902,47 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               const bld = parcel.edificio;
               if (!bld) return;
 
-              const bx = parcel.wx + 6;
-              const by = parcel.wy + 6;
-              const bw = Math.max(24, parcel.ww - 12);
-              const bh = Math.max(20, parcel.wh - 12);
+              const bx = parcel.wx + 4;
+              const by = parcel.wy + 4;
+              const bw = Math.max(20, parcel.ww - 8);
+              const bh = Math.max(16, parcel.wh - 8);
 
               if (bld.estado === 'en_obra') {
                 drawIsoBox(c, bx, by, bw, bh, 14, '#d97706', '#78350f', '#92400e');
                 c.fillStyle = 'rgba(15, 23, 42, 0.88)';
                 c.beginPath();
-                c.roundRect(center.ix - 34, center.iy - 28, 68, 16, 4);
+                c.roundRect(center.ix - 30, center.iy - 27, 60, 15, 4);
                 c.fill();
                 c.fillStyle = '#fde68a';
-                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
+                c.font = '700 7.8px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
                 c.fillText(`OBRA · ${bld.diasObraRestantes}d`, center.ix, center.iy - 17);
                 c.textAlign = 'start';
                 return;
               }
 
-              if (bld.tipo === 'hospital') {
-                drawIsoBox(c, bx, by, bw, bh, 26, '#ffffff', '#cbd5e1', '#e2e8f0', undefined, duskAmount);
-                c.fillStyle = '#dc2626';
-                c.fillRect(center.ix - 3, center.iy - 34, 6, 16);
-                c.fillRect(center.ix - 8, center.iy - 29, 16, 6);
-              } else if (bld.tipo === 'hospital_campana') {
-                drawIsoBox(c, bx + 4, by + 4, bw - 8, bh - 8, 14, '#fef2f2', '#94a3b8', '#cbd5e1');
-                drawIsoPitchedRoof(c, bx + 2, by + 2, bw - 4, bh - 4, 14, 10, '#f8fafc', '#cbd5e1');
-                c.fillStyle = '#dc2626';
-                c.fillRect(center.ix - 2.5, center.iy - 29, 5, 11);
-                c.fillRect(center.ix - 5.5, center.iy - 26, 11, 5);
-                if (bld.diasRestantesCampana !== undefined) {
-                  c.fillStyle = '#0f172a';
-                  c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                  c.textAlign = 'center';
-                  c.fillText(`${bld.diasRestantesCampana}d`, center.ix, center.iy - 4);
-                  c.textAlign = 'start';
-                }
-              } else if (bld.tipo === 'comisaria') {
-                drawIsoBox(c, bx, by, bw, bh, 24, '#1d4ed8', '#172554', '#1e3a8a', undefined, duskAmount);
-                c.fillStyle = '#dbeafe';
-                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('COMISARÍA', center.ix, center.iy - 24);
-                c.textAlign = 'start';
-              } else if (bld.tipo === 'escuela') {
-                drawIsoBox(c, bx, by, bw, bh, 24, '#e0e7ff', '#a5b4fc', '#c7d2fe', undefined, duskAmount);
-                drawIsoPitchedRoof(c, bx - 2, by - 2, bw + 4, bh + 4, 24, 12, '#4f46e5', '#3730a3');
-                c.fillStyle = '#ffffff';
-                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('ESCUELA', center.ix, center.iy - 22);
-                c.textAlign = 'start';
-              } else if (bld.tipo === 'oficina_publica') {
-                drawIsoBox(c, bx, by, bw, bh, 22, '#0f766e', '#475569', '#64748b', undefined, duskAmount);
-                c.fillStyle = '#ecfeff';
-                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('OFICINA', center.ix, center.iy - 23);
-                c.textAlign = 'start';
-              } else if (bld.tipo === 'campo') {
-                const barnW = Math.min(44, bw * 0.45);
-                const barnH = Math.min(32, bh * 0.5);
-                drawIsoBox(c, bx + 6, by + 6, barnW, barnH, 16, '#dc2626', '#991b1b', '#b91c1c', undefined, duskAmount);
-                drawIsoPitchedRoof(c, bx + 4, by + 4, barnW + 4, barnH + 4, 16, 10, '#ef4444', '#991b1b');
-                drawIsoBox(c, bx + barnW + 14, by + 10, 14, 14, 26, '#e2e8f0', '#94a3b8', '#cbd5e1');
-              } else if (bld.tipo === 'local_comercio') {
-                if (parcel.distrito === 'taller') {
-                  drawIsoBox(c, bx, by, bw, bh, 26, '#64748b', '#475569', '#94a3b8', undefined, duskAmount);
-                  drawIsoBox(c, bx + bw - 18, by + 6, 14, 14, 42, '#334155', '#1e293b', '#475569');
-                } else {
-                  drawIsoBox(c, bx, by, bw, bh, 18, '#d97706', '#92400e', '#b45309', undefined, duskAmount);
-                  c.fillStyle = '#fef3c7';
-                  c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                  c.textAlign = 'center';
-                  c.fillText('COMERCIO', center.ix, center.iy - 18);
-                  c.textAlign = 'start';
-                }
-              } else if (bld.tipo === 'muralla') {
-                drawIsoBox(c, bx, by, bw, 12, 22, '#cbd5e1', '#475569', '#64748b');
-                drawIsoBox(c, bx, by + bh - 12, bw, 12, 22, '#cbd5e1', '#475569', '#64748b');
-                drawIsoBox(c, bx, by, 12, bh, 22, '#cbd5e1', '#475569', '#64748b');
-                c.fillStyle = '#f8fafc';
-                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('MURALLA', center.ix, center.iy - 22);
-                c.textAlign = 'start';
-              } else if (bld.tipo === 'silo') {
-                drawIsoBox(c, bx + 8, by + 8, 20, 20, 34, '#f8fafc', '#94a3b8', '#cbd5e1');
-                drawIsoBox(c, bx + 34, by + 8, 20, 20, 34, '#f8fafc', '#94a3b8', '#cbd5e1');
-                c.fillStyle = '#0f172a';
-                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('SILO', center.ix, center.iy - 34);
-                c.textAlign = 'start';
-              } else if (bld.tipo === 'riego') {
-                c.fillStyle = '#0284c7';
-                isoQuadPath(c, bx, by + bh * 0.25, bw, bh * 0.5);
-                c.fill();
-                drawIsoBox(c, bx + bw * 0.35, by + bh * 0.15, 22, 22, 16, '#38bdf8', '#0369a1', '#0284c7');
-                c.fillStyle = '#e0f2fe';
-                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('RIEGO', center.ix, center.iy - 18);
-                c.textAlign = 'start';
-              }
+              const casa = bld.casaId ? casaById.get(bld.casaId) : undefined;
+              drawParcelBuilding(
+                c,
+                bld.tipo,
+                parcel,
+                bx,
+                by,
+                bw,
+                bh,
+                center,
+                duskAmount,
+                nowSec,
+                casa,
+                st.gobierno.finanzas.impago
+              );
 
+              // Operational status badge
               const fac = hospFacilityById.get(bld.id);
+              const bDef = BUILDING_CATALOG[bld.tipo];
+              const firma = bld.firmaId ? firmaById.get(bld.firmaId) : undefined;
               let statusTag: { text: string; bg: string; fg: string } | null = null;
+
               if (bld.tipo === 'hospital') {
                 const hIdx = hospParcelaOrder.findIndex((p) => p.id === parcel.id);
                 const hLen = Math.max(1, hospParcelaOrder.length);
@@ -1647,35 +1964,31 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
               } else if (bld.tipo === 'oficina_publica' && (activeRoleCounts.estatal ?? 0) === 0) {
                 statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
-              } else if (bld.tipo === 'campo') {
-                if ((activeRoleCounts.agricultor ?? 0) === 0) {
-                  statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
-                } else if (sinComidaFrame) {
-                  statusTag = { text: 'SIN COMIDA', bg: '#991b1b', fg: '#fee2e2' };
-                } else if (st.empresas.alimento.factor < 0.99) {
-                  statusTag = { text: 'RECORTANDO', bg: '#b45309', fg: '#fef3c7' };
+              } else if (bDef.categoria === 'vivienda' && casa) {
+                if (casa.estado < 45) {
+                  statusTag = { text: 'DETERIORO', bg: '#92400e', fg: '#fef3c7' };
                 }
-              } else if (bld.tipo === 'local_comercio') {
-                if ((activeRoleCounts.obrero ?? 0) + (activeRoleCounts.comerciante ?? 0) === 0) {
+              } else if (bDef.categoria === 'privado' && firma) {
+                if (firma.empleados.length === 0) {
                   statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
-                } else if (sinComidaFrame) {
+                } else if (bDef.vendeComida && sinComidaFrame) {
                   statusTag = { text: 'SIN COMIDA', bg: '#991b1b', fg: '#fee2e2' };
-                } else if (st.empresas.comercio.factor < 0.99) {
+                } else if (firma.factor < 0.96) {
                   statusTag = { text: 'RECORTANDO', bg: '#b45309', fg: '#fef3c7' };
                 }
               }
 
               if (statusTag) {
-                const tagW = statusTag.text.length * 5.2 + 12;
-                const tagY = center.iy - 46;
+                const tagW = statusTag.text.length * 5.0 + 10;
+                const tagY = center.iy - 42;
                 c.fillStyle = statusTag.bg;
                 c.beginPath();
-                c.roundRect(center.ix - tagW / 2, tagY, tagW, 14, 4);
+                c.roundRect(center.ix - tagW / 2, tagY, tagW, 13, 4);
                 c.fill();
                 c.fillStyle = statusTag.fg;
-                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
+                c.font = '700 7px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
-                c.fillText(statusTag.text, center.ix, tagY + 9.5);
+                c.fillText(statusTag.text, center.ix, tagY + 9);
                 c.textAlign = 'start';
               }
 
@@ -1686,7 +1999,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ) {
                 const occPct = fac.beds > 0 ? (fac.occupied / fac.beds) * 100 : 120;
                 const barCol = evaluateZoneMetricColor('hospital', occPct);
-                const badgeY = center.iy - (statusTag ? 64 : 48);
+                const badgeY = center.iy - (statusTag ? 60 : 44);
                 c.fillStyle = 'rgba(15, 23, 42, 0.9)';
                 c.beginPath();
                 c.roundRect(center.ix - 34, badgeY, 68, 16, 4);
@@ -1703,150 +2016,72 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             });
           }
 
-          // Plaza Fountain & Decorative Market Stalls
-          pushItem(510, 162, (c) => {
-            const fp = worldToIso(510, 162);
-            c.fillStyle = '#94a3b8';
-            c.beginPath();
-            c.ellipse(fp.ix, fp.iy, 30, 15, 0, 0, Math.PI * 2);
-            c.fill();
-            c.fillStyle = '#0ea5e9';
-            c.beginPath();
-            c.ellipse(fp.ix, fp.iy - 2, 22, 11, 0, 0, Math.PI * 2);
-            c.fill();
-            const ripple = ((nowSec * 12) % 16) + 4;
-            c.strokeStyle = 'rgba(255,255,255,0.7)';
-            c.lineWidth = 1.4;
-            c.beginPath();
-            c.ellipse(fp.ix, fp.iy - 2, ripple, ripple * 0.5, 0, 0, Math.PI * 2);
-            c.stroke();
-            c.fillStyle = '#e0f2fe';
-            c.fillRect(fp.ix - 1.5, fp.iy - 14, 3, 12);
-          });
-
-          // Press Building (Redacción)
-          pushItem(571, 219, (c) => {
-            drawIsoBox(c, 543, 200, 56, 38, 22, '#be185d', '#831843', '#9d174d', undefined, duskAmount);
-            const roof = worldToIso(571, 219);
-            c.fillStyle = '#fdf2f8';
-            c.fillRect(roof.ix - 20, roof.iy - 34, 40, 11);
-            c.fillStyle = '#9d174d';
-            c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
-            c.textAlign = 'center';
-            c.fillText('PRENSA', roof.ix, roof.iy - 26);
-            c.textAlign = 'start';
-          });
-
-          // Palacio de Gobierno (Hero Civic Monument)
-          pushItem(567, 416, (c) => {
-            drawIsoBox(c, 503, 369, 128, 94, 32, '#0f766e', '#94a3b8', '#cbd5e1', undefined, duskAmount);
-            // Upper Dome Tier
-            drawIsoBox(c, 541, 395, 52, 42, 16, '#14b8a6', '#0f766e', '#115e59');
-            const top = worldToIso(567, 416);
-            const flagWave = Math.sin(nowSec * 4) * 2.5;
-            c.strokeStyle = '#0f172a';
-            c.lineWidth = 1.6;
-            c.beginPath();
-            c.moveTo(top.ix, top.iy - 48);
-            c.lineTo(top.ix, top.iy - 74);
-            c.stroke();
-            c.fillStyle = '#f59e0b';
-            c.beginPath();
-            c.moveTo(top.ix, top.iy - 74);
-            c.lineTo(top.ix + 18, top.iy - 70 + flagWave);
-            c.lineTo(top.ix, top.iy - 63);
-            c.closePath();
-            c.fill();
-
-            if (st.gobierno.finanzas.impago) {
-              c.strokeStyle = `rgba(220, 38, 38, ${(0.55 + Math.sin(nowSec * 5) * 0.35).toFixed(2)})`;
-              c.lineWidth = 3;
-              isoQuadPath(c, 498, 364, 138, 104);
-              c.stroke();
-            }
-          });
-
-          // Residential Cottages
-          for (const hHouse of [
-            { x: 702, y: 274, w: 46, h: 36, r1: '#ea580c', r2: '#9a3412' },
-            { x: 766, y: 274, w: 46, h: 36, r1: '#d97706', r2: '#92400e' },
-            { x: 830, y: 274, w: 46, h: 36, r1: '#dc2626', r2: '#991b1b' },
-            { x: 896, y: 274, w: 48, h: 38, r1: '#0d9488', r2: '#115e59' },
-            { x: 702, y: 344, w: 46, h: 36, r1: '#d97706', r2: '#92400e' },
-            { x: 766, y: 344, w: 46, h: 36, r1: '#ea580c', r2: '#9a3412' },
-            { x: 702, y: 446, w: 50, h: 38, r1: '#c2410c', r2: '#7c2d12' },
-            { x: 772, y: 446, w: 50, h: 38, r1: '#b45309', r2: '#78350f' },
-          ]) {
-            pushItem(hHouse.x + hHouse.w / 2, hHouse.y + hHouse.h / 2, (c) => {
-              drawIsoBox(c, hHouse.x, hHouse.y, hHouse.w, hHouse.h, 15, '#fef3c7', '#e2d5b5', '#f5ebd1', undefined, duskAmount);
-              drawIsoPitchedRoof(c, hHouse.x - 2, hHouse.y - 2, hHouse.w + 4, hHouse.h + 4, 15, 10, hHouse.r1, hHouse.r2);
-            });
-          }
-
-          // Isometric Trees (Town + Surrounding Countryside)
+          // Isometric Trees along avenues, riverbanks & rural borders
           const trees = [
-            { x: 38, y: 54 },
-            { x: 326, y: 56 },
-            { x: 384, y: 256 },
-            { x: 632, y: 64 },
-            { x: 384, y: 332 },
-            { x: 636, y: 526 },
-            { x: 896, y: 102 },
-            { x: 938, y: 162 },
-            { x: 862, y: 368 },
-            { x: 932, y: 374 },
-            { x: 868, y: 492 },
-            { x: 934, y: 486 },
-            { x: 696, y: 516 },
-            // Countryside forest ring
-            { x: 110, y: -45 },
-            { x: 240, y: -65 },
-            { x: 520, y: -52 },
-            { x: 820, y: -48 },
-            { x: 1045, y: 95 },
-            { x: 1065, y: 225 },
-            { x: 1050, y: 410 },
-            { x: 180, y: 625 },
-            { x: 510, y: 635 },
-            { x: 840, y: 628 },
-            { x: -135, y: 120 },
-            { x: -140, y: 360 },
-            { x: -125, y: 490 },
+            { x: 376, y: 80 },
+            { x: 376, y: 224 },
+            { x: 772, y: 80 },
+            { x: 772, y: 224 },
+            { x: 772, y: 492 },
+            { x: 376, y: 580 },
+            { x: 772, y: 690 },
+            { x: 1140, y: 120 },
+            { x: 1140, y: 220 },
+            { x: 1140, y: 580 },
+            { x: 1140, y: 700 },
+            { x: 1265, y: 180 },
+            { x: 1280, y: 590 },
+            { x: 1410, y: 310 },
+            { x: 1430, y: 640 },
+            { x: 290, y: 710 },
+            { x: 960, y: 710 },
+            // Outer countryside ring
+            { x: 140, y: -55 },
+            { x: 520, y: -62 },
+            { x: 940, y: -55 },
+            { x: 1320, y: 90 },
+            { x: 1480, y: 450 },
+            { x: 640, y: 860 },
+            { x: 980, y: 860 },
+            { x: -95, y: 150 },
+            { x: -100, y: 460 },
+            { x: -90, y: 740 },
           ];
           for (const t of trees) {
             pushItem(t.x, t.y, (c) => {
               const p = worldToIso(t.x, t.y);
               c.fillStyle = 'rgba(15,23,42,0.2)';
               c.beginPath();
-              c.ellipse(p.ix + 6, p.iy + 2, 11, 5.5, 0, 0, Math.PI * 2);
+              c.ellipse(p.ix + 5, p.iy + 2, 10, 5, 0, 0, Math.PI * 2);
               c.fill();
               c.fillStyle = '#78350f';
               c.fillRect(p.ix - 2, p.iy - 10, 4, 10);
               c.fillStyle = hasDrought ? '#84a955' : '#15803d';
               c.beginPath();
-              c.arc(p.ix, p.iy - 16, 11, 0, Math.PI * 2);
+              c.arc(p.ix, p.iy - 15, 10, 0, Math.PI * 2);
               c.fill();
               c.fillStyle = hasDrought ? '#a3be6e' : '#22c55e';
               c.beginPath();
-              c.arc(p.ix - 3, p.iy - 19, 6.5, 0, Math.PI * 2);
+              c.arc(p.ix - 2.5, p.iy - 18, 6, 0, Math.PI * 2);
               c.fill();
             });
           }
 
-          // Ambient Isometric Vehicles
+          // Ambient Vehicles along V2 arterial avenues
           for (const v of vehiclesRef.current) {
             const wx = v.axis === 'v' ? v.lane : v.pos;
             const wy = v.axis === 'v' ? v.pos : v.lane;
             pushItem(wx, wy, (c) => {
-              const ww = v.axis === 'v' ? 9 : 15;
-              const wh = v.axis === 'v' ? 15 : 9;
-              drawIsoBox(c, wx - ww / 2, wy - wh / 2, ww, wh, 7, v.color, '#1e293b', '#334155');
+              const ww = v.axis === 'v' ? 8 : 13;
+              const wh = v.axis === 'v' ? 13 : 8;
+              drawIsoBox(c, wx - ww / 2, wy - wh / 2, ww, wh, 6, v.color, '#1e293b', '#334155');
             });
           }
 
-          // Isometric RCT Peeps (NPCs) - zero closure allocations per frame
+          // Isometric NPCs
           const curLens = lensRef.current;
           const curDerived = derivedRef.current;
+          const curFilter = filterRef.current;
           for (const npc of st.npcs) {
             if (!npc.vivo) continue;
             const rp = posMap.get(npc.id);
@@ -1870,18 +2105,25 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           for (let i = 0; i < renderQueue.length; i++) {
             const item = renderQueue[i];
             if (item.kind === 'npc') {
+              const n = item.npc;
+              let isVisible = true;
+              if (curFilter === 'acciones') isVisible = Boolean(n.accionIa);
+              else if (curFilter === 'descontentos') isVisible = n.variables.satisfaccion < 30;
+              else if (curFilter === 'hambre') isVisible = n.variables.hambre > 80;
+              else if (curFilter === 'calle') isVisible = hogarById.get(n.hogarId)?.estado === 'calle';
+
               drawIsoNpc(
                 ctx,
                 item.ix,
                 item.iy,
-                item.npc,
+                n,
                 item.rp,
                 st,
                 curLens,
                 curDerived,
                 curSelectedId,
                 isSimPaused,
-                matchesFilter(item.npc),
+                isVisible,
                 nowSec
               );
             } else {
@@ -1889,7 +2131,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             }
           }
 
-          // Factory Smoke (above roofs)
+          // Factory Smoke
           for (const sm of smokeRef.current) {
             const p = worldToIso(sm.wx, sm.wy);
             ctx.fillStyle = `rgba(226, 232, 240, ${sm.alpha.toFixed(2)})`;
@@ -1898,7 +2140,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ctx.fill();
           }
 
-          // Organic Speech Bubbles (using pre-measured width!)
+          // Speech Bubbles
           for (const b of bubblesRef.current) {
             if (b.npcId === selectedIdRef.current) continue;
             const rp = posMap.get(b.npcId);
@@ -1948,18 +2190,18 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             }
           }
 
-          // Pre-baked Lamp Glow Sprites at Dusk (zero gradient allocations per frame!)
+          // Streetlight glow at dusk
           if (duskAmount > 0.1 && lampSpriteRef.current) {
             ctx.save();
             ctx.globalAlpha = Math.min(0.85, duskAmount * 1.4);
             const lamps = [
-              { x: 355, y: 140 },
-              { x: 355, y: 420 },
-              { x: 665, y: 140 },
-              { x: 665, y: 420 },
-              { x: 510, y: 295 },
-              { x: 200, y: 295 },
-              { x: 820, y: 295 },
+              { x: 205, y: 132 },
+              { x: 600, y: 132 },
+              { x: 995, y: 132 },
+              { x: 205, y: 382 },
+              { x: 600, y: 382 },
+              { x: 995, y: 382 },
+              { x: 600, y: 632 },
             ];
             for (const lp of lamps) {
               const p = worldToIso(lp.x, lp.y);
@@ -1971,17 +2213,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           // Climate / Zombie edge aura & origin indicator
           if (hasZombie) {
             const zombieFen = activeFens.find((f) => f.tipo === 'plaga_zombie');
-            const origPos: Record<ZoneId, { wx: number; wy: number }> = {
-              centro: { wx: 510, wy: 290 },
-              norte: { wx: 184, wy: 80 },
-              este: { wx: 920, wy: 290 },
-              sur: { wx: 184, wy: 510 },
-              oeste: { wx: 45, wy: 290 },
-            };
-            for (let z = 0; z < 10; z++) {
-              const angle = nowSec * 0.2 + z * ((Math.PI * 2) / 10);
-              const zwx = 500 + Math.cos(angle) * 530 + Math.sin(nowSec * 2 + z) * 14;
-              const zwy = 290 + Math.sin(angle) * 310 + Math.cos(nowSec * 2 + z) * 14;
+            for (let z = 0; z < 12; z++) {
+              const angle = nowSec * 0.2 + z * ((Math.PI * 2) / 12);
+              const zwx = 780 + Math.cos(angle) * 760 + Math.sin(nowSec * 2 + z) * 18;
+              const zwy = 490 + Math.sin(angle) * 480 + Math.cos(nowSec * 2 + z) * 18;
               const p = worldToIso(zwx, zwy);
               ctx.fillStyle = 'rgba(136, 19, 55, 0.78)';
               ctx.beginPath();
@@ -1989,32 +2224,32 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ctx.fill();
             }
             if (zombieFen?.origen) {
-              const op = origPos[zombieFen.origen] || origPos.este;
-              const ip = worldToIso(op.wx, op.wy);
-              ctx.fillStyle = 'rgba(190, 18, 60, 0.9)';
-              ctx.beginPath();
-              ctx.roundRect(ip.ix - 54, ip.iy - 14, 108, 22, 4);
-              ctx.fill();
-              ctx.fillStyle = '#ffffff';
-              ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText(`ORIGEN: ${zombieFen.origen.toUpperCase()}`, ip.ix, ip.iy + 0.5);
-              ctx.textAlign = 'start';
+              const zr = st.zonas[zombieFen.origen]?.rect ?? st.zonas.este?.rect;
+              if (zr) {
+                const ip = worldToIso(zr.wx + zr.ww * 0.5, zr.wy + zr.wh * 0.5);
+                ctx.fillStyle = 'rgba(190, 18, 60, 0.9)';
+                ctx.beginPath();
+                ctx.roundRect(ip.ix - 60, ip.iy - 14, 120, 22, 4);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`ORIGEN: ${zombieFen.origen.toUpperCase()}`, ip.ix, ip.iy + 0.5);
+                ctx.textAlign = 'start';
+              }
             }
           }
 
           ctx.restore();
 
-          // Subtle twilight tint over viewport
           if (duskAmount > 0.05) {
             ctx.fillStyle = `rgba(30, 27, 75, ${(duskAmount * 0.22).toFixed(2)})`;
             ctx.fillRect(0, 0, w, h);
           }
 
-          // Throttled Minimap update (~12fps)
           if (now - lastMinimapTime > 80) {
             lastMinimapTime = now;
-            drawMinimap(st, posMap);
+            drawMinimap(st, posMap, zoneStateKey);
           }
         }
       }
@@ -2036,8 +2271,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         terrainCacheRef.current = null;
       }
       if (minimapBgRef.current) {
-        minimapBgRef.current.width = 0;
-        minimapBgRef.current.height = 0;
+        minimapBgRef.current.canvas.width = 0;
+        minimapBgRef.current.canvas.height = 0;
         minimapBgRef.current = null;
       }
       if (lampSpriteRef.current) {
@@ -2066,9 +2301,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   };
 
   const findParcelaAt = (ix: number, iy: number): Parcela | null => {
-    const sorted = [...stateRef.current.parcelas].sort(
-      (a, b) => b.wx + b.wy - (a.wx + a.wy)
-    );
+    const sorted = [...stateRef.current.parcelas].sort((a, b) => b.wx + b.wy - (a.wx + a.wy));
     for (const p of sorted) {
       const zOffsets = p.estado === 'ocupada' ? [14, 0] : [0];
       for (const zOff of zOffsets) {
@@ -2086,23 +2319,21 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     return null;
   };
 
-  const findLandmarkAt = (ix: number, iy: number): LandmarkDef | null => {
-    // Check front-most landmarks first (descending wx + wy)
-    for (const lm of SORTED_LANDMARKS) {
-      // Check both ground footprint and elevated roof plane
-      for (const zOff of [lm.height * 0.5, 0]) {
-        const wCoords = isoToWorld(ix, iy + zOff);
-        if (
-          wCoords.wx >= lm.wx &&
-          wCoords.wx <= lm.wx + lm.ww &&
-          wCoords.wy >= lm.wy &&
-          wCoords.wy <= lm.wy + lm.wh
-        ) {
-          return lm;
-        }
+  const findTramoAt = (ix: number, iy: number): ViaTramo | null => {
+    const threshold = 14 / camRef.current.zoom;
+    let best: ViaTramo | null = null;
+    let bestDist = threshold;
+    for (const tramo of stateRef.current.tramos ?? []) {
+      if (!tramo.puntos || tramo.puntos.length < 2) continue;
+      const p0 = worldToIso(tramo.puntos[0].wx, tramo.puntos[0].wy);
+      const p1 = worldToIso(tramo.puntos[1].wx, tramo.puntos[1].wy);
+      const dist = pointToSegmentDist(ix, iy, p0.ix, p0.iy, p1.ix, p1.iy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = tramo;
       }
     }
-    return null;
+    return best;
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -2123,18 +2354,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
         dragRef.current.moved = true;
         onCancelFollow();
-        camRef.current.targetX = Math.max(
-          -1450,
-          Math.min(1450, dragRef.current.origCamX - dx / camRef.current.zoom)
-        );
-        camRef.current.targetY = Math.max(
-          -760,
-          Math.min(760, dragRef.current.origCamY - dy / camRef.current.zoom)
-        );
+        camRef.current.targetX = clampCamX(dragRef.current.origCamX - dx / camRef.current.zoom);
+        camRef.current.targetY = clampCamY(dragRef.current.origCamY - dy / camRef.current.zoom);
         if (hoveredKeyRef.current !== null) {
           hoveredKeyRef.current = null;
-          hoveredLandmarkRef.current = null;
           hoveredParcelaIdRef.current = null;
+          hoveredTramoIdRef.current = null;
           setHoverTooltipData(null);
           onHoverInfoRef.current?.(null);
         }
@@ -2145,7 +2370,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     const coords = screenToIso(e.clientX, e.clientY);
     if (!coords) return;
 
-    // Move tooltip directly via DOM transform (ZERO React re-render on mouse move!)
     if (tooltipDivRef.current) {
       const tx = Math.min(coords.sx + 16, viewportSizeRef.current.w - 256);
       const ty = Math.max(coords.sy - 68, 66);
@@ -2157,8 +2381,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       const nextKey = `npc:${npc.id}`;
       if (hoveredKeyRef.current !== nextKey) {
         hoveredKeyRef.current = nextKey;
-        hoveredLandmarkRef.current = null;
         hoveredParcelaIdRef.current = null;
+        hoveredTramoIdRef.current = null;
         const subtitle = npc.accionIa ? npc.accionIa.nombre : npc.mapa.accion;
         setHoverTooltipData({
           kind: 'npc',
@@ -2178,23 +2402,28 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       const nextKey = `parcela:${parcela.id}:${parcela.estado}:${b?.tipo ?? ''}:${b?.diasObraRestantes ?? 0}`;
       if (hoveredKeyRef.current !== nextKey) {
         hoveredKeyRef.current = nextKey;
-        hoveredLandmarkRef.current = null;
         hoveredParcelaIdRef.current = parcela.id;
+        hoveredTramoIdRef.current = null;
+        const zName = stateRef.current.zonas[parcela.zona]?.nombre ?? parcela.zona;
         const subtitle =
-          parcela.estado === 'libre'
-            ? `Parcela libre · Zona ${parcela.zona}`
+          parcela.estado === 'sin_calle'
+            ? `Parcela sin vía · ${zName}`
+            : parcela.estado === 'libre'
+            ? `Parcela libre (${parcela.tipoParcela}) · ${zName}`
             : parcela.estado === 'bloqueada'
-            ? `Parcela bloqueada · Zona ${parcela.zona}`
+            ? `Parcela bloqueada · ${zName}`
             : parcela.estado === 'en_obra' && bDef && b
             ? `En obra: ${bDef.nombre} (${b.diasObraRestantes}d)`
             : bDef
-            ? `${bDef.nombre} · Zona ${parcela.zona}`
-            : `Zona ${parcela.zona}`;
+            ? `${bDef.nombre} · ${zName}`
+            : zName;
         const detail =
-          parcela.estado === 'libre'
+          parcela.estado === 'sin_calle'
+            ? 'Requiere conectar vía pública'
+            : parcela.estado === 'libre'
             ? 'Clic para construir obra'
             : parcela.estado === 'bloqueada'
-            ? 'Clic para ver hito requerido'
+            ? 'Clic para ver condición'
             : 'Clic para inspeccionar';
         setHoverTooltipData({
           kind: 'parcela',
@@ -2207,28 +2436,40 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       return;
     }
 
-    const lm = findLandmarkAt(coords.ix, coords.iy);
-    if (lm) {
-      const nextKey = `lm:${lm.id}`;
+    const tramo = findTramoAt(coords.ix, coords.iy);
+    if (tramo) {
+      const nextKey = `tramo:${tramo.id}:${tramo.construida}:${tramo.enObra}:${Math.round(tramo.estado)}`;
       if (hoveredKeyRef.current !== nextKey) {
         hoveredKeyRef.current = nextKey;
-        hoveredLandmarkRef.current = lm;
         hoveredParcelaIdRef.current = null;
+        hoveredTramoIdRef.current = tramo.id;
+        const subtitle = tramo.enObra
+          ? `En construcción · ${tramo.diasObraRestantes}d restantes`
+          : tramo.construida
+          ? tramo.estado <= 0
+            ? 'Vía cortada por deterioro'
+            : `Estado vial ${Math.round(tramo.estado)}% · Mant. $${tramo.mantenimientoPeriodo}`
+          : isViaConnectableToNetwork(stateRef.current, tramo)
+          ? `Vía conectable · Costo $${tramo.costoObra}`
+          : 'Vía planificada (aún sin enlace)';
+        const detail = tramo.construida
+          ? `${tramo.parcelasAbiertas.length} parcelas servidas`
+          : 'Clic para inspeccionar o construir';
         setHoverTooltipData({
-          kind: 'landmark',
-          title: lm.label,
-          subtitle: lm.hint,
-          detail: 'Clic para abrir ventana',
+          kind: 'tramo',
+          title: tramo.nombre,
+          subtitle,
+          detail,
         });
-        onHoverInfoRef.current?.(`${lm.label} — ${lm.hint}`);
+        onHoverInfoRef.current?.(`${tramo.nombre} — ${subtitle}`);
       }
       return;
     }
 
     if (hoveredKeyRef.current !== null) {
       hoveredKeyRef.current = null;
-      hoveredLandmarkRef.current = null;
       hoveredParcelaIdRef.current = null;
+      hoveredTramoIdRef.current = null;
       setHoverTooltipData(null);
       onHoverInfoRef.current?.(null);
     }
@@ -2254,33 +2495,27 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       return;
     }
 
-    const lm = findLandmarkAt(coords.ix, coords.iy);
-    if (lm) {
-      onOpenSection(lm.section, lm.tabHint);
+    const tramo = findTramoAt(coords.ix, coords.iy);
+    if (tramo) {
+      onSelectTramo?.(tramo.id);
     }
   };
 
-  // Cursor-anchored zoom (classic RCT / RTS zoom toward mouse pointer)
+  // Cursor-anchored zoom
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const coords = screenToIso(e.clientX, e.clientY);
     const prevZoom = camRef.current.targetZoom;
     const factor = e.deltaY < 0 ? 1.15 : 0.87;
-    const nextZoom = Math.max(0.48, Math.min(2.4, prevZoom * factor));
+    const nextZoom = Math.max(0.38, Math.min(2.4, prevZoom * factor));
     camRef.current.targetZoom = nextZoom;
 
     if (coords) {
       const rect = e.currentTarget.getBoundingClientRect();
       const offsetX = coords.sx - rect.width / 2;
       const offsetY = coords.sy - rect.height / 2;
-      camRef.current.targetX = Math.max(
-        -1450,
-        Math.min(1450, coords.ix - offsetX / nextZoom)
-      );
-      camRef.current.targetY = Math.max(
-        -760,
-        Math.min(760, coords.iy - offsetY / nextZoom)
-      );
+      camRef.current.targetX = clampCamX(coords.ix - offsetX / nextZoom);
+      camRef.current.targetY = clampCamY(coords.iy - offsetY / nextZoom);
     }
   };
 
@@ -2288,11 +2523,11 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const targetIx = (mx - MINIMAP_W / 2) / 0.068;
-    const targetIy = (my - MINIMAP_H / 2) / 0.068;
+    const targetIx = (mx - MINIMAP_W / 2) / MINIMAP_SCALE;
+    const targetIy = (my - MINIMAP_H / 2) / MINIMAP_SCALE;
     onCancelFollow();
-    camRef.current.targetX = Math.max(-1450, Math.min(1450, targetIx));
-    camRef.current.targetY = Math.max(-760, Math.min(760, targetIy));
+    camRef.current.targetX = clampCamX(targetIx);
+    camRef.current.targetY = clampCamY(targetIy);
   };
 
   return (
@@ -2306,8 +2541,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         onMouseLeave={() => {
           dragRef.current.dragging = false;
           hoveredKeyRef.current = null;
-          hoveredLandmarkRef.current = null;
           hoveredParcelaIdRef.current = null;
+          hoveredTramoIdRef.current = null;
           setHoverTooltipData(null);
           onHoverInfoRef.current?.(null);
         }}
@@ -2325,7 +2560,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         {hoverTooltipData && (
           <>
             <div className="font-semibold text-white leading-snug">{hoverTooltipData.title}</div>
-            <div className="text-zinc-300 capitalize text-xs mt-0.5">{hoverTooltipData.subtitle}</div>
+            <div className="text-zinc-300 text-xs mt-0.5">{hoverTooltipData.subtitle}</div>
             {hoverTooltipData.detail && (
               <div
                 className={`mt-1 font-mono text-xs tabular-nums ${

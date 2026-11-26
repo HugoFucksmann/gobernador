@@ -1,4 +1,4 @@
-import { DISTRICTS, ROLE_CATALOG } from '../data/catalogs';
+import { ROLE_CATALOG } from '../data/catalogs';
 import { CommunityDerived, GameState, Npc, ZoneId } from '../types/game';
 import { MapLens } from '../types/ui';
 import { getEffectiveZone, getWorldZones } from './simulation';
@@ -11,15 +11,36 @@ function hashIndex(id: string, len: number): number {
   return Math.abs(h) % len;
 }
 
-export function getNpcDistrictName(npc: Npc): string {
-  const match = DISTRICTS.find(
-    (d) =>
-      npc.mapa.x >= d.x &&
-      npc.mapa.x <= d.x + d.w &&
-      npc.mapa.y >= d.y &&
-      npc.mapa.y <= d.y + d.h
-  );
-  return match?.nombre || 'Avenidas centrales';
+export function getNpcDistrictName(npc: Npc, state?: GameState): string {
+  const zDef = state?.zonas?.[npc.zona];
+  if (zDef?.nombre) return zDef.nombre;
+  return npc.zona.charAt(0).toUpperCase() + npc.zona.slice(1);
+}
+
+/**
+ * Factor dominante en el ánimo actual del NPC (UI_PROTOTIPO §5).
+ * Calculado solo para visualización a partir de su estado real.
+ */
+export function evaluateNpcTopMoodFactor(npc: Npc, state?: GameState): string {
+  if (!npc.vivo) return 'Fallecido';
+  if (npc.hospital.esperandoCama) return 'No hay camas en el hospital';
+  if (npc.hospital.internado) return 'Internado en recuperación';
+  const hogar = state?.hogares.find((h) => h.id === npc.hogarId);
+  if (hogar?.estado === 'calle') return 'Sin vivienda en la zona';
+  if (npc.variables.hambre > 75) return 'Falta alimento en el hogar';
+  if (hogar && hogar.miembros.length > 0) {
+    const despPP = hogar.despensa / hogar.miembros.length;
+    if (despPP < 1.2) return 'Despensa casi vacía';
+  }
+  if (npc.variables.miedo > 65) return 'Miedo por amenazas en la zona';
+  if (npc.rol === 'desempleado') return 'Sin empleo estable';
+  const empFirm = npc.empleadorId ? state?.firmas.find((f) => f.id === npc.empleadorId) : undefined;
+  if (empFirm && empFirm.factor < 0.92) return `Le recortaron el sueldo (${empFirm.nombre})`;
+  if (hogar && hogar.periodosSinPagar > 0) return 'Atraso en el alquiler';
+  if (npc.variables.satisfaccion >= 72) return 'Ingresos y servicios estables';
+  if (npc.variables.satisfaccion < 35) return 'Descontento por impuestos y costo de vida';
+  if (empFirm && empFirm.factor > 1.05) return `Buen sueldo en ${empFirm.nombre}`;
+  return 'Rutina diaria sin sobresaltos';
 }
 
 export function evaluateNpcBubbleText(npc: Npc): string {
@@ -29,6 +50,9 @@ export function evaluateNpcBubbleText(npc: Npc): string {
     if (npc.accionIa.id === 'huelga') return '¡Exigimos nuestros pagos!';
     if (npc.accionIa.id === 'protesta') return '¡Queremos respuestas!';
     if (npc.accionIa.id === 'saqueo') return '¡Necesitamos comida ya!';
+    if (npc.accionIa.id === 'paro_firma') return '¡Paramos hasta recuperar sueldos!';
+    if (npc.accionIa.id === 'ocupacion') return '¡Esta casa está vacía y nos quedamos!';
+    if (npc.accionIa.id === 'boicot') return '¡No compramos con estos precios!';
     if (npc.accionIa.id === 'organizar_fiesta') return '¡Que siga la música!';
     if (npc.accionIa.id === 'organizar_asamblea') return '¡Vecinos, a debatir!';
     if (npc.accionIa.id === 'predicar') return '¡Escuchen lo que viene!';
@@ -50,9 +74,12 @@ export function evaluateNpcBubbleText(npc: Npc): string {
   if (npc.rol === 'policia') return 'Ronda tranquila';
   if (npc.rol === 'agricultor') return 'Buena tierra hoy';
   if (npc.rol === 'tecnico') return 'Ajustando el riego';
+  if (npc.rol === 'constructor') return 'Avanzando en la obra';
+  if (npc.rol === 'inmobiliario') return 'Revisando alquileres del barrio';
+  if (npc.rol === 'obrero') return 'Turno en marcha';
   if (npc.rol === 'periodista') return 'Buscando primicias';
   if (npc.rol === 'comerciante') return '¡Pasen a ver!';
-  if (npc.rol === 'empresario') return 'Revisando números del molino';
+  if (npc.rol === 'empresario') return 'Revisando márgenes y costos';
   return 'Día movido en el pueblo';
 }
 
@@ -69,7 +96,6 @@ export function evaluateZoneMetricColor(
   if (lens === 'amenaza') {
     return value >= 50 ? '#ef4444' : value >= 20 ? '#f59e0b' : '#10b981';
   }
-  // hospital occupancy %
   return value > 100 ? '#ef4444' : value >= 75 ? '#f59e0b' : '#0ea5e9';
 }
 
@@ -108,8 +134,20 @@ export function evaluateNpcLensColor(
     if (npc.variables.salud < 65) return '#f59e0b';
     return '#94a3b8';
   }
+  if (lens === 'vivienda') {
+    const hogar = state?.hogares.find((h) => h.id === npc.hogarId);
+    if (!hogar || hogar.estado === 'calle') return '#ef4444';
+    const casa = hogar.casaId ? state?.casas.find((c) => c.id === hogar.casaId) : undefined;
+    const crowded = casa
+      ? state!.hogares
+          .filter((h) => h.casaId === casa.id)
+          .reduce((acc, h) => acc + h.miembros.length, 0) > casa.capacidad
+      : false;
+    if (crowded || (casa && casa.estado < 45) || hogar.periodosSinPagar > 0) return '#f59e0b';
+    return hogar.estado === 'con_casa' ? '#10b981' : '#38bdf8';
+  }
 
-  const zonesCount = state ? getWorldZones(state).length : 5;
+  const zonesCount = state ? getWorldZones(state).length : 9;
   const zone: ZoneId = getEffectiveZone(npc, zonesCount);
 
   if (lens === 'defensa') {

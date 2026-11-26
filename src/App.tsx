@@ -26,6 +26,8 @@ export default function App() {
         paused={session.paused}
         selectedNpcId={session.selectedNpc?.id ?? null}
         selectedParcelaId={session.selectedParcela?.id ?? null}
+        selectedTramoId={session.selectedTramo?.id ?? null}
+        hoveredPreview={session.hoveredPreview}
         filter={session.mapFilter}
         lens={session.mapLens}
         followSelected={session.followSelected}
@@ -33,6 +35,7 @@ export default function App() {
         zoomRequest={session.zoomRequest}
         onSelectNpc={session.selectNpc}
         onSelectParcela={session.selectParcela}
+        onSelectTramo={session.selectTramo}
         onOpenSection={session.openLandmarkWindow}
         onCancelFollow={session.cancelFollow}
         onHoverInfoChange={session.setHoverInfo}
@@ -48,21 +51,31 @@ export default function App() {
         aiStatus={session.aiStatus}
         devMode={session.devMode}
         simStepMs={session.simStepMs}
+        soundMuted={session.soundMuted}
+        paydaySummary={session.paydaySummary}
+        monthlySummary={session.monthlySummary}
         onTogglePause={session.togglePause}
         onSetSpeed={session.setSpeed}
         onStepDay={session.stepDay}
+        onToggleSoundMute={session.toggleSoundMute}
+        onDismissPayday={session.dismissPaydaySummary}
+        onDismissMonthly={session.dismissMonthlySummary}
         onSetDevPopulation={session.setDevPopulation}
         onSetDevComplexity={session.setDevComplexity}
+        onSetEstadoAutomatico={session.setEstadoAutomatico}
         onForceClimate={session.forceClimatePhenomenon}
         onOpenObjetivo={() => session.openCiudadTab('bitacora')}
+        onOpenEconomia={() => session.openWindow('economia')}
+        onOpenDemandas={() => session.openCiudadTab('despacho')}
       />
 
-      {/* 3. Unified Lateral Panel (NPC, Parcela, Edificio, Landmark, Construir) */}
+      {/* 3. Unified Lateral Panel (NPC, Parcela, Vía, Landmark, Construir) */}
       <SideInspectorPanel
         state={session.state}
         derived={session.derived}
         selectedNpc={session.selectedNpc}
         selectedParcela={session.selectedParcela}
+        selectedTramo={session.selectedTramo}
         selectedLandmark={session.selectedLandmark}
         sideBuildOpen={session.sideBuildOpen}
         followSelected={session.followSelected}
@@ -70,10 +83,15 @@ export default function App() {
         onToggleFollow={() => session.setFollowSelected((f) => !f)}
         onClosePanel={session.clearSidePanel}
         onSelectParcela={session.selectParcela}
+        onSelectTramo={session.selectTramo}
         onJumpDistrict={session.jumpToDistrict}
+        onJumpZone={session.jumpToZone}
+        onHoverPreview={session.setHoveredPreview}
         onBuildInParcela={session.buildInParcela}
+        onBuildVia={session.buildVia}
         onDemolishParcela={session.demolishParcela}
         onRespondDemand={session.respondDemand}
+        onCounterOffer={session.counterOffer}
         onOpenWindow={session.openWindow}
         onTriggerPress={session.triggerPressManual}
         onInspectCausal={(title, ref, fallbackText) =>
@@ -90,6 +108,7 @@ export default function App() {
           onFocus={() => session.focusWindow('palancas')}
           onClose={() => session.closeWindow('palancas')}
           onUpdateLevers={session.updateLevers}
+          onSetExtraLever={session.setExtraLever}
           onOpenBuildPanel={session.toggleBuildPanel}
         />
       )}
@@ -102,6 +121,7 @@ export default function App() {
           onFocus={() => session.focusWindow('economia')}
           onClose={() => session.closeWindow('economia')}
           onOpenPalancas={() => session.openWindow('palancas')}
+          onJumpZone={session.jumpToZone}
           onInspectCausal={(title, ref, fallbackText) =>
             session.openCausalInspect({ title, ref, fallbackText })
           }
@@ -117,12 +137,17 @@ export default function App() {
           onFocus={() => session.focusWindow('ciudad')}
           onClose={() => session.closeWindow('ciudad')}
           onJumpDistrict={session.jumpToDistrict}
+          onJumpZone={session.jumpToZone}
           onSelectRoleSample={session.selectRoleSample}
           onSelectNpc={session.selectNpc}
           onSelectParcela={session.selectParcela}
+          onSelectTramo={session.selectTramo}
           onBuildInParcela={session.buildInParcela}
+          onBuildVia={session.buildVia}
           onDemolishParcela={session.demolishParcela}
           onRespondDemand={session.respondDemand}
+          onCounterOffer={session.counterOffer}
+          onHoverPreview={session.setHoveredPreview}
           onInspectCausal={(title, ref, fallbackText) =>
             session.openCausalInspect({ title, ref, fallbackText })
           }
@@ -157,7 +182,7 @@ export default function App() {
         onToggleWindow={session.toggleWindow}
         onChangeLens={session.setMapLens}
         onChangeFilter={session.setMapFilter}
-        onJumpDistrict={session.jumpToDistrict}
+        onJumpZone={session.jumpToZone}
         onZoom={session.requestZoom}
         onOpenNewGame={() => session.setShowConfigModal(true)}
         onToggleDevMode={() => session.setDevMode(!session.devMode)}

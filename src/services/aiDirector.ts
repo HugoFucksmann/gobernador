@@ -293,21 +293,18 @@ function buildSituationFacts(state: GameState, npc?: Npc): string[] {
   if (state.alimento.diasStock < 3) {
     facts.push('escasez grave de alimento');
   }
-  if (
-    state.empresas.alimento.ultimoTramo === 'despido' ||
-    state.empresas.comercio.ultimoTramo === 'despido'
-  ) {
+  const activeFirms = state.firmas.filter((f) => f.activa);
+  if (activeFirms.some((f) => f.ultimoTramo === 'despido')) {
     facts.push('despidos recientes en empresas');
-  } else if (
-    state.empresas.alimento.ultimoTramo === 'recorte' ||
-    state.empresas.comercio.ultimoTramo === 'recorte'
-  ) {
+  } else if (activeFirms.some((f) => f.ultimoTramo === 'recorte')) {
     facts.push('recorte de sueldos en empresas');
   }
 
   if (npc) {
     if (npc.variables.hambre > 60) facts.push('hambre alta');
-    if (npc.economia.despensa < 1.5) facts.push('despensa casi vacía');
+    const hogar = state.hogares.find((h) => h.id === npc.hogarId);
+    const despPP = hogar ? hogar.despensa / Math.max(1, hogar.miembros.length) : 2;
+    if (despPP < 1.5) facts.push('despensa casi vacía');
     if (npc.variables.satisfaccion < 30) facts.push('descontento personal');
     if (npc.variables.miedo > 55) facts.push('miedo elevado');
   }

@@ -8,6 +8,7 @@ import {
   GitBranch,
   Hammer,
   Lock,
+  Route,
   Search,
   Trash2,
 } from 'lucide-react';
@@ -16,7 +17,6 @@ import {
   DISTRICT_BY_ID,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
-  ZONE_TO_DISTRICT,
 } from '../../data/catalogs';
 import {
   getActivePhenomena,
@@ -24,6 +24,7 @@ import {
   getEffectiveZone,
   getWorldZones,
 } from '../../engine/simulation';
+import { isViaConnectableToNetwork } from '../../engine/worldHelpers';
 import {
   BuildingType,
   CommunityDerived,
@@ -31,8 +32,9 @@ import {
   EventLogEntry,
   GameState,
   RoleId,
+  ZoneId,
 } from '../../types/game';
-import { CityTab } from '../../types/ui';
+import { CityTab, MapHoverPreview } from '../../types/ui';
 import { RctWindow } from './RctWindow';
 import { UiTooltip } from './UiTooltip';
 
@@ -44,12 +46,17 @@ interface CityWindowProps {
   onFocus: () => void;
   onClose: () => void;
   onJumpDistrict: (d: DistrictId | 'all') => void;
+  onJumpZone: (z: ZoneId | 'all') => void;
   onSelectRoleSample: (role: RoleId) => void;
   onSelectNpc: (npcId: string) => void;
   onSelectParcela: (parcelaId: string) => void;
+  onSelectTramo: (tramoId: string) => void;
   onBuildInParcela: (parcelaId: string, tipo: BuildingType) => { ok: boolean; error?: string };
+  onBuildVia: (tramoId: string) => { ok: boolean; error?: string };
   onDemolishParcela: (parcelaId: string) => { ok: boolean; error?: string };
   onRespondDemand: (demandId: string, accept: boolean) => { ok: boolean; error?: string };
+  onCounterOffer: (demandId: string) => { ok: boolean; aceptada?: boolean; error?: string; texto?: string };
+  onHoverPreview?: (preview: MapHoverPreview | null) => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
@@ -60,12 +67,16 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   ciudadTabRequest,
   onFocus,
   onClose,
-  onJumpDistrict,
+  onJumpZone,
   onSelectRoleSample,
   onSelectNpc,
   onSelectParcela,
+  onSelectTramo,
+  onBuildVia,
   onDemolishParcela,
   onRespondDemand,
+  onCounterOffer,
+  onHoverPreview,
   onInspectCausal,
 }) => {
   const [cityTab, setCityTab] = useState<CityTab>('alertas');
@@ -81,19 +92,22 @@ export const CityWindow: React.FC<CityWindowProps> = ({
 
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const zoneIds = getWorldZones(state);
+  const allZoneDefs = Object.values(state.zonas);
   const zonesCount = zoneIds.length;
   const activeFenomenos = getActivePhenomena(state);
   const announcedFenomenos = getAnnouncedPhenomena(state);
   const govLevel =
     state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0';
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const isG1 = govLevel === 'G1';
+  const isG3 = govLevel === 'G3';
 
   const activeAlerts: Array<{
     id: string;
     severity: 'critica' | 'aviso';
     title: string;
     detail: string;
-    district?: DistrictId | 'all';
+    zona?: ZoneId | 'all';
     causalRef?: string;
   }> = [];
 
@@ -107,7 +121,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       detail: alcanzaNomina
         ? 'El faltante en el cierre afectó sueldos públicos y puede disparar huelgas.'
         : 'El faltante recortó gastos discrecionales sin afectar la nómina.',
-      district: 'civico',
+      zona: 'centro',
       causalRef: ev?.id,
     });
   }
@@ -118,8 +132,26 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       severity: 'critica',
       title: `Hospitales llenos (${derived.hospitalOcupacionPct}%)`,
       detail: `${derived.internados}/${derived.capacidadHospitalTotal} camas · ${derived.esperandoCama} esperando.`,
-      district: 'civico',
+      zona: 'centro',
       causalRef: ev?.id,
+    });
+  }
+  if ((derived.tramosCortados ?? 0) > 0) {
+    activeAlerts.push({
+      id: 'al_vias_cut',
+      severity: 'critica',
+      title: `${derived.tramosCortados} vía(s) cortada(s)`,
+      detail: 'Parcelas conectadas quedan aisladas hasta que Ingeniería las repare.',
+      zona: 'all',
+    });
+  }
+  if (derived.callePct > 12) {
+    activeAlerts.push({
+      id: 'al_calle',
+      severity: 'aviso',
+      title: `Hogares sin vivienda (${derived.callePct}%)`,
+      detail: 'Eleva ocupaciones y daño en salud.',
+      zona: 'centro',
     });
   }
   if (derived.hambreCriticaPct > 20) {
@@ -128,7 +160,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       severity: 'critica',
       title: `Hambre crítica (${derived.hambreCriticaPct}%)`,
       detail: 'Supera el umbral de saqueos (> 20%) y daña salud y apoyo.',
-      district: 'campos',
+      zona: 'oeste',
     });
   }
   if (derived.descontentosPct > 30) {
@@ -137,7 +169,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       severity: 'critica',
       title: `Malestar alto (${derived.descontentosPct}%)`,
       detail: 'Supera el umbral de protestas (> 30%).',
-      district: 'mercado',
+      zona: 'este',
     });
   }
   for (const fen of announcedFenomenos) {
@@ -147,7 +179,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       severity: 'aviso',
       title: `Aviso: ${fen.nombre} en ${daysTo}d`,
       detail: fen.origen ? `Zona estimada: ${fen.origen}.` : 'Prepara reservas.',
-      district: fen.origen ? ZONE_TO_DISTRICT[fen.origen] : 'all',
+      zona: fen.origen ?? 'all',
     });
   }
   for (const fen of activeFenomenos) {
@@ -157,7 +189,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       severity: fen.tipo === 'plaga_zombie' || fen.tipo === 'pandemia' ? 'critica' : 'aviso',
       title: `${fen.nombre} (${Math.round(fen.intensidad)}%)`,
       detail: fen.origen ? `Foco en zona ${fen.origen}.` : 'Afecta a toda la comunidad.',
-      district: fen.origen ? ZONE_TO_DISTRICT[fen.origen] : 'all',
+      zona: fen.origen ?? 'all',
       causalRef: ev?.id || `clima:${fen.tipo}`,
     });
   }
@@ -170,7 +202,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
       severity: 'critica',
       title: `Ataque en ${ev.zona} (${npc?.nombre || 'vecino'})`,
       detail: `Daño -${ev.dano} salud (Día ${ev.dia}).`,
-      district: ZONE_TO_DISTRICT[ev.zona],
+      zona: ev.zona,
       causalRef: ev.id,
     });
     hitAlerts += 1;
@@ -186,25 +218,30 @@ export const CityWindow: React.FC<CityWindowProps> = ({
 
   const totalAlertsBadge = activeAlerts.length + state.demandasActivas.length;
   const sortedParcelas = [...state.parcelas].sort((a, b) => a.orden - b.orden);
+  const tramosUnbuilt = state.tramos.filter((t) => !t.construida);
 
   return (
     <div className="pointer-events-none fixed top-20 left-4 md:left-[260px]" style={{ zIndex }}>
       <RctWindow
-        title="Ciudad"
+        title="Ciudad y Vías"
         subtitle={`${totalAlertsBadge} alertas · ${derived.edificiosActivos} obras · ${derived.parcelasLibres} libres`}
         tone="green"
         icon={<Compass className="w-4 h-4" />}
         zIndex={zIndex}
         onFocus={onFocus}
-        onClose={onClose}
-        className="w-[500px] max-w-[calc(100vw-32px)]"
+        onClose={() => {
+          onHoverPreview?.(null);
+          onClose();
+        }}
+        className="w-[540px] max-w-[calc(100vw-32px)]"
       >
         <div className="p-5 max-h-[calc(100vh-195px)] overflow-y-auto space-y-4">
-          <div className="grid grid-cols-4 gap-1.5 bg-zinc-800/80 p-1.5 rounded-xl text-xs">
+          <div className="grid grid-cols-5 gap-1 bg-zinc-800/80 p-1.5 rounded-xl text-xs">
             {(
               [
                 { id: 'alertas', label: `Alertas (${totalAlertsBadge})` },
                 { id: 'obras', label: `Parcelas (${derived.parcelasLibres})` },
+                { id: 'vias', label: `Vías (${tramosUnbuilt.length})` },
                 { id: 'vecinos', label: `Vecinos (${derived.poblacion})` },
                 { id: 'bitacora', label: 'Bitácora' },
               ] as Array<{ id: CityTab; label: string }>
@@ -213,7 +250,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 key={t.id}
                 type="button"
                 onClick={() => setCityTab(t.id)}
-                className={`py-2 px-2 rounded-lg font-semibold transition-colors truncate ${
+                className={`py-2 px-1.5 rounded-lg font-semibold transition-colors truncate ${
                   cityTab === t.id ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                 }`}
               >
@@ -257,7 +294,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                           {dem.diasRestantes}d
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
                         <button
                           type="button"
                           disabled={isG0}
@@ -265,10 +302,24 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                             const res = onRespondDemand(dem.id, true);
                             if (!res.ok) setActionError(res.error ?? 'No se pudo aceptar.');
                           }}
-                          className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40"
+                          className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
                         >
                           Aceptar
                         </button>
+                        {isG3 && (
+                          <button
+                            type="button"
+                            disabled={isG0}
+                            onClick={() => {
+                              const res = onCounterOffer(dem.id);
+                              if (!res.ok) setActionError(res.error ?? 'No se pudo contraofertar.');
+                              else if (res.texto) setActionError(res.texto);
+                            }}
+                            className="px-3.5 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
+                          >
+                            Contraoferta
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={isG0}
@@ -276,7 +327,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                             const res = onRespondDemand(dem.id, false);
                             if (!res.ok) setActionError(res.error ?? 'No se pudo rechazar.');
                           }}
-                          className="px-3.5 py-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40"
+                          className="px-3.5 py-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
                         >
                           Rechazar
                         </button>
@@ -331,11 +382,11 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                           <span className="truncate">{al.title}</span>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {al.district && (
+                          {al.zona && (
                             <button
                               type="button"
-                              onClick={() => onJumpDistrict(al.district!)}
-                              className="px-2.5 py-1 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg"
+                              onClick={() => onJumpZone(al.zona!)}
+                              className="px-2.5 py-1 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg whitespace-nowrap"
                             >
                               Ir
                             </button>
@@ -344,7 +395,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                             <button
                               type="button"
                               onClick={() => onInspectCausal(al.title, al.causalRef, al.detail)}
-                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg"
+                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg whitespace-nowrap"
                             >
                               ¿Por qué?
                             </button>
@@ -377,41 +428,48 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 </div>
               )}
 
-              {/* Zones Table */}
+              {/* Zones Table (all active + no_urbanizada zones) */}
               <div className="pt-3 border-t border-zinc-800 space-y-2">
-                <div className="text-xs font-semibold text-zinc-400">Zonas</div>
+                <div className="text-xs font-semibold text-zinc-400">Zonas ({allZoneDefs.length})</div>
                 <div className="space-y-1 font-mono text-xs tabular-nums">
-                  <div className="grid grid-cols-5 text-zinc-500 font-sans pb-1 border-b border-zinc-800">
-                    <span>Zona</span>
+                  <div className="grid grid-cols-6 text-zinc-500 font-sans pb-1 border-b border-zinc-800">
+                    <span className="col-span-2">Zona</span>
                     <span className="text-right">Def.</span>
                     <span className="text-right">Orden</span>
                     <span className="text-right">Integ.</span>
-                    <span className="text-right">Amen.</span>
+                    <span className="text-right">Suelo</span>
                   </div>
-                  {zoneIds.map((z) => {
+                  {allZoneDefs.map((zDef) => {
+                    const z = zDef.id;
+                    const noUrb = zDef.estado === 'no_urbanizada';
                     const def = Math.round(derived.defensa[z] ?? 0);
                     const ord = Math.round(derived.orden?.[z] ?? 0);
                     const integ = Math.round(state.gobierno.integridad?.[z] ?? 100);
-                    const amen = Math.round(derived.amenazaPercibida[z] ?? 0);
+                    const dem = (state.demandaSuelo?.[z] ?? 1).toFixed(2);
                     return (
                       <button
                         key={z}
                         type="button"
-                        onClick={() => onJumpDistrict(ZONE_TO_DISTRICT[z])}
-                        className="w-full grid grid-cols-5 items-center py-2 px-1.5 rounded-xl hover:bg-zinc-800/70 text-left transition-colors"
+                        onClick={() => onJumpZone(z)}
+                        onMouseEnter={() => onHoverPreview?.({ zona: z })}
+                        onMouseLeave={() => onHoverPreview?.(null)}
+                        className="w-full grid grid-cols-6 items-center py-2 px-1.5 rounded-xl hover:bg-zinc-800/70 text-left transition-colors"
                       >
-                        <span className="font-sans capitalize text-zinc-200 font-medium">{z}</span>
-                        <span className={`text-right ${def < 35 ? 'text-rose-400 font-bold' : 'text-emerald-400'}`}>
-                          {def}%
+                        <span className="col-span-2 font-sans text-zinc-200 font-medium truncate">
+                          {zDef.nombre}
+                          {noUrb ? ' (virgen)' : ''}
                         </span>
-                        <span className={`text-right ${ord < 35 ? 'text-amber-300 font-bold' : 'text-zinc-200'}`}>
-                          {ord}%
+                        <span className={`text-right ${noUrb ? 'text-zinc-500' : def < 35 ? 'text-rose-400 font-bold' : 'text-emerald-400'}`}>
+                          {noUrb ? '—' : `${def}%`}
                         </span>
-                        <span className={`text-right ${integ < 60 ? 'text-amber-300 font-bold' : 'text-emerald-400'}`}>
-                          {integ}%
+                        <span className={`text-right ${noUrb ? 'text-zinc-500' : ord < 35 ? 'text-amber-300 font-bold' : 'text-zinc-200'}`}>
+                          {noUrb ? '—' : `${ord}%`}
                         </span>
-                        <span className={`text-right ${amen >= 50 ? 'text-rose-400 font-bold' : 'text-zinc-300'}`}>
-                          {amen}%
+                        <span className={`text-right ${noUrb ? 'text-zinc-500' : integ < 60 ? 'text-amber-300 font-bold' : 'text-emerald-400'}`}>
+                          {noUrb ? '—' : `${integ}%`}
+                        </span>
+                        <span className={`text-right ${Number(dem) >= 1.5 ? 'text-amber-300 font-bold' : 'text-zinc-300'}`}>
+                          {dem}x
                         </span>
                       </button>
                     );
@@ -423,7 +481,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
 
           {cityTab === 'obras' && (
             <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-3 gap-3 bg-zinc-800/55 rounded-xl p-3 font-mono tabular-nums text-xs">
+              <div className="grid grid-cols-4 gap-2 bg-zinc-800/55 rounded-xl p-3 font-mono tabular-nums text-xs">
                 <div>
                   <span className="font-sans text-zinc-400 block">Activas</span>
                   <span className="font-bold text-white text-sm">{derived.edificiosActivos}</span>
@@ -433,6 +491,10 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                   <span className="font-bold text-emerald-400 text-sm">{derived.parcelasLibres}</span>
                 </div>
                 <div>
+                  <span className="font-sans text-zinc-400 block">Sin vía</span>
+                  <span className="font-bold text-zinc-300 text-sm">{derived.parcelasSinCalle ?? 0}</span>
+                </div>
+                <div>
                   <span className="font-sans text-zinc-400 block">Camas</span>
                   <span className={`font-bold text-sm ${derived.hospitalesLlenos > 0 ? 'text-rose-400' : 'text-white'}`}>
                     {derived.internados}/{derived.capacidadHospitalTotal}
@@ -440,35 +502,45 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
                 {sortedParcelas.map((p) => {
                   const b = p.edificio;
                   const bDef = b ? BUILDING_CATALOG[b.tipo] : null;
-                  const hito = p.hitoRequerido
-                    ? preset.hitos.find((h) => h.id === p.hitoRequerido)
-                    : undefined;
                   const distName = DISTRICT_BY_ID[p.distrito]?.nombre ?? p.distrito;
+                  const zoneName = state.zonas[p.zona]?.nombre ?? p.zona;
+                  const openingVia = p.tramoAperturaId
+                    ? state.tramos.find((t) => t.id === p.tramoAperturaId)
+                    : undefined;
+
                   return (
                     <div
                       key={p.id}
+                      onMouseEnter={() => onHoverPreview?.({ parcelaId: p.id })}
+                      onMouseLeave={() => onHoverPreview?.(null)}
                       className="bg-zinc-800/55 rounded-xl p-3 flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
-                        <UiTooltip text={`${p.zona} · ${distName}`}>
+                        <UiTooltip text={`${zoneName} · ${distName}`}>
                           <div className="flex items-center gap-2 font-semibold text-white truncate cursor-help">
                             <Building2 className="w-4 h-4 text-emerald-400 shrink-0" />
                             <span className="truncate">{p.nombre}</span>
                           </div>
                         </UiTooltip>
                         <div className="text-xs mt-1">
+                          {p.estado === 'sin_calle' && (
+                            <span className="text-zinc-400 flex items-center gap-1.5">
+                              <Route className="w-3.5 h-3.5 text-zinc-500" />
+                              Requiere vía{openingVia ? `: ${openingVia.nombre}` : ''}
+                            </span>
+                          )}
                           {p.estado === 'bloqueada' && (
                             <span className="text-zinc-400 flex items-center gap-1.5">
                               <Lock className="w-3.5 h-3.5 text-zinc-500" />
-                              {hito?.nombre ?? p.hitoRequerido}
+                              Se habilita por progreso o apertura vial
                             </span>
                           )}
                           {p.estado === 'libre' && (
-                            <span className="text-emerald-400 font-medium">Libre</span>
+                            <span className="text-emerald-400 font-medium">Libre · {zoneName}</span>
                           )}
                           {p.estado === 'en_obra' && b && bDef && (
                             <span className="text-amber-300 flex items-center gap-1.5">
@@ -486,14 +558,26 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {p.estado !== 'bloqueada' && (
+                        {p.estado === 'sin_calle' && openingVia && !openingVia.construida && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectTramo(openingVia.id);
+                              onJumpZone(openingVia.zonaA);
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-semibold bg-amber-600/80 hover:bg-amber-500 text-white rounded-xl whitespace-nowrap shrink-0"
+                          >
+                            Ver vía
+                          </button>
+                        )}
+                        {p.estado !== 'bloqueada' && p.estado !== 'sin_calle' && (
                           <button
                             type="button"
                             onClick={() => {
                               onSelectParcela(p.id);
-                              onJumpDistrict(p.distrito);
+                              onJumpZone(p.zona);
                             }}
-                            className={`px-3 py-1.5 text-xs font-semibold rounded-xl ${
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0 ${
                               p.estado === 'libre'
                                 ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                                 : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
@@ -510,7 +594,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                               const res = onDemolishParcela(p.id);
                               if (!res.ok) setActionError(res.error ?? 'No se pudo demoler.');
                             }}
-                            className="p-2 rounded-xl bg-rose-950/70 hover:bg-rose-800 text-rose-200"
+                            className="p-2 rounded-xl bg-rose-950/70 hover:bg-rose-800 text-rose-200 shrink-0"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -526,7 +610,6 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                   <div className="text-xs font-semibold text-zinc-400">Hitos</div>
                   {preset.hitos.map((h) => {
                     const done = state.hitosCumplidos.includes(h.id);
-                    const streak = state.hitosRacha[h.id] ?? 0;
                     return (
                       <UiTooltip key={h.id} text={h.descripcion} placement="top" className="w-full">
                         <div
@@ -545,7 +628,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                             <span>{h.nombre}</span>
                           </span>
                           <span className="font-mono shrink-0 tabular-nums">
-                            {done ? 'OK' : `${streak}/${h.condicion.periodos}`}
+                            {done ? 'Cumplido' : 'Pendiente'}
                           </span>
                         </div>
                       </UiTooltip>
@@ -553,6 +636,120 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {cityTab === 'vias' && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-4 gap-2 bg-zinc-800/55 rounded-xl p-3 font-mono tabular-nums text-xs">
+                <div>
+                  <span className="font-sans text-zinc-400 block">Activas</span>
+                  <span className="font-bold text-white text-sm">
+                    {state.tramos.filter((t) => t.construida).length}/{state.tramos.length}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Cortadas</span>
+                  <span className={`font-bold text-sm ${(derived.tramosCortados ?? 0) > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {derived.tramosCortados ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Mal estado</span>
+                  <span className={`font-bold text-sm ${(derived.tramosEnMalEstado ?? 0) > 0 ? 'text-amber-300' : 'text-zinc-200'}`}>
+                    {derived.tramosEnMalEstado ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Vírgenes</span>
+                  <span className="font-bold text-zinc-200 text-sm">{derived.zonasNoUrbanizadas ?? 0}</span>
+                </div>
+              </div>
+
+              <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                {[...state.tramos]
+                  .sort((a, b) => Number(a.construida) - Number(b.construida))
+                  .map((t) => {
+                    const connectable = isViaConnectableToNetwork(state, t);
+                    const isOpenable = !t.construida && !t.enObra && connectable;
+                    const noFunds = state.gobierno.reserva < t.costoObra;
+                    const viaBlockedByGov = isG0 || isG1;
+                    const zA = state.zonas[t.zonaA]?.nombre ?? t.zonaA;
+                    const zB = t.zonaB ? state.zonas[t.zonaB]?.nombre ?? t.zonaB : null;
+
+                    return (
+                      <div
+                        key={t.id}
+                        onMouseEnter={() => onHoverPreview?.({ tramoId: t.id })}
+                        onMouseLeave={() => onHoverPreview?.(null)}
+                        className="bg-zinc-800/55 border border-zinc-700/60 rounded-xl p-3 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 font-semibold text-white truncate">
+                            <Route className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span className="truncate">{t.nombre}</span>
+                          </div>
+                          <div className="text-xs text-zinc-400 truncate">
+                            {t.tipo} · {zA}
+                            {zB ? ` ↔ ${zB}` : ''}
+                            {t.parcelasAbiertas.length > 0 ? ` · +${t.parcelasAbiertas.length} parc.` : ''}
+                            {t.zonaAbierta ? ` · Abre ${state.zonas[t.zonaAbierta]?.nombre ?? t.zonaAbierta}` : ''}
+                          </div>
+                          <div className="text-xs font-mono tabular-nums">
+                            {t.construida ? (
+                              <span
+                                className={
+                                  t.estado <= 0
+                                    ? 'text-rose-400 font-semibold'
+                                    : t.estado < 50
+                                    ? 'text-amber-300'
+                                    : 'text-emerald-400'
+                                }
+                              >
+                                Estado {Math.round(t.estado)}% · Mant. ${t.mantenimientoPeriodo}/per
+                              </span>
+                            ) : t.enObra ? (
+                              <span className="text-amber-300">
+                                En obra · {t.diasObraRestantes}/{t.diasObraTotal}d
+                              </span>
+                            ) : (
+                              <span className={connectable ? 'text-amber-200' : 'text-zinc-500'}>
+                                ${t.costoObra} · {t.diasObraTotal}d · Mant. ${t.mantenimientoPeriodo}/per
+                                {!connectable ? ' · Sin conexión' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectTramo(t.id);
+                              onJumpZone(t.zonaA);
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl whitespace-nowrap shrink-0"
+                          >
+                            Ver
+                          </button>
+                          {isOpenable && (
+                            <button
+                              type="button"
+                              disabled={viaBlockedByGov || noFunds}
+                              onClick={() => {
+                                const res = onBuildVia(t.id);
+                                if (!res.ok) setActionError(res.error ?? 'No se pudo construir vía.');
+                              }}
+                              className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
+                            >
+                              {viaBlockedByGov ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           )}
 
@@ -597,9 +794,9 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                       className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800 text-xs transition-colors"
                     >
                       <span className="truncate text-zinc-100">
-                        <strong>{n.nombre}</strong>{' '}
+                        <strong>{n.nombre} {n.apellido}</strong>{' '}
                         <span className="text-zinc-400">
-                          · {ROLE_CATALOG[n.rol].nombre} · {z}
+                          · {ROLE_CATALOG[n.rol].nombre} · {state.zonas[z]?.nombre ?? z}
                         </span>
                       </span>
                       <span className="font-mono text-zinc-400 tabular-nums shrink-0 ml-2">
@@ -669,7 +866,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
               </UiTooltip>
 
               <div className="flex flex-wrap gap-1.5">
-                {(['todas', 'gobernador', 'caos', 'condicion', 'economia', 'clima', 'prensa'] as const).map((c) => (
+                {(['todas', 'gobernador', 'caos', 'sistema', 'economia', 'clima', 'prensa'] as const).map((c) => (
                   <button
                     key={c}
                     type="button"
@@ -680,7 +877,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                         : 'bg-zinc-800 text-zinc-300 hover:text-white'
                     }`}
                   >
-                    {c === 'todas' ? 'Todas' : c === 'condicion' ? 'Condición' : c === 'economia' ? 'Economía' : c}
+                    {c === 'todas' ? 'Todas' : c === 'economia' ? 'Economía' : c}
                   </button>
                 ))}
               </div>
