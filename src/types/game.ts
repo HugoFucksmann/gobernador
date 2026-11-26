@@ -211,6 +211,8 @@ export interface Npc {
   accionIa: ActiveNpcAction | null;
   modificadores: Modifier[];
   vivo: boolean;
+  /** Bolsa de estado extensible por nivel: campos nuevos van acá con valor por defecto, así el guardado viejo sigue cargando. */
+  extra?: Record<string, number | string | boolean>;
 }
 
 export type PhenomenonType = 'sequia' | 'plaga' | 'pandemia' | 'plaga_zombie';
@@ -456,6 +458,9 @@ export interface HitoDef {
 
 export type ActorId = 'empresarios' | string;
 export type DemandId =
+  | 'sindicato_salarios'
+  | 'vecinos_comida'
+  | 'vecinos_obras'
   | 'bajen_impuestos'
   | 'liberen_precio'
   | 'abran_exportacion'
@@ -560,6 +565,7 @@ export interface FiscalLedger {
   operacion: number;
   obras: number;
   prensa: number;
+  subsidios?: number;
   saldo: number;
   emision: number;
   importaciones: number; // paid directly from reserva
@@ -594,6 +600,7 @@ export interface GovernmentState {
     obras: number;
     operacionPorArea: Record<ServiceAreaId, number>;
     prensa: number;
+    subsidios?: number;
     importaciones: number;
     exportaciones: number;
   };
@@ -603,6 +610,11 @@ export interface GovernmentState {
   cuposFijos: Record<FixedPublicRoleId, number>;
   palancasVigentes: GovernorLevers;
   palancasObjetivo: GovernorLevers;
+  /** Palancas del nivel 1.1 (G3): subsidio de alimento, presión y acceso sobre la prensa, nivel de educación. */
+  extras?: {
+    vigentes: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number };
+    objetivo: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number };
+  };
 }
 
 export interface EconomyOutput {
@@ -691,6 +703,8 @@ export interface ScenarioPreset {
   zonaPorRol: Record<RoleId, ZoneId[]>;
   victoria: ObjectiveCondition;
   derrota: ObjectiveCondition;
+  /** Otras condiciones de derrota (GOBERNADOR §6: basta con cruzar una). */
+  derrotasExtra?: ObjectiveCondition[];
   caosDefault: ChaosLimits;
 }
 
@@ -730,6 +744,24 @@ export interface EventLogEntry {
 }
 
 export type SimEvent =
+  | {
+      id: string;
+      dia: number;
+      tipo: 'contraoferta';
+      zona: ZoneId;
+      actorId: ActorId;
+      demandaId: DemandId;
+      aceptada: boolean;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'agregado';
+      zona: ZoneId;
+      conteos: Record<string, number>;
+      causa?: string;
+    }
   | {
       id: string;
       dia: number;

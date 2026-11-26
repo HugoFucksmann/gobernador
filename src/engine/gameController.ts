@@ -33,7 +33,10 @@ import { DEFAULT_WORLD_CONFIG } from './policies';
 import { nextSeqId, normalizeSeed } from './rng';
 import {
   computeTotalWorldMoney,
+  counterOfferDemand,
   deriveCommunityStats,
+  ExtraLeverKey,
+  setExtraLever as setExtraLeverState,
   emitSimEvent,
   MAX_BITACORA_ENTRIES,
   orderBuildInParcela,
@@ -669,6 +672,7 @@ export class GameController {
     }
 
     for (const npc of loaded.npcs) {
+      if (!npc.extra) npc.extra = {};
       if ('progreso' in (npc.educacion as unknown as Record<string, unknown>)) {
         delete (npc.educacion as unknown as Record<string, unknown>).progreso;
       }
@@ -911,6 +915,19 @@ export class GameController {
     this.commit();
   }
 
+  /** Modo desarrollador: aplica una mutación puntual al estado (forzar demandas, etc.). */
+  mutateForDev(fn: (s: GameState) => { ok: boolean; error?: string }): { ok: boolean; error?: string } {
+    if (!this.devMode) return { ok: false, error: 'Requiere modo desarrollador.' };
+    const prevGov = this.state.gobierno;
+    const next = structuredClone(this.state);
+    const res = fn(next);
+    if (!res.ok) return res;
+    this.state = next;
+    this.syncDerivedAndGovCheck(next, prevGov);
+    this.commit();
+    return res;
+  }
+
   startNewGame(newConfig: WorldConfig): void {
     this.lastPressDay = 1;
     this.actionOffersDay = 1;
@@ -999,6 +1016,27 @@ export class GameController {
     const prevGov = this.state.gobierno;
     const next = structuredClone(this.state);
     const res = respondToDemand(next, demandId, accept);
+    if (!res.ok) return res;
+    this.state = next;
+    this.syncDerivedAndGovCheck(next, prevGov);
+    this.commit();
+    return res;
+  }
+
+  /** Palancas del nivel 1.1 (G3): entran en vigencia al día siguiente, como el resto de los controles. */
+  setExtraLever(key: ExtraLeverKey, value: number): { ok: boolean; error?: string } {
+    const next = structuredClone(this.state);
+    const res = setExtraLeverState(next, key, value);
+    if (!res.ok) return res;
+    this.state = next;
+    this.commit();
+    return res;
+  }
+
+  counterOffer(demandId: string): { ok: boolean; aceptada?: boolean; error?: string; texto?: string } {
+    const prevGov = this.state.gobierno;
+    const next = structuredClone(this.state);
+    const res = counterOfferDemand(next, demandId);
     if (!res.ok) return res;
     this.state = next;
     this.syncDerivedAndGovCheck(next, prevGov);

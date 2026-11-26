@@ -1,0 +1,491 @@
+{
+  "version": 1,
+  "id": "elecciones",
+  "unidad": "m",
+  "descripcion": "Fuente de verdad de zonas y parcelas. El motor lee id, zona, estado y vecindad; la vista lee pos/tam/rot. Para agregar parcelas basta sumar una entrada.",
+  "isla": {
+    "radio": 128,
+    "ruido": 0.18,
+    "semilla": 7
+  },
+  "zonas": {
+    "centro": {
+      "vecinas": [
+        "norte",
+        "este",
+        "sur",
+        "oeste"
+      ],
+      "centro": [
+        0,
+        0
+      ],
+      "caracter": "civico"
+    },
+    "norte": {
+      "vecinas": [
+        "este",
+        "oeste",
+        "centro"
+      ],
+      "centro": [
+        0,
+        -72
+      ],
+      "caracter": "campos"
+    },
+    "este": {
+      "vecinas": [
+        "norte",
+        "sur",
+        "centro"
+      ],
+      "centro": [
+        72,
+        0
+      ],
+      "caracter": "residencial"
+    },
+    "sur": {
+      "vecinas": [
+        "este",
+        "oeste",
+        "centro"
+      ],
+      "centro": [
+        0,
+        72
+      ],
+      "caracter": "taller"
+    },
+    "oeste": {
+      "vecinas": [
+        "sur",
+        "norte",
+        "centro"
+      ],
+      "centro": [
+        -72,
+        0
+      ],
+      "caracter": "campos"
+    }
+  },
+  "parcelas": [
+    {
+      "id": "p_hospital_centro",
+      "nombre": "Hospital Central",
+      "zona": "centro",
+      "distrito": "civico",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "hospital",
+      "pos": [
+        -18,
+        -16
+      ],
+      "tam": [
+        18,
+        14
+      ],
+      "rot": 0,
+      "wx": 382,
+      "wy": 356,
+      "ww": 102,
+      "wh": 70
+    },
+    {
+      "id": "p_comisaria_centro",
+      "nombre": "Comisaría Central",
+      "zona": "centro",
+      "distrito": "civico",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "comisaria",
+      "pos": [
+        -18,
+        14
+      ],
+      "tam": [
+        16,
+        13
+      ],
+      "rot": 0,
+      "wx": 382,
+      "wy": 452,
+      "ww": 98,
+      "wh": 64
+    },
+    {
+      "id": "p_oficina_centro",
+      "nombre": "Oficina Pública",
+      "zona": "centro",
+      "distrito": "civico",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "oficina_publica",
+      "pos": [
+        18,
+        16
+      ],
+      "tam": [
+        16,
+        12
+      ],
+      "rot": 0,
+      "wx": 518,
+      "wy": 482,
+      "ww": 100,
+      "wh": 56
+    },
+    {
+      "id": "p_escuela_este",
+      "nombre": "Escuela del Valle",
+      "zona": "este",
+      "distrito": "residencial",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "escuela",
+      "pos": [
+        62,
+        -30
+      ],
+      "tam": [
+        24,
+        16
+      ],
+      "rot": 90,
+      "wx": 718,
+      "wy": 80,
+      "ww": 146,
+      "wh": 74
+    },
+    {
+      "id": "p_comercio_1",
+      "nombre": "Galería Norte",
+      "zona": "centro",
+      "distrito": "mercado",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "local_comercio",
+      "pos": [
+        6,
+        -27
+      ],
+      "tam": [
+        14,
+        10
+      ],
+      "rot": 0,
+      "wx": 416,
+      "wy": 74,
+      "ww": 80,
+      "wh": 52
+    },
+    {
+      "id": "p_comercio_2",
+      "nombre": "Mercado Este",
+      "zona": "centro",
+      "distrito": "mercado",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "local_comercio",
+      "pos": [
+        22,
+        -14
+      ],
+      "tam": [
+        14,
+        10
+      ],
+      "rot": 90,
+      "wx": 526,
+      "wy": 74,
+      "ww": 80,
+      "wh": 52
+    },
+    {
+      "id": "p_comercio_3",
+      "nombre": "Taller Oeste",
+      "zona": "sur",
+      "distrito": "taller",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "local_comercio",
+      "pos": [
+        -26,
+        62
+      ],
+      "tam": [
+        22,
+        14
+      ],
+      "rot": 0,
+      "wx": 48,
+      "wy": 360,
+      "ww": 118,
+      "wh": 68
+    },
+    {
+      "id": "p_comercio_4",
+      "nombre": "Taller Sur",
+      "zona": "sur",
+      "distrito": "taller",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "local_comercio",
+      "pos": [
+        8,
+        62
+      ],
+      "tam": [
+        22,
+        14
+      ],
+      "rot": 0,
+      "wx": 192,
+      "wy": 360,
+      "ww": 118,
+      "wh": 68
+    },
+    {
+      "id": "p_campo_1",
+      "nombre": "Campo Norte I",
+      "zona": "norte",
+      "distrito": "campos",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "pos": [
+        -24,
+        -58
+      ],
+      "tam": [
+        24,
+        16
+      ],
+      "rot": 0,
+      "wx": 184,
+      "wy": 76,
+      "ww": 128,
+      "wh": 76
+    },
+    {
+      "id": "p_campo_2",
+      "nombre": "Campo Norte II",
+      "zona": "norte",
+      "distrito": "campos",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "pos": [
+        6,
+        -58
+      ],
+      "tam": [
+        24,
+        16
+      ],
+      "rot": 0,
+      "wx": 184,
+      "wy": 170,
+      "ww": 128,
+      "wh": 82
+    },
+    {
+      "id": "p_campo_3",
+      "nombre": "Campo Oeste I",
+      "zona": "oeste",
+      "distrito": "campos",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "pos": [
+        -64,
+        -26
+      ],
+      "tam": [
+        22,
+        16
+      ],
+      "rot": 90,
+      "wx": 42,
+      "wy": 76,
+      "ww": 120,
+      "wh": 76
+    },
+    {
+      "id": "p_campo_4",
+      "nombre": "Campo Oeste II",
+      "zona": "oeste",
+      "distrito": "campos",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "pos": [
+        -62,
+        4
+      ],
+      "tam": [
+        22,
+        16
+      ],
+      "rot": 90,
+      "wx": 42,
+      "wy": 170,
+      "ww": 120,
+      "wh": 82
+    },
+    {
+      "id": "p_campo_5",
+      "nombre": "Quinta del Río",
+      "zona": "oeste",
+      "distrito": "taller",
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "pos": [
+        -66,
+        32
+      ],
+      "tam": [
+        22,
+        14
+      ],
+      "rot": 90,
+      "wx": 48,
+      "wy": 454,
+      "ww": 118,
+      "wh": 74
+    },
+    {
+      "id": "p_centro_libre",
+      "nombre": "Solar Plaza Cívica",
+      "zona": "centro",
+      "distrito": "mercado",
+      "estadoInicial": "libre",
+      "pos": [
+        3,
+        0
+      ],
+      "tam": [
+        14,
+        12
+      ],
+      "rot": 0,
+      "wx": 396,
+      "wy": 186,
+      "ww": 86,
+      "wh": 62
+    },
+    {
+      "id": "p_norte_libre",
+      "nombre": "Solar Camino Norte",
+      "zona": "norte",
+      "distrito": "campos",
+      "estadoInicial": "libre",
+      "pos": [
+        -8,
+        -84
+      ],
+      "tam": [
+        18,
+        12
+      ],
+      "rot": 0,
+      "wx": 204,
+      "wy": 24,
+      "ww": 102,
+      "wh": 42
+    },
+    {
+      "id": "p_oeste_libre",
+      "nombre": "Solar del Molino",
+      "zona": "oeste",
+      "distrito": "campos",
+      "estadoInicial": "libre",
+      "pos": [
+        -92,
+        -8
+      ],
+      "tam": [
+        16,
+        12
+      ],
+      "rot": 90,
+      "wx": 46,
+      "wy": 24,
+      "ww": 102,
+      "wh": 42
+    },
+    {
+      "id": "p_sur_libre",
+      "nombre": "Solar Industrial Sur",
+      "zona": "sur",
+      "distrito": "taller",
+      "estadoInicial": "libre",
+      "pos": [
+        -8,
+        88
+      ],
+      "tam": [
+        18,
+        12
+      ],
+      "rot": 0,
+      "wx": 192,
+      "wy": 454,
+      "ww": 118,
+      "wh": 74
+    },
+    {
+      "id": "p_este_libre",
+      "nombre": "Solar del Barrio",
+      "zona": "este",
+      "distrito": "residencial",
+      "estadoInicial": "libre",
+      "pos": [
+        94,
+        -30
+      ],
+      "tam": [
+        14,
+        12
+      ],
+      "rot": 90,
+      "wx": 874,
+      "wy": 80,
+      "ww": 88,
+      "wh": 68
+    },
+    {
+      "id": "p_hito_este_1",
+      "nombre": "Ensanche del Valle",
+      "zona": "este",
+      "distrito": "residencial",
+      "estadoInicial": "bloqueada",
+      "hitoRequerido": "hito_estabilidad",
+      "pos": [
+        92,
+        4
+      ],
+      "tam": [
+        14,
+        12
+      ],
+      "rot": 90,
+      "wx": 874,
+      "wy": 178,
+      "ww": 88,
+      "wh": 68
+    },
+    {
+      "id": "p_hito_este_2",
+      "nombre": "Parque Nuevo",
+      "zona": "este",
+      "distrito": "residencial",
+      "estadoInicial": "bloqueada",
+      "hitoRequerido": "hito_prosperidad",
+      "pos": [
+        64,
+        32
+      ],
+      "tam": [
+        16,
+        14
+      ],
+      "rot": 90,
+      "wx": 854,
+      "wy": 454,
+      "ww": 98,
+      "wh": 74
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import {
   FOREIGN_TRADE_STEPS,
   LEVER_BOUNDS,
   LEVER_VALENCIA,
+  LEVEL11_CONSTANTS,
   NEWS_TEMPLATES,
   OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
@@ -30,6 +31,8 @@ import {
   EventLogEntry,
   ForeignTradeStep,
   GameState,
+  GovernmentState,
+  GovernorComplexityLevel,
   HitoMetric,
   LeverKey,
   ModifiableKey,
@@ -190,11 +193,61 @@ function shortestZonePath(
   return fallback;
 }
 
+/** Hechos de alta frecuencia: se guardan uno por uno la ventana reciente y, más atrás, agregados por día y zona (MOTOR §3). */
+const HIGH_FREQ_EVENTS = new Set<string>([
+  'ataque', 'golpe', 'internacion', 'alta', 'defensa', 'orden', 'integridad', 'hospital_saturado',
+  'reubicacion', 'noticia', 'accion_inicio', 'accion_fin', 'empresa_aumento', 'empresa_recorte',
+]);
+const EVENT_SOFT_CAP = 2500;
+
+/**
+ * Compacta el registro sin perder ninguna raíz: control, obra_inicio, demolicion, fenomeno_inicio, aviso, demandas,
+ * muerte e impago no se descartan nunca (MOTOR §3). Así ninguna cadena de causas pierde su raíz.
+ */
+export function compactEvents(state: GameState): void {
+  const cutoff = state.reloj.dia - ECON_CONSTANTS.ventanaEventosDias;
+  const keep: SimEvent[] = [];
+  const agg = new Map<string, Extract<SimEvent, { tipo: 'agregado' }>>();
+  // Un hecho viejo de alta frecuencia que es eslabón de una cadena de causas retenida se conserva (la cadena no pierde su raíz).
+  const byId = new Map<string, SimEvent>();
+  for (const e of state.eventos) byId.set(e.id, e);
+  const pinned = new Set<string>();
+  for (const e of state.eventos) {
+    if (e.tipo === 'agregado' || (e.dia < cutoff && HIGH_FREQ_EVENTS.has(e.tipo))) continue;
+    let cur: string | undefined = e.causa;
+    for (let depth = 0; depth < 6 && cur; depth++) {
+      const parent = byId.get(cur);
+      if (!parent || pinned.has(parent.id)) break;
+      if (parent.dia < cutoff && HIGH_FREQ_EVENTS.has(parent.tipo)) pinned.add(parent.id);
+      cur = parent.causa;
+    }
+  }
+  for (const e of state.eventos) {
+    if (e.tipo === 'agregado') {
+      const key = e.dia + '|' + e.zona;
+      const cur = agg.get(key);
+      if (cur) for (const [k, v] of Object.entries(e.conteos)) cur.conteos[k] = (cur.conteos[k] ?? 0) + v;
+      else agg.set(key, { ...e, conteos: { ...e.conteos } });
+    } else if (e.dia < cutoff && HIGH_FREQ_EVENTS.has(e.tipo) && !pinned.has(e.id)) {
+      const key = e.dia + '|' + e.zona;
+      let cur = agg.get(key);
+      if (!cur) {
+        cur = { id: 'agg_' + e.dia + '_' + e.zona, dia: e.dia, tipo: 'agregado', zona: e.zona, conteos: {} };
+        agg.set(key, cur);
+      }
+      cur.conteos[e.tipo] = (cur.conteos[e.tipo] ?? 0) + 1;
+    } else keep.push(e);
+  }
+  const merged: SimEvent[] = [...keep, ...agg.values()];
+  merged.sort((a, b) => b.dia - a.dia);
+  state.eventos = merged;
+}
+
 export function emitSimEvent(state: GameState, event: SimEvent): void {
   state.eventosDiaActual.push(event);
   state.eventos.unshift(event);
-  if (state.eventos.length > 2500) {
-    state.eventos.length = 2500;
+  if (state.eventos.length > EVENT_SOFT_CAP + 500) {
+    compactEvents(state);
   }
 }
 
@@ -869,6 +922,7 @@ function applyLeverChanges(state: GameState): void {
       }
     );
   }
+  applyExtraControls(state);
 }
 
 export const MAX_BITACORA_ENTRIES = 160;
@@ -1459,7 +1513,8 @@ function setLeverValueImmediate(
 function rejectDemandInternal(
   state: GameState,
   demand: ActiveDemand,
-  porVencimiento: boolean
+  porVencimiento: boolean,
+  escala = 1
 ): void {
   const dia = state.reloj.dia;
   const rejEvId = nextSeqId(state, `ev_${dia}`);
@@ -1474,7 +1529,7 @@ function rejectDemandInternal(
     causa: demand.causaId,
   });
 
-  const until = dia + ACTOR_CONSTANTS.diasMedida;
+  const until = dia + Math.max(2, Math.round(ACTOR_CONSTANTS.diasMedida * escala));
   let measure: ActorMeasure;
 
   if (demand.demandaId === 'bajen_impuestos') {
@@ -1513,6 +1568,10 @@ function rejectDemandInternal(
       hastaDia: until,
       causaId: rejEvId,
     };
+  } else if (demand.demandaId === 'sindicato_salarios' || demand.demandaId === 'vecinos_comida' || demand.demandaId === 'vecinos_obras') {
+    const m = extraActorMeasure(state, demand, rejEvId, until);
+    if (!m) return;
+    measure = m;
   } else if (demand.demandaId === 'mas_pauta') {
     measure = {
       id: nextSeqId(state, `med_${dia}`),
@@ -3450,6 +3509,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
   }
 
   // 1. Food Production + Tech Boost (tecnicos)
+  const subsidioProdMult = 1 + (state.gobierno.extras?.vigentes.subsidioAlimento ?? 0) * LEVEL11_CONSTANTS.subsidioProdPorPunto;
   let baseAgroProd = 0;
   let activeAgricultores = 0;
   const tecnicoProds: number[] = [];
@@ -3459,7 +3519,7 @@ function runDailyEconomyAndNeeds(state: GameState): void {
       const prod = getNpcProductivity(npc, state);
       if (prod > 0) {
         activeAgricultores++;
-        baseAgroProd += ECON_CONSTANTS.produccionBaseAgricultor * prod * agroClimaFactor;
+        baseAgroProd += ECON_CONSTANTS.produccionBaseAgricultor * prod * agroClimaFactor * subsidioProdMult;
       }
     } else if (npc.rol === 'tecnico') {
       const prod = getNpcProductivity(npc, state);
@@ -4862,11 +4922,12 @@ function runPaydaySettlement(state: GameState): void {
     medio.finanzas.dependenciaPct = Number(
       ((fondosPorMedio / Math.max(1, propios + fondosPorMedio)) * 100).toFixed(1)
     );
-    const targetReach = clamp(14 + Math.sqrt(fondosPorMedio) * 11.5, 12, 95);
+    const exV = state.gobierno.extras?.vigentes;
+    const targetReach = clamp(14 + Math.sqrt(fondosPorMedio) * 11.5 + (exV ? exV.acceso * LEVEL11_CONSTANTS.accesoAlcancePorPunto : 0), 12, 95);
     medio.alcancePct = Math.round(targetReach);
 
     const baseAff = medio.afinidadBase ?? 45;
-    const targetAff = clamp(baseAff + Math.max(0, medio.finanzas.dependenciaPct - 15) * 0.65, 0, 100);
+    const targetAff = clamp(baseAff + Math.max(0, medio.finanzas.dependenciaPct - 15) * 0.65 + (exV ? exV.presion * LEVEL11_CONSTANTS.presionAfinidadPorPunto : 0), 0, 100);
     medio.lineaEditorial.afinidadGobierno = Math.round(
       medio.lineaEditorial.afinidadGobierno + (targetAff - medio.lineaEditorial.afinidadGobierno) * 0.45
     );
@@ -4884,6 +4945,10 @@ function runPaydaySettlement(state: GameState): void {
       );
     } else {
       medio.credibilidad = clamp(Number((medio.credibilidad + 0.6).toFixed(1)), 15, 98);
+    }
+    if (exV && (exV.presion > 0 || exV.acceso > 0)) {
+      const dCred = exV.acceso * LEVEL11_CONSTANTS.accesoCredPorPunto - Math.max(0, exV.presion - LEVEL11_CONSTANTS.presionUmbral) * LEVEL11_CONSTANTS.presionCredPorPunto;
+      medio.credibilidad = clamp(Number((medio.credibilidad + dCred).toFixed(1)), 15, 98);
     }
   }
 
@@ -4959,6 +5024,7 @@ function runPaydaySettlement(state: GameState): void {
     paidAyu +
     paidOp +
     acum.obras +
+    (acum.subsidios ?? 0) +
     paidPrensa;
   const saldo = taxesCollected - gastosPeriodo;
 
@@ -4975,6 +5041,7 @@ function runPaydaySettlement(state: GameState): void {
     operacion: Number(paidOp.toFixed(1)),
     obras: Number(acum.obras.toFixed(1)),
     prensa: Number(paidPrensa.toFixed(1)),
+    subsidios: Number((acum.subsidios ?? 0).toFixed(1)),
     saldo: Number(saldo.toFixed(1)),
     emision: Number(emision.toFixed(1)),
     importaciones: Number(acum.importaciones.toFixed(1)),
@@ -5006,12 +5073,13 @@ function runPaydaySettlement(state: GameState): void {
     obras: 0,
     operacionPorArea: { seguridad: 0, salud: 0, infraestructura: 0 },
     prensa: 0,
+    subsidios: 0,
     importaciones: 0,
     exportaciones: 0,
   };
 }
 
-function updateClimate(state: GameState): void {
+function updateClimate(state: GameState, allowRandom = true): void {
   const dia = state.reloj.dia;
   const remaining: ClimatePhenomenon[] = [];
 
@@ -5096,7 +5164,7 @@ function updateClimate(state: GameState): void {
   }
   state.clima.fenomenos = remaining;
 
-  if (dia >= state.clima.proximoEventoDia) {
+  if (allowRandom && dia >= state.clima.proximoEventoDia) {
     const pool: PhenomenonType[] =
       state.config.escenarioId === 'zombies' ? ['sequia', 'plaga'] : ['sequia', 'plaga', 'pandemia'];
     const tipo = pool[Math.floor(drawRand(state) * pool.length)];
@@ -5270,8 +5338,11 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
     return val <= threshold;
   };
 
-  const defeatVal = getMetric(preset.derrota.metrica);
-  if (derived.poblacion === 0 || checkCond(defeatVal, preset.derrota.op, preset.derrota.umbral)) {
+  const defeatConds: ObjectiveCondition[] = [preset.derrota, ...(preset.derrotasExtra ?? [])];
+  const crossed = defeatConds.find((c) => checkCond(getMetric(c.metrica), c.op, c.umbral));
+  const defeat = crossed ?? preset.derrota;
+  const defeatVal = getMetric(defeat.metrica);
+  if (derived.poblacion === 0 || crossed) {
     const endCause =
       state.eventosDiaActual.find((e) => e.tipo === 'muerte' || e.tipo === 'golpe' || e.tipo === 'impago')?.id ||
       state.ultimoEventoClimaId ||
@@ -5282,14 +5353,14 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
       dia: state.reloj.dia,
       tipo: 'fin_partida',
       zona: 'centro',
-      metrica: preset.derrota.metrica,
+      metrica: defeat.metrica,
       valor: defeatVal,
       causa: endCause,
     });
     state.resultado = {
       ...state.resultado,
       estado: 'derrota',
-      razon: preset.derrota.descripcion,
+      razon: defeat.descripcion,
       diaFinal: state.reloj.dia,
     };
     addLog(
@@ -5297,7 +5368,7 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
       'sistema',
       'objetivo:derrota',
       'Fin de partida: Derrota',
-      preset.derrota.descripcion,
+      defeat.descripcion,
       endCause,
       endEvId
     );
@@ -5450,14 +5521,13 @@ function advanceDay(state: GameState): void {
     state.caosTracker.accionesEnVentana = 0;
   }
 
-  // 2. Climate
-  if (!isM0) {
-    updateClimate(state);
-  }
+  // 2. Climate (en M0 solo corren los fenómenos forzados, sin azar: emiten aviso/inicio/fin con su causa)
+  updateClimate(state, !isM0);
 
   // 3 & 4 & 8. Daily economy, needs, health/hospital, and NPC variables
   updateServiceCoverage(state);
   runDailyEconomyAndNeeds(state);
+  runLevel11Daily(state);
 
   // 5. Security: police relocation + zone integrity repair
   runPoliceRelocation(state);
@@ -5509,6 +5579,7 @@ function advanceDay(state: GameState): void {
     }
     if (!isM0) {
       evaluateActorDemands(state, derived);
+      evaluateExtraActors(state, derived);
     }
   }
   evaluateObjective(state, derived);
@@ -6208,9 +6279,27 @@ export function planDailyPressPublications(
   return planned;
 }
 
-function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
+export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
   const npcName = (id?: string) => state.npcs.find((n) => n.id === id)?.nombre || id || 'habitante';
   switch (ev.tipo) {
+    case 'contraoferta':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: ev.aceptada ? `Contraoferta aceptada (${ev.actorId})` : `Contraoferta rechazada (${ev.actorId})`,
+        detalle: ev.aceptada ? 'Acuerdo parcial: la mitad del cambio, la mitad del compromiso.' : 'Se aplica su medida con la mitad de duración.',
+      };
+    case 'agregado':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: 'Hechos del día (resumen)',
+        detalle: Object.entries(ev.conteos).map(([k, v]) => v + ' ' + k).join(', '),
+      };
     case 'control':
       return {
         id: ev.id,
@@ -6612,4 +6701,332 @@ export function buildCausalChain(
   }
 
   return chain;
+}
+
+/** Modo desarrollador (UI §10): fuerza una demanda de la tabla cerrada, ignorando umbrales y enfriamientos. */
+export function forceDemandForDev(state: GameState, demandaId: string): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') return { ok: false, error: 'La partida ya finalizó.' };
+  if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) {
+    return { ok: false, error: 'Ya hay demandas simultáneas al máximo.' };
+  }
+  const dia = state.reloj.dia;
+  const vig = state.gobierno.palancasVigentes;
+  const medio = state.medios[0];
+  type Spec = { actorId: string; actorNombre: string; titulo: string; razon: string; amenaza: string; palanca: LeverKey; nuevoValor: number | string; etiqueta: string };
+  const nextTax = Math.max(LEVER_BOUNDS.impuesto.min, vig.impuesto - 5);
+  const nextPrensa = Math.min(LEVER_BOUNDS.prensa.max, vig.prensa + 10);
+  const specs: Record<string, Spec | undefined> = {
+    bajen_impuestos: {
+      actorId: 'empresarios', actorNombre: 'Empresarios', titulo: 'Rebaja impositiva',
+      razon: 'Demanda forzada (modo desarrollador).',
+      amenaza: `Despido forzado de ${ACTOR_CONSTANTS.despidosMedida} empleados en la empresa más afectada.`,
+      palanca: 'impuesto', nuevoValor: nextTax, etiqueta: `Bajar impuesto a ${nextTax}%`,
+    },
+    liberen_precio: {
+      actorId: 'empresarios', actorNombre: 'Empresarios', titulo: 'Flexibilizar precio máximo',
+      razon: 'Demanda forzada (modo desarrollador).',
+      amenaza: `Retención parcial del stock diario de comida durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+      palanca: 'precioMaximo', nuevoValor: 'libre', etiqueta: 'Pasar tope a libre',
+    },
+    abran_exportacion: {
+      actorId: 'empresarios', actorNombre: 'Empresarios', titulo: 'Habilitar exportación',
+      razon: 'Demanda forzada (modo desarrollador).',
+      amenaza: `Frenan inversiones privadas por ${ACTOR_CONSTANTS.diasMedida} días.`,
+      palanca: 'comercioExterior', nuevoValor: -50, etiqueta: 'Pasar comercio exterior a Exportar (-50%)',
+    },
+    mas_pauta: medio
+      ? {
+          actorId: medio.id, actorNombre: medio.nombre, titulo: 'Aumento de pauta oficial',
+          razon: 'Demanda forzada (modo desarrollador).',
+          amenaza: `Campaña sostenida en tono crítico durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+          palanca: 'prensa', nuevoValor: nextPrensa, etiqueta: `Subir fondos de prensa a $${nextPrensa}`,
+        }
+      : undefined,
+    silencio_pagado: medio
+      ? {
+          actorId: medio.id, actorNombre: medio.nombre, titulo: 'Acuerdo editorial por pauta',
+          razon: 'Demanda forzada (modo desarrollador).',
+          amenaza: `Campaña alarmista sobre el hambre durante ${ACTOR_CONSTANTS.diasMedida} días.`,
+          palanca: 'prensa', nuevoValor: nextPrensa, etiqueta: `Subir prensa a $${nextPrensa}`,
+        }
+      : undefined,
+  };
+  const spec = specs[demandaId];
+  if (!spec) return { ok: false, error: 'Demanda desconocida.' };
+  if (state.demandasActivas.some((d) => d.actorId === spec.actorId)) return { ok: false, error: 'Ese actor ya tiene una demanda abierta.' };
+  const dObj: ActiveDemand = {
+    id: nextSeqId(state, `dem_${dia}`), actorId: spec.actorId, actorNombre: spec.actorNombre, demandaId: demandaId as DemandId,
+    titulo: spec.titulo, razon: spec.razon, amenaza: spec.amenaza,
+    pedido: { palanca: spec.palanca, nuevoValor: spec.nuevoValor, etiqueta: spec.etiqueta },
+    diaCreada: dia, diasRestantes: ACTOR_CONSTANTS.diasRespuesta, diasCompromiso: ACTOR_CONSTANTS.diasCompromiso,
+  };
+  state.demandasActivas.push(dObj);
+  const evId = nextSeqId(state, `ev_${dia}`);
+  emitSimEvent(state, { id: evId, dia, tipo: 'demanda', zona: 'centro', actorId: spec.actorId, demandaId: demandaId as DemandId, diasRespuesta: dObj.diasRestantes });
+  return { ok: true };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Nivel 1.1: profundidad (HOJA_DE_RUTA §3). Todo se activa solo con gobernador G3.
+// - Extensión `fiscal`: emisión e inflación dinámica y `tope_emision` (ya viven en runPaydaySettlement).
+// - Palancas de prensa `presion` y `acceso`, subsidio a la producción de alimento y educación como servicio con nivel.
+// - Contraofertas a las demandas y más actores (sindicato de públicos, vecinos de una zona).
+// Los valores están en LEVEL11_CONSTANTS (catalogs.ts) y en CALIBRACION §8. Las reglas que los docs no fijan quedan marcadas [propuesta].
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+export type ExtraLeverKey = 'subsidioAlimento' | 'presion' | 'acceso' | 'nivelEducacion';
+export const EXTRA_LEVER_KEYS: ExtraLeverKey[] = ['subsidioAlimento', 'presion', 'acceso', 'nivelEducacion'];
+export const EXTRA_LEVER_BOUNDS: Record<ExtraLeverKey, { min: number; max: number; step: number }> = {
+  subsidioAlimento: { min: 0, max: 30, step: 1 },
+  presion: { min: 0, max: 100, step: 5 },
+  acceso: { min: 0, max: 100, step: 5 },
+  nivelEducacion: { min: 0, max: 5, step: 1 },
+};
+const EXTRA_CONTROL: Record<ExtraLeverKey, string> = {
+  subsidioAlimento: 'subsidio_alimento_pct',
+  presion: 'presion_prensa',
+  acceso: 'acceso_prensa',
+  nivelEducacion: 'nivel_educacion',
+};
+
+export function ensureExtras(state: GameState): NonNullable<GovernmentState['extras']> {
+  const g = state.gobierno;
+  if (!g.extras) {
+    g.extras = {
+      vigentes: { subsidioAlimento: 0, presion: 0, acceso: 0, nivelEducacion: 0 },
+      objetivo: { subsidioAlimento: 0, presion: 0, acceso: 0, nivelEducacion: 0 },
+    };
+  }
+  return g.extras;
+}
+
+function governorLevel(state: GameState): GovernorComplexityLevel {
+  return state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+}
+
+/** Fija el objetivo de una palanca de nivel 1.1; entra en vigencia al día siguiente y emite `control` (CONTROLES §1). */
+export function setExtraLever(state: GameState, key: ExtraLeverKey, value: number): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') return { ok: false, error: 'La partida ya finalizó.' };
+  if (governorLevel(state) !== 'G3') return { ok: false, error: 'Esta palanca está disponible desde el nivel de gobernador G3.' };
+  const b = EXTRA_LEVER_BOUNDS[key];
+  if (!b || !Number.isFinite(value)) return { ok: false, error: 'Palanca o valor inválido.' };
+  const v = clamp(Math.round(value / b.step) * b.step, b.min, b.max);
+  ensureExtras(state).objetivo[key] = v;
+  return { ok: true };
+}
+
+function applyExtraControls(state: GameState): void {
+  const ex = state.gobierno.extras;
+  if (!ex) return;
+  for (const key of EXTRA_LEVER_KEYS) {
+    const prev = ex.vigentes[key];
+    const next = ex.objetivo[key];
+    if (Math.abs(next - prev) >= 0.01) {
+      ex.vigentes[key] = next;
+      recordControlEvent(state, EXTRA_CONTROL[key], prev, next, key);
+    }
+  }
+}
+
+/** Costo estimado por período de las palancas 1.1 (para la vista previa antes de confirmar). */
+export function estimateExtrasCost(state: GameState, ex: { subsidioAlimento: number; presion: number; acceso: number; nivelEducacion: number }) {
+  const vivos = state.npcs.filter((n) => n.vivo).length;
+  const refDia = referenciaSueldosAlimento(state) ;
+  return {
+    subsidio: Number((refDia * (ex.subsidioAlimento / 100) * PERIOD_DAYS).toFixed(1)),
+    educacion: Number((ex.nivelEducacion * vivos * LEVEL11_CONSTANTS.educCostoPorNpcPeriodo).toFixed(1)),
+    acceso: state.medios.length > 0 ? Number((ex.acceso * LEVEL11_CONSTANTS.accesoCostoPorPunto).toFixed(1)) : 0,
+    presion: 0,
+  };
+}
+
+function referenciaSueldosAlimento(state: GameState): number {
+  const ult = state.empresas.alimento.ultimoSueldosPeriodo;
+  if (ult > 0) return ult / PERIOD_DAYS;
+  const agro = state.npcs.filter((n) => n.vivo && (n.rol === 'agricultor' || n.rol === 'tecnico')).length;
+  return agro * ECON_CONSTANTS.salarioBasePublico * 1.2;
+}
+
+/** Costos y efectos diarios de las palancas 1.1 (después de la economía diaria). */
+function runLevel11Daily(state: GameState): void {
+  const ex = state.gobierno.extras;
+  if (!ex) return;
+  const v = ex.vigentes;
+  const acum = state.gobierno.acumuladoPeriodo;
+  const vivos = state.npcs.filter((n) => n.vivo);
+
+  // Subsidio a la producción de alimento: el Estado paga un % del costo diario de sueldos del sector; el dinero va a la empresa.
+  if (v.subsidioAlimento > 0) {
+    const pago = Math.min(
+      Math.max(0, state.gobierno.reserva),
+      referenciaSueldosAlimento(state) * (v.subsidioAlimento / 100)
+    );
+    if (pago > 0.001) {
+      state.gobierno.reserva = Number((state.gobierno.reserva - pago).toFixed(2));
+      state.empresas.alimento.ventasAcum += pago;
+      acum.subsidios = Number(((acum.subsidios ?? 0) + pago).toFixed(2));
+    }
+  }
+  // Educación como servicio con nivel: costo operativo que se paga con la operación del período.
+  if (v.nivelEducacion > 0) {
+    acum.operacion += (v.nivelEducacion * vivos.length * LEVEL11_CONSTANTS.educCostoPorNpcPeriodo) / PERIOD_DAYS;
+    for (const npc of vivos) {
+      const e = npc.educacion.nivel;
+      if (e >= 3) continue;
+      const estudiante = npc.rol === 'estudiante';
+      if (!estudiante && npc.rol !== 'desempleado') continue;
+      const extra = (npc.extra ??= {});
+      const xp = Number(extra.educXp ?? 0) + v.nivelEducacion * (estudiante ? LEVEL11_CONSTANTS.educXpEstudiante : LEVEL11_CONSTANTS.educXpDesempleado);
+      const need = LEVEL11_CONSTANTS.educXpBase + e * LEVEL11_CONSTANTS.educXpPorNivel;
+      if (xp >= need) {
+        npc.educacion.nivel = e + 1;
+        extra.educXp = xp - need;
+      } else extra.educXp = xp;
+    }
+  }
+  // Acceso a la prensa: la oficina de prensa cuesta y se paga como fondos a los medios (conserva el dinero).
+  if (v.acceso > 0 && state.medios.length > 0) {
+    acum.prensa += (v.acceso * LEVEL11_CONSTANTS.accesoCostoPorPunto) / PERIOD_DAYS;
+  }
+}
+
+// ───────── Contraofertas (ACTORES §4) ─────────
+function midValue(palanca: LeverKey, actual: number | string, pedido: number | string): number | string {
+  if (palanca === 'comercioExterior') return pedido; // escalones fijos: sin punto medio, se recorta solo el compromiso
+  if (typeof actual === 'number' && typeof pedido === 'number') {
+    const bounds = (LEVER_BOUNDS as Record<string, { min: number; max: number; step: number }>)[palanca];
+    const mid = actual + (pedido - actual) / 2;
+    if (!bounds) return Math.round(mid);
+    return clamp(Math.round(mid / bounds.step) * bounds.step, bounds.min, bounds.max);
+  }
+  if (palanca === 'precioMaximo') {
+    const order: PriceCapMode[] = ['estricto', 'moderado', 'libre'];
+    const a = order.indexOf(actual as PriceCapMode), p = order.indexOf(pedido as PriceCapMode);
+    if (a >= 0 && p >= 0 && Math.abs(p - a) >= 2) return order[a + Math.sign(p - a)];
+  }
+  return pedido;
+}
+
+function actorDisposition(state: GameState, actorId: string): number {
+  if (actorId === 'empresarios') {
+    const f = (state.empresas.alimento.factor + state.empresas.comercio.factor) / 2;
+    return clamp((f - 0.8) / 0.4, 0, 1);
+  }
+  const medio = state.medios.find((m) => m.id === actorId);
+  if (medio) return clamp(medio.lineaEditorial.afinidadGobierno / 100, 0, 1);
+  const sat = state.npcs.filter((n) => n.vivo).reduce((a, n) => a + n.variables.satisfaccion, 0) / Math.max(1, state.npcs.filter((n) => n.vivo).length);
+  return clamp(sat / 100, 0, 1);
+}
+
+/**
+ * Responder con condiciones: se ofrece la mitad del cambio pedido y la mitad del compromiso. El actor acepta con una
+ * probabilidad que depende de su disposición (tirada del azar de la partida: determinista por semilla). Si rechaza,
+ * se aplica su medida con la mitad de duración. [propuesta: los docs solo nombran las contraofertas]
+ */
+export function counterOfferDemand(state: GameState, demandId: string): { ok: boolean; aceptada?: boolean; error?: string; texto?: string } {
+  if (state.resultado.estado !== 'jugando') return { ok: false, error: 'La partida ya finalizó.' };
+  if (governorLevel(state) !== 'G3') return { ok: false, error: 'Las contraofertas están disponibles desde G3.' };
+  const idx = state.demandasActivas.findIndex((d) => d.id === demandId);
+  if (idx === -1) return { ok: false, error: 'La demanda ya no está activa.' };
+  const [demand] = state.demandasActivas.splice(idx, 1);
+  const dia = state.reloj.dia;
+  state.cooldownActorDemanda[demand.actorId] = dia + ACTOR_CONSTANTS.diasEntreDemandas;
+  const vig = state.gobierno.palancasVigentes;
+  const mid = midValue(demand.pedido.palanca, vig[demand.pedido.palanca], demand.pedido.nuevoValor);
+  const compromiso = Math.max(7, Math.round(demand.diasCompromiso / 2));
+  const p = clamp(LEVEL11_CONSTANTS.contraofertaBase + LEVEL11_CONSTANTS.contraofertaPeso * actorDisposition(state, demand.actorId), 0.15, 0.92);
+  const aceptada = nextRand(state) < p;
+  const evId = nextSeqId(state, `ev_${dia}`);
+  emitSimEvent(state, { id: evId, dia, tipo: 'contraoferta', zona: 'centro', actorId: demand.actorId, demandaId: demand.demandaId, aceptada, causa: demand.causaId });
+  if (!aceptada) {
+    rejectDemandInternal(state, { ...demand, causaId: evId }, false, 0.5);
+    addLog(state, 'gobernador', `actor:${demand.actorId}/contraoferta`, `${demand.actorNombre} rechazó tu contraoferta`, `Aplica su medida con la mitad de duración.`, demand.causaId, evId);
+    return { ok: true, aceptada: false, texto: `${demand.actorNombre} rechazó la contraoferta.` };
+  }
+  setLeverValueImmediate(state, demand.pedido.palanca, mid);
+  state.bloqueosPalanca = state.bloqueosPalanca.filter((b) => b.palanca !== demand.pedido.palanca);
+  state.bloqueosPalanca.push({
+    palanca: demand.pedido.palanca,
+    actorId: demand.actorId,
+    actorNombre: demand.actorNombre,
+    demandaId: demand.demandaId,
+    hastaDia: dia + compromiso,
+    motivo: `${demand.actorNombre}: contraoferta (${demand.pedido.etiqueta}, a medias)`,
+  });
+  addLog(state, 'gobernador', `actor:${demand.actorId}/contraoferta`, `Acuerdo parcial con ${demand.actorNombre}`, `Se fijó ${String(mid)} por ${compromiso} días en lugar de ${String(demand.pedido.nuevoValor)}.`, demand.causaId, evId);
+  return { ok: true, aceptada: true, texto: `${demand.actorNombre} aceptó la contraoferta: ${String(mid)} por ${compromiso} días.` };
+}
+
+// ───────── Más actores (ACTORES §4): sindicato de públicos y vecinos de una zona ─────────
+function pickOutletId(state: GameState): string | undefined {
+  const sorted = [...state.medios].sort((a, b) => a.lineaEditorial.afinidadGobierno - b.lineaEditorial.afinidadGobierno);
+  return sorted[0]?.id;
+}
+
+function evaluateExtraActors(state: GameState, derived: CommunityDerived): void {
+  if (governorLevel(state) !== 'G3') return;
+  const dia = state.reloj.dia;
+  if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) return;
+  const vig = state.gobierno.palancasVigentes;
+  const push = (
+    actorId: string, actorNombre: string, demandaId: DemandId, titulo: string, razon: string, amenaza: string,
+    palanca: LeverKey, nuevoValor: number | string, etiqueta: string, causaId?: string
+  ) => {
+    if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) return;
+    if (state.demandasActivas.some((d) => d.actorId === actorId)) return;
+    if (dia < (state.cooldownActorDemanda[actorId] ?? 0)) return;
+    if (isLeverLocked(state, palanca)) return;
+    const d: ActiveDemand = {
+      id: nextSeqId(state, `dem_${dia}`), actorId, actorNombre, demandaId, titulo, razon, amenaza,
+      pedido: { palanca, nuevoValor, etiqueta }, diaCreada: dia, diasRestantes: ACTOR_CONSTANTS.diasRespuesta,
+      diasCompromiso: ACTOR_CONSTANTS.diasCompromiso, causaId,
+    };
+    state.demandasActivas.push(d);
+    const evId = nextSeqId(state, `ev_${dia}`);
+    emitSimEvent(state, { id: evId, dia, tipo: 'demanda', zona: 'centro', actorId, demandaId, diasRespuesta: d.diasRestantes, causa: causaId });
+    addLog(state, 'gobernador', `actor:${actorId}/demanda`, `Demanda de ${actorNombre}: ${titulo}`, `${razon} · Pide: ${etiqueta} (${d.diasRestantes}d de plazo).`, causaId, evId);
+  };
+
+  // Sindicato de públicos: salarios por debajo del valor normal o impago de nómina
+  if (vig.salarioPublico < LEVEL11_CONSTANTS.sindicatoUmbralSalario || (state.gobierno.finanzas.impago && state.gobierno.finanzas.alcanzaNomina)) {
+    const nuevo = Math.min(LEVER_BOUNDS.salarioPublico.max, Math.max(100, vig.salarioPublico + 15));
+    if (nuevo > vig.salarioPublico) {
+      push('sindicato', 'Sindicato de públicos', 'sindicato_salarios', 'Recomposición salarial',
+        state.gobierno.finanzas.alcanzaNomina ? 'No se pagó la nómina pública completa.' : `El salario público está en ${vig.salarioPublico}% del valor normal.`,
+        `Campaña crítica contra la gestión por ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'salarioPublico', nuevo, `Subir salario público a ${nuevo}%`, state.ultimaCausaPalanca);
+    }
+  }
+  // Vecinos de una zona: hambre crítica o integridad baja
+  const zonas = getWorldZones(state);
+  for (const z of zonas) {
+    if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) break;
+    const hab = state.npcs.filter((n) => n.vivo && getEffectiveZone(n, zonas.length) === z);
+    if (hab.length < 3) continue;
+    const hambre = (hab.filter((n) => n.variables.hambre > 80).length / hab.length) * 100;
+    if (hambre >= LEVEL11_CONSTANTS.vecinosUmbralHambrePct && vig.garantiaAlimentaria < 100) {
+      const nuevo = Math.min(100, vig.garantiaAlimentaria + 15);
+      push(`vecinos_${z}`, `Vecinos de ${z}`, 'vecinos_comida', 'Más comida para el barrio',
+        `En ${z} el ${hambre.toFixed(0)}% pasa hambre crítica.`, `Cobertura alarmista sobre el hambre en ${z} por ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'garantiaAlimentaria', nuevo, `Subir garantía alimentaria a ${nuevo}%`, state.ultimoEventoClimaId || state.ultimaCausaPalanca);
+    } else if ((state.gobierno.integridad[z] ?? 100) < LEVEL11_CONSTANTS.vecinosUmbralIntegridad && vig.nivelObras < 5) {
+      const nuevo = (vig.nivelObras + 1) as ServiceLevel;
+      push(`vecinos_${z}`, `Vecinos de ${z}`, 'vecinos_obras', 'Reparar el barrio',
+        `La integridad de ${z} bajó a ${Math.round(state.gobierno.integridad[z] ?? 100)}.`, `Campaña crítica por el abandono de ${z} por ${ACTOR_CONSTANTS.diasMedida} días.`,
+        'nivelObras', nuevo, `Subir nivel de obras a ${nuevo}`, state.ultimoEventoClimaId || state.ultimaCausaPalanca);
+    }
+  }
+  void derived;
+}
+
+/** Medida por rechazo para los actores nuevos: usan una campaña de prensa con el medio más crítico. */
+function extraActorMeasure(state: GameState, demand: ActiveDemand, rejEvId: string, until: number): ActorMeasure | null {
+  const medioId = pickOutletId(state);
+  if (!medioId) return null;
+  const base = { id: nextSeqId(state, `med_${state.reloj.dia}`), actorId: demand.actorId, actorNombre: demand.actorNombre, tipo: 'campana' as const, hastaDia: until, medioId, causaId: rejEvId };
+  if (demand.demandaId === 'sindicato_salarios') return { ...base, descripcion: `${demand.actorNombre} impulsa una campaña crítica por los salarios.`, tema: 'gobierno', tono: 'critico' };
+  if (demand.demandaId === 'vecinos_comida') return { ...base, descripcion: `${demand.actorNombre} denuncia el hambre en su zona.`, tema: 'hambre', tono: 'alarmista' };
+  if (demand.demandaId === 'vecinos_obras') return { ...base, descripcion: `${demand.actorNombre} reclama por el abandono de su zona.`, tema: 'obras', tono: 'critico' };
+  return null;
 }
