@@ -14,7 +14,15 @@ import {
   stepHeadlessDay,
 } from '../src/engine/simulation';
 import { createInitialGameState } from '../src/engine/worldGenerator';
-import { BuildingType, GameState, PrivateRoleId, SimEvent, WorldConfig } from '../src/types/game';
+import type {
+  BuildingType,
+  GameState,
+  PrivateRoleId,
+  SimEvent,
+  WorldConfig,
+} from '../src/types/game';
+
+type SimEventType = SimEvent['tipo'];
 
 const presetPath = path.resolve(process.cwd(), 'presets/elecciones_simple.json');
 const PRESET = JSON.parse(fs.readFileSync(presetPath, 'utf-8'));
@@ -22,8 +30,8 @@ const PRESET = JSON.parse(fs.readFileSync(presetPath, 'utf-8'));
 function applyPreset() {
   Object.assign(ECON_CONSTANTS, PRESET.ECON_CONSTANTS);
   (Object.keys(PRESET.ROLE_CATALOG_ingresos) as PrivateRoleId[]).forEach((r) => {
-    const rng = PRESET.ROLE_CATALOG_ingresos[r];
-    if (rng) ROLE_CATALOG[r].ingreso = [...rng];
+    const rng = PRESET.ROLE_CATALOG_ingresos[r] as [number, number] | undefined;
+    if (rng) ROLE_CATALOG[r].ingreso = [rng[0], rng[1]];
   });
   SCENARIO_PRESETS.elecciones.reservaInicial = PRESET.SCENARIO_PRESET.reservaInicial;
   SCENARIO_PRESETS.elecciones.stockAlimentoInicial = PRESET.SCENARIO_PRESET.stockAlimentoInicial;
@@ -69,7 +77,7 @@ function stats(arr: number[]) {
 function isPandemicDeath(ev: SimEvent, eventById: Map<string, SimEvent>): boolean {
   let cursor = ev.causa;
   const seen = new Set<string>();
-  for (let i = 0; i < 5 && cursor; i++) {
+  for (let i = 0; i < 6 && cursor; i++) {
     if (seen.has(cursor)) break;
     seen.add(cursor);
     if (cursor.includes('pandemia')) return true;
@@ -80,9 +88,200 @@ function isPandemicDeath(ev: SimEvent, eventById: Map<string, SimEvent>): boolea
   return false;
 }
 
+const ALL_ENGINE_EVENT_TYPES: SimEventType[] = [
+  'ataque',
+  'golpe',
+  'muerte',
+  'internacion',
+  'alta',
+  'hospital_saturado',
+  'accion_inicio',
+  'accion_fin',
+  'reubicacion',
+  'defensa',
+  'integridad',
+  'orden',
+  'aviso',
+  'fenomeno_inicio',
+  'fenomeno_fin',
+  'impago',
+  'impago_fin',
+  'empresa_aumento',
+  'empresa_recorte',
+  'empresa_despido',
+  'obra_inicio',
+  'obra_fin',
+  'demolicion',
+  'parcela_habilitada',
+  'noticia',
+  'control',
+  'hito',
+  'victoria',
+  'objetivo_perdido',
+  'fin_partida',
+  'demanda',
+  'demanda_aceptada',
+  'demanda_rechazada',
+  'medida',
+];
+
+const ROOT_EVENTS = new Set<SimEventType>(['control', 'obra_inicio', 'demolicion', 'hito', 'impago_fin']);
+
+function runCorridaA() {
+  const SEEDS = 10;
+  const DAYS = 120;
+  const rows: any[] = [];
+  const allEventCounts: Record<string, number> = {};
+  const eventsWithoutCause: Record<string, number> = {};
+  let maxInvViolation = 0;
+
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    const s = makeM0State(seed, 'G0');
+    const m0 = computeTotalWorldMoney(s);
+    const stock0 = s.alimento.stock;
+    const prod1 = s.alimento.produccionDiaria;
+    const cons1 = s.alimento.consumoDiario;
+
+    let minFFood = s.empresas.alimento.factor;
+    let maxFFood = s.empresas.alimento.factor;
+    let minFCom = s.empresas.comercio.factor;
+    let maxFCom = s.empresas.comercio.factor;
+    let minStockRatio = 1;
+    let maxStockRatio = 1;
+    let maxHambreCritica = deriveCommunityStats(s).hambreCriticaPct;
+    let daysWithImpago = 0;
+    let npcSum64 = 0;
+    const npcWeek9: number[] = [];
+    const npcWeek17: number[] = [];
+    let ingRatio7 = 0;
+    let minEmployedNetDay8 = 999;
+
+    for (let d = 1; d < DAYS; d++) {
+      const prevM = computeTotalWorldMoney(s);
+      stepHeadlessDay(s);
+      const curM = computeTotalWorldMoney(s);
+      const diff = Math.abs(curM - (prevM + s.auditEntradasDia - s.auditSalidasDia));
+      if (diff > maxInvViolation) maxInvViolation = diff;
+
+      for (const ev of s.eventosDiaActual) {
+        allEventCounts[ev.tipo] = (allEventCounts[ev.tipo] ?? 0) + 1;
+        if (!ev.causa && !ROOT_EVENTS.has(ev.tipo)) {
+          eventsWithoutCause[ev.tipo] = (eventsWithoutCause[ev.tipo] ?? 0) + 1;
+        }
+      }
+
+      minFFood = Math.min(minFFood, s.empresas.alimento.factor);
+      maxFFood = Math.max(maxFFood, s.empresas.alimento.factor);
+      minFCom = Math.min(minFCom, s.empresas.comercio.factor);
+      maxFCom = Math.max(maxFCom, s.empresas.comercio.factor);
+      const sr = s.alimento.stock / stock0;
+      minStockRatio = Math.min(minStockRatio, sr);
+      maxStockRatio = Math.max(maxStockRatio, sr);
+      const dsNow = deriveCommunityStats(s);
+      maxHambreCritica = Math.max(maxHambreCritica, dsNow.hambreCriticaPct);
+      if (s.gobierno.finanzas.impago) daysWithImpago++;
+
+      const npcSum = s.npcs.reduce((acc, n) => acc + n.economia.dinero, 0);
+      if (s.reloj.dia === 64) npcSum64 = npcSum;
+      if (s.reloj.dia >= 57 && s.reloj.dia <= 63) npcWeek9.push(npcSum);
+      if (s.reloj.dia >= 113 && s.reloj.dia <= 119) npcWeek17.push(npcSum);
+      if (s.reloj.dia === 8) {
+        const fin = s.gobierno.finanzas;
+        const gastos =
+          fin.nomina +
+          fin.pensiones +
+          fin.comidaMenores +
+          fin.garantiaAlimentaria +
+          fin.ayudaSocial +
+          fin.operacion +
+          fin.prensa;
+        ingRatio7 = gastos > 0 ? fin.ingresos / gastos : 1;
+        for (const n of s.npcs) {
+          if (n.vivo && n.edad >= 18 && !['desempleado', 'jubilado', 'estudiante'].includes(n.rol)) {
+            minEmployedNetDay8 = Math.min(minEmployedNetDay8, n.economia.ultimoIngresoNeto);
+          }
+        }
+      }
+    }
+
+    const mEnd = computeTotalWorldMoney(s);
+    const driftPct = ((mEnd - m0) / m0) * 100;
+    const npcSum120 = s.npcs.reduce((acc, n) => acc + n.economia.dinero, 0);
+    const npcDelta64to120Pct = npcSum64 > 0 ? ((npcSum120 - npcSum64) / npcSum64) * 100 : 0;
+    const meanW9 = npcWeek9.reduce((a, b) => a + b, 0) / Math.max(1, npcWeek9.length);
+    const meanW17 = npcWeek17.reduce((a, b) => a + b, 0) / Math.max(1, npcWeek17.length);
+    const npcWeeklyDeltaPct = meanW9 > 0 ? ((meanW17 - meanW9) / meanW9) * 100 : 0;
+
+    const dsEnd = deriveCommunityStats(s);
+    const passed =
+      Math.abs(driftPct) < 2 &&
+      minFFood >= 0.95 &&
+      maxFFood <= 1.05 &&
+      minFCom >= 0.95 &&
+      maxFCom <= 1.05 &&
+      daysWithImpago === 0 &&
+      minStockRatio >= 0.8 &&
+      maxStockRatio <= 1.2 &&
+      maxHambreCritica === 0 &&
+      Math.abs(npcDelta64to120Pct) < 2;
+
+    rows.push({
+      seed,
+      passed,
+      driftPct: Number(driftPct.toFixed(2)),
+      fFoodMin: Number(minFFood.toFixed(3)),
+      fFoodMax: Number(maxFFood.toFixed(3)),
+      fComMin: Number(minFCom.toFixed(3)),
+      fComMax: Number(maxFCom.toFixed(3)),
+      stockRatioMin: Number(minStockRatio.toFixed(3)),
+      stockRatioMax: Number(maxStockRatio.toFixed(3)),
+      daysWithImpago,
+      maxHambreCritica,
+      npcDelta64to120Pct: Number(npcDelta64to120Pct.toFixed(2)),
+      npcWeeklyDeltaPct: Number(npcWeeklyDeltaPct.toFixed(2)),
+      prod1,
+      cons1,
+      ingRatio7: Number(ingRatio7.toFixed(3)),
+      minEmployedNetDay8: Number(minEmployedNetDay8.toFixed(2)),
+      reservaEnd: Number(s.gobierno.reserva.toFixed(2)),
+      apoyoEnd: dsEnd.apoyoPct,
+      satisfaccionEnd: dsEnd.satisfaccionMedia,
+      desempleoEnd: dsEnd.desempleoPct,
+    });
+  }
+
+  return {
+    config: { scenario: 'elecciones', capa: 'M0+G0', seeds: SEEDS, days: DAYS },
+    passedCount: rows.filter((r) => r.passed).length,
+    maxInvariantViolation: Number(maxInvViolation.toFixed(4)),
+    summary: {
+      driftPct: stats(rows.map((r) => r.driftPct)),
+      absDriftMax: Number(Math.max(...rows.map((r) => Math.abs(r.driftPct))).toFixed(2)),
+      fFoodMin: Math.min(...rows.map((r) => r.fFoodMin)),
+      fFoodMax: Math.max(...rows.map((r) => r.fFoodMax)),
+      fComMin: Math.min(...rows.map((r) => r.fComMin)),
+      fComMax: Math.max(...rows.map((r) => r.fComMax)),
+      stockRatioMin: Math.min(...rows.map((r) => r.stockRatioMin)),
+      stockRatioMax: Math.max(...rows.map((r) => r.stockRatioMax)),
+      totalImpagos: rows.reduce((a, r) => a + r.daysWithImpago, 0),
+      maxHambreCritica: Math.max(...rows.map((r) => r.maxHambreCritica)),
+      npcDelta64to120Pct: stats(rows.map((r) => r.npcDelta64to120Pct)),
+      npcWeeklyDeltaPct: stats(rows.map((r) => r.npcWeeklyDeltaPct)),
+      ingRatio7: stats(rows.map((r) => r.ingRatio7)),
+      reservaEnd: stats(rows.map((r) => r.reservaEnd)),
+      apoyoEnd: stats(rows.map((r) => r.apoyoEnd)),
+      satisfaccionEnd: stats(rows.map((r) => r.satisfaccionEnd)),
+    },
+    seeds: rows,
+    eventCounts: allEventCounts,
+    eventsWithoutCause,
+    neverTriggeredEvents: ALL_ENGINE_EVENT_TYPES.filter((t) => !allEventCounts[t]),
+  };
+}
+
 type StrategyId = 'pasiva' | 'constructora' | 'ahorradora';
 
-function runCorridaB(pandemicIntensity: number, pandemicDuration: number, maxBuilds = 5) {
+function runCorridaB(pandemicIntensity: number, pandemicDuration: number, ahorradoraTax = 46) {
   const SEEDS = 10;
   const DAYS = 180;
   const strategies: StrategyId[] = ['pasiva', 'constructora', 'ahorradora'];
@@ -91,8 +290,11 @@ function runCorridaB(pandemicIntensity: number, pandemicDuration: number, maxBui
   for (const strat of strategies) {
     const rows: any[] = [];
     const allEventCounts: Record<string, number> = {};
+    const endLogEventCounts: Record<string, number> = {};
     const eventsWithoutCause: Record<string, number> = {};
-    let sampleChain: any = null;
+    let sampleChainAtMoment: any = null;
+    let sampleChainAtEnd: any = null;
+    let maxEventsLen = 0;
 
     for (let seed = 1; seed <= SEEDS; seed++) {
       const s = makeM0State(seed, 'G1');
@@ -118,13 +320,11 @@ function runCorridaB(pandemicIntensity: number, pandemicDuration: number, maxBui
         if (strat === 'pasiva') return;
         if (strat === 'ahorradora') {
           if (day === 1) {
-            s.gobierno.palancasObjetivo.impuesto = 52;
-            s.gobierno.palancasObjetivo.garantiaAlimentaria = 50;
+            s.gobierno.palancasObjetivo.impuesto = ahorradoraTax;
           }
           return;
         }
         if (strat === 'constructora') {
-          if (buildingsBuilt >= maxBuilds) return;
           const hasConstruction = s.parcelas.some((p) => p.estado === 'en_obra');
           if (!hasConstruction) {
             const free = s.parcelas.find((p) => p.estado === 'libre');
@@ -142,23 +342,38 @@ function runCorridaB(pandemicIntensity: number, pandemicDuration: number, maxBui
         }
       };
 
-      applyStrategy(1);
-      for (let d = 1; d < DAYS; d++) {
-        stepHeadlessDay(s);
+      const seenEventIds = new Set<string>();
+      const recordDayEvents = () => {
         for (const ev of s.eventosDiaActual) {
+          if (seenEventIds.has(ev.id)) continue;
+          seenEventIds.add(ev.id);
           allEventsForSeed.push(ev);
           eventById.set(ev.id, ev);
           allEventCounts[ev.tipo] = (allEventCounts[ev.tipo] ?? 0) + 1;
-          if (
-            !ev.causa &&
-            !['construccion_inicio', 'construccion_fin', 'demolicion', 'hito', 'control', 'impago_fin'].includes(
-              ev.tipo
-            )
-          ) {
+          if (!ev.causa && !ROOT_EVENTS.has(ev.tipo)) {
             eventsWithoutCause[ev.tipo] = (eventsWithoutCause[ev.tipo] ?? 0) + 1;
           }
+          if (
+            !sampleChainAtMoment &&
+            (ev.tipo === 'muerte' || ev.tipo === 'impago')
+          ) {
+            sampleChainAtMoment = {
+              seed,
+              capturedAtDay: s.reloj.dia,
+              event: ev,
+              chain: buildCausalChain(s, ev.id, `Evento ${ev.tipo} día ${ev.dia}`),
+            };
+          }
         }
+      };
+
+      applyStrategy(1);
+      recordDayEvents();
+      for (let d = 1; d < DAYS; d++) {
+        stepHeadlessDay(s);
+        recordDayEvents();
         applyStrategy(s.reloj.dia);
+        recordDayEvents();
         if (s.gobierno.reserva < minReserva) {
           minReserva = s.gobierno.reserva;
           minReservaDay = s.reloj.dia;
@@ -169,27 +384,34 @@ function runCorridaB(pandemicIntensity: number, pandemicDuration: number, maxBui
         if (s.resultado.estado === 'derrota') break;
       }
 
-      const ds = deriveCommunityStats(s);
-      const deathEvents = allEventsForSeed.filter((e) => e.tipo === 'muerte');
-      const pandemicDeaths = deathEvents.filter((e) => isPandemicDeath(e, eventById)).length;
+      maxEventsLen = Math.max(maxEventsLen, s.eventos.length);
+      for (const ev of s.eventos) {
+        endLogEventCounts[ev.tipo] = (endLogEventCounts[ev.tipo] ?? 0) + 1;
+      }
 
-      if (!sampleChain) {
-        const deathEv = s.eventos.find((e) => e.tipo === 'muerte');
-        const impagoEv = s.eventos.find((e) => e.tipo === 'impago');
-        const targetEv = deathEv || impagoEv || s.eventos[s.eventos.length - 1];
-        if (targetEv) {
-          sampleChain = {
+      if (!sampleChainAtEnd) {
+        const refEv = allEventsForSeed.find((e) => e.tipo === 'muerte' || e.tipo === 'impago');
+        if (refEv) {
+          const stillInLog = s.eventos.some((e) => e.id === refEv.id);
+          sampleChainAtEnd = {
             seed,
-            event: targetEv,
-            chain: buildCausalChain(s, targetEv.id, `Evento ${targetEv.tipo} día ${targetEv.dia}`),
+            eventStillIn2500CapLog: stillInLog,
+            chainAtEnd: buildCausalChain(
+              s,
+              refEv.id,
+              `Evento ${refEv.tipo} día ${refEv.dia}`
+            ),
           };
         }
       }
 
+      const ds = deriveCommunityStats(s);
+      const deathEvents = allEventsForSeed.filter((e) => e.tipo === 'muerte');
+      const pandemicDeaths = deathEvents.filter((e) => isPandemicDeath(e, eventById)).length;
+
       rows.push({
         seed,
         estado: s.resultado.estado,
-        victoriaCumplida: Boolean(s.resultado.victoriaCumplida),
         finalDay: s.reloj.dia,
         poblacionPct: ds.poblacionPct,
         apoyoPct: ds.apoyoPct,
@@ -203,41 +425,52 @@ function runCorridaB(pandemicIntensity: number, pandemicDuration: number, maxBui
         buildingsBuilt,
         pandemicDeaths,
         totalDeaths: deathEvents.length,
-        aliveEnd: s.npcs.filter((n) => n.vivo).length,
+        hospitalOcupacionMaxPct: ds.hospitalOcupacionPct,
       });
     }
 
-    const sortedEvents = Object.entries(allEventCounts)
+    const top5AllEmitted = Object.entries(allEventCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+    const top5RetainedLog = Object.entries(endLogEventCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
     out[strat] = {
-      params: { inicioDia: 30, duracionDias: pandemicDuration, intensidad: pandemicIntensity, maxBuilds },
+      params: {
+        inicioDia: 30,
+        duracionDias: pandemicDuration,
+        intensidad: pandemicIntensity,
+        ...(strat === 'ahorradora' ? { ahorradoraTax } : {}),
+      },
       summary: {
-        winPct: Number(((rows.filter((r) => r.victoriaCumplida).length / SEEDS) * 100).toFixed(1)),
         defeatPct: Number(((rows.filter((r) => r.estado === 'derrota').length / SEEDS) * 100).toFixed(1)),
         poblacionPct: stats(rows.map((r) => r.poblacionPct)),
         apoyoPct: stats(rows.map((r) => r.apoyoPct)),
         satisfaccionMedia: stats(rows.map((r) => r.satisfaccionMedia)),
         hambreCriticaPct: stats(rows.map((r) => r.hambreCriticaPct)),
-        desempleoPct: stats(rows.map((r) => r.desempleoPct)),
         minReserva: stats(rows.map((r) => r.minReserva)),
         minReservaDay: stats(rows.map((r) => r.minReservaDay)),
+        reservaEnd: stats(rows.map((r) => r.reservaEnd)),
         daysWithImpago: stats(rows.map((r) => r.daysWithImpago)),
         buildingsBuilt: stats(rows.map((r) => r.buildingsBuilt)),
         pandemicDeaths: stats(rows.map((r) => r.pandemicDeaths)),
-        totalDeaths: stats(rows.map((r) => r.totalDeaths)),
+        desempleoPct: stats(rows.map((r) => r.desempleoPct)),
       },
-      top5Events: sortedEvents,
+      top5EmittedEvents: top5AllEmitted,
+      top5RetainedEvents: top5RetainedLog,
+      maxRetainedEventsLength: maxEventsLen,
       eventsWithoutCause,
-      sampleCausalChain: sampleChain,
+      neverTriggeredEvents: ALL_ENGINE_EVENT_TYPES.filter((t) => !allEventCounts[t]),
+      sampleCausalChain: sampleChainAtMoment,
+      sampleCausalChainAtEnd: sampleChainAtEnd,
     };
   }
 
   return out;
 }
 
-console.log('--- B1: intensity=75, dur=150, maxBuilds=5 ---');
-console.log(JSON.stringify(runCorridaB(75, 150, 5)));
-console.log('--- B2: intensity=65, dur=90, maxBuilds=2 ---');
-console.log(JSON.stringify(runCorridaB(65, 90, 2)));
+console.log('=== CORRIDA A: M0 + G0 (10 semillas, 120 dias) ===');
+console.log(JSON.stringify(runCorridaA(), null, 2));
+console.log('=== CORRIDA B: M0 + G1 con pandemia forzada desde dia 30 (intensidad=65, duracion=90, 10 semillas, 180 dias) ===');
+console.log(JSON.stringify(runCorridaB(65, 90, 46), null, 2));

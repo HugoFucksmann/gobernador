@@ -52,25 +52,25 @@ Con esto, 365 días de elecciones son unas 2 horas reales a x1 y 180 días de zo
 | Parámetro | Valor vigente | Usado en |
 |---|---|---|
 | `salario_base_publico` | 4,25 $/día (al 100 %) | `ECONOMIA §3` |
-| `pension_base` | 2,56 $/día | `ECONOMIA §3` |
-| `ingreso` privado por día `[min, max]` | agricultor `[5,8, 7,8]`, obrero `[8,0, 10,6]`, técnico `[9,0, 12,2]`, periodista `[4,2, 6,4]` | `ECONOMIA §4` |
-| `produccion_base_agricultor` | 5,35 u/día | `ECONOMIA §4` |
+| `pension_base` | 2,65 $/día | `ECONOMIA §3` |
+| `ingreso` privado por día `[min, max]` | agricultor `[8,2, 8,8]`, obrero `[8,0, 10,4]`, técnico `[8,0, 9,0]`, periodista `[7,1, 7,3]` | `ECONOMIA §4` |
+| `produccion_base_agricultor` | 5,55 u/día | `ECONOMIA §4` |
 | `tecnicos_por_agricultor` | 0,20 | `ECONOMIA §4`, `MUNDO §3` |
 | `k_tecnificacion` | 1,5 | `ECONOMIA §4` |
-| `parte_sueldos` | La fija el generador al arranque para que ambas empresas inicien con `factor = 1,0` (acotada en `[0,25, 0,92]` en alimento y `[0,20, 0,90]` en comercio) | `ECONOMIA §4`, §12 |
+| `parte_sueldos` | La fija el generador por punto fijo al arranque para que ambas empresas inicien en estado estacionario con `factor = 1,0` (acotada en `[0,25, 0,92]` en alimento y `[0,20, 0,90]` en comercio) | `ECONOMIA §4`, §12 |
 | `factor_max` | 1,5 | `ECONOMIA §4` |
 | `piso_sueldo_pct` | 70 % | `ECONOMIA §4` |
 | `max_contrataciones_por_periodo` | 3 | `ECONOMIA §4` |
 | `max_pase_desempleo_por_dia` | 2 | `ECONOMIA §4`, `MUNDO §3` |
-| `margen_comercial_pct` | 26 % | `ECONOMIA §6` |
+| `margen_comercial_pct` | 16 % | `ECONOMIA §6` |
 | `propension_gasto` `[base, min, max]` | 0,85 `[0,55, 0,95]` | `ECONOMIA §3` |
 | `k_riqueza` | 0,045 | `ECONOMIA §3` |
 | `colchon_dias` | 7 días de consumo en comida | `ECONOMIA §3`, §12 |
 | Factor impositivo (`MUNDO §10`) | 1,0 hasta `40 %` de impuesto; baja `0,01` por cada punto por encima (piso `0,5`) | `MUNDO §10` |
-| `ingresos_propios` de medios (por período) | El Heraldo `40`, La Crónica del Valle `36`, Voz Popular `32` | `ECONOMIA §7`, `CAOS_PRENSA §7` |
+| `ingresos_propios` de medios (por período) | El Heraldo `140`, La Crónica del Valle `130`, Voz Popular `120` | `ECONOMIA §7`, `CAOS_PRENSA §7` |
 | `umbral_dependencia_pct` (prensa) | 35 % | `CAOS_PRENSA §7` |
 
-*Nota sobre cupos iniciales:* los puestos de `agricultor`, `obrero`, `comerciante`, `policia` y `medico` derivan de los edificios iniciales del preset (sección 2.4 y sección 3). Los cupos fijos iniciales en `100` habitantes son `estatal = 4` y `docente = 4` en elecciones (`docente = 3` en zombies); `tecnico = 3`, `empresario = 1`, `periodista = 3`, `ingeniero = 3` (por `nivel_obras = 2`), `estudiante = 12`, `jubilado = 10`, `desempleado = 2`.
+*Nota sobre cupos iniciales:* los puestos de `agricultor`, `obrero`, `comerciante`, `policia` y `medico` derivan de los edificios iniciales del preset (sección 2.4 y sección 3). Los cupos fijos iniciales en `100` habitantes son `estatal = 3` y `docente = 3` en elecciones (`estatal = 4`, `docente = 3` en zombies); `tecnico = 3`, `empresario = 1`, `periodista = 2` en elecciones (`3` en zombies), `ingeniero = 3` (por `nivel_obras = 2`), `estudiante = 12`, `jubilado = 10`, `desempleado = 6` (`4` sin puesto fijo tras equilibrar cupos).
 
 ### 2.3 Alimento, despensas y comercio exterior (`ECONOMIA-1.md`)
 
@@ -78,8 +78,8 @@ Con esto, 365 días de elecciones son unas 2 horas reales a x1 y 180 días de zo
 |---|---|---|
 | `consumo_por_npc` | 1,0 | `ECONOMIA §6` |
 | `precio_base` | 2,55 | `ECONOMIA §6` |
-| `silo_dias` | 25 (+ `silo_extra_dias` por cada silo construido) | `ECONOMIA §6` |
-| Stock inicial | Elecciones: `1.600` (16 días). Zombies: `1.800` (18 días) | `ECONOMIA §12`, `ESCENARIOS §4` |
+| `silo_dias` | 23 (+ `silo_extra_dias` por cada silo construido) | `ECONOMIA §6` |
+| Stock inicial | Elecciones: `2.000` (20 días). Zombies: `1.800` (18 días) | `ECONOMIA §12`, `ESCENARIOS §4` |
 | `despensa_max_dias` | 14 | `ECONOMIA §6` |
 | `objetivo_base_dias` | 3,4 | `ECONOMIA §6` |
 | `umbral_recompra_dias` | 3,6 | `ECONOMIA §6` |
@@ -142,14 +142,14 @@ Con esto, 365 días de elecciones son unas 2 horas reales a x1 y 180 días de zo
 
 | Control (y palanca) | Rango / Modos / Escalones | Elecciones (piloto aut.) | Zombies (piloto aut.) |
 |---|---|---|---|
-| `tasa_impuesto` (`impuesto`) | `0` a `60 %` (paso `1`) | `38 %` | `40 %` |
+| `tasa_impuesto` (`impuesto`) | `0` a `60 %` (paso `1`) | `36 %` | `40 %` |
 | `salario_publico` (`salario_publico`) | `50` a `150 %` del salario base público (paso `5`; `2,13` a `6,38 $/d` hoy) | `100 %` | `100 %` |
 | `puestos[ingeniero]`, `operacion[obras]` (`nivel_obras`) | Niveles `0` a `5` (tabla superior) | `2` (3 % / $18) | `2` (3 % / $18) |
 | `ayuda_social` (`ayuda_social`) | `0` a `10 $/día` (paso `0,5`; para desempleados y jubilados) | `0 $/día` | `0 $/día` |
 | `garantia_pct` (`garantia_alimentaria`) | `0` a `100 %` (paso `5`; menores siempre `100 %`) | `85 %` | `85 %` |
 | `tope_precio` (`precio_maximo`) | `libre` (sin tope), `moderado` (**×1,25** `precio_base` = `$3,19`), `estricto` (**×0,60** `precio_base` = `$1,53`) | `libre` | `libre` |
 | `flujo_exterior_pct` (`comercio_exterior`) | 5 escalones: `−100 %` (Exp. máx), `−50 %` (Exportar), `0 %` (Cerrado), `+50 %` (Importar), `+100 %` (Imp. máx) | `0 %` | `0 %` |
-| `fondos_prensa` (`prensa`) | `0` a `100 $/período` (paso `5`; reparto parejo entre medios) | `12 $/per` | `12 $/per` |
+| `fondos_prensa` (`prensa`) | `0` a `100 $/período` (paso `5`; reparto parejo entre medios) | `60 $/per` | `12 $/per` |
 | `tope_emision_pct` *(solo ext. `fiscal`, M2/G3)* | `0` a `30 %` (paso `1`) | `10 %` | `10 %` |
 
 ### 2.6 Actores y demandas (`ACTORES.md`)
@@ -282,12 +282,12 @@ Con esto, 365 días de elecciones son unas 2 horas reales a x1 y 180 días de zo
 |---|---|
 | Nivel de mundo y de gobernador por defecto (Nivel 1) | `M1 + G2` (pruebas iniciales por pasos: `M0 + G0` → `M0 + G1`) |
 | Parcelas por zona (`20` totales: `13` ocupadas, `5` libres, `2` bloqueadas) | `centro`: 1 `hospital`, 1 `comisaria`, 1 `oficina_publica`, 2 `local_comercio`, 1 libre (`p_centro_libre`) · `norte`: 2 `campo`, 1 libre (`p_norte_libre`) · `oeste`: 3 `campo`, 1 libre (`p_oeste_libre`) · `sur`: 2 `local_comercio`, 1 libre (`p_sur_libre`) · `este`: 1 `escuela`, 1 libre (`p_este_libre`), 2 bloqueadas (`p_hito_este_1`, `p_hito_este_2`) |
-| Medios y columnistas por medio | `mediosDefault = 2`, `periodista = 3` (reparto round-robin: `El Heraldo` recibe `2` columnistas, `La Crónica del Valle` recibe `1`; con `3` medios, `1` cada uno sumando `Voz Popular`) |
+| Medios y columnistas por medio | `mediosDefault = 2`, `periodista = 2` en `elecciones` (`1` cada uno entre `El Heraldo` y `La Crónica del Valle`; `periodista = 3` en `zombies` y `1` cada uno si `medios = 3`) |
 
 ### 3.2 Preset `elecciones` (Año Electoral)
 
-- **Reserva y stock inicial:** `$4.800`, `1.600` u. (16 días).
-- **Piloto automático (`initialLevers`):** `impuesto = 38 %`, `salario_publico = 100 %`, `nivel_obras = 2`, `ayuda_social = 0`, `garantia_alimentaria = 85 %`, `precio_maximo = libre`, `comercio_exterior = 0 %`, `prensa = 12 $/per` (`tope_emision = 10 %` en M2).
+- **Reserva y stock inicial:** `$6.000`, `2.000` u. (20 días).
+- **Piloto automático (`initialLevers`):** `impuesto = 36 %`, `salario_publico = 100 %`, `nivel_obras = 2`, `ayuda_social = 0`, `garantia_alimentaria = 85 %`, `precio_maximo = libre`, `comercio_exterior = 0 %`, `prensa = 60 $/per` (`tope_emision = 10 %` en M2).
 - **Hitos con sus parcelas:**
   - `hito_estabilidad`: `satisfaccion_media >= 52` durante `2` períodos → habilita `p_hito_este_1` (*Ensanche del Valle*).
   - `hito_prosperidad`: `apoyo_pct >= 55` durante `2` períodos → habilita `p_hito_este_2` (*Parque Nuevo*).
@@ -309,13 +309,13 @@ Con esto, 365 días de elecciones son unas 2 horas reales a x1 y 180 días de zo
 
 ### 3.4 Criterios de arranque de un mundo (`ECONOMIA §12`)
 
-Un mundo generado debe cumplir al día 1–7 sin intervención del jugador:
-- Producción de alimento ≥ consumo × 1,05 (medido: `113,4 u/d` vs `100 u/d`).
-- Stock inicial de 15 a 20 días (`elecciones`: 16 días; `zombies`: 18 días).
-- Ingresos ≥ gastos totales × 1,10 (medido: ratio `1,16` en elecciones, `1,23` en zombies).
-- Reserva ≥ 20 días de nómina (`elecciones`: `$4.800`; `zombies`: `$3.400`).
-- Ningún rol vacío al arranque y todas las empresas arrancando con `ultima_ganancia` positiva y `factor = 1,0` (`alimento = $265,24`, `comercio = $347,88 / $312,86`).
-- `lealtad` inicial heterogénea, y `apoyo_pct` inicial derivado del estado (no fijo).
+Un mundo generado debe cumplir al día 1–7 sin intervención del jugador (`ECONOMIA §12`):
+- Producción de alimento con margen sobre el consumo (medido al arranque en `elecciones` semillas 1–10: `116,6–128,2 u/d` vs `100 u/d`, promedio ~`120,6 u/d`) para tolerar traspasos de agricultores a roles públicos y bajas por internación sin caer en desabastecimiento. *(Nota: el texto orientativo de `ECONOMIA §12` hablaba de "producción ≈ consumo"; ver §7.)*
+- Stock inicial entre `0,8×` y `1,2×` estable con tope de silo (elecciones: `2.000 u.` / `silo_dias = 23` → tope `1,15×`; zombies: `1.800 u.`).
+- Equilibrio fiscal cercano a neutro en estado estacionario sin deriva de dinero total del mundo (`|Δdinero_total| < 2 %` en 120d; medido en elecciones: `ingRatio7 = 0,98–0,99` en semana 1 con reserva `~$5.875` al día 120; `1,07` en zombies).
+- Reserva ≥ 20 días de nómina (`elecciones`: `$6.000`; `zombies`: `$3.400`).
+- Ningún rol vacío al arranque y ambas empresas arrancando en punto fijo con `ultima_ganancia` positiva y `factor = 1,0` (`alimento = $218,55`, `comercio = $345,00` en elecciones; `comercio = $91,55` en zombies).
+- `lealtad` inicial heterogénea, y `apoyo_pct` inicial derivado del estado (sin inflación artificial de `satisfaccion`).
 
 ---
 
@@ -333,48 +333,38 @@ Un mundo generado debe cumplir al día 1–7 sin intervención del jugador:
 
 ## 5. Resultados de la última corrida de validación
 
-Corrida sobre el código vigente (`npx tsx scripts/run_calibration.ts`, `M1 + G2`):
+Corridas reproducibles sobre el código vigente (`npx tsx scripts/validate_pasos_1_2.ts` y `npx tsx scripts/run_calibration.ts --quick`):
 
-- **Determinismo, sistemas nuevos e invariantes:** `deterministic: true`, `newSystems.passed: true` (`G1` vs `G2`, demolición/reubicación hospitalaria, `silo`/`riego`/`hospital_campana` a 25 días, desbloqueo de parcela por hito, demanda con bloqueo y rechazo con medida), `invariantViolations: 0` en todas las corridas.
-- **Elecciones — Línea base y respuestas a sequía (`intensidad 95, día 140, 90d` + caos):**
-  - Base sin perturbación (`B_no_perturb`, n=10): **80 % victoria**, 20 % `objetivo_perdido`, 0 % derrota, 0 impagos, `prod/cons = 113,4 / 100`, `ingRatio7 = 1,16`, `apoyoEnd = 53,13 %`, `resEnd = $8.464,65` *(nota: registró `65` eventos `empresa_recorte`/`empresa_despido` acumulados en el año, ver §7)*.
-  - Pasivo con sequía + caos (`C1_passive_drought`, n=10): **0 % victoria**, **100 % derrota**, `hambreEnd = 68,1 %`, `apoyoEnd = 3,71 %`.
-  - Heurístico (`C2_heuristic_drought`, n=10): **0 % victoria**, **100 % `objetivo_perdido` sin derrota** (`hambreEnd = 0,8 %`, `apoyoEnd = 4,12 %`, `impagos = 142`, `nomImpagos = 0`).
-  - Activo balanceado (`C3_active_balanced`, n=10): **20 % victoria**, **80 % `objetivo_perdido`**, 0 % derrota (`hambreEnd = 0 %`, `apoyoEnd = 26,18 %`, `resEnd = $1.568,28`).
-- **Sensibilidad de palancas y edificios (n=8):**
-  - `impuesto` (48 vs 28 %): Δ`apoyo` −67,82 pp, Δ`reserva` +$1.839,06.
-  - `salario_publico` (120 vs 80 %): Δ`apoyo` +21,72 pp, Δ`reserva` −$486,46.
-  - `nivel_obras` (N5 vs N0): Δ`ind.infraestructura` +76,2, Δ`stock` +65,06 u., Δ`reserva` −$599,39.
-  - `ayuda_social` (4 vs 0 $/d): Δ`apoyo` +1,55 pp, Δ`reserva` −$705,50.
-  - `garantia_alimentaria` (100 vs 0 %, liquidez baja): Δ`hambre` −19,63 pp, Δ`apoyo` +5,98 pp, Δ`reserva` −$301,31.
-  - `precio_maximo` (`libre` vs `estricto`, sequía): Δ`precio` +$9,02, Δ`empResp` (`empresa_recorte`/`empresa_despido`) −13,75, Δ`stock` +2,17, Δ`hambre` −20,12 pp.
-  - `comercio_exterior` (+100 vs −100 %): Δ`stock` +1.808,84 u., Δ`reserva` −$10.407,42, Δ`ganancia_alimento` −$736,66, Δ`precio` −$1,47.
-  - `prensa` (45 vs 0 $/per): Δ`alcance` +55 pp, Δ`credibilidad` −5,6, Δ`dependencia` +36 pp, Δ`reserva` −$340,58.
-  - `obra.comisaria` (+2 comisarías vs sin obra): Δ`ind.seguridad` +40,1, Δ`apoyo` +4,81 pp, Δ`reserva` −$523,42.
-  - `obra.hospital` (+2 hospitales vs sin obra): Δ`ind.salud` +29,4, Δ`apoyo` +15,03 pp, Δ`reserva` −$593,14.
-- **Zombies (`M1 + G2`, n=10):**
-  - Pasivo (`Z_passive`): **30 % victoria**, **50 % `objetivo_perdido`**, 20 % derrota (`popEnd = 56 %`, `hambreEnd = 71,13 %`).
-  - `+1 comisaria` (`Z_1comisaria`): **100 % victoria**, `popEnd = 99,1 %`, `hambreEnd = 19,53 %`, `resEnd = $3.339,07`.
-  - `+2 comisarias + 1 muralla` con impuesto 43 % (`Z_2com_muralla_tax43`): **10 % victoria**, **90 % `objetivo_perdido`** (`popEnd = 59,2 %`, `hambreEnd = 91,41 %`, `ingRatio7 = 0,88`).
-- **No-dominancia (n=5 por punto):**
-  - *`nivel_obras` en elecciones (con sequía `75, d140, 70d`):* N0–1 terminan en **100 % derrota** (`hambreEnd 56–63 %`), N2 en **100 % `objetivo_perdido`** (`apoyo 29,04 %`), N3 en `40 %` victoria (`apoyo 38,84 %`), **N4 rinde óptimo (`80 %` victoria, `apoyo 44,4 %`, `$8.691,68`)** y N5 cae a `60 %` victoria (`$8.469,93`).
-  - *Defensa en zombies:* `base` da `40 %` victoria / `20 %` `objetivo_perdido` / `40 %` derrota (`popEnd 55,8 %`); **`1_comisaria` logra 100 % victoria (`popEnd 98,2 %`)**; `2_comisarias` y `2_com_1_muralla` bajan a `80 %` victoria / `20 %` `objetivo_perdido` (`popEnd 83,6–83,8 %`) por el costo fiscal de obra y mantenimiento.
-  - *`precio_maximo` con sequía prolongada (`80, d90, 90d`):* `libre` sufre `40 %` derrota / `60 %` `objetivo_perdido` (`apoyo 19,2 %`); **`moderado` evita la derrota (`100 % objetivo_perdido`, `0 %` derrota, `hambre 0 %`)**; `estricto` sostenido dispara `74` respuestas/despidos empresariales, vacía el stock (`minStock 0,13`) y termina en **100 % derrota (`hambreEnd 87,8 %`)**.
-  - *`comercio_exterior` (90d):* −100 % sube la reserva a `$12.072,96` drenando stock (`minStock 439,43`) y apoyo (`28,36 %`); **−50 % equilibra (`apoyo 80,26 %`, `$10.288,48`, `minStock 1.489,05`)**; 0 % da `apoyo 68,24 %`; +50 % y +100 % sostienen stock (`1.594–1.600`) vaciando la reserva (`$179,26` con 5 impagos y `$0` con 35 impagos).
+- **Paso 1 — Corrida A (`M0 + G0`, escenario `elecciones`, 10 semillas, 120 días, sin clima ni caos ni controles):** **10/10 aprobadas (`ECONOMIA §12`)**:
+  - `invViol = 0` (conservación exacta en cada día); deriva del dinero total del mundo `−0,71 %` media (`DE 0,88 %`, mín `−1,57 %`, máx `+1,49 %`, todas `< 2 %`).
+  - Factor empresarial: `alimento ∈ [0,978, 1,035]`, `comercio ∈ [1,000, 1,047]` (dentro de `[0,95, 1,05]`).
+  - `impagos = 0`, `hambre_critica_pct = 0`, `stock / stock0 ∈ [1,000, 1,100]` (dentro de `[0,8, 1,2]`).
+  - Dinero total de NPCs estabilizado desde el día 60: en fase equivalente de pago (día `64` vs `120`) varía `−0,12 %` media (`[−0,29 %, +0,11 %]`), y por promedio semanal (sem. `9` vs `17`) `−0,22 %` (`[−0,46 %, +0,08 %]`).
+- **Paso 2 — Corrida B (`M0 + G1`, escenario `elecciones`, 10 semillas, 180 días, pandemia forzada desde día 30 con `intensidad = 65, duracion = 90`):**
+  - *Pasiva:* `poblacion_pct = 47,4 %` (`DE 3,5`), `muertes = 52,6` (`DE 3,5`), `apoyo_pct = 64,71 %` (`DE 8,37`), `satisfaccion = 58,04` (`DE 1,57`), `hambre_critica = 0 %`, `reserva_min = $5.421,13` (día `96,5`), `impagos = 0`, `obras = 0`, `desempleo = 0 %`.
+  - *Constructora (`hospital`/`comisaria` alternados):* `poblacion_pct = 100 %` (`DE 0`), `muertes = 0` (`DE 0`), `apoyo_pct = 25,77 %` (`DE 27,92`), `satisfaccion = 46,32` (`DE 8,35`), `hambre_critica = 0 %`, `reserva_min = $1.660,01` (día `156`), `impagos = 23,5` días (`DE 23,71`, `[0, 54]`), `obras = 5`, `desempleo = 0 %`.
+  - *Ahorradora (`impuesto = 46 %`, sin obras):* `poblacion_pct = 47 %` (`DE 5,29`), `muertes = 53` (`DE 5,29`), `apoyo_pct = 15,61 %` (`DE 6,21`), `satisfaccion = 47,88` (`DE 1,08`), `hambre_critica = 0 %`, `reserva_min = $5.687,18` (día `24,3`, reserva final `$6.331,78`), `impagos = 0`, `obras = 0`, `desempleo = 0 %`.
+- **Verificación extendida (`npx tsx scripts/run_calibration.ts --quick`, `n = 2` por punto):**
+  - `deterministic: true`, `newSystems.passed: true`, `invViol: 0` en todas las corridas.
+  - `M0_G0_elecciones_30d`: `0` impagos, `0` recortes/despidos en 30d, `apoyoEnd = 61,35 %`, `resEnd = $5.886,89`. `M0_G0_zombies_30d`: `0` impagos, `apoyoEnd = 43,5 %`, `resEnd = $3.672,14`.
+  - `M0_G1_pasivo_90d` vs `1hosp_alivio_90d` vs `sobreconstruccion_90d`: `apoyoEnd` sube `65,35 → 90,9 → 98,3 %` mientras `resEnd` baja `$5.658 → $5.188 → $3.344` (`ingRatio7`: `0,98 → 0,73 → 0,49`).
+  - Sensibilidad de las 10 palancas/obras en dirección esperada y no-dominancia confirmada en `nivel_obras` (óptimo en N4 con sequía), `zombiesDefensa`, `precio_maximo` y `comercio_exterior`.
 
 ---
 
 ## 6. Informe de calibración
 
-El detalle reproducible de corridas y comparaciones se ejecuta con `npx tsx scripts/run_calibration.ts` sobre `presets/elecciones_simple.json` y `src/data/catalogs.ts`.
+- Validación explícita de Pasos 1 y 2 (`HOJA_DE_RUTA §2`): `npx tsx scripts/validate_pasos_1_2.ts`.
+- Suite completa de regresiones, sensibilidad y no-dominancia (`M0/M1`, `G0/G1/G2`): `npx tsx scripts/run_calibration.ts` (`--quick` para `n=2`).
 
 ---
 
 ## 7. Hallazgos y pendientes de calibración (agente de prototipo)
 
-1. **Pruebas pendientes por orden de `HOJA_DE_RUTA §2`:** agregar al banco de pruebas automático corridas explícitas para **Paso 1 (`M0 + G0`, 30 días sin clima ni caos)** y **Paso 2 (`M0 + G1`, servicios + 3 palancas)** antes de reajustar `M1 + G2`. En la corrida actual sobre `M1`, `B_no_perturb` a 365 días mostró `65` eventos `empresa_recorte`/`empresa_despido`: conviene verificar en `M0 + G0` a 30 días que el arranque sea limpio (`0` recortes, `ECONOMIA §12`).
-2. **Desfasajes menores detectados entre presets/código y docs:**
-   - `presets/elecciones_simple.json` conserva `topesPrivados.obrero = 14`, mientras `src/data/catalogs.ts` ya usa `16` (`4` locales iniciales × `4` obreros).
-   - En `elecciones` falta incorporar la sequía con aviso a mitad de año (`[propuesta]` de `ESCENARIOS §2`) cuando se pase a calibrar `M1 + G2`.
-   - El interruptor `noticias_mueven_satisfaccion` (`CAOS_PRENSA §10`, `[pendiente de prueba]`) todavía no está cableado en `applyPressArticleEffects`.
-   - En `elecciones` con sequía intensa (`C2`/`C3`), la política balanceada logra `0 %` de hambre crítica pero queda corta en `apoyoEnd` (`26,18 %`): revisar en la ronda `M1 + G2` el peso del precio/sequía sobre `satisfaccion` y `lealtad`.
+1. **Paradoja de mortalidad pandémica sobre cobertura y apoyo (`MUNDO §6, §7, §10`):** En `M0 + G1` con pandemia forzada, las muertes reducen el denominador `vivos` (`100 → 47,4`), lo que eleva artificialmente `cobertura.medico` (`4 / (47,4 × 0,05) → 1,00`), elimina `medicoLowPenalty`, reduce el consumo total de comida/pensiones y no penaliza el ánimo ni la lealtad de los sobrevivientes por muertes masivas. Como resultado, *Pasiva* sufre `52,6` muertes y aun así termina con `64,71 %` de apoyo (por encima de *Constructora*, `25,77 %`, que salva al `100 %` pero entra en `impago` de operación en 6/10 semillas por el costo de 5 obras + 20 empleados públicos sin subir impuestos).
+2. **Tensión entre `ECONOMIA §12` ("producción ≈ consumo") y pérdida de agricultores por empleo público/internación (`MUNDO §3, §6`):** Con producción ajustada (`~100 u/d`), construir hospitales/comisarías o sufrir internaciones durante pandemia drena agricultores y hunde en hambruna letal precisamente a quien construye servicios. Elevar `produccionBaseAgricultor` a `5,55`, `stockAlimentoInicial` a `2.000` y bajar `siloDias` a `23` permite salvar el `100 %` sin hambruna manteniendo `stock/stock0 ∈ [1,00, 1,10]` en `M0 + G0`. Se recomienda evaluar en diseño si el reclutamiento público debe proteger `agricultor` y `tecnico` frente al resto de roles.
+3. **Acoplamiento del dinero cerrado con prensa y `periodista` (`ECONOMIA §7–8`):** El flujo neto externo del mundo en `M0` es `ingresosPropios − surplus` de medios (= `sueldos_periodistas − fondos_prensa`). Como `periodista` tiene afinidad `rebeldia` (sin bono de `laboriosidad`), su productividad oscila `±25–30 %` entre semillas, generando deriva de dinero total en `M0 + G0` si `prensa` y rango salarial de periodistas no se centran (`prensa = 60`, `[7,1, 7,3]`). Aun centrado, en la semilla 1 un periodista de baja laboriosidad percibe `$1,93/d` neto (< `$2,55` comida base).
+4. **Eventos sin `causa`, reglas inactivas en `M0 + G1` y tope del log (`2.500`):**
+   - `M0` saltea `updateClimate(state)` (`simulation.ts`), por lo que una pandemia inyectada en el estado no emite `fenomeno_inicio`, `fenomeno_fin` ni `aviso`, ni actualiza `state.ultimoEventoClimaId`: esto deja `hospital_saturado` sin `causa` tras terminar el fenómeno (13 eventos en *Pasiva*) y `empresa_recorte`/`empresa_aumento` sin `causa` en `M0 + G0` y *Pasiva*.
+   - `state.eventos` trunca a `2.500` entradas con `unshift`: en partidas con pandemia (>12.000 ataques/golpes), las causas tempranas (como `ev_15_46` de `obra_inicio`) se expulsan del log antes del fin de partida y `buildCausalChain` las reemplaza por nodo sintético `'origen'` estampado con `dia = state.reloj.dia` en lugar del día original del evento.
+   - El interruptor `noticias_mueven_satisfaccion` (`CAOS_PRENSA §10`) sigue sin cablearse en `applyPressArticleEffects`, y en `elecciones` (`M1 + G2`) sigue pendiente incorporar una sequía con aviso a mitad de año en el preset base.
