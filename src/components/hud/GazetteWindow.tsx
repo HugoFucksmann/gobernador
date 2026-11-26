@@ -12,6 +12,7 @@ interface GazetteWindowProps {
   onClose: () => void;
   onTriggerPress: () => void;
   onOpenPalancas: () => void;
+  onSelectMedio?: (medioId: string) => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
@@ -23,15 +24,19 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
   onClose,
   onTriggerPress,
   onOpenPalancas,
+  onSelectMedio,
   onInspectCausal,
 }) => {
   const [pressView, setPressView] = useState<'edicion' | 'medios'>('edicion');
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
 
   return (
     <div className="pointer-events-none fixed top-20 left-4 md:left-[380px]" style={{ zIndex }}>
       <RctWindow
         title="Gaceta"
-        subtitle={`${state.noticias.length} notas · ${state.medios.length} medio(s)`}
+        subtitle={`${state.noticias.length} notas · ${state.medios.filter((m) => m.activa !== false).length}/${state.medios.length} medio(s)`}
         tone="neutral"
         icon={<Newspaper className="w-4 h-4" />}
         zIndex={zIndex}
@@ -45,7 +50,7 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
               <button
                 type="button"
                 onClick={() => setPressView('edicion')}
-                className={`px-3 py-1.5 rounded-lg font-semibold transition-colors ${
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap ${
                   pressView === 'edicion' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                 }`}
               >
@@ -54,7 +59,7 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
               <button
                 type="button"
                 onClick={() => setPressView('medios')}
-                className={`px-3 py-1.5 rounded-lg font-semibold transition-colors ${
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap ${
                   pressView === 'medios' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
                 }`}
               >
@@ -62,52 +67,60 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={onTriggerPress}
-              disabled={aiBusy || state.resultado.estado !== 'jugando'}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl disabled:opacity-45 shrink-0 transition-colors"
-            >
-              <Newspaper className="w-3.5 h-3.5" />
-              Publicar
-            </button>
+            {!isG0 && (
+              <button
+                type="button"
+                onClick={onTriggerPress}
+                disabled={aiBusy || state.resultado.estado !== 'jugando'}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl disabled:opacity-45 shrink-0 transition-colors whitespace-nowrap"
+              >
+                <Newspaper className="w-3.5 h-3.5" />
+                Publicar
+              </button>
+            )}
           </div>
 
           {pressView === 'edicion' ? (
             <div className="bg-[#f6f4ef] text-zinc-900 rounded-xl divide-y divide-zinc-300 max-h-[430px] overflow-y-auto">
-              {state.noticias.slice(0, 14).map((article) => (
-                <article key={article.id} className="p-4 space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
-                    <span className="font-semibold text-zinc-900">
-                      {article.medioNombre} · D{article.dia}
-                    </span>
-                    <span className="font-mono text-zinc-600 tabular-nums">
-                      {article.autorNombre} · {article.tema} · {article.tono} · {Math.round(article.alcance)}%
-                      {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
-                    </span>
-                  </div>
-                  <h3 className="font-display text-base font-bold text-zinc-900 leading-snug">
-                    {article.titulo}
-                  </h3>
-                  <p className="text-sm text-zinc-700 leading-relaxed">{article.texto}</p>
-                  <div className="flex justify-end pt-1">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onInspectCausal(
-                          `${article.medioNombre}: ${article.titulo}`,
-                          article.causa || `noticia:${article.id}`,
-                          article.texto
-                        )
-                      }
-                      className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
-                    >
-                      <GitBranch className="w-3.5 h-3.5" />
-                      ¿Por qué?
-                    </button>
-                  </div>
-                </article>
-              ))}
+              {state.noticias.length === 0 ? (
+                <div className="p-6 text-center text-sm text-zinc-600">
+                  Sin noticias publicadas (sin medios activos).
+                </div>
+              ) : (
+                state.noticias.slice(0, 14).map((article) => (
+                  <article key={article.id} className="p-4 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
+                      <span className="font-semibold text-zinc-900">
+                        {article.medioNombre} · D{article.dia}
+                      </span>
+                      <span className="font-mono text-zinc-600 tabular-nums">
+                        {article.autorNombre} · {article.tema} · {article.tono} · {Math.round(article.alcance)}%
+                        {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
+                      </span>
+                    </div>
+                    <h3 className="font-display text-base font-bold text-zinc-900 leading-snug">
+                      {article.titulo}
+                    </h3>
+                    <p className="text-sm text-zinc-700 leading-relaxed">{article.texto}</p>
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onInspectCausal(
+                            `${article.medioNombre}: ${article.titulo}`,
+                            article.causa || `noticia:${article.id}`,
+                            article.texto
+                          )
+                        }
+                        className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
+                      >
+                        <GitBranch className="w-3.5 h-3.5" />
+                        ¿Por qué?
+                      </button>
+                    </div>
+                  </article>
+                ))
+              )}
             </div>
           ) : (
             <div className="space-y-4">
@@ -118,32 +131,62 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
                     ${Math.round(state.gobierno.palancasVigentes.prensa)}/per
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={onOpenPalancas}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl shrink-0"
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5" />
-                  Ajustar
-                </button>
+                {!isG0 && (
+                  <button
+                    type="button"
+                    onClick={onOpenPalancas}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl shrink-0 whitespace-nowrap"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    Ajustar
+                  </button>
+                )}
               </div>
 
-              <div className="divide-y divide-zinc-800 border-t border-zinc-800">
-                {state.medios.map((m) => (
-                  <div key={m.id} className="py-3 space-y-1.5 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-display font-bold text-white">{m.nombre}</span>
-                      <UiTooltip
-                        text={`Pauta recibida: $${m.finanzas.fondosEstado.toFixed(1)} · Ingresos propios: $${m.finanzas.ingresosPropios.toFixed(0)}`}
-                      >
-                        <span className="font-mono text-xs text-zinc-400 tabular-nums cursor-help">
-                          Cred {Math.round(m.credibilidad)}% · Alc {Math.round(m.alcancePct)}% · Dep {Math.round(m.finanzas.dependenciaPct)}%
+              {state.medios.length === 0 ? (
+                <div className="py-6 text-center text-xs text-zinc-400 bg-zinc-800/40 rounded-xl">
+                  No hay medios de prensa operando en la comunidad.
+                </div>
+              ) : (
+                <div className="divide-y divide-zinc-800 border-t border-zinc-800">
+                  {state.medios.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => onSelectMedio?.(m.id)}
+                      className="w-full py-3 px-2 -mx-2 rounded-xl hover:bg-zinc-800/60 transition-colors text-left space-y-1 text-sm"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-display font-bold text-white flex items-center gap-2">
+                          <span>{m.nombre}</span>
+                          {m.activa === false && (
+                            <span className="text-[11px] font-sans font-semibold text-rose-400">
+                              (Cerrado)
+                            </span>
+                          )}
                         </span>
-                      </UiTooltip>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                        <UiTooltip
+                          text={`Pauta recibida: $${m.finanzas.fondosEstado.toFixed(1)} · Ingresos propios: $${m.finanzas.ingresosPropios.toFixed(0)}`}
+                        >
+                          <span className="font-mono text-xs text-zinc-400 tabular-nums cursor-help">
+                            Cred {Math.round(m.credibilidad)}% · Alc {Math.round(m.alcancePct)}% · Dep {Math.round(m.finanzas.dependenciaPct)}%
+                          </span>
+                        </UiTooltip>
+                      </div>
+                      <div className="text-xs text-zinc-400 capitalize">
+                        Línea:{' '}
+                        {m.lineaEditorial.afinidadGobierno >= 60
+                          ? 'Oficialista'
+                          : m.lineaEditorial.afinidadGobierno <= 40
+                          ? 'Crítica'
+                          : 'Independiente'}{' '}
+                        · Sensac. {Math.round(m.lineaEditorial.sensacionalismo)}% · Zona{' '}
+                        {m.zona ? (state.zonas[m.zona]?.nombre ?? m.zona) : 'Comunidad'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

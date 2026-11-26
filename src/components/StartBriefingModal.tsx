@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FolderOpen, Play, Settings2, ShieldAlert, Vote } from 'lucide-react';
+import { Eye, FolderOpen, Landmark, Play, Settings2, ShieldAlert, Vote } from 'lucide-react';
 import { SCENARIO_PRESETS } from '../data/catalogs';
 import { SaveSlotMeta } from '../engine/gameController';
 import { HintIcon } from './hud/UiTooltip';
@@ -8,11 +8,16 @@ interface StartBriefingModalProps {
   initialScenario: 'elecciones' | 'zombies';
   manualSaveMeta: SaveSlotMeta | null;
   autoSaveMeta: SaveSlotMeta | null;
-  onStartScenario: (escenarioId: 'elecciones' | 'zombies') => void;
+  onStartScenario: (
+    escenarioId: 'elecciones' | 'zombies',
+    options?: { mode?: 'observador' | 'gobernador'; poblacion?: number }
+  ) => void;
   onOpenAdvancedConfig: () => void;
   onLoadManual: () => boolean;
   onLoadAutoSave: () => boolean;
 }
+
+const SCALE_PRESETS = [100, 500, 5000] as const;
 
 export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
   initialScenario,
@@ -24,6 +29,13 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
   onLoadAutoSave,
 }) => {
   const [selected, setSelected] = useState<'elecciones' | 'zombies'>(initialScenario);
+  const [mode, setMode] = useState<'observador' | 'gobernador'>('observador');
+  const [poblacion, setPoblacion] = useState<number>(SCENARIO_PRESETS[initialScenario].poblacionDefault);
+
+  const handleSelectScenario = (id: 'elecciones' | 'zombies') => {
+    setSelected(id);
+    setPoblacion(SCENARIO_PRESETS[id].poblacionDefault);
+  };
 
   return (
     <div
@@ -39,7 +51,9 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
               El Gobernador
             </h1>
             <p className="text-sm text-zinc-400">
-              Elegí escenario para empezar.
+              {mode === 'observador'
+                ? 'Modo observador (v0.1): seguí la vida, la economía, la prensa y los hogares sin intervención manual.'
+                : 'Modo gobernador: conducí presupuesto, obras públicas, vías y palancas de gobierno.'}
             </p>
           </div>
           {(manualSaveMeta || autoSaveMeta) && (
@@ -48,7 +62,7 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
                 <button
                   type="button"
                   onClick={onLoadManual}
-                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-zinc-100"
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-zinc-100 whitespace-nowrap"
                 >
                   <FolderOpen className="w-4 h-4 text-emerald-400" />
                   Continuar (D{manualSaveMeta.dia})
@@ -58,7 +72,7 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
                 <button
                   type="button"
                   onClick={onLoadAutoSave}
-                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-zinc-100"
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-zinc-100 whitespace-nowrap"
                 >
                   <FolderOpen className="w-4 h-4 text-amber-400" />
                   Auto (D{autoSaveMeta.dia})
@@ -66,6 +80,53 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
               )}
             </div>
           )}
+        </div>
+
+        {/* Mode & Scale Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-zinc-800/45 border border-zinc-700/70 rounded-2xl p-3.5 text-xs">
+          <div className="space-y-1.5">
+            <span className="text-zinc-400 font-semibold block">Modo de inicio</span>
+            <div className="grid grid-cols-2 gap-1.5 bg-zinc-900/70 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setMode('observador')}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                  mode === 'observador' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Observador (G0)
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('gobernador')}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                  mode === 'gobernador' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Landmark className="w-3.5 h-3.5" />
+                Gobernador (G2)
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="text-zinc-400 font-semibold block">Escala de población</span>
+            <div className="grid grid-cols-3 gap-1.5 bg-zinc-900/70 p-1 rounded-xl font-mono tabular-nums">
+              {SCALE_PRESETS.map((sc) => (
+                <button
+                  key={sc}
+                  type="button"
+                  onClick={() => setPoblacion(sc)}
+                  className={`py-2 px-2 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                    poblacion === sc ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {sc.toLocaleString('es-AR')}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -77,7 +138,7 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
               <button
                 key={id}
                 type="button"
-                onClick={() => setSelected(id)}
+                onClick={() => handleSelectScenario(id)}
                 className={`text-left p-5 rounded-2xl border transition-colors space-y-3 ${
                   isSelected
                     ? 'border-emerald-500 bg-emerald-950/35'
@@ -92,16 +153,18 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
                   </div>
                 </div>
                 <div className="text-xs font-medium text-emerald-400">{p.subtitulo}</div>
-                <div className="pt-2 border-t border-zinc-800 text-xs space-y-1.5">
-                  <div className="text-emerald-300">
-                    <span className="text-zinc-400">Meta: </span>
-                    {p.victoria.descripcion}
+                {mode === 'gobernador' && (
+                  <div className="pt-2 border-t border-zinc-800 text-xs space-y-1.5">
+                    <div className="text-emerald-300">
+                      <span className="text-zinc-400">Meta: </span>
+                      {p.victoria.descripcion}
+                    </div>
+                    <div className="text-rose-300">
+                      <span className="text-zinc-400">Derrota: </span>
+                      {p.derrota.descripcion}
+                    </div>
                   </div>
-                  <div className="text-rose-300">
-                    <span className="text-zinc-400">Derrota: </span>
-                    {p.derrota.descripcion}
-                  </div>
-                </div>
+                )}
               </button>
             );
           })}
@@ -111,7 +174,7 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
           <button
             type="button"
             onClick={onOpenAdvancedConfig}
-            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl transition-colors whitespace-nowrap"
           >
             <Settings2 className="w-4 h-4 text-zinc-400" />
             Opciones
@@ -119,11 +182,11 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
 
           <button
             type="button"
-            onClick={() => onStartScenario(selected)}
-            className="flex items-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg transition-colors"
+            onClick={() => onStartScenario(selected, { mode, poblacion })}
+            className="flex items-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg transition-colors whitespace-nowrap"
           >
             <Play className="w-4 h-4 fill-current" />
-            Comenzar
+            Comenzar ({mode === 'observador' ? 'Observador' : 'Gobernador'})
           </button>
         </div>
       </div>

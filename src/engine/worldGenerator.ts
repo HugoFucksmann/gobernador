@@ -4,6 +4,7 @@ import {
   DEFAULT_ZONAS,
   ECON_CONSTANTS,
   FIRM_CONSTANTS,
+  LOT_CLASS_RANK,
   MEDIA_TEMPLATES,
   ROLE_CATALOG,
   ROLE_DISTRICTS,
@@ -25,6 +26,7 @@ import {
   GovernorLevers,
   Hogar,
   HouseType,
+  LotClass,
   MediaOutlet,
   Npc,
   Parcela,
@@ -40,10 +42,13 @@ import {
 import { getBuildingJobCaps, getBuildingRoleCapacity, getObrasTargetJobs } from './policies';
 import { initSubsystemRng, nextRand, normalizeSeed, randInt, randRange } from './rng';
 import {
+  buildTileGridAndSyncMap,
+  canBuildTypeInParcela,
   clamp,
   computeDemandaSuelo,
   computeTotalWorldMoney,
   getWorldZones,
+  inferLotClassFromParcel,
   recomputeRoadDistances,
   syncLegacyEnterprisesView,
 } from './worldHelpers';
@@ -191,12 +196,37 @@ function buildScaledParcelas(
       };
     }
 
+    const minClassFromHint: LotClass | undefined = def.edificioInicial
+      ? BUILDING_CATALOG[def.edificioInicial]?.claseMinima
+      : def.houseType
+      ? BUILDING_CATALOG[def.houseType]?.claseMinima
+      : undefined;
+    const rawClass = def.clase ?? inferLotClassFromParcel({
+      clase: def.clase,
+      w: def.w,
+      h: def.h,
+      ww: def.ww,
+      wh: def.wh,
+      tipoParcela,
+      edificio,
+    }, def.edificioInicial ?? def.houseType);
+    const resolvedClass: LotClass =
+      minClassFromHint && LOT_CLASS_RANK[minClassFromHint] > LOT_CLASS_RANK[rawClass]
+        ? minClassFromHint
+        : rawClass;
+
     return {
       id: def.id,
       nombre: def.nombre,
       zona,
       distrito: def.distrito,
       tipoParcela,
+      clase: resolvedClass,
+      x: def.x,
+      y: def.y,
+      w: def.w,
+      h: def.h,
+      frente: def.frente,
       orden: def.orden ?? idx + 1,
       wx: def.wx,
       wy: def.wy,
@@ -231,6 +261,7 @@ function buildScaledParcelas(
         zona: z,
         distrito: 'residencial',
         tipoParcela: 'residencial',
+        clase: i % 4 === 0 ? 'L' : i % 3 === 0 ? 'S' : 'M',
         orden: 100 + i,
         wx: rect.wx + 16 + col * 48,
         wy: rect.wy + 135 + row * 24,
@@ -253,6 +284,7 @@ function buildScaledParcelas(
         zona: z,
         distrito: 'campos',
         tipoParcela: 'agricola',
+        clase: 'XL',
         orden: 200 + i,
         wx: rect.wx + 24 + (i % 4) * 82,
         wy: rect.wy + 150,
@@ -290,6 +322,7 @@ function buildScaledParcelas(
         zona: z,
         distrito: 'mercado',
         tipoParcela: 'comercial',
+        clase: BUILDING_CATALOG[tipo].claseMinima,
         orden: 300 + i,
         wx: rect.wx + 20 + (i % 5) * 56,
         wy: rect.wy + 88,
@@ -324,6 +357,7 @@ function buildScaledParcelas(
           zona: z,
           distrito: 'taller',
           tipoParcela: 'industrial',
+          clase: 'XL',
           orden: 350 + i,
           wx: rect.wx + 32 + (i % 4) * 74,
           wy: rect.wy + 160,
@@ -358,6 +392,7 @@ function buildScaledParcelas(
         zona: z,
         distrito: 'civico',
         tipoParcela: 'publica',
+        clase: 'L',
         orden: 400 + i * 2,
         wx: rect.wx + 260,
         wy: rect.wy + 32,
@@ -384,6 +419,7 @@ function buildScaledParcelas(
         zona: z,
         distrito: 'civico',
         tipoParcela: 'publica',
+        clase: 'M',
         orden: 401 + i * 2,
         wx: rect.wx + 314,
         wy: rect.wy + 32,
@@ -610,6 +646,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     hogares.push({
       id: hId,
       miembros: members.map((m) => m.id),
+      adultoIds: members.filter((m) => m.edad >= 18).map((m) => m.id),
+      esAcogida: false,
       casaId: null,
       dinero: 0,
       despensa: 0,
@@ -629,6 +667,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     if (i % 2 === 0 && hogares.length > 0) {
       const targetH = hogares[i % hogares.length];
       targetH.miembros.push(ret.id);
+      targetH.adultoIds = [...(targetH.adultoIds ?? []), ret.id];
       ret.hogarId = targetH.id;
       ret.zona = targetH.zona;
     } else {
@@ -637,6 +676,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       hogares.push({
         id: hId,
         miembros: [ret.id],
+        adultoIds: [ret.id],
+        esAcogida: false,
         casaId: null,
         dinero: 0,
         despensa: 0,
@@ -962,10 +1003,12 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     chosen.empleados.push(n.id);
   }
 
-  // Allocate Houses to accessible Residential Parcels (exclude sin_calle!)
+  // Allocate Houses to accessible Residential Parcels (exclude sin_calle, respect claseMinima!)
   const casas: Casa[] = [];
   let cSeq = 0;
-  const resParcels = parcelas.filter((p) => p.tipoParcela === 'residencial' && p.estado === 'libre');
+  const resParcels = parcelas
+    .filter((p) => p.tipoParcela === 'residencial' && p.estado === 'libre')
+    .sort((a, b) => LOT_CLASS_RANK[inferLotClassFromParcel(b)] - LOT_CLASS_RANK[inferLotClassFromParcel(a)]);
   const inmobFirms = firmas.filter((f) => f.rubro === 'inmobiliaria');
   const sortedHogares = [...hogares].sort((a, b) => b.miembros.length - a.miembros.length);
 
@@ -975,8 +1018,13 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     const parcel = resParcels[i];
     const h = sortedHogares[i];
     const desiredCap = h ? h.miembros.length : 4;
-    const houseType: HouseType =
+    const rawHouseType: HouseType =
       desiredCap >= 6 ? 'casa_grande' : desiredCap >= 4 ? 'casa_mediana' : 'casa_chica';
+    const houseType: HouseType = canBuildTypeInParcela(parcel, rawHouseType)
+      ? rawHouseType
+      : canBuildTypeInParcela(parcel, 'casa_mediana')
+      ? 'casa_mediana'
+      : 'casa_chica';
     const def = BUILDING_CATALOG[houseType];
     cSeq++;
     const casaId = `c_${cSeq}`;
@@ -1126,6 +1174,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     zonas,
     tramos,
     distanciasZonas: {},
+    distanciasLotes: {},
     demandaSuelo: {},
     demandaSueloRachas: {},
     npcs,
@@ -1382,6 +1431,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
   };
 
+  state.mapaGrid = buildTileGridAndSyncMap(state.zonas, state.parcelas, state.tramos, pop);
   recomputeRoadDistances(state);
   state.demandaSuelo = computeDemandaSuelo(state);
   syncLegacyEnterprisesView(state);

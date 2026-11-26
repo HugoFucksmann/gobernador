@@ -4,7 +4,9 @@
 
 ---
 
-## 1. Parcelas
+## 1. Parcelas (lotes)
+
+> Las parcelas son los **lotes** del mapa de baldosas (MAPA_V2.md): tienen posición, tamaño (`S`, `M`, `L`, `XL`) y un frente sobre una calle. Cada edificio exige una clase de lote mínima (MAPA_V2 §4).
 
 | Tipo | Quién construye | Qué se levanta |
 |---|---|---|

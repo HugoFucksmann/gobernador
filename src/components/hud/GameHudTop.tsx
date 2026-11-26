@@ -1,15 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Building2,
   CheckCircle2,
   CloudRain,
   Coins,
   Download,
+  EyeOff,
+  Home,
   Pause,
   Play,
   Skull,
   StepForward,
   TrendingUp,
+  Upload,
   Users,
   Volume2,
   VolumeX,
@@ -38,6 +42,7 @@ interface GameHudTopProps {
   aiBusy: boolean;
   aiStatus: AiStatus;
   devMode: boolean;
+  noRender: boolean;
   simStepMs: number;
   soundMuted: boolean;
   paydaySummary: PaydaySummary | null;
@@ -51,11 +56,17 @@ interface GameHudTopProps {
   onSetDevPopulation: (pop: number) => void;
   onSetDevComplexity: (nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel) => void;
   onSetEstadoAutomatico: (enabled: boolean) => void;
+  onSetNoRender: (enabled: boolean) => void;
   onForceClimate: (tipo: PhenomenonType, zona: ZoneId) => void;
+  onExportSaveJson: () => string;
+  onImportSaveJson: (raw: string) => { ok: boolean; error?: string };
+  onExportMetricsJson: () => string;
   onOpenObjetivo: () => void;
   onOpenEconomia: () => void;
   onOpenDemandas: () => void;
 }
+
+const SPEEDS = [1, 2, 5, 20] as const;
 
 export const GameHudTop: React.FC<GameHudTopProps> = ({
   state,
@@ -65,6 +76,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   aiBusy,
   aiStatus,
   devMode,
+  noRender,
   simStepMs,
   soundMuted,
   paydaySummary,
@@ -78,7 +90,11 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   onSetDevPopulation,
   onSetDevComplexity,
   onSetEstadoAutomatico,
+  onSetNoRender,
   onForceClimate,
+  onExportSaveJson,
+  onImportSaveJson,
+  onExportMetricsJson,
   onOpenObjetivo,
   onOpenEconomia,
   onOpenDemandas,
@@ -87,7 +103,9 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   const [devFenom, setDevFenom] = useState<PhenomenonType>('sequia');
   const [devZona, setDevZona] = useState<ZoneId>(zoneIds[0] ?? 'centro');
   const [devPopInput, setDevPopInput] = useState<number>(state.config.poblacionInicial);
+  const [devImportFeedback, setDevImportFeedback] = useState<string | null>(null);
   const [fps, setFps] = useState<number>(60);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setDevPopInput(state.config.poblacionInicial);
@@ -100,7 +118,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   }, [devZona, state.zonas, zoneIds]);
 
   useEffect(() => {
-    if (!devMode || typeof requestAnimationFrame !== 'function') return;
+    if (!devMode || noRender || typeof requestAnimationFrame !== 'function') return;
     let rafId = 0;
     let frames = 0;
     let lastSample = performance.now();
@@ -116,13 +134,26 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
     };
     rafId = requestAnimationFrame(measure);
     return () => cancelAnimationFrame(rafId);
-  }, [devMode]);
+  }, [devMode, noRender]);
 
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const plazo = preset.victoria.plazoDia ?? 365;
   const daysLeft = Math.max(0, plazo - state.reloj.dia);
   const victoryCumplida = Boolean(state.resultado.victoriaCumplida);
   const objetivoPerdido = state.eventos.some((e) => e.tipo === 'objetivo_perdido');
+
+  const ticksPorDia = Math.max(1, state.reloj.ticksPorDia || 120);
+  const tickInDay = ((state.reloj.tick % ticksPorDia) + ticksPorDia) % ticksPorDia;
+  const totalMinutes = Math.floor((tickInDay / ticksPorDia) * 24 * 60);
+  const hourStr = String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0');
+  const minStr = String(totalMinutes % 60).padStart(2, '0');
+
+  const worldLevel: WorldComplexityLevel =
+    state.config.nivelMundo ?? (state.config.economiaModulo === 'fiscal' ? 'M4' : 'M3');
+  const govLevel: GovernorComplexityLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const estadoAuto = Boolean(state.config.estadoAutomatico);
+  const isG0 = govLevel === 'G0' || estadoAuto;
 
   const basePop = Math.max(1, state.config.poblacionInicial || state.npcs.length);
   const vicIsPct =
@@ -179,12 +210,6 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
 
   const activeFen = getActivePhenomena(state)[0];
   const announcedFen = getAnnouncedPhenomena(state)[0];
-  const normalSpeeds = devMode ? [1, 2, 4, 8] : [1, 2];
-  const worldLevel: WorldComplexityLevel =
-    state.config.nivelMundo ?? (state.config.economiaModulo === 'fiscal' ? 'M4' : 'M3');
-  const govLevel: GovernorComplexityLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const estadoAuto = Boolean(state.config.estadoAutomatico);
 
   const aiLabel =
     aiStatus === 'activa' ? 'IA activa' : aiStatus === 'lenta' ? 'IA lenta' : 'IA plantilla';
@@ -214,31 +239,49 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       : derived.hambreCriticaPct > 20 || derived.descontentosPct > 30
       ? 'text-amber-300'
       : 'text-zinc-100';
+  const streetColor =
+    derived.callePct > 18
+      ? 'text-rose-400'
+      : derived.callePct > 8
+      ? 'text-amber-300'
+      : 'text-emerald-400';
 
-  const handleExportJson = () => {
+  const triggerDownload = (filename: string, payload: string) => {
     if (typeof window === 'undefined' || typeof Blob === 'undefined') return;
-    const payload = JSON.stringify({ state, derived }, null, 2);
     const blob = new Blob([payload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `estado-valle-d${state.reloj.dia}.json`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   };
 
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = onImportSaveJson(text);
+      setDevImportFeedback(res.ok ? 'Partida cargada.' : res.error ?? 'Archivo inválido.');
+    } catch {
+      setDevImportFeedback('No se pudo leer el archivo JSON.');
+    }
+  };
+
   return (
     <header className="pointer-events-none fixed top-3 inset-x-4 z-30 flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* Left HUD Capsule: Day, Speed, Goal & Próximo */}
+        {/* Left HUD Capsule: Day · HH:MM, Speed, and (when not G0) Goal & Próximo */}
         <div className="pointer-events-auto flex items-center gap-2.5 bg-zinc-900/90 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-3.5 py-2 shadow-2xl">
           <UiTooltip
-            text={`Día ${state.reloj.dia} de ${plazo} · Cierre semanal en ${daysToClose}d`}
+            text={`Día ${state.reloj.dia} · ${hourStr}:${minStr} · Año ${state.reloj.anio} · Cierre en ${daysToClose}d`}
           >
             <div className="font-mono text-sm font-bold text-zinc-100 tabular-nums whitespace-nowrap px-1">
-              Día {state.reloj.dia}
+              Día {state.reloj.dia} <span className="text-zinc-400 font-medium">· {hourStr}:{minStr}</span>
             </div>
           </UiTooltip>
 
@@ -259,7 +302,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               </button>
             </UiTooltip>
 
-            {normalSpeeds.map((spd) => (
+            {SPEEDS.map((spd) => (
               <button
                 key={spd}
                 type="button"
@@ -288,90 +331,94 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
             </UiTooltip>
           </div>
 
-          <div className="h-5 w-px bg-zinc-700/70" aria-hidden="true" />
+          {!isG0 && (
+            <>
+              <div className="h-5 w-px bg-zinc-700/70" aria-hidden="true" />
 
-          <UiTooltip
-            text={`${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
-          >
-            <button
-              type="button"
-              onClick={onOpenObjetivo}
-              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors text-sm font-mono tabular-nums whitespace-nowrap shrink-0 ${
-                objetivoPerdido || defeatDanger
-                  ? 'border-rose-500/50 bg-rose-950/35 hover:bg-rose-950/55'
-                  : 'border-transparent hover:bg-zinc-800/90'
-              }`}
-            >
-              {victoryCumplida || (!objetivoPerdido && objectiveHealthy && !defeatDanger) ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertTriangle
-                  className={`w-4 h-4 shrink-0 ${
-                    objetivoPerdido || defeatDanger ? 'text-rose-400' : 'text-amber-400'
-                  }`}
-                />
-              )}
-              <span
-                className={
-                  objetivoPerdido || defeatDanger
-                    ? 'text-rose-400 font-bold'
-                    : objectiveHealthy || victoryCumplida
-                    ? 'text-emerald-400 font-bold'
-                    : 'text-amber-300 font-bold'
-                }
+              <UiTooltip
+                text={`${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
               >
-                {vicIsPct ? `${vicCurrent}%` : vicCurrent}
-              </span>
-              <span
-                className={`text-xs font-bold ${vicTrendColor}`}
-                aria-label={`Tendencia ${vicTrendSymbol}`}
-              >
-                {vicTrendSymbol}
-              </span>
-              <span className="text-zinc-500 text-xs">
-                /{preset.victoria.umbral}
-                {vicIsPct ? '%' : ''}
-              </span>
-              <span className="text-zinc-600">·</span>
-              <span
-                className={`text-xs font-sans font-semibold ${
-                  victoryCumplida
-                    ? 'text-emerald-300'
-                    : objetivoPerdido || defeatDanger
-                    ? 'text-rose-300'
-                    : 'text-zinc-300'
-                }`}
-              >
-                {goalStateLabel}
-              </span>
-            </button>
-          </UiTooltip>
-
-          <div className="h-5 w-px bg-zinc-700/70 hidden lg:block" aria-hidden="true" />
-
-          {/* Próximo countdown strip */}
-          <div className="hidden lg:flex items-center gap-2 text-xs font-mono tabular-nums text-zinc-300 whitespace-nowrap">
-            <UiTooltip text={`Cierre semanal de caja, sueldos y alquileres en ${daysToClose}d`}>
-              <button
-                type="button"
-                onClick={onOpenEconomia}
-                className="px-2 py-1 rounded-lg bg-zinc-800/75 hover:bg-zinc-800 text-zinc-200 whitespace-nowrap shrink-0"
-              >
-                Pago {daysToClose}d
-              </button>
-            </UiTooltip>
-            {state.demandasActivas.length > 0 && (
-              <UiTooltip text="Demandas abiertas que requieren respuesta del gobernador">
                 <button
                   type="button"
-                  onClick={onOpenDemandas}
-                  className="px-2 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-200 hover:bg-amber-900/60 whitespace-nowrap shrink-0"
+                  onClick={onOpenObjetivo}
+                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors text-sm font-mono tabular-nums whitespace-nowrap shrink-0 ${
+                    objetivoPerdido || defeatDanger
+                      ? 'border-rose-500/50 bg-rose-950/35 hover:bg-rose-950/55'
+                      : 'border-transparent hover:bg-zinc-800/90'
+                  }`}
                 >
-                  Demanda {state.demandasActivas[0].diasRestantes}d
+                  {victoryCumplida || (!objetivoPerdido && objectiveHealthy && !defeatDanger) ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle
+                      className={`w-4 h-4 shrink-0 ${
+                        objetivoPerdido || defeatDanger ? 'text-rose-400' : 'text-amber-400'
+                      }`}
+                    />
+                  )}
+                  <span
+                    className={
+                      objetivoPerdido || defeatDanger
+                        ? 'text-rose-400 font-bold'
+                        : objectiveHealthy || victoryCumplida
+                        ? 'text-emerald-400 font-bold'
+                        : 'text-amber-300 font-bold'
+                    }
+                  >
+                    {vicIsPct ? `${vicCurrent}%` : vicCurrent}
+                  </span>
+                  <span
+                    className={`text-xs font-bold ${vicTrendColor}`}
+                    aria-label={`Tendencia ${vicTrendSymbol}`}
+                  >
+                    {vicTrendSymbol}
+                  </span>
+                  <span className="text-zinc-500 text-xs">
+                    /{preset.victoria.umbral}
+                    {vicIsPct ? '%' : ''}
+                  </span>
+                  <span className="text-zinc-600">·</span>
+                  <span
+                    className={`text-xs font-sans font-semibold ${
+                      victoryCumplida
+                        ? 'text-emerald-300'
+                        : objetivoPerdido || defeatDanger
+                        ? 'text-rose-300'
+                        : 'text-zinc-300'
+                    }`}
+                  >
+                    {goalStateLabel}
+                  </span>
                 </button>
               </UiTooltip>
-            )}
-          </div>
+
+              <div className="h-5 w-px bg-zinc-700/70 hidden lg:block" aria-hidden="true" />
+
+              {/* Próximo countdown strip */}
+              <div className="hidden lg:flex items-center gap-2 text-xs font-mono tabular-nums text-zinc-300 whitespace-nowrap">
+                <UiTooltip text={`Cierre semanal de caja, sueldos y alquileres en ${daysToClose}d`}>
+                  <button
+                    type="button"
+                    onClick={onOpenEconomia}
+                    className="px-2 py-1 rounded-lg bg-zinc-800/75 hover:bg-zinc-800 text-zinc-200 whitespace-nowrap shrink-0"
+                  >
+                    Pago {daysToClose}d
+                  </button>
+                </UiTooltip>
+                {state.demandasActivas.length > 0 && (
+                  <UiTooltip text="Demandas abiertas que requieren respuesta del gobernador">
+                    <button
+                      type="button"
+                      onClick={onOpenDemandas}
+                      className="px-2 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-200 hover:bg-amber-900/60 whitespace-nowrap shrink-0"
+                    >
+                      Demanda {state.demandasActivas[0].diasRestantes}d
+                    </button>
+                  </UiTooltip>
+                )}
+              </div>
+            </>
+          )}
 
           {(activeFen || announcedFen) && (
             <>
@@ -408,41 +455,77 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
           )}
         </div>
 
-        {/* Right HUD Capsule: Essential Resources & Audio Toggle */}
+        {/* Right HUD Capsule: World Observatory KPIs (Pob · Hog · Calle % · Firmas) + Governor Treasury */}
         <div className="pointer-events-auto hidden sm:flex items-center gap-4 bg-zinc-900/90 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-4 py-2 shadow-2xl font-mono tabular-nums text-sm">
           <UiTooltip
-            text={`Caja: $${Math.round(state.gobierno.reserva)} (${reserveWeeks.toFixed(1)} semanas de gasto) · Flujo est.: ${estDiario >= 0 ? '+' : ''}$${estDiario.toFixed(0)}/d · Último cierre: +$${fin.ingresos.toFixed(0)} / -$${lastGastos.toFixed(0)}${fin.impago ? ' (IMPAGO)' : ''}`}
-          >
-            <button
-              type="button"
-              onClick={onOpenEconomia}
-              className="flex items-center gap-2 hover:opacity-85 whitespace-nowrap shrink-0"
-            >
-              <Coins className={`w-4 h-4 shrink-0 ${reserveColor}`} />
-              <span className={`font-bold ${reserveColor}`}>
-                {reserveWeeks.toFixed(1)}sem
-              </span>
-              <span className="text-xs text-zinc-400">${Math.round(state.gobierno.reserva)}</span>
-            </button>
-          </UiTooltip>
-
-          <UiTooltip
-            text={`Alimento: ${Math.round(state.alimento.stock)} u. (${state.alimento.diasStock.toFixed(0)}d) · Cosecha +${state.alimento.produccionDiaria}/d · Consumo -${state.alimento.consumoDiario}/d · Precio $${state.alimento.precio.toFixed(2)}`}
-          >
-            <div className="flex items-center gap-1.5 cursor-default whitespace-nowrap">
-              <Wheat className={`w-4 h-4 shrink-0 ${foodColor}`} />
-              <span className={`font-bold ${foodColor}`}>{state.alimento.diasStock.toFixed(0)}d</span>
-            </div>
-          </UiTooltip>
-
-          <UiTooltip
-            text={`Población: ${derived.poblacion}/${basePop} (${derived.poblacionPct}%) · Ánimo ${derived.satisfaccionMedia}% · Apoyo ${derived.apoyoPct}% · Hambre crítica ${derived.hambreCriticaPct}% · Calle ${derived.callePct}%`}
+            text={`Población: ${derived.poblacion} vivos · Ánimo ${derived.satisfaccionMedia}% · Hambre crítica ${derived.hambreCriticaPct}% · Natalidad ${derived.natalidad}%`}
           >
             <div className="flex items-center gap-1.5 cursor-default whitespace-nowrap">
               <Users className={`w-4 h-4 shrink-0 ${popColor}`} />
-              <span className={`font-bold ${popColor}`}>{derived.poblacion}</span>
+              <span className="font-sans text-xs text-zinc-400">Pob</span>
+              <span className={`font-bold ${popColor}`}>{derived.poblacion.toLocaleString('es-AR')}</span>
             </div>
           </UiTooltip>
+
+          <UiTooltip
+            text={`Hogares: ${derived.hogares} · Hacinamiento ${derived.hacinamientoPct}% · Despensa media ${derived.despensaMediaDias.toFixed(1)}d`}
+          >
+            <div className="flex items-center gap-1.5 cursor-default whitespace-nowrap">
+              <Home className="w-4 h-4 shrink-0 text-sky-400" />
+              <span className="font-sans text-xs text-zinc-400">Hog</span>
+              <span className="font-bold text-zinc-100">{derived.hogares.toLocaleString('es-AR')}</span>
+            </div>
+          </UiTooltip>
+
+          <UiTooltip text={`Hogares en la calle: ${derived.callePct}% · Carga alquiler media ${derived.alquilerCargaMediaPct}%`}>
+            <button
+              type="button"
+              onClick={onOpenEconomia}
+              className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
+            >
+              <span className="font-sans text-xs text-zinc-400">Calle</span>
+              <span className={`font-bold ${streetColor}`}>{derived.callePct}%</span>
+            </button>
+          </UiTooltip>
+
+          <UiTooltip text={`Firmas activas: ${derived.mercado.firmas} · Concentración máx. ${derived.mercado.cuotaMayorPct}%`}>
+            <button
+              type="button"
+              onClick={onOpenEconomia}
+              className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
+            >
+              <Building2 className="w-4 h-4 shrink-0 text-amber-400" />
+              <span className="font-sans text-xs text-zinc-400">Firmas</span>
+              <span className="font-bold text-zinc-100">{derived.mercado.firmas}</span>
+            </button>
+          </UiTooltip>
+
+          {!isG0 && (
+            <>
+              <div className="h-4 w-px bg-zinc-700/70" aria-hidden="true" />
+              <UiTooltip
+                text={`Caja: $${Math.round(state.gobierno.reserva)} (${reserveWeeks.toFixed(1)} sem.) · Flujo ${estDiario >= 0 ? '+' : ''}$${estDiario.toFixed(0)}/d${fin.impago ? ' (IMPAGO)' : ''}`}
+              >
+                <button
+                  type="button"
+                  onClick={onOpenEconomia}
+                  className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
+                >
+                  <Coins className={`w-4 h-4 shrink-0 ${reserveColor}`} />
+                  <span className={`font-bold ${reserveColor}`}>${Math.round(state.gobierno.reserva)}</span>
+                </button>
+              </UiTooltip>
+
+              <UiTooltip
+                text={`Alimento: ${Math.round(state.alimento.stock)} u. (${state.alimento.diasStock.toFixed(0)}d) · Precio $${state.alimento.precio.toFixed(2)}`}
+              >
+                <div className="flex items-center gap-1.5 cursor-default whitespace-nowrap">
+                  <Wheat className={`w-4 h-4 shrink-0 ${foodColor}`} />
+                  <span className={`font-bold ${foodColor}`}>{state.alimento.diasStock.toFixed(0)}d</span>
+                </div>
+              </UiTooltip>
+            </>
+          )}
 
           {state.config.economiaModulo === 'fiscal' && (
             <UiTooltip text={`Inflación acumulada: ${state.gobierno.inflacion.toFixed(1)}%`}>
@@ -492,8 +575,8 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
         </div>
       </div>
 
-      {/* Non-pausing Weekly Payday Summary Strip */}
-      {paydaySummary && (
+      {/* Non-pausing Weekly Payday Summary Strip (only in Governor mode) */}
+      {paydaySummary && !isG0 && (
         <div className="pointer-events-auto self-end bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-4 py-2.5 flex items-center gap-4 text-xs shadow-xl">
           <span className="font-semibold text-zinc-200">
             Cierre P{paydaySummary.periodo} (D{paydaySummary.dia})
@@ -522,8 +605,8 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
         </div>
       )}
 
-      {/* Optional Non-blocking 30-day Summary Card */}
-      {monthlySummary && (
+      {/* Optional Non-blocking 30-day Summary Card (only in Governor mode) */}
+      {monthlySummary && !isG0 && (
         <div className="pointer-events-auto self-end w-[340px] max-w-[calc(100vw-32px)] bg-zinc-900/95 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-3.5 shadow-2xl space-y-2 text-xs">
           <div className="flex items-center justify-between gap-2">
             <span className="font-bold text-white">Balance mensual · Día {monthlySummary.dia}</span>
@@ -572,16 +655,44 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
         <div className="pointer-events-auto self-start bg-zinc-950/92 backdrop-blur-md border border-amber-500/40 rounded-2xl px-4 py-2.5 flex flex-wrap items-center gap-3 text-xs shadow-2xl">
           <div className="flex items-center gap-3 font-mono tabular-nums text-zinc-300">
             <span className="text-amber-300 font-sans font-bold">Dev</span>
-            <span>{fps} FPS</span>
+            <span>{noRender ? '—' : `${fps} FPS`}</span>
             <span>{simStepMs.toFixed(2)} ms</span>
+            <span>S:{state.semilla}</span>
             <span>T{state.reloj.tick}</span>
-            <span>
-              Hosp {derived.internados}/{derived.camasHospital}
-            </span>
           </div>
 
+          <button
+            type="button"
+            onClick={() => onSetNoRender(!noRender)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 font-semibold rounded-lg border whitespace-nowrap shrink-0 transition-colors ${
+              noRender
+                ? 'bg-emerald-600 border-emerald-400 text-white'
+                : 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
+            }`}
+          >
+            <EyeOff className="w-3.5 h-3.5" />
+            Sin dibujo
+          </button>
+
           <div className="flex items-center gap-1.5">
-            <span className="text-zinc-400">NPCs</span>
+            <span className="text-zinc-400">Escala</span>
+            {([100, 500, 5000] as const).map((sc) => (
+              <button
+                key={sc}
+                type="button"
+                onClick={() => {
+                  setDevPopInput(sc);
+                  onSetDevPopulation(sc);
+                }}
+                className={`px-2 py-1 font-mono rounded-lg whitespace-nowrap shrink-0 ${
+                  state.config.poblacionInicial === sc
+                    ? 'bg-emerald-600 text-white font-semibold'
+                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                }`}
+              >
+                {sc}
+              </button>
+            ))}
             <input
               type="number"
               min={20}
@@ -669,14 +780,46 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleExportJson}
-            className="flex items-center gap-1.5 px-2.5 py-1 font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 rounded-lg whitespace-nowrap shrink-0"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Exportar JSON
-          </button>
+          <div className="flex items-center gap-1.5">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleFileImport}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-2.5 py-1 font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 rounded-lg whitespace-nowrap shrink-0"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Importar
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                triggerDownload(`partida-valle-d${state.reloj.dia}.json`, onExportSaveJson())
+              }
+              className="flex items-center gap-1.5 px-2.5 py-1 font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 rounded-lg whitespace-nowrap shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Partida
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                triggerDownload(`metricas-valle-d${state.reloj.dia}.json`, onExportMetricsJson())
+              }
+              className="flex items-center gap-1.5 px-2.5 py-1 font-semibold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 rounded-lg whitespace-nowrap shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Métricas
+            </button>
+            {devImportFeedback && (
+              <span className="text-emerald-300 font-medium">{devImportFeedback}</span>
+            )}
+          </div>
         </div>
       )}
     </header>

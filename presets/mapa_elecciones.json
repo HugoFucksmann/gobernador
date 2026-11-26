@@ -3,8 +3,15 @@
   "id": "elecciones",
   "unidad": "m",
   "descripcion": "Mapa cívico planar V2 de 9 zonas activas + 2 zonas no urbanizadas (polígono industrial y ribera tras el río), con red vial de tramos (calle, camino, puente) y parcelas de los 9 rubros.",
-  "bounds": { "w": 1560, "h": 980 },
-  "isla": { "radio": 165, "ruido": 0.14, "semilla": 7 },
+  "bounds": {
+    "w": 1560,
+    "h": 980
+  },
+  "isla": {
+    "radio": 165,
+    "ruido": 0.14,
+    "semilla": 7
+  },
   "zonas": {
     "noroeste": {
       "id": "noroeste",
@@ -12,10 +19,21 @@
       "caracter": "agricola",
       "estado": "activa",
       "nodoPrincipal": "n_noroeste",
-      "vecinas": ["norte", "oeste"],
+      "vecinas": [
+        "norte",
+        "oeste"
+      ],
       "demandaAlquilerIndice": 0.78,
-      "centro": [-96, -86],
-      "rect": { "wx": 20, "wy": 20, "ww": 370, "wh": 225 }
+      "centro": [
+        -96,
+        -86
+      ],
+      "rect": {
+        "wx": 20,
+        "wy": 20,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "norte": {
       "id": "norte",
@@ -23,10 +41,22 @@
       "caracter": "residencial",
       "estado": "activa",
       "nodoPrincipal": "n_norte",
-      "vecinas": ["noroeste", "noreste", "centro"],
-      "demandaAlquilerIndice": 1.0,
-      "centro": [0, -86],
-      "rect": { "wx": 415, "wy": 20, "ww": 370, "wh": 225 }
+      "vecinas": [
+        "noroeste",
+        "noreste",
+        "centro"
+      ],
+      "demandaAlquilerIndice": 1,
+      "centro": [
+        0,
+        -86
+      ],
+      "rect": {
+        "wx": 415,
+        "wy": 20,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "noreste": {
       "id": "noreste",
@@ -34,10 +64,22 @@
       "caracter": "residencial",
       "estado": "activa",
       "nodoPrincipal": "n_noreste",
-      "vecinas": ["norte", "este"],
+      "vecinas": [
+        "norte",
+        "ribera",
+        "este"
+      ],
       "demandaAlquilerIndice": 0.96,
-      "centro": [96, -86],
-      "rect": { "wx": 810, "wy": 20, "ww": 370, "wh": 225 }
+      "centro": [
+        96,
+        -86
+      ],
+      "rect": {
+        "wx": 810,
+        "wy": 20,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "oeste": {
       "id": "oeste",
@@ -45,10 +87,22 @@
       "caracter": "agricola",
       "estado": "activa",
       "nodoPrincipal": "n_oeste",
-      "vecinas": ["noroeste", "centro", "suroeste"],
+      "vecinas": [
+        "noroeste",
+        "centro",
+        "suroeste"
+      ],
       "demandaAlquilerIndice": 0.82,
-      "centro": [-96, 0],
-      "rect": { "wx": 20, "wy": 270, "ww": 370, "wh": 225 }
+      "centro": [
+        -96,
+        0
+      ],
+      "rect": {
+        "wx": 20,
+        "wy": 270,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "centro": {
       "id": "centro",
@@ -56,10 +110,23 @@
       "caracter": "centro",
       "estado": "activa",
       "nodoPrincipal": "n_centro",
-      "vecinas": ["norte", "este", "sur", "oeste"],
+      "vecinas": [
+        "norte",
+        "oeste",
+        "este",
+        "sur"
+      ],
       "demandaAlquilerIndice": 1.3,
-      "centro": [0, 0],
-      "rect": { "wx": 415, "wy": 270, "ww": 370, "wh": 225 }
+      "centro": [
+        0,
+        0
+      ],
+      "rect": {
+        "wx": 415,
+        "wy": 270,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "este": {
       "id": "este",
@@ -67,10 +134,23 @@
       "caracter": "comercial",
       "estado": "activa",
       "nodoPrincipal": "n_este",
-      "vecinas": ["noreste", "centro", "sureste", "ribera"],
+      "vecinas": [
+        "noreste",
+        "centro",
+        "ribera",
+        "sureste"
+      ],
       "demandaAlquilerIndice": 1.12,
-      "centro": [96, 0],
-      "rect": { "wx": 810, "wy": 270, "ww": 370, "wh": 225 }
+      "centro": [
+        96,
+        0
+      ],
+      "rect": {
+        "wx": 810,
+        "wy": 270,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "suroeste": {
       "id": "suroeste",
@@ -78,10 +158,22 @@
       "caracter": "agricola",
       "estado": "activa",
       "nodoPrincipal": "n_suroeste",
-      "vecinas": ["oeste", "sur", "poligono"],
+      "vecinas": [
+        "oeste",
+        "sur",
+        "poligono"
+      ],
       "demandaAlquilerIndice": 0.78,
-      "centro": [-96, 86],
-      "rect": { "wx": 20, "wy": 520, "ww": 370, "wh": 225 }
+      "centro": [
+        -96,
+        86
+      ],
+      "rect": {
+        "wx": 20,
+        "wy": 520,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "sur": {
       "id": "sur",
@@ -89,10 +181,23 @@
       "caracter": "residencial",
       "estado": "activa",
       "nodoPrincipal": "n_sur",
-      "vecinas": ["suroeste", "centro", "sureste", "poligono"],
+      "vecinas": [
+        "centro",
+        "suroeste",
+        "sureste",
+        "poligono"
+      ],
       "demandaAlquilerIndice": 1.02,
-      "centro": [0, 86],
-      "rect": { "wx": 415, "wy": 520, "ww": 370, "wh": 225 }
+      "centro": [
+        0,
+        86
+      ],
+      "rect": {
+        "wx": 415,
+        "wy": 520,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "sureste": {
       "id": "sureste",
@@ -100,10 +205,23 @@
       "caracter": "agricola",
       "estado": "activa",
       "nodoPrincipal": "n_sureste",
-      "vecinas": ["este", "sur", "ribera"],
+      "vecinas": [
+        "este",
+        "sur",
+        "ribera",
+        "poligono"
+      ],
       "demandaAlquilerIndice": 0.84,
-      "centro": [96, 86],
-      "rect": { "wx": 810, "wy": 520, "ww": 370, "wh": 225 }
+      "centro": [
+        96,
+        86
+      ],
+      "rect": {
+        "wx": 810,
+        "wy": 520,
+        "ww": 370,
+        "wh": 225
+      }
     },
     "poligono": {
       "id": "poligono",
@@ -112,10 +230,22 @@
       "estado": "no_urbanizada",
       "viaAperturaId": "via_camino_poligono",
       "nodoPrincipal": "n_poligono",
-      "vecinas": ["suroeste", "sur"],
+      "vecinas": [
+        "suroeste",
+        "sur",
+        "sureste"
+      ],
       "demandaAlquilerIndice": 0.85,
-      "centro": [-32, 165],
-      "rect": { "wx": 20, "wy": 770, "ww": 765, "wh": 190 }
+      "centro": [
+        -32,
+        165
+      ],
+      "rect": {
+        "wx": 20,
+        "wy": 770,
+        "ww": 765,
+        "wh": 190
+      }
     },
     "ribera": {
       "id": "ribera",
@@ -125,10 +255,22 @@
       "viaAperturaId": "via_puente_ribera",
       "nodoPrincipal": "n_ribera",
       "barreraNatural": true,
-      "vecinas": ["este", "sureste"],
+      "vecinas": [
+        "noreste",
+        "este",
+        "sureste"
+      ],
       "demandaAlquilerIndice": 1.08,
-      "centro": [190, 40],
-      "rect": { "wx": 1240, "wy": 270, "ww": 300, "wh": 475 }
+      "centro": [
+        190,
+        40
+      ],
+      "rect": {
+        "wx": 1240,
+        "wy": 270,
+        "ww": 300,
+        "wh": 475
+      }
     }
   },
   "tramos": [
@@ -149,7 +291,70 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 205, "wy": 132 }, { "wx": 600, "wy": 132 }]
+      "puntos": [
+        {
+          "wx": 205,
+          "wy": 132
+        },
+        {
+          "wx": 600,
+          "wy": 132
+        }
+      ],
+      "baldosas": [
+        [
+          6,
+          6
+        ],
+        [
+          7,
+          6
+        ],
+        [
+          8,
+          6
+        ],
+        [
+          9,
+          6
+        ],
+        [
+          10,
+          6
+        ],
+        [
+          11,
+          6
+        ],
+        [
+          12,
+          6
+        ],
+        [
+          13,
+          6
+        ],
+        [
+          14,
+          6
+        ],
+        [
+          15,
+          6
+        ],
+        [
+          16,
+          6
+        ],
+        [
+          17,
+          6
+        ],
+        [
+          18,
+          6
+        ]
+      ]
     },
     {
       "id": "via_norte_noreste",
@@ -168,7 +373,74 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 600, "wy": 132 }, { "wx": 995, "wy": 132 }]
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 132
+        },
+        {
+          "wx": 995,
+          "wy": 132
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          6
+        ],
+        [
+          19,
+          6
+        ],
+        [
+          20,
+          6
+        ],
+        [
+          21,
+          6
+        ],
+        [
+          22,
+          6
+        ],
+        [
+          23,
+          6
+        ],
+        [
+          24,
+          6
+        ],
+        [
+          25,
+          6
+        ],
+        [
+          26,
+          6
+        ],
+        [
+          27,
+          6
+        ],
+        [
+          28,
+          6
+        ],
+        [
+          29,
+          6
+        ],
+        [
+          30,
+          6
+        ],
+        [
+          31,
+          6
+        ]
+      ]
     },
     {
       "id": "via_oeste_centro",
@@ -187,7 +459,70 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 205, "wy": 382 }, { "wx": 600, "wy": 382 }]
+      "puntos": [
+        {
+          "wx": 205,
+          "wy": 382
+        },
+        {
+          "wx": 600,
+          "wy": 382
+        }
+      ],
+      "baldosas": [
+        [
+          6,
+          19
+        ],
+        [
+          7,
+          19
+        ],
+        [
+          8,
+          19
+        ],
+        [
+          9,
+          19
+        ],
+        [
+          10,
+          19
+        ],
+        [
+          11,
+          19
+        ],
+        [
+          12,
+          19
+        ],
+        [
+          13,
+          19
+        ],
+        [
+          14,
+          19
+        ],
+        [
+          15,
+          19
+        ],
+        [
+          16,
+          19
+        ],
+        [
+          17,
+          19
+        ],
+        [
+          18,
+          19
+        ]
+      ]
     },
     {
       "id": "via_centro_este",
@@ -206,7 +541,74 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 6,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 600, "wy": 382 }, { "wx": 995, "wy": 382 }]
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 382
+        },
+        {
+          "wx": 995,
+          "wy": 382
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          19
+        ],
+        [
+          19,
+          19
+        ],
+        [
+          20,
+          19
+        ],
+        [
+          21,
+          19
+        ],
+        [
+          22,
+          19
+        ],
+        [
+          23,
+          19
+        ],
+        [
+          24,
+          19
+        ],
+        [
+          25,
+          19
+        ],
+        [
+          26,
+          19
+        ],
+        [
+          27,
+          19
+        ],
+        [
+          28,
+          19
+        ],
+        [
+          29,
+          19
+        ],
+        [
+          30,
+          19
+        ],
+        [
+          31,
+          19
+        ]
+      ]
     },
     {
       "id": "via_suroeste_sur",
@@ -225,7 +627,70 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 205, "wy": 632 }, { "wx": 600, "wy": 632 }]
+      "puntos": [
+        {
+          "wx": 205,
+          "wy": 632
+        },
+        {
+          "wx": 600,
+          "wy": 632
+        }
+      ],
+      "baldosas": [
+        [
+          6,
+          31
+        ],
+        [
+          7,
+          31
+        ],
+        [
+          8,
+          31
+        ],
+        [
+          9,
+          31
+        ],
+        [
+          10,
+          31
+        ],
+        [
+          11,
+          31
+        ],
+        [
+          12,
+          31
+        ],
+        [
+          13,
+          31
+        ],
+        [
+          14,
+          31
+        ],
+        [
+          15,
+          31
+        ],
+        [
+          16,
+          31
+        ],
+        [
+          17,
+          31
+        ],
+        [
+          18,
+          31
+        ]
+      ]
     },
     {
       "id": "via_sur_sureste",
@@ -244,7 +709,74 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 600, "wy": 632 }, { "wx": 995, "wy": 632 }]
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 632
+        },
+        {
+          "wx": 995,
+          "wy": 632
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          31
+        ],
+        [
+          19,
+          31
+        ],
+        [
+          20,
+          31
+        ],
+        [
+          21,
+          31
+        ],
+        [
+          22,
+          31
+        ],
+        [
+          23,
+          31
+        ],
+        [
+          24,
+          31
+        ],
+        [
+          25,
+          31
+        ],
+        [
+          26,
+          31
+        ],
+        [
+          27,
+          31
+        ],
+        [
+          28,
+          31
+        ],
+        [
+          29,
+          31
+        ],
+        [
+          30,
+          31
+        ],
+        [
+          31,
+          31
+        ]
+      ]
     },
     {
       "id": "via_noroeste_oeste",
@@ -263,7 +795,74 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 205, "wy": 132 }, { "wx": 205, "wy": 382 }]
+      "puntos": [
+        {
+          "wx": 205,
+          "wy": 132
+        },
+        {
+          "wx": 205,
+          "wy": 382
+        }
+      ],
+      "baldosas": [
+        [
+          6,
+          6
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          6,
+          8
+        ],
+        [
+          6,
+          9
+        ],
+        [
+          6,
+          10
+        ],
+        [
+          6,
+          11
+        ],
+        [
+          6,
+          12
+        ],
+        [
+          6,
+          13
+        ],
+        [
+          6,
+          14
+        ],
+        [
+          6,
+          15
+        ],
+        [
+          6,
+          16
+        ],
+        [
+          6,
+          17
+        ],
+        [
+          6,
+          18
+        ],
+        [
+          6,
+          19
+        ]
+      ]
     },
     {
       "id": "via_oeste_suroeste",
@@ -282,7 +881,70 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 205, "wy": 382 }, { "wx": 205, "wy": 632 }]
+      "puntos": [
+        {
+          "wx": 205,
+          "wy": 382
+        },
+        {
+          "wx": 205,
+          "wy": 632
+        }
+      ],
+      "baldosas": [
+        [
+          6,
+          19
+        ],
+        [
+          6,
+          20
+        ],
+        [
+          6,
+          21
+        ],
+        [
+          6,
+          22
+        ],
+        [
+          6,
+          23
+        ],
+        [
+          6,
+          24
+        ],
+        [
+          6,
+          25
+        ],
+        [
+          6,
+          26
+        ],
+        [
+          6,
+          27
+        ],
+        [
+          6,
+          28
+        ],
+        [
+          6,
+          29
+        ],
+        [
+          6,
+          30
+        ],
+        [
+          6,
+          31
+        ]
+      ]
     },
     {
       "id": "via_norte_centro",
@@ -301,7 +963,74 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 6,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 600, "wy": 132 }, { "wx": 600, "wy": 382 }]
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 132
+        },
+        {
+          "wx": 600,
+          "wy": 382
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          6
+        ],
+        [
+          18,
+          7
+        ],
+        [
+          18,
+          8
+        ],
+        [
+          18,
+          9
+        ],
+        [
+          18,
+          10
+        ],
+        [
+          18,
+          11
+        ],
+        [
+          18,
+          12
+        ],
+        [
+          18,
+          13
+        ],
+        [
+          18,
+          14
+        ],
+        [
+          18,
+          15
+        ],
+        [
+          18,
+          16
+        ],
+        [
+          18,
+          17
+        ],
+        [
+          18,
+          18
+        ],
+        [
+          18,
+          19
+        ]
+      ]
     },
     {
       "id": "via_centro_sur",
@@ -320,7 +1049,70 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 6,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 600, "wy": 382 }, { "wx": 600, "wy": 632 }]
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 382
+        },
+        {
+          "wx": 600,
+          "wy": 632
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          19
+        ],
+        [
+          18,
+          20
+        ],
+        [
+          18,
+          21
+        ],
+        [
+          18,
+          22
+        ],
+        [
+          18,
+          23
+        ],
+        [
+          18,
+          24
+        ],
+        [
+          18,
+          25
+        ],
+        [
+          18,
+          26
+        ],
+        [
+          18,
+          27
+        ],
+        [
+          18,
+          28
+        ],
+        [
+          18,
+          29
+        ],
+        [
+          18,
+          30
+        ],
+        [
+          18,
+          31
+        ]
+      ]
     },
     {
       "id": "via_noreste_este",
@@ -339,7 +1131,74 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 995, "wy": 132 }, { "wx": 995, "wy": 382 }]
+      "puntos": [
+        {
+          "wx": 995,
+          "wy": 132
+        },
+        {
+          "wx": 995,
+          "wy": 382
+        }
+      ],
+      "baldosas": [
+        [
+          31,
+          6
+        ],
+        [
+          31,
+          7
+        ],
+        [
+          31,
+          8
+        ],
+        [
+          31,
+          9
+        ],
+        [
+          31,
+          10
+        ],
+        [
+          31,
+          11
+        ],
+        [
+          31,
+          12
+        ],
+        [
+          31,
+          13
+        ],
+        [
+          31,
+          14
+        ],
+        [
+          31,
+          15
+        ],
+        [
+          31,
+          16
+        ],
+        [
+          31,
+          17
+        ],
+        [
+          31,
+          18
+        ],
+        [
+          31,
+          19
+        ]
+      ]
     },
     {
       "id": "via_este_sureste",
@@ -358,7 +1217,70 @@
       "costoObra": 240,
       "mantenimientoPeriodo": 5,
       "parcelasAbiertas": [],
-      "puntos": [{ "wx": 995, "wy": 382 }, { "wx": 995, "wy": 632 }]
+      "puntos": [
+        {
+          "wx": 995,
+          "wy": 382
+        },
+        {
+          "wx": 995,
+          "wy": 632
+        }
+      ],
+      "baldosas": [
+        [
+          31,
+          19
+        ],
+        [
+          31,
+          20
+        ],
+        [
+          31,
+          21
+        ],
+        [
+          31,
+          22
+        ],
+        [
+          31,
+          23
+        ],
+        [
+          31,
+          24
+        ],
+        [
+          31,
+          25
+        ],
+        [
+          31,
+          26
+        ],
+        [
+          31,
+          27
+        ],
+        [
+          31,
+          28
+        ],
+        [
+          31,
+          29
+        ],
+        [
+          31,
+          30
+        ],
+        [
+          31,
+          31
+        ]
+      ]
     },
     {
       "id": "via_calle_norte_ext",
@@ -375,8 +1297,49 @@
       "diasObraRestantes": 0,
       "costoObra": 180,
       "mantenimientoPeriodo": 4,
-      "parcelasAbiertas": ["p_casa_norte_10", "p_casa_norte_11", "p_norte_com_ext"],
-      "puntos": [{ "wx": 600, "wy": 132 }, { "wx": 650, "wy": 210 }]
+      "parcelasAbiertas": [
+        "p_casa_norte_10",
+        "p_casa_norte_11",
+        "p_norte_com_ext",
+        "p_ext2_norte_1",
+        "p_ext2_norte_2",
+        "p_ext2_norte_3",
+        "p_ext2_noreste_1",
+        "p_ext2_noreste_2",
+        "p_ext2_noreste_3"
+      ],
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 132
+        },
+        {
+          "wx": 650,
+          "wy": 210
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          6
+        ],
+        [
+          18,
+          7
+        ],
+        [
+          19,
+          8
+        ],
+        [
+          19,
+          9
+        ],
+        [
+          20,
+          10
+        ]
+      ]
     },
     {
       "id": "via_calle_sur_ext",
@@ -393,8 +1356,49 @@
       "diasObraRestantes": 0,
       "costoObra": 180,
       "mantenimientoPeriodo": 4,
-      "parcelasAbiertas": ["p_casa_sur_9", "p_casa_sur_10", "p_sur_com_ext"],
-      "puntos": [{ "wx": 600, "wy": 632 }, { "wx": 650, "wy": 710 }]
+      "parcelasAbiertas": [
+        "p_casa_sur_9",
+        "p_casa_sur_10",
+        "p_sur_com_ext",
+        "p_ext2_sur_1",
+        "p_ext2_sur_2",
+        "p_ext2_sur_3",
+        "p_ext2_suroeste_1",
+        "p_ext2_suroeste_2",
+        "p_ext2_suroeste_3"
+      ],
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 632
+        },
+        {
+          "wx": 650,
+          "wy": 710
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          31
+        ],
+        [
+          18,
+          32
+        ],
+        [
+          19,
+          33
+        ],
+        [
+          19,
+          34
+        ],
+        [
+          20,
+          35
+        ]
+      ]
     },
     {
       "id": "via_calle_oeste_ind",
@@ -411,8 +1415,48 @@
       "diasObraRestantes": 0,
       "costoObra": 210,
       "mantenimientoPeriodo": 5,
-      "parcelasAbiertas": ["p_ind_oeste_2", "p_ind_oeste_3", "p_casa_oeste_4"],
-      "puntos": [{ "wx": 205, "wy": 382 }, { "wx": 205, "wy": 465 }]
+      "parcelasAbiertas": [
+        "p_ind_oeste_2",
+        "p_ind_oeste_3",
+        "p_casa_oeste_4",
+        "p_ext2_oeste_1",
+        "p_ext2_oeste_2",
+        "p_ext2_oeste_3",
+        "p_ext2_oeste_4",
+        "p_ext2_oeste_5"
+      ],
+      "puntos": [
+        {
+          "wx": 205,
+          "wy": 382
+        },
+        {
+          "wx": 205,
+          "wy": 465
+        }
+      ],
+      "baldosas": [
+        [
+          6,
+          19
+        ],
+        [
+          6,
+          20
+        ],
+        [
+          6,
+          21
+        ],
+        [
+          6,
+          22
+        ],
+        [
+          6,
+          23
+        ]
+      ]
     },
     {
       "id": "via_calle_este_com",
@@ -429,8 +1473,47 @@
       "diasObraRestantes": 0,
       "costoObra": 190,
       "mantenimientoPeriodo": 4,
-      "parcelasAbiertas": ["p_este_com_libre_3", "p_casa_este_7"],
-      "puntos": [{ "wx": 995, "wy": 382 }, { "wx": 1060, "wy": 465 }]
+      "parcelasAbiertas": [
+        "p_este_com_libre_3",
+        "p_casa_este_7",
+        "p_ext2_este_1",
+        "p_ext2_este_2",
+        "p_ext2_este_3",
+        "p_ext2_sureste_1",
+        "p_ext2_sureste_2"
+      ],
+      "puntos": [
+        {
+          "wx": 995,
+          "wy": 382
+        },
+        {
+          "wx": 1060,
+          "wy": 465
+        }
+      ],
+      "baldosas": [
+        [
+          31,
+          19
+        ],
+        [
+          31,
+          20
+        ],
+        [
+          32,
+          21
+        ],
+        [
+          32,
+          22
+        ],
+        [
+          33,
+          23
+        ]
+      ]
     },
     {
       "id": "via_camino_poligono",
@@ -448,9 +1531,75 @@
       "diasObraRestantes": 0,
       "costoObra": 320,
       "mantenimientoPeriodo": 7,
-      "parcelasAbiertas": ["p_pol_ind_1", "p_pol_ind_2", "p_pol_ind_3", "p_pol_com_1", "p_pol_pub_1", "p_pol_res_1"],
+      "parcelasAbiertas": [
+        "p_pol_ind_1",
+        "p_pol_ind_2",
+        "p_pol_ind_3",
+        "p_pol_com_1",
+        "p_pol_pub_1",
+        "p_pol_res_1"
+      ],
       "zonaAbierta": "poligono",
-      "puntos": [{ "wx": 600, "wy": 632 }, { "wx": 400, "wy": 865 }]
+      "puntos": [
+        {
+          "wx": 600,
+          "wy": 632
+        },
+        {
+          "wx": 400,
+          "wy": 865
+        }
+      ],
+      "baldosas": [
+        [
+          18,
+          31
+        ],
+        [
+          17,
+          32
+        ],
+        [
+          17,
+          33
+        ],
+        [
+          16,
+          34
+        ],
+        [
+          16,
+          35
+        ],
+        [
+          15,
+          36
+        ],
+        [
+          15,
+          37
+        ],
+        [
+          14,
+          38
+        ],
+        [
+          14,
+          39
+        ],
+        [
+          13,
+          40
+        ],
+        [
+          13,
+          41
+        ],
+        [
+          12,
+          42
+        ]
+      ]
     },
     {
       "id": "via_puente_ribera",
@@ -468,156 +1617,3800 @@
       "diasObraRestantes": 0,
       "costoObra": 460,
       "mantenimientoPeriodo": 10,
-      "parcelasAbiertas": ["p_rib_res_1", "p_rib_res_2", "p_rib_res_3", "p_rib_res_4", "p_rib_com_1", "p_rib_pub_1"],
+      "parcelasAbiertas": [
+        "p_rib_res_1",
+        "p_rib_res_2",
+        "p_rib_res_3",
+        "p_rib_res_4",
+        "p_rib_com_1",
+        "p_rib_pub_1"
+      ],
       "zonaAbierta": "ribera",
       "barreraNatural": true,
-      "puntos": [{ "wx": 1140, "wy": 420 }, { "wx": 1300, "wy": 420 }]
+      "puntos": [
+        {
+          "wx": 1140,
+          "wy": 420
+        },
+        {
+          "wx": 1300,
+          "wy": 420
+        }
+      ],
+      "baldosas": [
+        [
+          35,
+          21
+        ],
+        [
+          36,
+          21
+        ],
+        [
+          37,
+          21
+        ],
+        [
+          38,
+          21
+        ],
+        [
+          39,
+          21
+        ],
+        [
+          40,
+          21
+        ]
+      ]
     }
   ],
   "parcelas": [
-    { "id": "p_plaza_centro", "nombre": "Plaza Mayor", "zona": "centro", "distrito": "civico", "tipoParcela": "especial", "orden": 1, "estadoInicial": "ocupada", "edificioInicial": "plaza", "duenoInicial": "estado", "wx": 566, "wy": 356, "ww": 68, "wh": 52 },
-    { "id": "p_hospital_centro", "nombre": "Hospital Central", "zona": "centro", "distrito": "civico", "tipoParcela": "publica", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "hospital", "duenoInicial": "estado", "wx": 430, "wy": 290, "ww": 58, "wh": 46 },
-    { "id": "p_comisaria_centro", "nombre": "Comisaría Central", "zona": "centro", "distrito": "civico", "tipoParcela": "publica", "orden": 3, "estadoInicial": "ocupada", "edificioInicial": "comisaria", "duenoInicial": "estado", "wx": 430, "wy": 350, "ww": 54, "wh": 44 },
-    { "id": "p_oficina_centro", "nombre": "Oficina Pública Central", "zona": "centro", "distrito": "civico", "tipoParcela": "publica", "orden": 4, "estadoInicial": "ocupada", "edificioInicial": "oficina_publica", "duenoInicial": "estado", "wx": 430, "wy": 410, "ww": 54, "wh": 42 },
-    { "id": "p_escuela_centro", "nombre": "Escuela Central", "zona": "centro", "distrito": "civico", "tipoParcela": "publica", "orden": 5, "estadoInicial": "ocupada", "edificioInicial": "escuela", "duenoInicial": "estado", "wx": 500, "wy": 290, "ww": 54, "wh": 44 },
-    { "id": "p_centro_libre", "nombre": "Solar Cívico Centro", "zona": "centro", "distrito": "civico", "tipoParcela": "publica", "orden": 6, "estadoInicial": "libre", "wx": 500, "wy": 416, "ww": 54, "wh": 42 },
-
-    { "id": "p_comercio_1", "nombre": "Supermercado Central", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 7, "estadoInicial": "ocupada", "edificioInicial": "supermercado", "wx": 568, "wy": 290, "ww": 48, "wh": 40 },
-    { "id": "p_comercio_2", "nombre": "Tienda El Progreso", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 8, "estadoInicial": "ocupada", "edificioInicial": "tienda", "wx": 626, "wy": 290, "ww": 42, "wh": 38 },
-    { "id": "p_restoran_1", "nombre": "Restorán del Centro", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 9, "estadoInicial": "ocupada", "edificioInicial": "restoran", "wx": 678, "wy": 290, "ww": 48, "wh": 40 },
-    { "id": "p_constructora_1", "nombre": "Constructora Central", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 10, "estadoInicial": "ocupada", "edificioInicial": "oficina_constructora", "wx": 650, "wy": 344, "ww": 50, "wh": 40 },
-    { "id": "p_inmobiliaria_1", "nombre": "Inmobiliaria del Valle", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 11, "estadoInicial": "ocupada", "edificioInicial": "oficina_inmobiliaria", "wx": 710, "wy": 344, "ww": 50, "wh": 40 },
-    { "id": "p_medio_1", "nombre": "Redacción El Heraldo", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 12, "estadoInicial": "ocupada", "edificioInicial": "oficina_medio", "wx": 568, "wy": 422, "ww": 48, "wh": 38 },
-    { "id": "p_medio_2", "nombre": "Redacción La Crónica", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 13, "estadoInicial": "ocupada", "edificioInicial": "oficina_medio", "wx": 624, "wy": 422, "ww": 48, "wh": 38 },
-    { "id": "p_centro_cine", "nombre": "Cine Teatro Colón", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 14, "estadoInicial": "ocupada", "edificioInicial": "cine_teatro", "wx": 500, "wy": 352, "ww": 52, "wh": 40 },
-    { "id": "p_centro_peluqueria", "nombre": "Peluquería Plaza", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 15, "estadoInicial": "ocupada", "edificioInicial": "peluqueria", "wx": 682, "wy": 422, "ww": 46, "wh": 38 },
-    { "id": "p_centro_com_libre", "nombre": "Lote Comercial Centro", "zona": "centro", "distrito": "mercado", "tipoParcela": "comercial", "orden": 16, "estadoInicial": "libre", "wx": 584, "wy": 464, "ww": 46, "wh": 26 },
-
-    { "id": "p_casa_centro_1", "nombre": "Solar Residencial Centro 1", "zona": "centro", "distrito": "residencial", "tipoParcela": "residencial", "orden": 17, "estadoInicial": "libre", "houseType": "casa_grande", "wx": 430, "wy": 462, "ww": 42, "wh": 26 },
-    { "id": "p_casa_centro_2", "nombre": "Solar Residencial Centro 2", "zona": "centro", "distrito": "residencial", "tipoParcela": "residencial", "orden": 18, "estadoInicial": "libre", "houseType": "casa_grande", "wx": 480, "wy": 462, "ww": 42, "wh": 26 },
-    { "id": "p_casa_centro_3", "nombre": "Solar Residencial Centro 3", "zona": "centro", "distrito": "residencial", "tipoParcela": "residencial", "orden": 19, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 530, "wy": 462, "ww": 42, "wh": 26 },
-    { "id": "p_casa_centro_4", "nombre": "Solar Residencial Centro 4", "zona": "centro", "distrito": "residencial", "tipoParcela": "residencial", "orden": 20, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 734, "wy": 290, "ww": 40, "wh": 36 },
-    { "id": "p_casa_centro_5", "nombre": "Solar Residencial Centro 5", "zona": "centro", "distrito": "residencial", "tipoParcela": "residencial", "orden": 21, "estadoInicial": "libre", "wx": 736, "wy": 422, "ww": 40, "wh": 38 },
-
-    { "id": "p_puerto_este", "nombre": "Puerto Fluvial", "zona": "este", "distrito": "mercado", "tipoParcela": "especial", "orden": 1, "estadoInicial": "ocupada", "edificioInicial": "puerto", "duenoInicial": "estado", "wx": 1106, "wy": 286, "ww": 60, "wh": 50 },
-    { "id": "p_muelle_este", "nombre": "Muelle de Comercio Exterior", "zona": "este", "distrito": "mercado", "tipoParcela": "especial", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "muelle_comercio", "duenoInicial": "estado", "wx": 1106, "wy": 348, "ww": 60, "wh": 50 },
-    { "id": "p_este_libre", "nombre": "Solar Público Este", "zona": "este", "distrito": "civico", "tipoParcela": "publica", "orden": 3, "estadoInicial": "libre", "wx": 824, "wy": 286, "ww": 52, "wh": 42 },
-    { "id": "p_hito_este_1", "nombre": "Parcela Este I (Hito)", "zona": "este", "distrito": "civico", "tipoParcela": "publica", "orden": 4, "estadoInicial": "bloqueada", "wx": 824, "wy": 340, "ww": 52, "wh": 42 },
-    { "id": "p_hito_este_2", "nombre": "Parcela Este II (Hito)", "zona": "este", "distrito": "civico", "tipoParcela": "publica", "orden": 5, "estadoInicial": "bloqueada", "wx": 824, "wy": 394, "ww": 52, "wh": 42 },
-    { "id": "p_comercio_este_1", "nombre": "Almacén del Puerto", "zona": "este", "distrito": "mercado", "tipoParcela": "comercial", "orden": 6, "estadoInicial": "ocupada", "edificioInicial": "almacen", "wx": 890, "wy": 286, "ww": 50, "wh": 40 },
-    { "id": "p_comercio_este_2", "nombre": "Kiosco Portuario", "zona": "este", "distrito": "mercado", "tipoParcela": "comercial", "orden": 7, "estadoInicial": "ocupada", "edificioInicial": "kiosco", "wx": 950, "wy": 286, "ww": 44, "wh": 40 },
-    { "id": "p_restoran_este_1", "nombre": "Café del Muelle", "zona": "este", "distrito": "mercado", "tipoParcela": "comercial", "orden": 8, "estadoInicial": "ocupada", "edificioInicial": "bar_cafe", "wx": 1004, "wy": 286, "ww": 50, "wh": 40 },
-    { "id": "p_fabrica_este_1", "nombre": "Fábrica del Puerto", "zona": "este", "distrito": "taller", "tipoParcela": "industrial", "orden": 9, "estadoInicial": "ocupada", "edificioInicial": "fabrica", "wx": 890, "wy": 340, "ww": 54, "wh": 42 },
-    { "id": "p_club_este_1", "nombre": "Club Portuario", "zona": "este", "distrito": "mercado", "tipoParcela": "comercial", "orden": 10, "estadoInicial": "ocupada", "edificioInicial": "club", "wx": 954, "wy": 340, "ww": 46, "wh": 40 },
-    { "id": "p_este_com_libre_1", "nombre": "Lote Comercial Este 1", "zona": "este", "distrito": "mercado", "tipoParcela": "comercial", "orden": 11, "estadoInicial": "libre", "wx": 1010, "wy": 340, "ww": 48, "wh": 40 },
-    { "id": "p_casa_este_1", "nombre": "Vivienda Este 1", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 12, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 890, "wy": 402, "ww": 44, "wh": 34 },
-    { "id": "p_casa_este_2", "nombre": "Vivienda Este 2", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 13, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 944, "wy": 402, "ww": 44, "wh": 34 },
-    { "id": "p_casa_este_3", "nombre": "Vivienda Este 3", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 14, "estadoInicial": "libre", "houseType": "casa_grande", "wx": 998, "wy": 402, "ww": 44, "wh": 34 },
-    { "id": "p_casa_este_4", "nombre": "Vivienda Este 4", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 15, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 1052, "wy": 402, "ww": 44, "wh": 34 },
-    { "id": "p_casa_este_5", "nombre": "Solar Residencial Este 5", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 16, "estadoInicial": "libre", "wx": 890, "wy": 448, "ww": 44, "wh": 34 },
-    { "id": "p_casa_este_6", "nombre": "Solar Residencial Este 6", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 17, "estadoInicial": "libre", "wx": 944, "wy": 448, "ww": 44, "wh": 34 },
-    { "id": "p_este_com_libre_3", "nombre": "Ensanche Comercial Puerto", "zona": "este", "distrito": "mercado", "tipoParcela": "comercial", "orden": 18, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_este_com", "wx": 1002, "wy": 448, "ww": 48, "wh": 34 },
-    { "id": "p_casa_este_7", "nombre": "Ensanche Residencial Este", "zona": "este", "distrito": "residencial", "tipoParcela": "residencial", "orden": 19, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_este_com", "wx": 1060, "wy": 448, "ww": 44, "wh": 34 },
-
-    { "id": "p_norte_libre", "nombre": "Solar Público Norte", "zona": "norte", "distrito": "civico", "tipoParcela": "publica", "orden": 1, "estadoInicial": "libre", "wx": 430, "wy": 36, "ww": 52, "wh": 42 },
-    { "id": "p_comercio_norte_1", "nombre": "Almacén Norte", "zona": "norte", "distrito": "mercado", "tipoParcela": "comercial", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "almacen", "wx": 496, "wy": 36, "ww": 50, "wh": 40 },
-    { "id": "p_comercio_norte_2", "nombre": "Kiosco Norte", "zona": "norte", "distrito": "mercado", "tipoParcela": "comercial", "orden": 3, "estadoInicial": "ocupada", "edificioInicial": "kiosco", "wx": 556, "wy": 36, "ww": 44, "wh": 40 },
-    { "id": "p_gimnasio_norte_1", "nombre": "Gimnasio del Norte", "zona": "norte", "distrito": "mercado", "tipoParcela": "comercial", "orden": 4, "estadoInicial": "ocupada", "edificioInicial": "gimnasio", "wx": 610, "wy": 36, "ww": 48, "wh": 40 },
-    { "id": "p_norte_com_libre", "nombre": "Lote Comercial Norte", "zona": "norte", "distrito": "mercado", "tipoParcela": "comercial", "orden": 5, "estadoInicial": "libre", "wx": 668, "wy": 36, "ww": 48, "wh": 40 },
-    { "id": "p_casa_norte_1", "nombre": "Vivienda Norte 1", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "libre", "houseType": "casa_grande", "wx": 430, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_2", "nombre": "Vivienda Norte 2", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 7, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 484, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_3", "nombre": "Vivienda Norte 3", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 8, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 538, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_4", "nombre": "Vivienda Norte 4", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 9, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 592, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_5", "nombre": "Vivienda Norte 5", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 10, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 646, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_6", "nombre": "Vivienda Norte 6", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 11, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 700, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_7", "nombre": "Solar Residencial Norte 7", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 12, "estadoInicial": "libre", "wx": 430, "wy": 146, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_8", "nombre": "Solar Residencial Norte 8", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 13, "estadoInicial": "libre", "wx": 484, "wy": 146, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_9", "nombre": "Solar Residencial Norte 9", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 14, "estadoInicial": "libre", "wx": 538, "wy": 146, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_10", "nombre": "Ensanche Norte 10", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 15, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_norte_ext", "wx": 430, "wy": 194, "ww": 44, "wh": 36 },
-    { "id": "p_casa_norte_11", "nombre": "Ensanche Norte 11", "zona": "norte", "distrito": "residencial", "tipoParcela": "residencial", "orden": 16, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_norte_ext", "wx": 484, "wy": 194, "ww": 44, "wh": 36 },
-    { "id": "p_norte_com_ext", "nombre": "Ensanche Comercial Norte", "zona": "norte", "distrito": "mercado", "tipoParcela": "comercial", "orden": 17, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_norte_ext", "wx": 538, "wy": 194, "ww": 48, "wh": 36 },
-
-    { "id": "p_noreste_libre", "nombre": "Solar Público Noreste", "zona": "noreste", "distrito": "civico", "tipoParcela": "publica", "orden": 1, "estadoInicial": "libre", "wx": 824, "wy": 36, "ww": 52, "wh": 42 },
-    { "id": "p_comercio_noreste_1", "nombre": "Almacén Noreste", "zona": "noreste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "almacen", "wx": 890, "wy": 36, "ww": 50, "wh": 40 },
-    { "id": "p_noreste_bar_1", "nombre": "Bar Villa Noreste", "zona": "noreste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 3, "estadoInicial": "ocupada", "edificioInicial": "bar_cafe", "wx": 950, "wy": 36, "ww": 46, "wh": 40 },
-    { "id": "p_noreste_com_libre", "nombre": "Lote Comercial Noreste", "zona": "noreste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 4, "estadoInicial": "libre", "wx": 1006, "wy": 36, "ww": 48, "wh": 40 },
-    { "id": "p_casa_noreste_1", "nombre": "Vivienda Noreste 1", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 5, "estadoInicial": "libre", "houseType": "casa_grande", "wx": 824, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_noreste_2", "nombre": "Vivienda Noreste 2", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 878, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_noreste_3", "nombre": "Vivienda Noreste 3", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 7, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 932, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_noreste_4", "nombre": "Vivienda Noreste 4", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 8, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 986, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_noreste_5", "nombre": "Vivienda Noreste 5", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 9, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 1040, "wy": 96, "ww": 44, "wh": 36 },
-    { "id": "p_casa_noreste_6", "nombre": "Solar Residencial Noreste 6", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 10, "estadoInicial": "libre", "wx": 824, "wy": 146, "ww": 44, "wh": 36 },
-    { "id": "p_casa_noreste_7", "nombre": "Solar Residencial Noreste 7", "zona": "noreste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 11, "estadoInicial": "libre", "wx": 878, "wy": 146, "ww": 44, "wh": 36 },
-
-    { "id": "p_sur_libre", "nombre": "Solar Público Sur", "zona": "sur", "distrito": "civico", "tipoParcela": "publica", "orden": 1, "estadoInicial": "libre", "wx": 430, "wy": 536, "ww": 52, "wh": 42 },
-    { "id": "p_escuela_sur", "nombre": "Escuela del Sur", "zona": "sur", "distrito": "residencial", "tipoParcela": "publica", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "escuela", "duenoInicial": "estado", "wx": 494, "wy": 536, "ww": 52, "wh": 42 },
-    { "id": "p_comercio_sur_1", "nombre": "Supermercado del Sur", "zona": "sur", "distrito": "mercado", "tipoParcela": "comercial", "orden": 3, "estadoInicial": "ocupada", "edificioInicial": "supermercado", "wx": 560, "wy": 536, "ww": 50, "wh": 40 },
-    { "id": "p_comercio_sur_2", "nombre": "Tienda Sur", "zona": "sur", "distrito": "mercado", "tipoParcela": "comercial", "orden": 4, "estadoInicial": "ocupada", "edificioInicial": "tienda", "wx": 620, "wy": 536, "ww": 44, "wh": 40 },
-    { "id": "p_sur_com_libre", "nombre": "Lote Comercial Sur", "zona": "sur", "distrito": "mercado", "tipoParcela": "comercial", "orden": 5, "estadoInicial": "libre", "wx": 676, "wy": 536, "ww": 48, "wh": 40 },
-    { "id": "p_casa_sur_1", "nombre": "Vivienda Sur 1", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "libre", "houseType": "casa_grande", "wx": 430, "wy": 596, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_2", "nombre": "Vivienda Sur 2", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 7, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 484, "wy": 596, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_3", "nombre": "Vivienda Sur 3", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 8, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 538, "wy": 596, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_4", "nombre": "Vivienda Sur 4", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 9, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 592, "wy": 596, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_5", "nombre": "Vivienda Sur 5", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 10, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 646, "wy": 596, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_6", "nombre": "Vivienda Sur 6", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 11, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 700, "wy": 596, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_7", "nombre": "Solar Residencial Sur 7", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 12, "estadoInicial": "libre", "wx": 430, "wy": 646, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_8", "nombre": "Solar Residencial Sur 8", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 13, "estadoInicial": "libre", "wx": 484, "wy": 646, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_9", "nombre": "Ensanche Sur 9", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 14, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_sur_ext", "wx": 430, "wy": 694, "ww": 44, "wh": 36 },
-    { "id": "p_casa_sur_10", "nombre": "Ensanche Sur 10", "zona": "sur", "distrito": "residencial", "tipoParcela": "residencial", "orden": 15, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_sur_ext", "wx": 484, "wy": 694, "ww": 44, "wh": 36 },
-    { "id": "p_sur_com_ext", "nombre": "Ensanche Comercial Sur", "zona": "sur", "distrito": "mercado", "tipoParcela": "comercial", "orden": 16, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_sur_ext", "wx": 538, "wy": 694, "ww": 48, "wh": 36 },
-
-    { "id": "p_campo_1", "nombre": "Campo Noroeste 1", "zona": "noroeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 1, "estadoInicial": "ocupada", "edificioInicial": "campo", "wx": 36, "wy": 36, "ww": 78, "wh": 52 },
-    { "id": "p_campo_2", "nombre": "Campo Noroeste 2", "zona": "noroeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "campo", "wx": 126, "wy": 36, "ww": 78, "wh": 52 },
-    { "id": "p_noroeste_agro_libre", "nombre": "Lote Agrícola Noroeste", "zona": "noroeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 3, "estadoInicial": "libre", "wx": 216, "wy": 36, "ww": 78, "wh": 52 },
-    { "id": "p_noroeste_libre", "nombre": "Solar Público Noroeste", "zona": "noroeste", "distrito": "civico", "tipoParcela": "publica", "orden": 4, "estadoInicial": "libre", "wx": 310, "wy": 36, "ww": 50, "wh": 42 },
-    { "id": "p_casa_noroeste_1", "nombre": "Chacra Noroeste 1", "zona": "noroeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 5, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 36, "wy": 108, "ww": 46, "wh": 36 },
-    { "id": "p_casa_noroeste_2", "nombre": "Chacra Noroeste 2", "zona": "noroeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 92, "wy": 108, "ww": 46, "wh": 36 },
-    { "id": "p_casa_noroeste_3", "nombre": "Solar Rural Noroeste 3", "zona": "noroeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 7, "estadoInicial": "libre", "wx": 148, "wy": 108, "ww": 46, "wh": 36 },
-    { "id": "p_noroeste_com_libre", "nombre": "Lote Comercial Noroeste", "zona": "noroeste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 8, "estadoInicial": "libre", "wx": 216, "wy": 108, "ww": 48, "wh": 40 },
-
-    { "id": "p_campo_3", "nombre": "Campo Vega Oeste 1", "zona": "oeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 1, "estadoInicial": "ocupada", "edificioInicial": "campo", "wx": 36, "wy": 286, "ww": 78, "wh": 52 },
-    { "id": "p_campo_4", "nombre": "Campo Vega Oeste 2", "zona": "oeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 2, "estadoInicial": "ocupada", "edificioInicial": "campo", "wx": 126, "wy": 286, "ww": 78, "wh": 52 },
-    { "id": "p_oeste_agro_libre", "nombre": "Lote Agrícola Oeste", "zona": "oeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 3, "estadoInicial": "libre", "wx": 216, "wy": 286, "ww": 78, "wh": 52 },
-    { "id": "p_oeste_libre", "nombre": "Solar Público Oeste", "zona": "oeste", "distrito": "civico", "tipoParcela": "publica", "orden": 4, "estadoInicial": "libre", "wx": 310, "wy": 286, "ww": 50, "wh": 42 },
-    { "id": "p_comercio_oeste_1", "nombre": "Almacén de la Vega", "zona": "oeste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 5, "estadoInicial": "ocupada", "edificioInicial": "almacen", "wx": 216, "wy": 356, "ww": 48, "wh": 40 },
-    { "id": "p_taller_oeste_1", "nombre": "Taller Mecánico Oeste", "zona": "oeste", "distrito": "taller", "tipoParcela": "comercial", "orden": 6, "estadoInicial": "ocupada", "edificioInicial": "taller", "wx": 274, "wy": 356, "ww": 48, "wh": 40 },
-    { "id": "p_fabrica_oeste_1", "nombre": "Manufacturas del Valle", "zona": "oeste", "distrito": "taller", "tipoParcela": "industrial", "orden": 7, "estadoInicial": "ocupada", "edificioInicial": "fabrica", "wx": 36, "wy": 414, "ww": 62, "wh": 42 },
-    { "id": "p_ind_oeste_libre", "nombre": "Lote Industrial Oeste", "zona": "oeste", "distrito": "taller", "tipoParcela": "industrial", "orden": 8, "estadoInicial": "libre", "wx": 108, "wy": 414, "ww": 62, "wh": 42 },
-    { "id": "p_ind_oeste_2", "nombre": "Parcela Industrial Oeste II", "zona": "oeste", "distrito": "taller", "tipoParcela": "industrial", "orden": 9, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_oeste_ind", "wx": 180, "wy": 414, "ww": 62, "wh": 42 },
-    { "id": "p_ind_oeste_3", "nombre": "Parcela Industrial Oeste III", "zona": "oeste", "distrito": "taller", "tipoParcela": "industrial", "orden": 10, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_oeste_ind", "wx": 252, "wy": 414, "ww": 62, "wh": 42 },
-    { "id": "p_casa_oeste_1", "nombre": "Vivienda Oeste 1", "zona": "oeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 11, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 36, "wy": 356, "ww": 46, "wh": 36 },
-    { "id": "p_casa_oeste_2", "nombre": "Vivienda Oeste 2", "zona": "oeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 12, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 92, "wy": 356, "ww": 46, "wh": 36 },
-    { "id": "p_casa_oeste_3", "nombre": "Solar Rural Oeste 3", "zona": "oeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 13, "estadoInicial": "libre", "wx": 148, "wy": 356, "ww": 46, "wh": 36 },
-    { "id": "p_casa_oeste_4", "nombre": "Ensanche Residencial Oeste 4", "zona": "oeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 14, "estadoInicial": "sin_calle", "tramoAperturaId": "via_calle_oeste_ind", "wx": 324, "wy": 414, "ww": 46, "wh": 36 },
-
-    { "id": "p_campo_5", "nombre": "Campo Suroeste 1", "zona": "suroeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 1, "estadoInicial": "ocupada", "edificioInicial": "campo", "wx": 36, "wy": 536, "ww": 78, "wh": 52 },
-    { "id": "p_suroeste_agro_libre", "nombre": "Lote Agrícola Suroeste", "zona": "suroeste", "distrito": "campos", "tipoParcela": "agricola", "orden": 2, "estadoInicial": "libre", "wx": 126, "wy": 536, "ww": 78, "wh": 52 },
-    { "id": "p_suroeste_libre", "nombre": "Solar Público Suroeste", "zona": "suroeste", "distrito": "civico", "tipoParcela": "publica", "orden": 3, "estadoInicial": "libre", "wx": 220, "wy": 536, "ww": 50, "wh": 42 },
-    { "id": "p_suroeste_com_libre", "nombre": "Lote Comercial Suroeste", "zona": "suroeste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 4, "estadoInicial": "libre", "wx": 220, "wy": 604, "ww": 48, "wh": 40 },
-    { "id": "p_casa_suroeste_1", "nombre": "Vivienda Suroeste 1", "zona": "suroeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 5, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 36, "wy": 604, "ww": 46, "wh": 36 },
-    { "id": "p_casa_suroeste_2", "nombre": "Vivienda Suroeste 2", "zona": "suroeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 92, "wy": 604, "ww": 46, "wh": 36 },
-    { "id": "p_casa_suroeste_3", "nombre": "Solar Rural Suroeste 3", "zona": "suroeste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 7, "estadoInicial": "libre", "wx": 148, "wy": 604, "ww": 46, "wh": 36 },
-
-    { "id": "p_campo_6", "nombre": "Campo Sureste 1", "zona": "sureste", "distrito": "campos", "tipoParcela": "agricola", "orden": 1, "estadoInicial": "ocupada", "edificioInicial": "campo", "wx": 824, "wy": 536, "ww": 78, "wh": 52 },
-    { "id": "p_sureste_agro_libre", "nombre": "Lote Agrícola Sureste", "zona": "sureste", "distrito": "campos", "tipoParcela": "agricola", "orden": 2, "estadoInicial": "libre", "wx": 914, "wy": 536, "ww": 78, "wh": 52 },
-    { "id": "p_sureste_libre", "nombre": "Solar Público Sureste", "zona": "sureste", "distrito": "civico", "tipoParcela": "publica", "orden": 3, "estadoInicial": "libre", "wx": 1008, "wy": 536, "ww": 50, "wh": 42 },
-    { "id": "p_sureste_com_libre", "nombre": "Lote Comercial Sureste", "zona": "sureste", "distrito": "mercado", "tipoParcela": "comercial", "orden": 4, "estadoInicial": "libre", "wx": 1008, "wy": 604, "ww": 48, "wh": 40 },
-    { "id": "p_casa_sureste_1", "nombre": "Vivienda Sureste 1", "zona": "sureste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 5, "estadoInicial": "libre", "houseType": "casa_mediana", "wx": 824, "wy": 604, "ww": 46, "wh": 36 },
-    { "id": "p_casa_sureste_2", "nombre": "Vivienda Sureste 2", "zona": "sureste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "libre", "houseType": "casa_chica", "wx": 880, "wy": 604, "ww": 46, "wh": 36 },
-    { "id": "p_casa_sureste_3", "nombre": "Solar Rural Sureste 3", "zona": "sureste", "distrito": "residencial", "tipoParcela": "residencial", "orden": 7, "estadoInicial": "libre", "wx": 936, "wy": 604, "ww": 46, "wh": 36 },
-
-    { "id": "p_pol_ind_1", "nombre": "Lote Industrial Polígono 1", "zona": "poligono", "distrito": "taller", "tipoParcela": "industrial", "orden": 1, "estadoInicial": "sin_calle", "tramoAperturaId": "via_camino_poligono", "wx": 40, "wy": 794, "ww": 74, "wh": 50 },
-    { "id": "p_pol_ind_2", "nombre": "Lote Industrial Polígono 2", "zona": "poligono", "distrito": "taller", "tipoParcela": "industrial", "orden": 2, "estadoInicial": "sin_calle", "tramoAperturaId": "via_camino_poligono", "wx": 128, "wy": 794, "ww": 74, "wh": 50 },
-    { "id": "p_pol_ind_3", "nombre": "Lote Industrial Polígono 3", "zona": "poligono", "distrito": "taller", "tipoParcela": "industrial", "orden": 3, "estadoInicial": "sin_calle", "tramoAperturaId": "via_camino_poligono", "wx": 216, "wy": 794, "ww": 74, "wh": 50 },
-    { "id": "p_pol_com_1", "nombre": "Lote Comercial Polígono", "zona": "poligono", "distrito": "mercado", "tipoParcela": "comercial", "orden": 4, "estadoInicial": "sin_calle", "tramoAperturaId": "via_camino_poligono", "wx": 308, "wy": 794, "ww": 58, "wh": 44 },
-    { "id": "p_pol_pub_1", "nombre": "Solar Público Polígono", "zona": "poligono", "distrito": "civico", "tipoParcela": "publica", "orden": 5, "estadoInicial": "sin_calle", "tramoAperturaId": "via_camino_poligono", "wx": 382, "wy": 794, "ww": 56, "wh": 44 },
-    { "id": "p_pol_res_1", "nombre": "Solar Obrero Polígono", "zona": "poligono", "distrito": "residencial", "tipoParcela": "residencial", "orden": 6, "estadoInicial": "sin_calle", "tramoAperturaId": "via_camino_poligono", "wx": 454, "wy": 794, "ww": 52, "wh": 40 },
-
-    { "id": "p_rib_res_1", "nombre": "Solar Ribera 1", "zona": "ribera", "distrito": "residencial", "tipoParcela": "residencial", "orden": 1, "estadoInicial": "sin_calle", "tramoAperturaId": "via_puente_ribera", "wx": 1260, "wy": 300, "ww": 50, "wh": 38 },
-    { "id": "p_rib_res_2", "nombre": "Solar Ribera 2", "zona": "ribera", "distrito": "residencial", "tipoParcela": "residencial", "orden": 2, "estadoInicial": "sin_calle", "tramoAperturaId": "via_puente_ribera", "wx": 1322, "wy": 300, "ww": 50, "wh": 38 },
-    { "id": "p_rib_res_3", "nombre": "Solar Ribera 3", "zona": "ribera", "distrito": "residencial", "tipoParcela": "residencial", "orden": 3, "estadoInicial": "sin_calle", "tramoAperturaId": "via_puente_ribera", "wx": 1260, "wy": 352, "ww": 50, "wh": 38 },
-    { "id": "p_rib_res_4", "nombre": "Solar Ribera 4", "zona": "ribera", "distrito": "residencial", "tipoParcela": "residencial", "orden": 4, "estadoInicial": "sin_calle", "tramoAperturaId": "via_puente_ribera", "wx": 1322, "wy": 352, "ww": 50, "wh": 38 },
-    { "id": "p_rib_com_1", "nombre": "Lote Comercial Ribera", "zona": "ribera", "distrito": "mercado", "tipoParcela": "comercial", "orden": 5, "estadoInicial": "sin_calle", "tramoAperturaId": "via_puente_ribera", "wx": 1260, "wy": 410, "ww": 56, "wh": 42 },
-    { "id": "p_rib_pub_1", "nombre": "Solar Público Ribera", "zona": "ribera", "distrito": "civico", "tipoParcela": "publica", "orden": 6, "estadoInicial": "sin_calle", "tramoAperturaId": "via_puente_ribera", "wx": 1332, "wy": 410, "ww": 56, "wh": 42 }
-  ]
+    {
+      "id": "p_plaza_centro",
+      "nombre": "Plaza Mayor",
+      "zona": "centro",
+      "distrito": "civico",
+      "tipoParcela": "especial",
+      "orden": 1,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "plaza",
+      "duenoInicial": "estado",
+      "wx": 566,
+      "wy": 356,
+      "ww": 68,
+      "wh": 52,
+      "clase": "L",
+      "x": 17,
+      "y": 17,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        18,
+        19
+      ]
+    },
+    {
+      "id": "p_hospital_centro",
+      "nombre": "Hospital Central",
+      "zona": "centro",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "hospital",
+      "duenoInicial": "estado",
+      "wx": 430,
+      "wy": 290,
+      "ww": 58,
+      "wh": 46,
+      "clase": "L",
+      "x": 13,
+      "y": 14,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        16,
+        17
+      ]
+    },
+    {
+      "id": "p_comisaria_centro",
+      "nombre": "Comisaría Central",
+      "zona": "centro",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 3,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "comisaria",
+      "duenoInicial": "estado",
+      "wx": 430,
+      "wy": 350,
+      "ww": 54,
+      "wh": 44,
+      "clase": "M",
+      "x": 13,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        16,
+        18
+      ]
+    },
+    {
+      "id": "p_oficina_centro",
+      "nombre": "Oficina Pública Central",
+      "zona": "centro",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 4,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "oficina_publica",
+      "duenoInicial": "estado",
+      "wx": 430,
+      "wy": 410,
+      "ww": 54,
+      "wh": 42,
+      "clase": "M",
+      "x": 13,
+      "y": 20,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        16,
+        20
+      ]
+    },
+    {
+      "id": "p_escuela_centro",
+      "nombre": "Escuela Central",
+      "zona": "centro",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 5,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "escuela",
+      "duenoInicial": "estado",
+      "wx": 500,
+      "wy": 290,
+      "ww": 54,
+      "wh": 44,
+      "clase": "L",
+      "x": 15,
+      "y": 14,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        17,
+        17
+      ]
+    },
+    {
+      "id": "p_centro_libre",
+      "nombre": "Solar Cívico Centro",
+      "zona": "centro",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "wx": 500,
+      "wy": 416,
+      "ww": 54,
+      "wh": 42,
+      "clase": "L",
+      "x": 15,
+      "y": 20,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        17,
+        20
+      ]
+    },
+    {
+      "id": "p_comercio_1",
+      "nombre": "Supermercado Central",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 7,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "supermercado",
+      "wx": 568,
+      "wy": 290,
+      "ww": 48,
+      "wh": 40,
+      "clase": "L",
+      "x": 17,
+      "y": 14,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        18,
+        17
+      ]
+    },
+    {
+      "id": "p_comercio_2",
+      "nombre": "Tienda El Progreso",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 8,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "tienda",
+      "wx": 626,
+      "wy": 290,
+      "ww": 42,
+      "wh": 38,
+      "clase": "M",
+      "x": 19,
+      "y": 14,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        19,
+        17
+      ]
+    },
+    {
+      "id": "p_restoran_1",
+      "nombre": "Restorán del Centro",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 9,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "restoran",
+      "wx": 678,
+      "wy": 290,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 21,
+      "y": 14,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        17
+      ]
+    },
+    {
+      "id": "p_constructora_1",
+      "nombre": "Constructora Central",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 10,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "oficina_constructora",
+      "wx": 650,
+      "wy": 344,
+      "ww": 50,
+      "wh": 40,
+      "clase": "M",
+      "x": 20,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        18
+      ]
+    },
+    {
+      "id": "p_inmobiliaria_1",
+      "nombre": "Inmobiliaria del Valle",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 11,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "oficina_inmobiliaria",
+      "wx": 710,
+      "wy": 344,
+      "ww": 50,
+      "wh": 40,
+      "clase": "M",
+      "x": 22,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        21,
+        18
+      ]
+    },
+    {
+      "id": "p_medio_1",
+      "nombre": "Redacción El Heraldo",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 12,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "oficina_medio",
+      "wx": 568,
+      "wy": 422,
+      "ww": 48,
+      "wh": 38,
+      "clase": "M",
+      "x": 17,
+      "y": 21,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        18,
+        20
+      ]
+    },
+    {
+      "id": "p_medio_2",
+      "nombre": "Redacción La Crónica",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 13,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "oficina_medio",
+      "wx": 624,
+      "wy": 422,
+      "ww": 48,
+      "wh": 38,
+      "clase": "M",
+      "x": 19,
+      "y": 21,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        19,
+        20
+      ]
+    },
+    {
+      "id": "p_centro_cine",
+      "nombre": "Cine Teatro Colón",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 14,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "cine_teatro",
+      "wx": 500,
+      "wy": 352,
+      "ww": 52,
+      "wh": 40,
+      "clase": "L",
+      "x": 15,
+      "y": 17,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        17,
+        18
+      ]
+    },
+    {
+      "id": "p_centro_peluqueria",
+      "nombre": "Peluquería Plaza",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 15,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "peluqueria",
+      "wx": 682,
+      "wy": 422,
+      "ww": 46,
+      "wh": 38,
+      "clase": "S",
+      "x": 21,
+      "y": 21,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        20
+      ]
+    },
+    {
+      "id": "p_centro_com_libre",
+      "nombre": "Lote Comercial Centro",
+      "zona": "centro",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 16,
+      "estadoInicial": "libre",
+      "wx": 584,
+      "wy": 464,
+      "ww": 46,
+      "wh": 26,
+      "clase": "M",
+      "x": 18,
+      "y": 23,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        19,
+        21
+      ]
+    },
+    {
+      "id": "p_casa_centro_1",
+      "nombre": "Solar Residencial Centro 1",
+      "zona": "centro",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 17,
+      "estadoInicial": "libre",
+      "houseType": "casa_grande",
+      "wx": 430,
+      "wy": 462,
+      "ww": 42,
+      "wh": 26,
+      "clase": "L",
+      "x": 13,
+      "y": 23,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        16,
+        21
+      ]
+    },
+    {
+      "id": "p_casa_centro_2",
+      "nombre": "Solar Residencial Centro 2",
+      "zona": "centro",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 18,
+      "estadoInicial": "libre",
+      "houseType": "casa_grande",
+      "wx": 480,
+      "wy": 462,
+      "ww": 42,
+      "wh": 26,
+      "clase": "L",
+      "x": 15,
+      "y": 23,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        17,
+        21
+      ]
+    },
+    {
+      "id": "p_casa_centro_3",
+      "nombre": "Solar Residencial Centro 3",
+      "zona": "centro",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 19,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 530,
+      "wy": 462,
+      "ww": 42,
+      "wh": 26,
+      "clase": "M",
+      "x": 16,
+      "y": 23,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        18,
+        21
+      ]
+    },
+    {
+      "id": "p_casa_centro_4",
+      "nombre": "Solar Residencial Centro 4",
+      "zona": "centro",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 20,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 734,
+      "wy": 290,
+      "ww": 40,
+      "wh": 36,
+      "clase": "M",
+      "x": 23,
+      "y": 14,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        21,
+        17
+      ]
+    },
+    {
+      "id": "p_casa_centro_5",
+      "nombre": "Solar Residencial Centro 5",
+      "zona": "centro",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 21,
+      "estadoInicial": "libre",
+      "wx": 736,
+      "wy": 422,
+      "ww": 40,
+      "wh": 38,
+      "clase": "S",
+      "x": 23,
+      "y": 21,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        21,
+        20
+      ]
+    },
+    {
+      "id": "p_puerto_este",
+      "nombre": "Puerto Fluvial",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "especial",
+      "orden": 1,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "puerto",
+      "duenoInicial": "estado",
+      "wx": 1106,
+      "wy": 286,
+      "ww": 60,
+      "wh": 50,
+      "clase": "L",
+      "x": 34,
+      "y": 14,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        33,
+        17
+      ]
+    },
+    {
+      "id": "p_muelle_este",
+      "nombre": "Muelle de Comercio Exterior",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "especial",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "muelle_comercio",
+      "duenoInicial": "estado",
+      "wx": 1106,
+      "wy": 348,
+      "ww": 60,
+      "wh": 50,
+      "clase": "L",
+      "x": 34,
+      "y": 17,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        33,
+        18
+      ]
+    },
+    {
+      "id": "p_este_libre",
+      "nombre": "Solar Público Este",
+      "zona": "este",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 3,
+      "estadoInicial": "libre",
+      "wx": 824,
+      "wy": 286,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 25,
+      "y": 14,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        28,
+        17
+      ]
+    },
+    {
+      "id": "p_hito_este_1",
+      "nombre": "Parcela Este I (Hito)",
+      "zona": "este",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 4,
+      "estadoInicial": "bloqueada",
+      "wx": 824,
+      "wy": 340,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 25,
+      "y": 17,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        28,
+        18
+      ]
+    },
+    {
+      "id": "p_hito_este_2",
+      "nombre": "Parcela Este II (Hito)",
+      "zona": "este",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 5,
+      "estadoInicial": "bloqueada",
+      "wx": 824,
+      "wy": 394,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 25,
+      "y": 19,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        28,
+        20
+      ]
+    },
+    {
+      "id": "p_comercio_este_1",
+      "nombre": "Almacén del Puerto",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 6,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "almacen",
+      "wx": 890,
+      "wy": 286,
+      "ww": 50,
+      "wh": 40,
+      "clase": "S",
+      "x": 27,
+      "y": 14,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        29,
+        17
+      ]
+    },
+    {
+      "id": "p_comercio_este_2",
+      "nombre": "Kiosco Portuario",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 7,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "kiosco",
+      "wx": 950,
+      "wy": 286,
+      "ww": 44,
+      "wh": 40,
+      "clase": "S",
+      "x": 29,
+      "y": 14,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        30,
+        17
+      ]
+    },
+    {
+      "id": "p_restoran_este_1",
+      "nombre": "Café del Muelle",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 8,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "bar_cafe",
+      "wx": 1004,
+      "wy": 286,
+      "ww": 50,
+      "wh": 40,
+      "clase": "S",
+      "x": 31,
+      "y": 14,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        31,
+        17
+      ]
+    },
+    {
+      "id": "p_fabrica_este_1",
+      "nombre": "Fábrica del Puerto",
+      "zona": "este",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 9,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "fabrica",
+      "wx": 890,
+      "wy": 340,
+      "ww": 54,
+      "wh": 42,
+      "clase": "XL",
+      "x": 27,
+      "y": 17,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        29,
+        18
+      ]
+    },
+    {
+      "id": "p_club_este_1",
+      "nombre": "Club Portuario",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 10,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "club",
+      "wx": 954,
+      "wy": 340,
+      "ww": 46,
+      "wh": 40,
+      "clase": "L",
+      "x": 29,
+      "y": 17,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        30,
+        18
+      ]
+    },
+    {
+      "id": "p_este_com_libre_1",
+      "nombre": "Lote Comercial Este 1",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 11,
+      "estadoInicial": "libre",
+      "wx": 1010,
+      "wy": 340,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 31,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        31,
+        18
+      ]
+    },
+    {
+      "id": "p_casa_este_1",
+      "nombre": "Vivienda Este 1",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 12,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 890,
+      "wy": 402,
+      "ww": 44,
+      "wh": 34,
+      "clase": "M",
+      "x": 27,
+      "y": 20,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        29,
+        20
+      ]
+    },
+    {
+      "id": "p_casa_este_2",
+      "nombre": "Vivienda Este 2",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 13,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 944,
+      "wy": 402,
+      "ww": 44,
+      "wh": 34,
+      "clase": "M",
+      "x": 29,
+      "y": 20,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        30,
+        20
+      ]
+    },
+    {
+      "id": "p_casa_este_3",
+      "nombre": "Vivienda Este 3",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 14,
+      "estadoInicial": "libre",
+      "houseType": "casa_grande",
+      "wx": 998,
+      "wy": 402,
+      "ww": 44,
+      "wh": 34,
+      "clase": "L",
+      "x": 31,
+      "y": 20,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        31,
+        20
+      ]
+    },
+    {
+      "id": "p_casa_este_4",
+      "nombre": "Vivienda Este 4",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 15,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 1052,
+      "wy": 402,
+      "ww": 44,
+      "wh": 34,
+      "clase": "S",
+      "x": 32,
+      "y": 20,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        32,
+        20
+      ]
+    },
+    {
+      "id": "p_casa_este_5",
+      "nombre": "Solar Residencial Este 5",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 16,
+      "estadoInicial": "libre",
+      "wx": 890,
+      "wy": 448,
+      "ww": 44,
+      "wh": 34,
+      "clase": "S",
+      "x": 27,
+      "y": 22,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        29,
+        21
+      ]
+    },
+    {
+      "id": "p_casa_este_6",
+      "nombre": "Solar Residencial Este 6",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 17,
+      "estadoInicial": "libre",
+      "wx": 944,
+      "wy": 448,
+      "ww": 44,
+      "wh": 34,
+      "clase": "S",
+      "x": 29,
+      "y": 22,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        30,
+        21
+      ]
+    },
+    {
+      "id": "p_este_com_libre_3",
+      "nombre": "Ensanche Comercial Puerto",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 18,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 1002,
+      "wy": 448,
+      "ww": 48,
+      "wh": 34,
+      "clase": "M",
+      "x": 31,
+      "y": 22,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        33,
+        23
+      ]
+    },
+    {
+      "id": "p_casa_este_7",
+      "nombre": "Ensanche Residencial Este",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 19,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 1060,
+      "wy": 448,
+      "ww": 44,
+      "wh": 34,
+      "clase": "S",
+      "x": 33,
+      "y": 22,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        33,
+        23
+      ]
+    },
+    {
+      "id": "p_norte_libre",
+      "nombre": "Solar Público Norte",
+      "zona": "norte",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 1,
+      "estadoInicial": "libre",
+      "wx": 430,
+      "wy": 36,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 13,
+      "y": 2,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        16,
+        4
+      ]
+    },
+    {
+      "id": "p_comercio_norte_1",
+      "nombre": "Almacén Norte",
+      "zona": "norte",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "almacen",
+      "wx": 496,
+      "wy": 36,
+      "ww": 50,
+      "wh": 40,
+      "clase": "S",
+      "x": 15,
+      "y": 2,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        17,
+        4
+      ]
+    },
+    {
+      "id": "p_comercio_norte_2",
+      "nombre": "Kiosco Norte",
+      "zona": "norte",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 3,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "kiosco",
+      "wx": 556,
+      "wy": 36,
+      "ww": 44,
+      "wh": 40,
+      "clase": "S",
+      "x": 17,
+      "y": 2,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        18,
+        4
+      ]
+    },
+    {
+      "id": "p_gimnasio_norte_1",
+      "nombre": "Gimnasio del Norte",
+      "zona": "norte",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 4,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "gimnasio",
+      "wx": 610,
+      "wy": 36,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 19,
+      "y": 2,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        19,
+        4
+      ]
+    },
+    {
+      "id": "p_norte_com_libre",
+      "nombre": "Lote Comercial Norte",
+      "zona": "norte",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 5,
+      "estadoInicial": "libre",
+      "wx": 668,
+      "wy": 36,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 21,
+      "y": 2,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        4
+      ]
+    },
+    {
+      "id": "p_casa_norte_1",
+      "nombre": "Vivienda Norte 1",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "houseType": "casa_grande",
+      "wx": 430,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "L",
+      "x": 13,
+      "y": 5,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        16,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_norte_2",
+      "nombre": "Vivienda Norte 2",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 7,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 484,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 15,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        17,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_norte_3",
+      "nombre": "Vivienda Norte 3",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 8,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 538,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 17,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        18,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_norte_4",
+      "nombre": "Vivienda Norte 4",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 9,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 592,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 18,
+      "y": 5,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        19,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_norte_5",
+      "nombre": "Vivienda Norte 5",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 10,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 646,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 20,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_norte_6",
+      "nombre": "Vivienda Norte 6",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 11,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 700,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 22,
+      "y": 5,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        21,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_norte_7",
+      "nombre": "Solar Residencial Norte 7",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 12,
+      "estadoInicial": "libre",
+      "wx": 430,
+      "wy": 146,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 13,
+      "y": 7,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        16,
+        7
+      ]
+    },
+    {
+      "id": "p_casa_norte_8",
+      "nombre": "Solar Residencial Norte 8",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 13,
+      "estadoInicial": "libre",
+      "wx": 484,
+      "wy": 146,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 15,
+      "y": 7,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        17,
+        7
+      ]
+    },
+    {
+      "id": "p_casa_norte_9",
+      "nombre": "Solar Residencial Norte 9",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 14,
+      "estadoInicial": "libre",
+      "wx": 538,
+      "wy": 146,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 17,
+      "y": 7,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        18,
+        7
+      ]
+    },
+    {
+      "id": "p_casa_norte_10",
+      "nombre": "Ensanche Norte 10",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 15,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 430,
+      "wy": 194,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 13,
+      "y": 10,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_casa_norte_11",
+      "nombre": "Ensanche Norte 11",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 16,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 484,
+      "wy": 194,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 15,
+      "y": 10,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_norte_com_ext",
+      "nombre": "Ensanche Comercial Norte",
+      "zona": "norte",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 17,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 538,
+      "wy": 194,
+      "ww": 48,
+      "wh": 36,
+      "clase": "M",
+      "x": 17,
+      "y": 10,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_noreste_libre",
+      "nombre": "Solar Público Noreste",
+      "zona": "noreste",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 1,
+      "estadoInicial": "libre",
+      "wx": 824,
+      "wy": 36,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 25,
+      "y": 2,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        28,
+        4
+      ]
+    },
+    {
+      "id": "p_comercio_noreste_1",
+      "nombre": "Almacén Noreste",
+      "zona": "noreste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "almacen",
+      "wx": 890,
+      "wy": 36,
+      "ww": 50,
+      "wh": 40,
+      "clase": "S",
+      "x": 27,
+      "y": 2,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        29,
+        4
+      ]
+    },
+    {
+      "id": "p_noreste_bar_1",
+      "nombre": "Bar Villa Noreste",
+      "zona": "noreste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 3,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "bar_cafe",
+      "wx": 950,
+      "wy": 36,
+      "ww": 46,
+      "wh": 40,
+      "clase": "S",
+      "x": 29,
+      "y": 2,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        30,
+        4
+      ]
+    },
+    {
+      "id": "p_noreste_com_libre",
+      "nombre": "Lote Comercial Noreste",
+      "zona": "noreste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 4,
+      "estadoInicial": "libre",
+      "wx": 1006,
+      "wy": 36,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 31,
+      "y": 2,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        31,
+        4
+      ]
+    },
+    {
+      "id": "p_casa_noreste_1",
+      "nombre": "Vivienda Noreste 1",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 5,
+      "estadoInicial": "libre",
+      "houseType": "casa_grande",
+      "wx": 824,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "L",
+      "x": 25,
+      "y": 5,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        28,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noreste_2",
+      "nombre": "Vivienda Noreste 2",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 878,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 27,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        29,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noreste_3",
+      "nombre": "Vivienda Noreste 3",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 7,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 932,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 29,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        30,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noreste_4",
+      "nombre": "Vivienda Noreste 4",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 8,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 986,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 30,
+      "y": 5,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        31,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noreste_5",
+      "nombre": "Vivienda Noreste 5",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 9,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 1040,
+      "wy": 96,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 32,
+      "y": 5,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        32,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noreste_6",
+      "nombre": "Solar Residencial Noreste 6",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 10,
+      "estadoInicial": "libre",
+      "wx": 824,
+      "wy": 146,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 25,
+      "y": 7,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        28,
+        7
+      ]
+    },
+    {
+      "id": "p_casa_noreste_7",
+      "nombre": "Solar Residencial Noreste 7",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 11,
+      "estadoInicial": "libre",
+      "wx": 878,
+      "wy": 146,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 27,
+      "y": 7,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        29,
+        7
+      ]
+    },
+    {
+      "id": "p_sur_libre",
+      "nombre": "Solar Público Sur",
+      "zona": "sur",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 1,
+      "estadoInicial": "libre",
+      "wx": 430,
+      "wy": 536,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 13,
+      "y": 26,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        16,
+        29
+      ]
+    },
+    {
+      "id": "p_escuela_sur",
+      "nombre": "Escuela del Sur",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "publica",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "escuela",
+      "duenoInicial": "estado",
+      "wx": 494,
+      "wy": 536,
+      "ww": 52,
+      "wh": 42,
+      "clase": "L",
+      "x": 15,
+      "y": 26,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        17,
+        29
+      ]
+    },
+    {
+      "id": "p_comercio_sur_1",
+      "nombre": "Supermercado del Sur",
+      "zona": "sur",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 3,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "supermercado",
+      "wx": 560,
+      "wy": 536,
+      "ww": 50,
+      "wh": 40,
+      "clase": "L",
+      "x": 17,
+      "y": 26,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        18,
+        29
+      ]
+    },
+    {
+      "id": "p_comercio_sur_2",
+      "nombre": "Tienda Sur",
+      "zona": "sur",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 4,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "tienda",
+      "wx": 620,
+      "wy": 536,
+      "ww": 44,
+      "wh": 40,
+      "clase": "M",
+      "x": 19,
+      "y": 26,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        19,
+        29
+      ]
+    },
+    {
+      "id": "p_sur_com_libre",
+      "nombre": "Lote Comercial Sur",
+      "zona": "sur",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 5,
+      "estadoInicial": "libre",
+      "wx": 676,
+      "wy": 536,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 21,
+      "y": 26,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        29
+      ]
+    },
+    {
+      "id": "p_casa_sur_1",
+      "nombre": "Vivienda Sur 1",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "houseType": "casa_grande",
+      "wx": 430,
+      "wy": 596,
+      "ww": 44,
+      "wh": 36,
+      "clase": "L",
+      "x": 13,
+      "y": 29,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        16,
+        30
+      ]
+    },
+    {
+      "id": "p_casa_sur_2",
+      "nombre": "Vivienda Sur 2",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 7,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 484,
+      "wy": 596,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 15,
+      "y": 29,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        17,
+        30
+      ]
+    },
+    {
+      "id": "p_casa_sur_3",
+      "nombre": "Vivienda Sur 3",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 8,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 538,
+      "wy": 596,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 17,
+      "y": 29,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        18,
+        30
+      ]
+    },
+    {
+      "id": "p_casa_sur_4",
+      "nombre": "Vivienda Sur 4",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 9,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 592,
+      "wy": 596,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 18,
+      "y": 29,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        19,
+        30
+      ]
+    },
+    {
+      "id": "p_casa_sur_5",
+      "nombre": "Vivienda Sur 5",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 10,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 646,
+      "wy": 596,
+      "ww": 44,
+      "wh": 36,
+      "clase": "M",
+      "x": 20,
+      "y": 29,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        30
+      ]
+    },
+    {
+      "id": "p_casa_sur_6",
+      "nombre": "Vivienda Sur 6",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 11,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 700,
+      "wy": 596,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 22,
+      "y": 29,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        21,
+        30
+      ]
+    },
+    {
+      "id": "p_casa_sur_7",
+      "nombre": "Solar Residencial Sur 7",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 12,
+      "estadoInicial": "libre",
+      "wx": 430,
+      "wy": 646,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 13,
+      "y": 32,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        16,
+        32
+      ]
+    },
+    {
+      "id": "p_casa_sur_8",
+      "nombre": "Solar Residencial Sur 8",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 13,
+      "estadoInicial": "libre",
+      "wx": 484,
+      "wy": 646,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 15,
+      "y": 32,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        17,
+        32
+      ]
+    },
+    {
+      "id": "p_casa_sur_9",
+      "nombre": "Ensanche Sur 9",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 14,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 430,
+      "wy": 694,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 13,
+      "y": 34,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_casa_sur_10",
+      "nombre": "Ensanche Sur 10",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 15,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 484,
+      "wy": 694,
+      "ww": 44,
+      "wh": 36,
+      "clase": "S",
+      "x": 15,
+      "y": 34,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_sur_com_ext",
+      "nombre": "Ensanche Comercial Sur",
+      "zona": "sur",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 16,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 538,
+      "wy": 694,
+      "ww": 48,
+      "wh": 36,
+      "clase": "M",
+      "x": 17,
+      "y": 34,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_campo_1",
+      "nombre": "Campo Noroeste 1",
+      "zona": "noroeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 1,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "wx": 36,
+      "wy": 36,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 1,
+      "y": 2,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        4,
+        5
+      ]
+    },
+    {
+      "id": "p_campo_2",
+      "nombre": "Campo Noroeste 2",
+      "zona": "noroeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "wx": 126,
+      "wy": 36,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 4,
+      "y": 2,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        5
+      ]
+    },
+    {
+      "id": "p_noroeste_agro_libre",
+      "nombre": "Lote Agrícola Noroeste",
+      "zona": "noroeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 3,
+      "estadoInicial": "libre",
+      "wx": 216,
+      "wy": 36,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 7,
+      "y": 2,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        7,
+        5
+      ]
+    },
+    {
+      "id": "p_noroeste_libre",
+      "nombre": "Solar Público Noroeste",
+      "zona": "noroeste",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 4,
+      "estadoInicial": "libre",
+      "wx": 310,
+      "wy": 36,
+      "ww": 50,
+      "wh": 42,
+      "clase": "L",
+      "x": 10,
+      "y": 2,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        9,
+        4
+      ]
+    },
+    {
+      "id": "p_casa_noroeste_1",
+      "nombre": "Chacra Noroeste 1",
+      "zona": "noroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 5,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 36,
+      "wy": 108,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 1,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        4,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noroeste_2",
+      "nombre": "Chacra Noroeste 2",
+      "zona": "noroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 92,
+      "wy": 108,
+      "ww": 46,
+      "wh": 36,
+      "clase": "S",
+      "x": 3,
+      "y": 5,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        5,
+        6
+      ]
+    },
+    {
+      "id": "p_casa_noroeste_3",
+      "nombre": "Solar Rural Noroeste 3",
+      "zona": "noroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 7,
+      "estadoInicial": "libre",
+      "wx": 148,
+      "wy": 108,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 5,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        6,
+        6
+      ]
+    },
+    {
+      "id": "p_noroeste_com_libre",
+      "nombre": "Lote Comercial Noroeste",
+      "zona": "noroeste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 8,
+      "estadoInicial": "libre",
+      "wx": 216,
+      "wy": 108,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 7,
+      "y": 5,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        7,
+        6
+      ]
+    },
+    {
+      "id": "p_campo_3",
+      "nombre": "Campo Vega Oeste 1",
+      "zona": "oeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 1,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "wx": 36,
+      "wy": 286,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 1,
+      "y": 14,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        4,
+        17
+      ]
+    },
+    {
+      "id": "p_campo_4",
+      "nombre": "Campo Vega Oeste 2",
+      "zona": "oeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 2,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "wx": 126,
+      "wy": 286,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 4,
+      "y": 14,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        17
+      ]
+    },
+    {
+      "id": "p_oeste_agro_libre",
+      "nombre": "Lote Agrícola Oeste",
+      "zona": "oeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 3,
+      "estadoInicial": "libre",
+      "wx": 216,
+      "wy": 286,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 7,
+      "y": 14,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        7,
+        17
+      ]
+    },
+    {
+      "id": "p_oeste_libre",
+      "nombre": "Solar Público Oeste",
+      "zona": "oeste",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 4,
+      "estadoInicial": "libre",
+      "wx": 310,
+      "wy": 286,
+      "ww": 50,
+      "wh": 42,
+      "clase": "L",
+      "x": 10,
+      "y": 14,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        9,
+        17
+      ]
+    },
+    {
+      "id": "p_comercio_oeste_1",
+      "nombre": "Almacén de la Vega",
+      "zona": "oeste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 5,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "almacen",
+      "wx": 216,
+      "wy": 356,
+      "ww": 48,
+      "wh": 40,
+      "clase": "S",
+      "x": 7,
+      "y": 17,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        7,
+        19
+      ]
+    },
+    {
+      "id": "p_taller_oeste_1",
+      "nombre": "Taller Mecánico Oeste",
+      "zona": "oeste",
+      "distrito": "taller",
+      "tipoParcela": "comercial",
+      "orden": 6,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "taller",
+      "wx": 274,
+      "wy": 356,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 8,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        8,
+        19
+      ]
+    },
+    {
+      "id": "p_fabrica_oeste_1",
+      "nombre": "Manufacturas del Valle",
+      "zona": "oeste",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 7,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "fabrica",
+      "wx": 36,
+      "wy": 414,
+      "ww": 62,
+      "wh": 42,
+      "clase": "XL",
+      "x": 1,
+      "y": 20,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        4,
+        20
+      ]
+    },
+    {
+      "id": "p_ind_oeste_libre",
+      "nombre": "Lote Industrial Oeste",
+      "zona": "oeste",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 8,
+      "estadoInicial": "libre",
+      "wx": 108,
+      "wy": 414,
+      "ww": 62,
+      "wh": 42,
+      "clase": "XL",
+      "x": 3,
+      "y": 20,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        5,
+        20
+      ]
+    },
+    {
+      "id": "p_ind_oeste_2",
+      "nombre": "Parcela Industrial Oeste II",
+      "zona": "oeste",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 9,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 180,
+      "wy": 414,
+      "ww": 62,
+      "wh": 42,
+      "clase": "XL",
+      "x": 6,
+      "y": 20,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_ind_oeste_3",
+      "nombre": "Parcela Industrial Oeste III",
+      "zona": "oeste",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 10,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 252,
+      "wy": 414,
+      "ww": 62,
+      "wh": 42,
+      "clase": "XL",
+      "x": 8,
+      "y": 20,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_casa_oeste_1",
+      "nombre": "Vivienda Oeste 1",
+      "zona": "oeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 11,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 36,
+      "wy": 356,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 1,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        4,
+        19
+      ]
+    },
+    {
+      "id": "p_casa_oeste_2",
+      "nombre": "Vivienda Oeste 2",
+      "zona": "oeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 12,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 92,
+      "wy": 356,
+      "ww": 46,
+      "wh": 36,
+      "clase": "S",
+      "x": 3,
+      "y": 17,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        5,
+        19
+      ]
+    },
+    {
+      "id": "p_casa_oeste_3",
+      "nombre": "Solar Rural Oeste 3",
+      "zona": "oeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 13,
+      "estadoInicial": "libre",
+      "wx": 148,
+      "wy": 356,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 5,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        6,
+        19
+      ]
+    },
+    {
+      "id": "p_casa_oeste_4",
+      "nombre": "Ensanche Residencial Oeste 4",
+      "zona": "oeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 14,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 324,
+      "wy": 414,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 10,
+      "y": 20,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_campo_5",
+      "nombre": "Campo Suroeste 1",
+      "zona": "suroeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 1,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "wx": 36,
+      "wy": 536,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 1,
+      "y": 26,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        4,
+        29
+      ]
+    },
+    {
+      "id": "p_suroeste_agro_libre",
+      "nombre": "Lote Agrícola Suroeste",
+      "zona": "suroeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 2,
+      "estadoInicial": "libre",
+      "wx": 126,
+      "wy": 536,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 4,
+      "y": 26,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        29
+      ]
+    },
+    {
+      "id": "p_suroeste_libre",
+      "nombre": "Solar Público Suroeste",
+      "zona": "suroeste",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 3,
+      "estadoInicial": "libre",
+      "wx": 220,
+      "wy": 536,
+      "ww": 50,
+      "wh": 42,
+      "clase": "L",
+      "x": 7,
+      "y": 26,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        7,
+        29
+      ]
+    },
+    {
+      "id": "p_suroeste_com_libre",
+      "nombre": "Lote Comercial Suroeste",
+      "zona": "suroeste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 4,
+      "estadoInicial": "libre",
+      "wx": 220,
+      "wy": 604,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 7,
+      "y": 30,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        7,
+        31
+      ]
+    },
+    {
+      "id": "p_casa_suroeste_1",
+      "nombre": "Vivienda Suroeste 1",
+      "zona": "suroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 5,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 36,
+      "wy": 604,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 1,
+      "y": 30,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        4,
+        31
+      ]
+    },
+    {
+      "id": "p_casa_suroeste_2",
+      "nombre": "Vivienda Suroeste 2",
+      "zona": "suroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 92,
+      "wy": 604,
+      "ww": 46,
+      "wh": 36,
+      "clase": "S",
+      "x": 3,
+      "y": 30,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        5,
+        31
+      ]
+    },
+    {
+      "id": "p_casa_suroeste_3",
+      "nombre": "Solar Rural Suroeste 3",
+      "zona": "suroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 7,
+      "estadoInicial": "libre",
+      "wx": 148,
+      "wy": 604,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 5,
+      "y": 30,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        6,
+        31
+      ]
+    },
+    {
+      "id": "p_campo_6",
+      "nombre": "Campo Sureste 1",
+      "zona": "sureste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 1,
+      "estadoInicial": "ocupada",
+      "edificioInicial": "campo",
+      "wx": 824,
+      "wy": 536,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 25,
+      "y": 26,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        28,
+        29
+      ]
+    },
+    {
+      "id": "p_sureste_agro_libre",
+      "nombre": "Lote Agrícola Sureste",
+      "zona": "sureste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "orden": 2,
+      "estadoInicial": "libre",
+      "wx": 914,
+      "wy": 536,
+      "ww": 78,
+      "wh": 52,
+      "clase": "XL",
+      "x": 28,
+      "y": 26,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        30,
+        29
+      ]
+    },
+    {
+      "id": "p_sureste_libre",
+      "nombre": "Solar Público Sureste",
+      "zona": "sureste",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 3,
+      "estadoInicial": "libre",
+      "wx": 1008,
+      "wy": 536,
+      "ww": 50,
+      "wh": 42,
+      "clase": "L",
+      "x": 31,
+      "y": 26,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        31,
+        29
+      ]
+    },
+    {
+      "id": "p_sureste_com_libre",
+      "nombre": "Lote Comercial Sureste",
+      "zona": "sureste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 4,
+      "estadoInicial": "libre",
+      "wx": 1008,
+      "wy": 604,
+      "ww": 48,
+      "wh": 40,
+      "clase": "M",
+      "x": 31,
+      "y": 30,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        31,
+        31
+      ]
+    },
+    {
+      "id": "p_casa_sureste_1",
+      "nombre": "Vivienda Sureste 1",
+      "zona": "sureste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 5,
+      "estadoInicial": "libre",
+      "houseType": "casa_mediana",
+      "wx": 824,
+      "wy": 604,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 25,
+      "y": 30,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        28,
+        31
+      ]
+    },
+    {
+      "id": "p_casa_sureste_2",
+      "nombre": "Vivienda Sureste 2",
+      "zona": "sureste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "libre",
+      "houseType": "casa_chica",
+      "wx": 880,
+      "wy": 604,
+      "ww": 46,
+      "wh": 36,
+      "clase": "S",
+      "x": 27,
+      "y": 30,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        29,
+        31
+      ]
+    },
+    {
+      "id": "p_casa_sureste_3",
+      "nombre": "Solar Rural Sureste 3",
+      "zona": "sureste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 7,
+      "estadoInicial": "libre",
+      "wx": 936,
+      "wy": 604,
+      "ww": 46,
+      "wh": 36,
+      "clase": "M",
+      "x": 29,
+      "y": 30,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        30,
+        31
+      ]
+    },
+    {
+      "id": "p_pol_ind_1",
+      "nombre": "Lote Industrial Polígono 1",
+      "zona": "poligono",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 1,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_camino_poligono",
+      "wx": 40,
+      "wy": 794,
+      "ww": 74,
+      "wh": 50,
+      "clase": "XL",
+      "x": 1,
+      "y": 39,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        12,
+        42
+      ]
+    },
+    {
+      "id": "p_pol_ind_2",
+      "nombre": "Lote Industrial Polígono 2",
+      "zona": "poligono",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 2,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_camino_poligono",
+      "wx": 128,
+      "wy": 794,
+      "ww": 74,
+      "wh": 50,
+      "clase": "XL",
+      "x": 4,
+      "y": 39,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        12,
+        42
+      ]
+    },
+    {
+      "id": "p_pol_ind_3",
+      "nombre": "Lote Industrial Polígono 3",
+      "zona": "poligono",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "orden": 3,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_camino_poligono",
+      "wx": 216,
+      "wy": 794,
+      "ww": 74,
+      "wh": 50,
+      "clase": "XL",
+      "x": 7,
+      "y": 39,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        12,
+        42
+      ]
+    },
+    {
+      "id": "p_pol_com_1",
+      "nombre": "Lote Comercial Polígono",
+      "zona": "poligono",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 4,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_camino_poligono",
+      "wx": 308,
+      "wy": 794,
+      "ww": 58,
+      "wh": 44,
+      "clase": "L",
+      "x": 9,
+      "y": 39,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        12,
+        42
+      ]
+    },
+    {
+      "id": "p_pol_pub_1",
+      "nombre": "Solar Público Polígono",
+      "zona": "poligono",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 5,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_camino_poligono",
+      "wx": 382,
+      "wy": 794,
+      "ww": 56,
+      "wh": 44,
+      "clase": "L",
+      "x": 12,
+      "y": 39,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        12,
+        42
+      ]
+    },
+    {
+      "id": "p_pol_res_1",
+      "nombre": "Solar Obrero Polígono",
+      "zona": "poligono",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 6,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_camino_poligono",
+      "wx": 454,
+      "wy": 794,
+      "ww": 52,
+      "wh": 40,
+      "clase": "L",
+      "x": 14,
+      "y": 39,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        12,
+        42
+      ]
+    },
+    {
+      "id": "p_rib_res_1",
+      "nombre": "Solar Ribera 1",
+      "zona": "ribera",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 1,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_puente_ribera",
+      "wx": 1260,
+      "wy": 300,
+      "ww": 50,
+      "wh": 38,
+      "clase": "M",
+      "x": 39,
+      "y": 15,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        40,
+        21
+      ]
+    },
+    {
+      "id": "p_rib_res_2",
+      "nombre": "Solar Ribera 2",
+      "zona": "ribera",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 2,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_puente_ribera",
+      "wx": 1322,
+      "wy": 300,
+      "ww": 50,
+      "wh": 38,
+      "clase": "M",
+      "x": 41,
+      "y": 15,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        40,
+        21
+      ]
+    },
+    {
+      "id": "p_rib_res_3",
+      "nombre": "Solar Ribera 3",
+      "zona": "ribera",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 3,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_puente_ribera",
+      "wx": 1260,
+      "wy": 352,
+      "ww": 50,
+      "wh": 38,
+      "clase": "M",
+      "x": 39,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        40,
+        21
+      ]
+    },
+    {
+      "id": "p_rib_res_4",
+      "nombre": "Solar Ribera 4",
+      "zona": "ribera",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "orden": 4,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_puente_ribera",
+      "wx": 1322,
+      "wy": 352,
+      "ww": 50,
+      "wh": 38,
+      "clase": "M",
+      "x": 41,
+      "y": 17,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        40,
+        21
+      ]
+    },
+    {
+      "id": "p_rib_com_1",
+      "nombre": "Lote Comercial Ribera",
+      "zona": "ribera",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "orden": 5,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_puente_ribera",
+      "wx": 1260,
+      "wy": 410,
+      "ww": 56,
+      "wh": 42,
+      "clase": "L",
+      "x": 39,
+      "y": 20,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        40,
+        21
+      ]
+    },
+    {
+      "id": "p_rib_pub_1",
+      "nombre": "Solar Público Ribera",
+      "zona": "ribera",
+      "distrito": "civico",
+      "tipoParcela": "publica",
+      "orden": 6,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_puente_ribera",
+      "wx": 1332,
+      "wy": 410,
+      "ww": 56,
+      "wh": 42,
+      "clase": "L",
+      "x": 41,
+      "y": 20,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        40,
+        21
+      ]
+    },
+    {
+      "id": "p_ext2_norte_1",
+      "nombre": "Ensanche Residencial Norte 12",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 598,
+      "wy": 194,
+      "ww": 44,
+      "wh": 36,
+      "x": 18,
+      "y": 10,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_ext2_norte_2",
+      "nombre": "Ensanche Residencial Norte 13",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "S",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 652,
+      "wy": 194,
+      "ww": 42,
+      "wh": 36,
+      "x": 20,
+      "y": 10,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_ext2_norte_3",
+      "nombre": "Ensanche Residencial Norte 14",
+      "zona": "norte",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "L",
+      "orden": 32,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 704,
+      "wy": 194,
+      "ww": 50,
+      "wh": 38,
+      "x": 22,
+      "y": 10,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_ext2_sur_1",
+      "nombre": "Ensanche Residencial Sur 11",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 598,
+      "wy": 694,
+      "ww": 44,
+      "wh": 36,
+      "x": 18,
+      "y": 34,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_ext2_sur_2",
+      "nombre": "Ensanche Residencial Sur 12",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "S",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 652,
+      "wy": 694,
+      "ww": 42,
+      "wh": 36,
+      "x": 20,
+      "y": 34,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_ext2_sur_3",
+      "nombre": "Ensanche Residencial Sur 13",
+      "zona": "sur",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "L",
+      "orden": 32,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 704,
+      "wy": 694,
+      "ww": 50,
+      "wh": 38,
+      "x": 22,
+      "y": 34,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_ext2_este_1",
+      "nombre": "Ensanche Comercial Este 4",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "clase": "M",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 1114,
+      "wy": 448,
+      "ww": 48,
+      "wh": 34,
+      "x": 34,
+      "y": 22,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        33,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_este_2",
+      "nombre": "Ensanche Residencial Este 8",
+      "zona": "este",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 1002,
+      "wy": 492,
+      "ww": 44,
+      "wh": 32,
+      "x": 31,
+      "y": 24,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        33,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_este_3",
+      "nombre": "Ensanche Comercial Este 5",
+      "zona": "este",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "clase": "L",
+      "orden": 32,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 1060,
+      "wy": 492,
+      "ww": 52,
+      "wh": 34,
+      "x": 33,
+      "y": 24,
+      "w": 4,
+      "h": 4,
+      "frente": [
+        33,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_oeste_1",
+      "nombre": "Ensanche Agrícola Oeste 2",
+      "zona": "oeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "clase": "XL",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 36,
+      "wy": 462,
+      "ww": 78,
+      "wh": 32,
+      "x": 1,
+      "y": 23,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_oeste_2",
+      "nombre": "Ensanche Comercial Oeste 2",
+      "zona": "oeste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "clase": "M",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 126,
+      "wy": 462,
+      "ww": 48,
+      "wh": 32,
+      "x": 4,
+      "y": 23,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_oeste_3",
+      "nombre": "Ensanche Residencial Oeste 5",
+      "zona": "oeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 32,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 184,
+      "wy": 462,
+      "ww": 46,
+      "wh": 32,
+      "x": 6,
+      "y": 23,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_oeste_4",
+      "nombre": "Ensanche Residencial Oeste 6",
+      "zona": "oeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "S",
+      "orden": 33,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 240,
+      "wy": 462,
+      "ww": 42,
+      "wh": 32,
+      "x": 7,
+      "y": 23,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_oeste_5",
+      "nombre": "Ensanche Industrial Oeste 4",
+      "zona": "oeste",
+      "distrito": "taller",
+      "tipoParcela": "industrial",
+      "clase": "XL",
+      "orden": 34,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_oeste_ind",
+      "wx": 292,
+      "wy": 462,
+      "ww": 70,
+      "wh": 34,
+      "x": 9,
+      "y": 23,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        6,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_noreste_1",
+      "nombre": "Ensanche Residencial Noreste 8",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 932,
+      "wy": 194,
+      "ww": 44,
+      "wh": 36,
+      "x": 29,
+      "y": 10,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_ext2_noreste_2",
+      "nombre": "Ensanche Residencial Noreste 9",
+      "zona": "noreste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "S",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 986,
+      "wy": 194,
+      "ww": 42,
+      "wh": 36,
+      "x": 30,
+      "y": 10,
+      "w": 2,
+      "h": 2,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_ext2_noreste_3",
+      "nombre": "Ensanche Comercial Noreste 2",
+      "zona": "noreste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "clase": "M",
+      "orden": 32,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_norte_ext",
+      "wx": 1040,
+      "wy": 194,
+      "ww": 48,
+      "wh": 36,
+      "x": 32,
+      "y": 10,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        10
+      ]
+    },
+    {
+      "id": "p_ext2_suroeste_1",
+      "nombre": "Ensanche Residencial Suroeste 4",
+      "zona": "suroeste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 36,
+      "wy": 656,
+      "ww": 46,
+      "wh": 36,
+      "x": 1,
+      "y": 32,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_ext2_suroeste_2",
+      "nombre": "Ensanche Agrícola Suroeste 2",
+      "zona": "suroeste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "clase": "XL",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 92,
+      "wy": 656,
+      "ww": 76,
+      "wh": 44,
+      "x": 3,
+      "y": 32,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_ext2_suroeste_3",
+      "nombre": "Ensanche Comercial Suroeste 2",
+      "zona": "suroeste",
+      "distrito": "mercado",
+      "tipoParcela": "comercial",
+      "clase": "M",
+      "orden": 32,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_sur_ext",
+      "wx": 180,
+      "wy": 656,
+      "ww": 48,
+      "wh": 36,
+      "x": 6,
+      "y": 32,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        20,
+        35
+      ]
+    },
+    {
+      "id": "p_ext2_sureste_1",
+      "nombre": "Ensanche Residencial Sureste 4",
+      "zona": "sureste",
+      "distrito": "residencial",
+      "tipoParcela": "residencial",
+      "clase": "M",
+      "orden": 30,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 824,
+      "wy": 656,
+      "ww": 46,
+      "wh": 36,
+      "x": 25,
+      "y": 32,
+      "w": 3,
+      "h": 3,
+      "frente": [
+        33,
+        23
+      ]
+    },
+    {
+      "id": "p_ext2_sureste_2",
+      "nombre": "Ensanche Agrícola Sureste 2",
+      "zona": "sureste",
+      "distrito": "campos",
+      "tipoParcela": "agricola",
+      "clase": "XL",
+      "orden": 31,
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
+      "wx": 882,
+      "wy": 656,
+      "ww": 76,
+      "wh": 44,
+      "x": 27,
+      "y": 32,
+      "w": 6,
+      "h": 6,
+      "frente": [
+        33,
+        23
+      ]
+    }
+  ],
+  "mapaGrid": {
+    "version": 1,
+    "ancho": 48,
+    "alto": 48,
+    "terreno": [
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      "......................................^^^^^^^^^^",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      ".....................................~..........",
+      "................................................",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^",
+      ".........................^^^^^^^^^^^^^^^^^^^^^^^"
+    ],
+    "vias": [
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "......rrrrrrrrrrrrrrrrrrrrrrrrrr................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......rrrrrrrrrrrrrrrrrrrrrrrrrr................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......r...........r............r................",
+      "......rrrrrrrrrrrrrrrrrrrrrrrrrr................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................",
+      "................................................"
+    ],
+    "zonas": [
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEEEEBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEEEEBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEEEBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEEBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEEBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEEBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEEBBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEBBBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEEBBBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEBBBBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEEBBBBBBBBBB",
+      "OOOOOOOOOOOONNNNNNNNNNNNNEEEEEEEEEEEEBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "WWWWWWWWWWWWCCCCCCCCCCCCCPPPPPPPPPPPPBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "SSSSSSSSSSSSUUUUUUUUUUUUURRRRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRRBBBBBBBBBBB",
+      "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIRRRRRRBBBBBBBBBBB"
+    ],
+    "zonas_info": {
+      "noroeste": {
+        "id": "noroeste",
+        "codigo": "O",
+        "nombre": "Noroeste Agrario",
+        "estado": "activa",
+        "nodoPrincipal": "n_noroeste"
+      },
+      "norte": {
+        "id": "norte",
+        "codigo": "N",
+        "nombre": "Barrio Norte",
+        "estado": "activa",
+        "nodoPrincipal": "n_norte"
+      },
+      "noreste": {
+        "id": "noreste",
+        "codigo": "E",
+        "nombre": "Villa Noreste",
+        "estado": "activa",
+        "nodoPrincipal": "n_noreste"
+      },
+      "oeste": {
+        "id": "oeste",
+        "codigo": "W",
+        "nombre": "Vega Oeste",
+        "estado": "activa",
+        "nodoPrincipal": "n_oeste"
+      },
+      "centro": {
+        "id": "centro",
+        "codigo": "C",
+        "nombre": "Centro Cívico",
+        "estado": "activa",
+        "nodoPrincipal": "n_centro"
+      },
+      "este": {
+        "id": "este",
+        "codigo": "P",
+        "nombre": "Puerto Este",
+        "estado": "activa",
+        "nodoPrincipal": "n_este"
+      },
+      "suroeste": {
+        "id": "suroeste",
+        "codigo": "S",
+        "nombre": "Pradera Suroeste",
+        "estado": "activa",
+        "nodoPrincipal": "n_suroeste"
+      },
+      "sur": {
+        "id": "sur",
+        "codigo": "U",
+        "nombre": "Barrio Sur",
+        "estado": "activa",
+        "nodoPrincipal": "n_sur"
+      },
+      "sureste": {
+        "id": "sureste",
+        "codigo": "R",
+        "nombre": "Granjas Sureste",
+        "estado": "activa",
+        "nodoPrincipal": "n_sureste"
+      },
+      "poligono": {
+        "id": "poligono",
+        "codigo": "I",
+        "nombre": "Polígono Industrial",
+        "estado": "no_urbanizada",
+        "nodoPrincipal": "n_poligono"
+      },
+      "ribera": {
+        "id": "ribera",
+        "codigo": "B",
+        "nombre": "Ribera del Este",
+        "estado": "no_urbanizada",
+        "nodoPrincipal": "n_ribera"
+      }
+    }
+  }
 }

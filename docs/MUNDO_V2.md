@@ -117,21 +117,23 @@ Como MUNDO_V1 §6 (golpes, hambre crítica, vulnerabilidad por edad, hospital, c
 
 ## 8. Zonas y parcelas
 
-- **8 a 12 zonas activas al empezar** (más con escala alta), más las zonas `no_urbanizada` que traiga el preset, con vecindad dibujable sin cruces y distancia en pasos como MUNDO_V1 §4.
+> **El territorio es una grilla de baldosas con calles y lotes (MAPA_V2.md).** "Parcela" y "lote" son lo mismo. Donde este apartado y MAPA_V2 difieran, manda MAPA_V2: las zonas son regiones de baldosas, su vecindad se deriva de la contigüidad y la red de rutas sale de las baldosas de vía.
+
+- **8 a 12 zonas activas al empezar** (más con escala alta), más las zonas `no_urbanizada` que traiga el preset. Cada zona es un conjunto de baldosas; la vecindad (contigüidad) se deriva del mapa y la distancia entre zonas es el número de pasos entre vecinas, como MUNDO_V1 §4.
 - **Tipos de parcela:** `residencial`, `comercial`, `agricola`, `industrial`, `publica` y `especial`. Cada zona define cuántas de cada tipo y en qué orden. `especial` reserva puntos de interés del mapa (plaza, puerto, muelle de comercio exterior) y no se edifica.
 - **Estados:** `sin_calle` (existe en el suelo urbanizable pero no tiene acceso), `bloqueada` (se habilita más adelante por hitos, capa del gobernador), `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` no admite ninguna obra.
-- Cada parcela tiene un lugar fijo en el terreno (UI); sus eventos se ven ahí.
+- Cada lote tiene posición y tamaño en el mapa (MAPA_V2 §4); sus eventos se ven ahí.
 - **Carácter de zona [propuesta]:** centro con comercios y edificios públicos, anillo residencial, periferia con campos. Los precios de alquiler y la demanda de comercio varían por zona.
 - **Red vial y expansión de la ciudad.**
   - El territorio tiene **suelo urbanizable**: el preset define más parcelas y más zonas de las que están en uso. Lo que no tiene acceso está `sin_calle` (parcelas) o `no_urbanizada` (zonas).
   - **Tramo:** segmento de vía con tipo (`calle`, `camino`, `puente`), `estado` (0-100) y las parcelas o la zona que abre. Una **calle** abre las parcelas de su frente dentro de una zona; un **camino** une dos zonas o abre una zona no urbanizada; un **puente** es un camino que cruza una barrera natural (agua, desnivel) y abre el terreno del otro lado. Catálogo: EDIFICIOS_V2 §3b.
   - **Solo el estado construye vías.** Cada tramo tiene costo de obra, días de obra y mantenimiento por período (parámetros). Al terminar, las parcelas que abre pasan a `libre`; una zona nueva pasa a activa y entra en la vecindad.
   - **Mantenimiento:** el estado paga el de cada tramo el día de pago. Sin pago, el `estado` del tramo baja; con la vía en mal estado baja la `infraestructura` de la zona y la capacidad de venta de los locales de su frente.
-  - **Red de rutas.** La red vial es un grafo: los tramos son aristas con `longitud` (unidad abstracta) y se unen en nodos; cada parcela construida tiene un acceso a un nodo. La **vecindad de zonas** (contigüidad en el mapa) no cambia; la red decide la **transitabilidad**. Todas las zonas activas arrancan conectadas por el preset.
+  - **Red de rutas.** Sale de las baldosas de vía del mapa (MAPA_V2 §6): nodos en intersecciones, extremos y frentes de lote; tramos entre nodos con `longitud` y `estado`. La vecindad de zonas (contigüidad) no cambia; la red decide la **transitabilidad**. Todas las zonas activas arrancan conectadas por el preset.
   - **Distancia entre dos parcelas** = costo del camino mínimo por la red, con costo de cada tramo = `longitud` × (1 + `k_vial` × (1 − estado/100)). Un tramo en estado 0 es intransitable: si hay otra ruta se usa (más larga y cara); si no hay, la parcela queda aislada.
   - **Dónde se usa:** elección de vendedor y de casa (cercanía), búsqueda de trabajo (hasta `ruta_max_trabajo`), hospital más cercano, y la rutina que dibuja la UI. Ataques, clima y orden siguen usando la distancia entre zonas de MUNDO_V1 §4.
   - **Traslado:** la productividad baja con el costo de la ruta casa-trabajo (`k_traslado`) **[propuesta]**. Cortar o deteriorar un tramo clave alarga rutas, baja ventas y productividad, y aparece en las noticias de obras.
-  - **Cómputo:** la distancia se calcula por par de zonas (camino mínimo entre sus nodos de conexión) más un costo interno fijo dentro de cada zona, y solo se recalcula cuando un tramo cambia de estado o se construye.
+  - **Cómputo:** distancias precomputadas entre nodos y cacheadas; solo se recalculan cuando un tramo cambia de estado o se construye (MAPA_V2 §6).
   - **La ciudad se expande solo por vías:** no hay parcelas nuevas sin una vía que las abra. Los hogares y las firmas construyen sobre lo que el estado abre.
   - **Demanda de suelo:** indicador por zona y tipo de parcela = demanda (hogares sin casa, firmas con caja para un local o campo) ÷ parcelas libres. Es lo que dispara la obra en piloto automático (sección 9).
 - Las parcelas libres son compartidas: las ocupan firmas, hogares y el estado (sección 9). Quien llega primero según el orden de ejecución de ese día la ocupa.

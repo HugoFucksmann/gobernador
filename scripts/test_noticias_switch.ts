@@ -15,7 +15,7 @@ import { createInitialGameState } from '../src/engine/worldGenerator';
 function run(seed: number, on: boolean, garantia: number, dias = 120) {
   (PRESS_CONSTANTS as { noticiasMuevenSatisfaccion: boolean }).noticiasMuevenSatisfaccion = on;
   const p = SCENARIO_PRESETS.elecciones;
-  let s = createInitialGameState({ ...structuredClone(DEFAULT_WORLD_CONFIG), escenarioId: 'elecciones', economiaModulo: 'base', nivelMundo: 'M1', nivelGobernador: 'G2', poblacionInicial: 100, cantidadMedios: 2, semilla: seed, caos: structuredClone(p.caosDefault), usarIaGemini: false } as never);
+  let s = createInitialGameState({ ...structuredClone(DEFAULT_WORLD_CONFIG), escenarioId: 'elecciones', economiaModulo: 'base', nivelMundo: 'M1', nivelGobernador: 'G2', estadoAutomatico: false, poblacionInicial: 100, cantidadMedios: 2, semilla: seed, caos: structuredClone(p.caosDefault), usarIaGemini: false } as never);
   s.gobierno.palancasObjetivo.garantiaAlimentaria = garantia;
   s.gobierno.palancasObjetivo.precioMaximo = 'libre';
   // una sequía fuerte para que haya hambre y noticias alarmistas

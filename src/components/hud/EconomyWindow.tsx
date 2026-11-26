@@ -15,6 +15,7 @@ interface EconomyWindowProps {
   onClose: () => void;
   onOpenPalancas: () => void;
   onJumpZone: (z: ZoneId | 'all') => void;
+  onSelectFirma?: (firmaId: string) => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
@@ -74,10 +75,14 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
   onClose,
   onOpenPalancas,
   onJumpZone,
+  onSelectFirma,
   onInspectCausal,
 }) => {
   const [tab, setTab] = useState<'resumen' | 'firmas' | 'vivienda' | 'curvas'>('resumen');
   const [rubroFilter, setRubroFilter] = useState<FirmRubro | 'todos'>('todos');
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
 
   const fin = state.gobierno.finanzas;
   const acum = state.gobierno.acumuladoPeriodo;
@@ -145,14 +150,16 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={onOpenPalancas}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl shrink-0 transition-colors whitespace-nowrap"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              Palancas
-            </button>
+            {!isG0 && (
+              <button
+                type="button"
+                onClick={onOpenPalancas}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-emerald-400 rounded-xl shrink-0 transition-colors whitespace-nowrap"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                Palancas
+              </button>
+            )}
           </div>
 
           {tab === 'resumen' && (
@@ -321,9 +328,13 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                   </div>
                 ) : (
                   filteredFirms.map((f) => {
-                    const share = Math.round((state.ultimaSalidaEconomica.cuotaMercado[f.rubro]?.firma === f.nombre
-                      ? state.ultimaSalidaEconomica.cuotaMercado[f.rubro].cuota
-                      : Math.max(...Object.values(f.cuotaZona), 0)) * 100);
+                    const mKey = `${f.rubro}:${f.zona}`;
+                    const leader = state.ultimaSalidaEconomica.cuotaMercado[mKey];
+                    const share = Math.round(
+                      (leader?.firma === f.nombre
+                        ? leader.cuota
+                        : f.cuotaZona?.[f.zona] ?? Math.max(...Object.values(f.cuotaZona), 0)) * 100
+                    );
                     const zoneName = state.zonas[f.zona]?.nombre ?? f.zona;
                     const stockText =
                       f.stock !== undefined
@@ -339,10 +350,16 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onSelectFirma?.(f.id)}
+                              className="flex items-center gap-2 text-left hover:text-emerald-400 transition-colors max-w-full"
+                            >
                               <Store className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                              <span className="font-semibold text-sm text-white truncate">{f.nombre}</span>
-                            </div>
+                              <span className="font-semibold text-sm text-white hover:text-emerald-400 truncate">
+                                {f.nombre}
+                              </span>
+                            </button>
                             <div className="text-zinc-400 mt-0.5">
                               {getRubroDisplayName(f.rubro)} ·{' '}
                               <button
@@ -429,7 +446,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                 <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1 text-xs font-mono tabular-nums">
                   {Object.values(state.zonas).map((z) => {
                     const alq = state.ultimaSalidaEconomica.alquilerMedio[z.id] ?? 0;
-                    const demSuelo = state.demandaSuelo[z.id] ?? 1;
+                    const demSuelo = state.demandaSuelo[`${z.id}:residencial`] ?? 1;
                     const zCasas = state.casas.filter((c) => c.zona === z.id).length;
                     const isNoUrb = z.estado === 'no_urbanizada';
                     return (

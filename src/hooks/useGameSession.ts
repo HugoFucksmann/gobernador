@@ -39,6 +39,8 @@ interface CausalInspectTarget {
   fallbackText?: string;
 }
 
+export type InspectorDirectoryTab = 'personas' | 'hogares' | 'firmas';
+
 export function useGameSession() {
   const controllerRef = useRef<GameController | null>(null);
   if (!controllerRef.current) {
@@ -53,9 +55,14 @@ export function useGameSession() {
   const [openWindows, setOpenWindows] = useState<WindowId[]>([]);
   const [ciudadTabRequest, setCiudadTabRequest] = useState<{ tab: CityTab; seq: number } | null>(null);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
+  const [selectedHogarId, setSelectedHogarId] = useState<string | null>(null);
   const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
+  const [selectedFirmaId, setSelectedFirmaId] = useState<string | null>(null);
   const [selectedTramoId, setSelectedTramoId] = useState<string | null>(null);
+  const [selectedZonaId, setSelectedZonaId] = useState<ZoneId | null>(null);
+  const [selectedMedioId, setSelectedMedioId] = useState<string | null>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<LandmarkId | null>(null);
+  const [inspectorSearchOpen, setInspectorSearchOpen] = useState<InspectorDirectoryTab | null>(null);
   const [sideBuildOpen, setSideBuildOpen] = useState<boolean>(false);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
   const [mapFilter, setMapFilter] = useState<MapFilter>('todos');
@@ -98,12 +105,15 @@ export function useGameSession() {
       st.parcelas.filter((p) => p.estado === 'ocupada' && p.edificio).length +
       st.tramos.filter((t) => t.construida).length;
 
+    const isG0 =
+      (st.config.nivelGobernador ?? (st.config.economiaModulo === 'fiscal' ? 'G3' : 'G2')) === 'G0' ||
+      Boolean(st.config.estadoAutomatico);
+
     if (st.reloj.dia !== prevDiaRef.current) {
       if (st.reloj.dia < prevDiaRef.current) {
-        // New game or loaded save: reset trackers cleanly
         setPaydaySummary(null);
         setMonthlySummary(null);
-      } else if (hasStarted && st.resultado.estado === 'jugando') {
+      } else if (hasStarted && st.resultado.estado === 'jugando' && !isG0) {
         if (st.reloj.periodo > prevPeriodoRef.current) {
           const gastos = sumPeriodExpenses(st.gobierno.finanzas);
           setPaydaySummary({
@@ -146,7 +156,7 @@ export function useGameSession() {
     }
 
     if (hasStarted) {
-      if (st.demandasActivas.length > prevDemandsRef.current) {
+      if (!isG0 && st.demandasActivas.length > prevDemandsRef.current) {
         playDemandSfx();
       }
       const activeFenCount = getActivePhenomena(st).length;
@@ -163,6 +173,20 @@ export function useGameSession() {
     prevBuiltCountRef.current = builtCount;
   }, [snapshot.state, snapshot.derived, hasStarted]);
 
+  const clearSideSelectionIds = useCallback(() => {
+    setSelectedNpcId(null);
+    setSelectedHogarId(null);
+    setSelectedParcelaId(null);
+    setSelectedFirmaId(null);
+    setSelectedTramoId(null);
+    setSelectedZonaId(null);
+    setSelectedMedioId(null);
+    setSelectedLandmark(null);
+    setInspectorSearchOpen(null);
+    setSideBuildOpen(false);
+    setFollowSelected(false);
+  }, []);
+
   // Global keyboard shortcuts (Escape closes topmost overlay/window, Space toggles pause)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -173,17 +197,19 @@ export function useGameSession() {
           setShowConfigModal(false);
         } else if (openWindows.length > 0) {
           setOpenWindows((prev) => prev.slice(0, -1));
-        } else if (selectedNpcId) {
-          setSelectedNpcId(null);
-          setFollowSelected(false);
-        } else if (selectedParcelaId) {
-          setSelectedParcelaId(null);
-        } else if (selectedTramoId) {
-          setSelectedTramoId(null);
-        } else if (selectedLandmark) {
-          setSelectedLandmark(null);
-        } else if (sideBuildOpen) {
-          setSideBuildOpen(false);
+        } else if (
+          selectedNpcId ||
+          selectedHogarId ||
+          selectedParcelaId ||
+          selectedFirmaId ||
+          selectedTramoId ||
+          selectedZonaId ||
+          selectedMedioId ||
+          selectedLandmark ||
+          inspectorSearchOpen ||
+          sideBuildOpen
+        ) {
+          clearSideSelectionIds();
         }
       } else if (e.key === ' ' && hasStarted && !showConfigModal && !causalInspect) {
         const activeEl = document.activeElement as HTMLElement | null;
@@ -200,13 +226,19 @@ export function useGameSession() {
     hasStarted,
     openWindows.length,
     selectedNpcId,
+    selectedHogarId,
     selectedParcelaId,
+    selectedFirmaId,
     selectedTramoId,
+    selectedZonaId,
+    selectedMedioId,
     selectedLandmark,
+    inspectorSearchOpen,
     sideBuildOpen,
     showConfigModal,
     causalInspect,
     controller,
+    clearSideSelectionIds,
   ]);
 
   const selectedNpc = useMemo(
@@ -214,14 +246,34 @@ export function useGameSession() {
     [snapshot.state.npcs, selectedNpcId]
   );
 
+  const selectedHogar = useMemo(
+    () => snapshot.state.hogares.find((h) => h.id === selectedHogarId) || null,
+    [snapshot.state.hogares, selectedHogarId]
+  );
+
   const selectedParcela = useMemo(
     () => snapshot.state.parcelas.find((p) => p.id === selectedParcelaId) || null,
     [snapshot.state.parcelas, selectedParcelaId]
   );
 
+  const selectedFirma = useMemo(
+    () => snapshot.state.firmas.find((f) => f.id === selectedFirmaId) || null,
+    [snapshot.state.firmas, selectedFirmaId]
+  );
+
   const selectedTramo = useMemo(
     () => snapshot.state.tramos.find((t) => t.id === selectedTramoId) || null,
     [snapshot.state.tramos, selectedTramoId]
+  );
+
+  const selectedZona = useMemo(
+    () => (selectedZonaId ? snapshot.state.zonas[selectedZonaId] || null : null),
+    [snapshot.state.zonas, selectedZonaId]
+  );
+
+  const selectedMedio = useMemo(
+    () => snapshot.state.medios.find((m) => m.id === selectedMedioId) || null,
+    [snapshot.state.medios, selectedMedioId]
   );
 
   const hasConditionAlert = useMemo(
@@ -230,57 +282,79 @@ export function useGameSession() {
   );
 
   const selectNpc = useCallback((npcId: string) => {
-    setSelectedParcelaId(null);
-    setSelectedTramoId(null);
-    setSelectedLandmark(null);
-    setSideBuildOpen(false);
+    clearSideSelectionIds();
     setSelectedNpcId(npcId);
-  }, []);
+  }, [clearSideSelectionIds]);
 
   const clearSelectedNpc = useCallback(() => {
     setSelectedNpcId(null);
     setFollowSelected(false);
   }, []);
 
+  const selectHogar = useCallback((hogarId: string) => {
+    clearSideSelectionIds();
+    setSelectedHogarId(hogarId);
+  }, [clearSideSelectionIds]);
+
   const selectParcela = useCallback((parcelaId: string) => {
-    setSelectedNpcId(null);
-    setFollowSelected(false);
-    setSelectedTramoId(null);
-    setSelectedLandmark(null);
-    setSideBuildOpen(false);
+    clearSideSelectionIds();
     setSelectedParcelaId(parcelaId);
-  }, []);
+  }, [clearSideSelectionIds]);
 
   const clearSelectedParcela = useCallback(() => {
     setSelectedParcelaId(null);
   }, []);
 
+  const selectFirma = useCallback((firmaId: string) => {
+    clearSideSelectionIds();
+    setSelectedFirmaId(firmaId);
+  }, [clearSideSelectionIds]);
+
   const selectTramo = useCallback((tramoId: string) => {
-    setSelectedNpcId(null);
-    setFollowSelected(false);
-    setSelectedParcelaId(null);
-    setSelectedLandmark(null);
-    setSideBuildOpen(false);
+    clearSideSelectionIds();
     setSelectedTramoId(tramoId);
-  }, []);
+  }, [clearSideSelectionIds]);
+
+  const selectZona = useCallback((zonaId: ZoneId) => {
+    clearSideSelectionIds();
+    setSelectedZonaId(zonaId);
+  }, [clearSideSelectionIds]);
+
+  const selectMedio = useCallback((medioId: string) => {
+    clearSideSelectionIds();
+    setSelectedMedioId(medioId);
+  }, [clearSideSelectionIds]);
+
+  const openInspectorDirectory = useCallback((tab: InspectorDirectoryTab = 'personas') => {
+    setInspectorSearchOpen((prev) => {
+      if (prev === tab) return null;
+      clearSideSelectionIds();
+      return tab;
+    });
+  }, [clearSideSelectionIds]);
 
   const clearSidePanel = useCallback(() => {
-    setSelectedNpcId(null);
-    setFollowSelected(false);
-    setSelectedParcelaId(null);
-    setSelectedTramoId(null);
-    setSelectedLandmark(null);
-    setSideBuildOpen(false);
+    clearSideSelectionIds();
     setHoveredPreview(null);
-  }, []);
+  }, [clearSideSelectionIds]);
 
   const toggleBuildPanel = useCallback(() => {
-    setSelectedNpcId(null);
-    setFollowSelected(false);
-    setSelectedParcelaId(null);
-    setSelectedTramoId(null);
-    setSelectedLandmark(null);
-    setSideBuildOpen((prev) => !prev);
+    setSideBuildOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setSelectedNpcId(null);
+        setSelectedHogarId(null);
+        setSelectedParcelaId(null);
+        setSelectedFirmaId(null);
+        setSelectedTramoId(null);
+        setSelectedZonaId(null);
+        setSelectedMedioId(null);
+        setSelectedLandmark(null);
+        setInspectorSearchOpen(null);
+        setFollowSelected(false);
+      }
+      return next;
+    });
   }, []);
 
   const selectRoleSample = useCallback(
@@ -298,6 +372,7 @@ export function useGameSession() {
   const setSpeed = useCallback((spd: number) => controller.setSpeed(spd), [controller]);
   const stepDay = useCallback(() => controller.stepDay(), [controller]);
   const setDevMode = useCallback((enabled: boolean) => controller.setDevMode(enabled), [controller]);
+  const setNoRender = useCallback((enabled: boolean) => controller.setNoRender(enabled), [controller]);
   const setDevPopulation = useCallback((pop: number) => controller.setDevPopulation(pop), [controller]);
   const setEstadoAutomatico = useCallback(
     (enabled: boolean) => controller.setEstadoAutomatico(enabled),
@@ -315,44 +390,39 @@ export function useGameSession() {
   );
 
   const saveManual = useCallback(() => controller.saveManual(), [controller]);
+  const exportSaveJson = useCallback(() => controller.exportSaveJson(), [controller]);
+  const exportMetricsJson = useCallback(() => controller.exportMetricsJson(), [controller]);
+
+  const resetUiAfterLoad = useCallback(() => {
+    setHasStarted(true);
+    clearSideSelectionIds();
+    setShowConfigModal(false);
+    setMilestoneBannerDismissed(true);
+    setCausalInspect(null);
+    setPaydaySummary(null);
+    setMonthlySummary(null);
+  }, [clearSideSelectionIds]);
+
+  const importSaveJson = useCallback(
+    (raw: string) => {
+      const res = controller.importSaveJson(raw);
+      if (res.ok) resetUiAfterLoad();
+      return res;
+    },
+    [controller, resetUiAfterLoad]
+  );
 
   const loadManual = useCallback(() => {
     const ok = controller.loadManual();
-    if (ok) {
-      setHasStarted(true);
-      setSelectedNpcId(null);
-      setSelectedParcelaId(null);
-      setSelectedTramoId(null);
-      setSelectedLandmark(null);
-      setSideBuildOpen(false);
-      setFollowSelected(false);
-      setShowConfigModal(false);
-      setMilestoneBannerDismissed(true);
-      setCausalInspect(null);
-      setPaydaySummary(null);
-      setMonthlySummary(null);
-    }
+    if (ok) resetUiAfterLoad();
     return ok;
-  }, [controller]);
+  }, [controller, resetUiAfterLoad]);
 
   const loadAutoSave = useCallback(() => {
     const ok = controller.loadAutoSave();
-    if (ok) {
-      setHasStarted(true);
-      setSelectedNpcId(null);
-      setSelectedParcelaId(null);
-      setSelectedTramoId(null);
-      setSelectedLandmark(null);
-      setSideBuildOpen(false);
-      setFollowSelected(false);
-      setShowConfigModal(false);
-      setMilestoneBannerDismissed(true);
-      setCausalInspect(null);
-      setPaydaySummary(null);
-      setMonthlySummary(null);
-    }
+    if (ok) resetUiAfterLoad();
     return ok;
-  }, [controller]);
+  }, [controller, resetUiAfterLoad]);
 
   const updateLevers = useCallback(
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
@@ -421,19 +491,29 @@ export function useGameSession() {
   }, [controller]);
 
   const beginQuickGame = useCallback(
-    (escenarioId: 'elecciones' | 'zombies') => {
+    (
+      escenarioId: 'elecciones' | 'zombies',
+      options?: { mode?: 'observador' | 'gobernador'; poblacion?: number }
+    ) => {
       const current = controller.getState().config;
-      if (current.escenarioId === escenarioId && controller.getState().reloj.dia === 1) {
+      const mode = options?.mode ?? 'observador';
+      const targetGov: GovernorComplexityLevel = mode === 'gobernador' ? 'G2' : 'G0';
+      const targetAuto = mode === 'observador';
+      const targetPop = options?.poblacion ?? current.poblacionInicial;
+
+      const sameStartConfig =
+        current.escenarioId === escenarioId &&
+        (current.nivelGobernador ?? 'G0') === targetGov &&
+        Boolean(current.estadoAutomatico) === targetAuto &&
+        current.poblacionInicial === targetPop &&
+        controller.getState().reloj.dia === 1;
+
+      if (sameStartConfig) {
         setHasStarted(true);
         controller.setPaused(false);
         return;
       }
-      setSelectedNpcId(null);
-      setSelectedParcelaId(null);
-      setSelectedTramoId(null);
-      setSelectedLandmark(null);
-      setSideBuildOpen(false);
-      setFollowSelected(false);
+      clearSideSelectionIds();
       setShowConfigModal(false);
       setOpenWindows([]);
       setMilestoneBannerDismissed(false);
@@ -444,19 +524,17 @@ export function useGameSession() {
       controller.startNewGame({
         ...current,
         escenarioId,
+        nivelGobernador: targetGov,
+        estadoAutomatico: targetAuto,
+        poblacionInicial: targetPop,
       });
     },
-    [controller]
+    [controller, clearSideSelectionIds]
   );
 
   const startNewGame = useCallback(
     (newConfig: WorldConfig) => {
-      setSelectedNpcId(null);
-      setSelectedParcelaId(null);
-      setSelectedTramoId(null);
-      setSelectedLandmark(null);
-      setSideBuildOpen(false);
-      setFollowSelected(false);
+      clearSideSelectionIds();
       setShowConfigModal(false);
       setOpenWindows([]);
       setMilestoneBannerDismissed(false);
@@ -466,7 +544,7 @@ export function useGameSession() {
       setHasStarted(true);
       controller.startNewGame(newConfig);
     },
-    [controller]
+    [controller, clearSideSelectionIds]
   );
 
   const jumpToDistrict = useCallback((district: DistrictId | 'all') => {
@@ -479,6 +557,12 @@ export function useGameSession() {
     setFollowSelected(false);
     uiSeqRef.current += 1;
     setCameraTarget({ zone, seq: uiSeqRef.current });
+  }, []);
+
+  const jumpToCoords = useCallback((wx: number, wy: number) => {
+    setFollowSelected(false);
+    uiSeqRef.current += 1;
+    setCameraTarget({ wx, wy, seq: uiSeqRef.current });
   }, []);
 
   const focusWindow = useCallback((winId: WindowId) => {
@@ -516,14 +600,10 @@ export function useGameSession() {
     (winId: WindowId, _tabHint?: CityTab) => {
       const lm: LandmarkId =
         winId === 'gaceta' ? 'prensa' : winId === 'economia' ? 'mercado' : 'palacio';
-      setSelectedNpcId(null);
-      setFollowSelected(false);
-      setSelectedParcelaId(null);
-      setSelectedTramoId(null);
-      setSideBuildOpen(false);
+      clearSideSelectionIds();
       setSelectedLandmark(lm);
     },
-    []
+    [clearSideSelectionIds]
   );
 
   const requestZoom = useCallback((delta: number) => {
@@ -558,9 +638,14 @@ export function useGameSession() {
   return {
     ...snapshot,
     selectedNpc,
+    selectedHogar,
     selectedParcela,
+    selectedFirma,
     selectedTramo,
+    selectedZona,
+    selectedMedio,
     selectedLandmark,
+    inspectorSearchOpen,
     sideBuildOpen,
     hasConditionAlert,
 
@@ -590,6 +675,8 @@ export function useGameSession() {
     openCiudadTab,
     openLandmarkWindow,
     toggleBuildPanel,
+    openInspectorDirectory,
+    setInspectorSearchOpen,
     clearSidePanel,
     setFollowSelected,
     cancelFollow,
@@ -609,14 +696,19 @@ export function useGameSession() {
     beginQuickGame,
     selectNpc,
     clearSelectedNpc,
+    selectHogar,
     selectParcela,
     clearSelectedParcela,
+    selectFirma,
     selectTramo,
+    selectZona,
+    selectMedio,
     selectRoleSample,
     togglePause,
     setSpeed,
     stepDay,
     setDevMode,
+    setNoRender,
     setDevPopulation,
     setEstadoAutomatico,
     setDevComplexity,
@@ -624,6 +716,9 @@ export function useGameSession() {
     saveManual,
     loadManual,
     loadAutoSave,
+    exportSaveJson,
+    importSaveJson,
+    exportMetricsJson,
     updateLevers,
     setExtraLever,
     buildInParcela,
@@ -635,6 +730,7 @@ export function useGameSession() {
     startNewGame,
     jumpToDistrict,
     jumpToZone,
+    jumpToCoords,
     requestZoom,
   };
 }

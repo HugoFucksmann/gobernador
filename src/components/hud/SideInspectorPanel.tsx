@@ -10,11 +10,14 @@ import {
   IdCard,
   Landmark,
   Lock,
+  MapPin,
   Newspaper,
   Route,
+  Search,
   Store,
   Trash2,
   User,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -34,19 +37,31 @@ import {
   getNpcProductivity,
   getStage,
   getWorldZones,
+  TICKS_PER_DAY,
 } from '../../engine/simulation';
-import { getRubroDisplayName, isViaConnectableToNetwork } from '../../engine/worldHelpers';
+import {
+  getFranjaDia,
+  getNpcDailyAgenda,
+  getRubroDisplayName,
+  isViaConnectableToNetwork,
+} from '../../engine/worldHelpers';
+import { InspectorDirectoryTab } from '../../hooks/useGameSession';
 import {
   ActionEffectId,
   BuildingDefinition,
   BuildingType,
   CommunityDerived,
   DistrictId,
+  Firma,
+  FirmPart,
   GameState,
+  Hogar,
+  MediaOutlet,
   Npc,
   Parcela,
   PersonalityTrait,
   ViaTramo,
+  ZoneDefinition,
   ZoneId,
 } from '../../types/game';
 import { LandmarkId, MapHoverPreview, WindowId } from '../../types/ui';
@@ -99,16 +114,27 @@ interface SideInspectorPanelProps {
   state: GameState;
   derived: CommunityDerived;
   selectedNpc: Npc | null;
+  selectedHogar?: Hogar | null;
   selectedParcela: Parcela | null;
+  selectedFirma?: Firma | null;
   selectedTramo: ViaTramo | null;
+  selectedZona?: ZoneDefinition | null;
+  selectedMedio?: MediaOutlet | null;
   selectedLandmark: LandmarkId | null;
+  inspectorSearchOpen?: InspectorDirectoryTab | null;
   sideBuildOpen: boolean;
   followSelected: boolean;
   aiBusy: boolean;
   onToggleFollow: () => void;
   onClosePanel: () => void;
+  onSelectNpc?: (npcId: string) => void;
+  onSelectHogar?: (hogarId: string) => void;
   onSelectParcela: (parcelaId: string) => void;
+  onSelectFirma?: (firmaId: string) => void;
   onSelectTramo: (tramoId: string) => void;
+  onSelectZona?: (zonaId: ZoneId) => void;
+  onSelectMedio?: (medioId: string) => void;
+  onOpenDirectory?: (tab: InspectorDirectoryTab) => void;
   onJumpDistrict: (d: DistrictId | 'all') => void;
   onJumpZone: (z: ZoneId | 'all') => void;
   onHoverPreview?: (preview: MapHoverPreview | null) => void;
@@ -181,16 +207,27 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   state,
   derived,
   selectedNpc,
+  selectedHogar = null,
   selectedParcela,
+  selectedFirma = null,
   selectedTramo,
+  selectedZona = null,
+  selectedMedio = null,
   selectedLandmark,
+  inspectorSearchOpen = null,
   sideBuildOpen,
   followSelected,
   aiBusy,
   onToggleFollow,
   onClosePanel,
+  onSelectNpc,
+  onSelectHogar,
   onSelectParcela,
+  onSelectFirma,
   onSelectTramo,
+  onSelectZona,
+  onSelectMedio,
+  onOpenDirectory,
   onJumpZone,
   onHoverPreview,
   onBuildInParcela,
@@ -205,6 +242,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   const [npcTab, setNpcTab] = useState<CitizenTab>('estado');
   const [buildSection, setBuildSection] = useState<'parcelas' | 'vias'>('parcelas');
   const [buildFilter, setBuildFilter] = useState<'libres' | 'todas'>('libres');
+  const [directoryQuery, setDirectoryQuery] = useState<string>('');
   const [parcelError, setParcelError] = useState<string | null>(null);
   const [demandNote, setDemandNote] = useState<string | null>(null);
 
@@ -215,7 +253,16 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   const isG3 = govLevel === 'G3';
 
   const hasPanelOpen = Boolean(
-    selectedNpc || selectedParcela || selectedTramo || selectedLandmark || sideBuildOpen
+    selectedNpc ||
+      selectedHogar ||
+      selectedParcela ||
+      selectedFirma ||
+      selectedTramo ||
+      selectedZona ||
+      selectedMedio ||
+      selectedLandmark ||
+      inspectorSearchOpen ||
+      sideBuildOpen
   );
 
   const renderDemandsList = (compact = false) => (
@@ -291,9 +338,9 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     </div>
   );
 
-  // When no inspector is open, surface only urgent active actor demands cleanly
+  // When no inspector is open, surface only urgent active actor demands cleanly (only in governor mode)
   if (!hasPanelOpen) {
-    if (state.demandasActivas.length === 0) return null;
+    if (isG0 || state.demandasActivas.length === 0) return null;
 
     return (
       <aside className="pointer-events-auto fixed top-20 right-4 z-25 w-[350px] max-w-[calc(100vw-32px)] bg-zinc-900/95 backdrop-blur-md border border-amber-500/50 rounded-2xl p-4 shadow-2xl space-y-3">
@@ -316,16 +363,38 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     headerTitle = `${selectedNpc.nombre} ${selectedNpc.apellido}`;
     headerSub = `${ROLE_CATALOG[selectedNpc.rol].nombre} · ${selectedNpc.edad}a`;
     HeaderIcon = <User className="w-4 h-4 text-emerald-400" />;
+  } else if (selectedHogar) {
+    const head = state.npcs.find((n) => n.id === selectedHogar.miembros[0]);
+    headerTitle = head ? `Hogar ${head.apellido}` : selectedHogar.id;
+    headerSub = `${selectedHogar.miembros.length} integrante(s) · ${state.zonas[selectedHogar.zona]?.nombre ?? selectedHogar.zona}`;
+    HeaderIcon = <Users className="w-4 h-4 text-emerald-400" />;
   } else if (selectedParcela) {
     const distName = DISTRICT_BY_ID[selectedParcela.distrito]?.nombre ?? selectedParcela.distrito;
     const zName = state.zonas[selectedParcela.zona]?.nombre ?? selectedParcela.zona;
     headerTitle = selectedParcela.nombre;
-    headerSub = `${zName} · ${distName}`;
+    headerSub = `${zName} · ${distName}${selectedParcela.clase ? ` · Lote ${selectedParcela.clase}` : ''}`;
     HeaderIcon = <Building2 className="w-4 h-4 text-emerald-400" />;
+  } else if (selectedFirma) {
+    headerTitle = selectedFirma.nombre;
+    headerSub = `${getRubroDisplayName(selectedFirma.rubro)} · ${state.zonas[selectedFirma.zona]?.nombre ?? selectedFirma.zona}`;
+    HeaderIcon = <Store className="w-4 h-4 text-amber-400" />;
   } else if (selectedTramo) {
     headerTitle = selectedTramo.nombre;
-    headerSub = `Vía (${selectedTramo.tipo}) · ${selectedTramo.zonaA}`;
+    headerSub = `Vía (${selectedTramo.tipo}) · ${state.zonas[selectedTramo.zonaA]?.nombre ?? selectedTramo.zonaA}`;
     HeaderIcon = <Route className="w-4 h-4 text-amber-400" />;
+  } else if (selectedZona) {
+    headerTitle = selectedZona.nombre;
+    headerSub = `Zona (${selectedZona.caracter}) · ${selectedZona.estado === 'no_urbanizada' ? 'Sin urbanizar' : 'Urbanizada'}`;
+    HeaderIcon = <MapPin className="w-4 h-4 text-emerald-400" />;
+  } else if (selectedMedio) {
+    const afin = selectedMedio.lineaEditorial.afinidadGobierno;
+    headerTitle = selectedMedio.nombre;
+    headerSub = `Medio · ${afin >= 60 ? 'Oficialista' : afin <= 40 ? 'Crítica' : 'Independiente'}`;
+    HeaderIcon = <Newspaper className="w-4 h-4 text-amber-400" />;
+  } else if (inspectorSearchOpen) {
+    headerTitle = 'Explorar comunidad';
+    headerSub = `${derived.poblacion} personas · ${state.hogares.length} hogares · ${derived.mercado.firmas} firmas`;
+    HeaderIcon = <Search className="w-4 h-4 text-emerald-400" />;
   } else if (selectedLandmark === 'palacio') {
     headerTitle = 'Palacio de Gobierno';
     headerSub = 'Sede ejecutiva';
@@ -375,8 +444,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
         </button>
       </div>
 
-      {/* Pinned Urgent Demands when another panel is open */}
-      {state.demandasActivas.length > 0 && (
+      {/* Pinned Urgent Demands when another panel is open (only in governor mode) */}
+      {!isG0 && state.demandasActivas.length > 0 && (
         <div className="px-5 py-3 bg-amber-950/35 border-b border-amber-500/40 shrink-0 space-y-2">
           <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -487,8 +556,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                           <span className="text-zinc-300">{item.label}</span>
                           <span className="font-mono font-bold text-white tabular-nums">{v}%</span>
                         </div>
-                        <div className="w-full h-2.5 bg-zinc-800 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${v}%` }} />
+                        <div className="w-full h-2.5 bg-zinc-800 rounded-sm overflow-hidden">
+                          <div className={`h-full rounded-sm ${barColor}`} style={{ width: `${v}%` }} />
                         </div>
                       </div>
                     );
@@ -496,76 +565,135 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 </div>
               )}
 
-              {npcTab === 'actividad' && (
-                <div className="space-y-3">
-                  {selectedNpc.accionIa ? (
-                    <div className="rounded-xl border border-amber-500/40 bg-amber-950/35 p-3.5 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-amber-300">
-                          {selectedNpc.accionIa.nombre} · {selectedNpc.accionIa.diasRestantes}d
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onInspectCausal(
-                              `${selectedNpc.nombre}: ${selectedNpc.accionIa!.nombre}`,
-                              selectedNpc.accionIa!.causa || selectedNpc.accionIa!.origen,
-                              selectedNpc.accionIa!.texto
-                            )
-                          }
-                          className="text-xs font-semibold text-amber-300 hover:text-white underline shrink-0"
-                        >
-                          ¿Por qué?
-                        </button>
-                      </div>
-                      <p className="text-xs text-zinc-200 leading-relaxed">{selectedNpc.accionIa.texto}</p>
-                      {selectedNpc.accionIa.efectos && selectedNpc.accionIa.efectos.length > 0 && (
-                        <div className="text-xs text-zinc-400">
-                          {selectedNpc.accionIa.efectos.map((ef) => EFFECT_LABELS[ef.id] ?? ef.id).join(' · ')}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="bg-zinc-800/60 rounded-xl p-3.5 text-sm text-zinc-200 capitalize">
-                      {selectedNpc.hospital.internado
-                        ? `Internado (${selectedNpc.hospital.diasInternado}d)`
-                        : selectedNpc.hospital.esperandoCama
-                        ? 'Esperando cama'
-                        : `${selectedNpc.mapa.accion} (${def.nombre})`}
-                    </div>
-                  )}
+              {npcTab === 'actividad' && (() => {
+                const agenda = getNpcDailyAgenda(state, selectedNpc);
+                const curFranja = getFranjaDia(state.reloj.tick, TICKS_PER_DAY);
 
-                  {selectedNpc.modificadores.length > 0 ? (
-                    <div className="space-y-2 max-h-[180px] overflow-y-auto divide-y divide-zinc-800">
-                      {selectedNpc.modificadores.map((mod) => (
-                        <div key={mod.id} className="pt-2.5 first:pt-0 flex items-start justify-between gap-2 text-xs">
-                          <span className="text-zinc-200 leading-snug">
-                            {mod.texto}{' '}
-                            <span className="font-mono text-zinc-500">({mod.diasRestantes}d)</span>
+                return (
+                  <div className="space-y-3">
+                    {selectedNpc.accionIa ? (
+                      <div className="rounded-xl border border-amber-500/40 bg-amber-950/35 p-3.5 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-amber-300">
+                            {selectedNpc.accionIa.nombre} · {selectedNpc.accionIa.diasRestantes}d
                           </span>
                           <button
                             type="button"
                             onClick={() =>
                               onInspectCausal(
-                                `Modificador de ${selectedNpc.nombre}`,
-                                mod.causa || mod.origen,
-                                mod.texto
+                                `${selectedNpc.nombre}: ${selectedNpc.accionIa!.nombre}`,
+                                selectedNpc.accionIa!.causa || selectedNpc.accionIa!.origen,
+                                selectedNpc.accionIa!.texto
                               )
                             }
-                            className="text-emerald-400 hover:text-white underline shrink-0 font-semibold"
+                            className="text-xs font-semibold text-amber-300 hover:text-white underline shrink-0"
                           >
                             ¿Por qué?
                           </button>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-zinc-500">Sin eventos activos hoy.</div>
-                  )}
-                </div>
-              )}
+                        <p className="text-xs text-zinc-200 leading-relaxed">{selectedNpc.accionIa.texto}</p>
+                        {selectedNpc.accionIa.efectos && selectedNpc.accionIa.efectos.length > 0 && (
+                          <div className="text-xs text-zinc-400">
+                            {selectedNpc.accionIa.efectos.map((ef) => EFFECT_LABELS[ef.id] ?? ef.id).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-zinc-800/60 rounded-xl p-3.5 text-sm text-zinc-200 capitalize">
+                        {selectedNpc.hospital.internado
+                          ? `Internado (${selectedNpc.hospital.diasInternado}d)`
+                          : selectedNpc.hospital.esperandoCama
+                          ? 'Esperando cama'
+                          : `${selectedNpc.mapa.accion} (${def.nombre})`}
+                      </div>
+                    )}
 
-              {npcTab === 'ficha' && (
+                    {/* 5-franja daily agenda from simulation engine */}
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-semibold text-zinc-400">Agenda del día</div>
+                      <div className="space-y-1">
+                        {agenda.map((slot) => {
+                          const isCurrent = slot.franja === curFranja;
+                          return (
+                            <div
+                              key={slot.franja}
+                              className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
+                                isCurrent
+                                  ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-100'
+                                  : 'bg-zinc-800/45 text-zinc-300'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <span className="font-mono text-[11px] text-zinc-400 mr-1.5">{slot.horario}</span>
+                                <span className={isCurrent ? 'font-semibold text-white' : ''}>{slot.actividad}</span>
+                              </div>
+                              {slot.parcelaId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onSelectParcela(slot.parcelaId!);
+                                    onJumpZone(slot.zona);
+                                  }}
+                                  className="text-[11px] text-emerald-400 hover:underline shrink-0 whitespace-nowrap"
+                                >
+                                  {state.zonas[slot.zona]?.nombre ?? slot.zona}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => onJumpZone(slot.zona)}
+                                  className="text-[11px] text-zinc-400 hover:text-white shrink-0 whitespace-nowrap"
+                                >
+                                  {state.zonas[slot.zona]?.nombre ?? slot.zona}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {selectedNpc.modificadores.length > 0 ? (
+                      <div className="space-y-2 max-h-[160px] overflow-y-auto divide-y divide-zinc-800 pt-1">
+                        {selectedNpc.modificadores.map((mod) => (
+                          <div key={mod.id} className="pt-2 first:pt-0 flex items-start justify-between gap-2 text-xs">
+                            <span className="text-zinc-200 leading-snug">
+                              {mod.texto}{' '}
+                              <span className="font-mono text-zinc-500">({mod.diasRestantes}d)</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onInspectCausal(
+                                  `Modificador de ${selectedNpc.nombre}`,
+                                  mod.causa || mod.origen,
+                                  mod.texto
+                                )
+                              }
+                              className="text-emerald-400 hover:text-white underline shrink-0 font-semibold"
+                            >
+                              ¿Por qué?
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-zinc-500">Sin eventos activos hoy.</div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {npcTab === 'ficha' && (() => {
+                const parents = (selectedNpc.padresIds ?? [])
+                  .map((id: string) => state.npcs.find((n) => n.id === id))
+                  .filter((n): n is Npc => Boolean(n));
+                const pareja = selectedNpc.parejaId ? state.npcs.find((n) => n.id === selectedNpc.parejaId) : undefined;
+                const hijos = state.npcs.filter(
+                  (n) => n.vivo && (n.padresIds ?? []).includes(selectedNpc.id)
+                );
+
+                return (
                 <div className="space-y-4">
                   <div className="space-y-2 font-mono tabular-nums text-sm pb-3 border-b border-zinc-800">
                     <div className="flex justify-between">
@@ -581,16 +709,26 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     {employerFirm && (
                       <div className="flex justify-between gap-2">
                         <span className="font-sans text-zinc-400">Empleador</span>
-                        <span className="font-sans font-semibold text-zinc-200 truncate">
+                        <button
+                          type="button"
+                          onClick={() => onSelectFirma?.(employerFirm.id)}
+                          className="font-sans font-semibold text-emerald-400 hover:underline truncate"
+                        >
                           {employerFirm.nombre}
-                        </span>
+                        </button>
                       </div>
                     )}
                     {hogar && (
                       <>
-                        <div className="flex justify-between">
-                          <span className="font-sans text-zinc-400">Caja del hogar ({hogar.miembros.length} p.)</span>
-                          <span className="font-semibold text-white">${hogar.dinero.toFixed(1)}</span>
+                        <div className="flex justify-between gap-2">
+                          <span className="font-sans text-zinc-400">Hogar ({hogar.miembros.length} p.)</span>
+                          <button
+                            type="button"
+                            onClick={() => onSelectHogar?.(hogar.id)}
+                            className="font-semibold text-emerald-400 hover:underline"
+                          >
+                            Caja ${hogar.dinero.toFixed(1)}
+                          </button>
                         </div>
                         <div className="flex justify-between">
                           <span className="font-sans text-zinc-400">Despensa hogar</span>
@@ -604,25 +742,33 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                             {(hogar.despensa / Math.max(1, hogar.miembros.length)).toFixed(1)}d/p
                           </span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between gap-2">
                           <span className="font-sans text-zinc-400">Vivienda</span>
-                          <span
-                            className={`font-sans font-semibold ${
-                              hogar.estado === 'calle'
-                                ? 'text-rose-400'
+                          {casa?.parcelaId ? (
+                            <button
+                              type="button"
+                              onClick={() => onSelectParcela(casa.parcelaId)}
+                              className="font-sans font-semibold text-emerald-400 hover:underline truncate"
+                            >
+                              {BUILDING_CATALOG[casa.tipo].nombre} ({Math.round(casa.estado)}%)
+                            </button>
+                          ) : (
+                            <span
+                              className={`font-sans font-semibold ${
+                                hogar.estado === 'calle'
+                                  ? 'text-rose-400'
+                                  : hogar.estado === 'acogida'
+                                  ? 'text-amber-300'
+                                  : 'text-emerald-400'
+                              }`}
+                            >
+                              {hogar.estado === 'calle'
+                                ? 'En calle'
                                 : hogar.estado === 'acogida'
-                                ? 'text-amber-300'
-                                : 'text-emerald-400'
-                            }`}
-                          >
-                            {hogar.estado === 'calle'
-                              ? 'En calle'
-                              : hogar.estado === 'acogida'
-                              ? 'Acogida'
-                              : casa
-                              ? `${BUILDING_CATALOG[casa.tipo].nombre} (${Math.round(casa.estado)}%)`
-                              : 'Con casa'}
-                          </span>
+                                ? 'Acogida'
+                                : 'Con casa'}
+                            </span>
+                          )}
                         </div>
                       </>
                     )}
@@ -637,11 +783,64 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       <span className="font-semibold text-white">N{selectedNpc.educacion.nivel}/3</span>
                     </div>
                     {selectedNpc.partes.length > 0 && (
-                      <div className="pt-1 text-xs font-sans text-amber-300">
-                        Participación en {selectedNpc.partes.length} firma(s)
+                      <div className="pt-1 space-y-1">
+                        <div className="text-xs font-sans text-amber-300">Participaciones societarias</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedNpc.partes.map((pt) => {
+                            const f = state.firmas.find((fi) => fi.id === pt.firmaId);
+                            return (
+                              <button
+                                key={pt.firmaId}
+                                type="button"
+                                onClick={() => onSelectFirma?.(pt.firmaId)}
+                                className="px-2 py-0.5 text-[11px] font-sans bg-zinc-800 hover:bg-zinc-700 text-amber-200 rounded-lg"
+                              >
+                                {f?.nombre ?? pt.firmaId} ({Math.round(pt.pct)}%)
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
+
+                  {(parents.length > 0 || pareja || hijos.length > 0) && (
+                    <div className="space-y-1.5 pb-3 border-b border-zinc-800">
+                      <div className="text-xs font-semibold text-zinc-400">Familia</div>
+                      <div className="flex flex-wrap gap-1.5 text-xs">
+                        {pareja && pareja.vivo && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectNpc?.(pareja.id)}
+                            className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-emerald-300 rounded-lg"
+                          >
+                            Pareja: {pareja.nombre}
+                          </button>
+                        )}
+                        {parents.map((p: Npc, idx: number) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            disabled={!p.vivo}
+                            onClick={() => p.vivo && onSelectNpc?.(p.id)}
+                            className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg disabled:opacity-50"
+                          >
+                            Progenitor {idx + 1}: {p.nombre} {!p.vivo ? '(fallecido)' : ''}
+                          </button>
+                        ))}
+                        {hijos.map((h: Npc) => (
+                          <button
+                            key={h.id}
+                            type="button"
+                            onClick={() => onSelectNpc?.(h.id)}
+                            className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg"
+                          >
+                            Hijo/a: {h.nombre} ({h.edad}a)
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <div className="text-xs font-semibold text-zinc-400">Rasgos</div>
@@ -665,7 +864,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     })}
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
           );
         })()}
@@ -738,7 +938,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     <div className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl p-3.5 text-xs text-zinc-300 space-y-1">
                       <div className="font-semibold text-white">Parcela de iniciativa privada</div>
                       <div>
-                        Las constructoras, inmobiliarias y emprendedores construyen viviendas y comercios aquí según la demanda zonal ({(state.demandaSuelo[selectedParcela.zona] ?? 1).toFixed(2)}x).
+                        Las constructoras, inmobiliarias y emprendedores construyen viviendas y comercios aquí según la demanda zonal ({(state.demandaSuelo[`${selectedParcela.zona}:${selectedParcela.tipoParcela}`] ?? 1).toFixed(2)}x).
                       </div>
                     </div>
                   ) : (
@@ -936,6 +1136,31 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       {staffLine && (
                         <div className="font-mono text-xs text-zinc-300 tabular-nums">{staffLine}</div>
                       )}
+                      {b.ventasHoy !== undefined && b.ventasHoy > 0 && (
+                        <div className="font-mono text-xs text-emerald-400 tabular-nums">
+                          Ventas hoy: ${b.ventasHoy.toFixed(1)}
+                        </div>
+                      )}
+                      {firm && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectFirma?.(firm.id)}
+                          className="flex items-center gap-1.5 text-xs text-amber-300 hover:underline font-medium"
+                        >
+                          <Store className="w-3.5 h-3.5" />
+                          <span>Ver firma: {firm.nombre}</span>
+                        </button>
+                      )}
+                      {tenantHogar && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectHogar?.(tenantHogar.id)}
+                          className="flex items-center gap-1.5 text-xs text-emerald-400 hover:underline font-medium"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>Ver hogar ocupante ({tenantHogar.miembros.length} p.)</span>
+                        </button>
+                      )}
                       {casa && (
                         <div className="flex items-center gap-1.5 text-xs text-zinc-400">
                           <Home className="w-3.5 h-3.5 text-emerald-400" />
@@ -1114,14 +1339,16 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => onOpenWindow('palancas')}
-                  className="py-2.5 px-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors"
-                >
-                  Palancas
-                </button>
+              <div className={`grid ${isG0 ? 'grid-cols-1' : 'grid-cols-2'} gap-2.5`}>
+                {!isG0 && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenWindow('palancas')}
+                    className="py-2.5 px-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors"
+                  >
+                    Palancas
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onOpenWindow('ciudad')}
@@ -1143,6 +1370,21 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
               </span>
             </div>
 
+            {state.medios.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {state.medios.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onSelectMedio?.(m.id)}
+                    className="px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-amber-200 rounded-lg transition-colors"
+                  >
+                    {m.nombre}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
               {state.noticias.slice(0, 4).map((n) => (
                 <button
@@ -1160,15 +1402,17 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
               ))}
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                disabled={aiBusy || state.resultado.estado !== 'jugando'}
-                onClick={onTriggerPress}
-                className="py-2.5 px-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
-              >
-                Publicar hoy
-              </button>
+            <div className={`grid ${isG0 ? 'grid-cols-1' : 'grid-cols-2'} gap-2.5`}>
+              {!isG0 && (
+                <button
+                  type="button"
+                  disabled={aiBusy || state.resultado.estado !== 'jugando'}
+                  onClick={onTriggerPress}
+                  className="py-2.5 px-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+                >
+                  Publicar hoy
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onOpenWindow('gaceta')}
@@ -1215,8 +1459,632 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           </div>
         )}
 
+        {/* 4B. HOGAR VIEW */}
+        {selectedHogar && (() => {
+          const casa = selectedHogar.casaId
+            ? state.casas.find((c) => c.id === selectedHogar.casaId)
+            : undefined;
+          const miembros = selectedHogar.miembros
+            .map((id) => state.npcs.find((n) => n.id === id))
+            .filter((n): n is Npc => Boolean(n && n.vivo));
+          const despPP = selectedHogar.despensa / Math.max(1, miembros.length);
+
+          return (
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-2.5 bg-zinc-800/60 rounded-xl p-3.5 font-mono tabular-nums">
+                <div>
+                  <span className="font-sans text-zinc-400 block">Caja hogar</span>
+                  <span className="text-base font-bold text-white">${selectedHogar.dinero.toFixed(1)}</span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Despensa</span>
+                  <span className={`text-base font-bold ${despPP < 1.5 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {despPP.toFixed(1)}d/p
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Alquiler</span>
+                  <span className="text-sm font-bold text-zinc-200">
+                    {casa ? `$${casa.alquiler.toFixed(1)}/p` : '$0'}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Meses sin pagar</span>
+                  <span className={`text-sm font-bold ${selectedHogar.periodosSinPagar > 0 ? 'text-rose-400' : 'text-zinc-200'}`}>
+                    {selectedHogar.periodosSinPagar}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-zinc-800/50 rounded-xl p-3.5 flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-zinc-400 block">Vivienda</span>
+                  <span
+                    className={`font-semibold text-sm ${
+                      selectedHogar.estado === 'calle'
+                        ? 'text-rose-400'
+                        : selectedHogar.estado === 'acogida'
+                        ? 'text-amber-300'
+                        : 'text-emerald-400'
+                    }`}
+                  >
+                    {selectedHogar.estado === 'calle'
+                      ? 'En situación de calle'
+                      : selectedHogar.estado === 'acogida'
+                      ? 'Acogida estatal'
+                      : casa
+                      ? `${BUILDING_CATALOG[casa.tipo].nombre} (${Math.round(casa.estado)}%)`
+                      : 'Con vivienda'}
+                  </span>
+                </div>
+                {casa?.parcelaId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectParcela(casa.parcelaId);
+                      onJumpZone(selectedHogar.zona);
+                    }}
+                    className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white rounded-xl font-semibold shrink-0 whitespace-nowrap"
+                  >
+                    Ver lote
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="font-semibold text-zinc-400">Integrantes ({miembros.length})</div>
+                <div className="divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl">
+                  {miembros.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => onSelectNpc?.(m.id)}
+                      className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-zinc-800 transition-colors"
+                    >
+                      <span className="truncate text-zinc-100">
+                        <strong>{m.nombre} {m.apellido}</strong>{' '}
+                        <span className="text-zinc-400">· {ROLE_CATALOG[m.rol].nombre} ({m.edad}a)</span>
+                      </span>
+                      <span className="font-mono text-zinc-400 tabular-nums shrink-0 ml-2">
+                        Ánimo {Math.round(m.variables.satisfaccion)}%
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 4C. FIRMA VIEW */}
+        {selectedFirma && (() => {
+          const empList = selectedFirma.empleados
+            .map((id) => state.npcs.find((n) => n.id === id))
+            .filter((n): n is Npc => Boolean(n && n.vivo));
+          const locales = selectedFirma.locales
+            .map((id) => state.parcelas.find((p) => p.id === id))
+            .filter((p): p is Parcela => Boolean(p));
+
+          return (
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-2.5 bg-zinc-800/60 rounded-xl p-3.5 font-mono tabular-nums">
+                <div>
+                  <span className="font-sans text-zinc-400 block">Caja</span>
+                  <span className="text-base font-bold text-white">${Math.round(selectedFirma.caja)}</span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Últ. ganancia</span>
+                  <span
+                    className={`text-base font-bold ${
+                      selectedFirma.ultimaGanancia >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {selectedFirma.ultimaGanancia >= 0 ? '+' : ''}${selectedFirma.ultimaGanancia.toFixed(0)}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Factor salarial</span>
+                  <span className="text-sm font-bold text-amber-300">
+                    {Math.round(selectedFirma.factor * 100)}%
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Estado</span>
+                  <span className={`font-sans text-sm font-bold ${selectedFirma.activa ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {selectedFirma.activa ? 'Activa' : 'Cerrada'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="font-semibold text-zinc-400">Dueños ({selectedFirma.partes.length})</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedFirma.partes.map((pt, idx) => {
+                    const ownerNpc = pt.tipo === 'npc' ? state.npcs.find((n) => n.id === pt.id) : undefined;
+                    return ownerNpc ? (
+                      <button
+                        key={`${pt.id}_${idx}`}
+                        type="button"
+                        onClick={() => onSelectNpc?.(ownerNpc.id)}
+                        className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-emerald-300 rounded-lg"
+                      >
+                        {ownerNpc.nombre} {ownerNpc.apellido} ({Math.round(pt.pct)}%)
+                      </button>
+                    ) : (
+                      <span key={`${pt.id}_${idx}`} className="px-2.5 py-1 bg-zinc-800 text-zinc-300 rounded-lg">
+                        {pt.tipo === 'estado' ? 'Estado' : pt.id} ({Math.round(pt.pct)}%)
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {Object.keys(selectedFirma.cuotaZona || {}).length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="font-semibold text-zinc-400">Cuota por zona</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(selectedFirma.cuotaZona).map(([zKey, val]) => (
+                      <button
+                        key={zKey}
+                        type="button"
+                        onClick={() => {
+                          onSelectZona?.(zKey as ZoneId);
+                          onJumpZone(zKey as ZoneId);
+                        }}
+                        className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-mono tabular-nums"
+                      >
+                        {state.zonas[zKey]?.nombre ?? zKey}: {Math.round(val * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <div className="font-semibold text-zinc-400">Locales ({locales.length})</div>
+                <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                  {locales.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectParcela(p.id);
+                        onJumpZone(p.zona);
+                      }}
+                      className="w-full px-3 py-2 bg-zinc-800/50 hover:bg-zinc-800 rounded-xl flex items-center justify-between text-left"
+                    >
+                      <span className="font-medium text-zinc-100 truncate">
+                        {p.edificio ? BUILDING_CATALOG[p.edificio.tipo].nombre : p.nombre}
+                      </span>
+                      <span className="text-zinc-400 shrink-0 ml-2">{state.zonas[p.zona]?.nombre ?? p.zona}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="font-semibold text-zinc-400">Empleados ({empList.length})</div>
+                <div className="divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl max-h-[150px] overflow-y-auto">
+                  {empList.length === 0 ? (
+                    <div className="p-3 text-zinc-500">Sin empleados contratados.</div>
+                  ) : (
+                    empList.map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() => onSelectNpc?.(n.id)}
+                        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-zinc-800"
+                      >
+                        <span className="text-zinc-100 truncate">
+                          {n.nombre} {n.apellido} · <span className="text-zinc-400">{ROLE_CATALOG[n.rol].nombre}</span>
+                        </span>
+                        <span className="font-mono text-emerald-400 shrink-0 ml-2">
+                          ${n.economia.ultimoIngresoNeto.toFixed(1)}/d
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {selectedFirma.ultimaCausa && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onInspectCausal(
+                      `${selectedFirma.nombre}: ${selectedFirma.ultimoTramo}`,
+                      selectedFirma.ultimaCausa,
+                      `Factor salarial ${Math.round(selectedFirma.factor * 100)}%`
+                    )
+                  }
+                  className="text-xs font-semibold text-emerald-400 hover:underline"
+                >
+                  ¿Por qué? (último cambio)
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* 4D. ZONA VIEW */}
+        {selectedZona && (() => {
+          const z = selectedZona.id;
+          const zNpcs = state.npcs.filter((n) => n.vivo && n.zona === z);
+          const zHogares = state.hogares.filter((h) => h.zona === z);
+          const zCalle = zHogares.filter((h) => h.estado === 'calle').length;
+          const zFirms = state.firmas.filter((f) => f.activa && f.zona === z);
+          const zCasas = state.casas.filter((c) => c.zona === z);
+          const zOcupadas = zCasas.filter((c) => Boolean(c.hogarId)).length;
+          const avgMood =
+            zNpcs.length > 0
+              ? Math.round(zNpcs.reduce((s, n) => s + n.variables.satisfaccion, 0) / zNpcs.length)
+              : 0;
+          const unemployed = zNpcs.filter((n) => n.rol === 'desempleado').length;
+          const hungry = zNpcs.filter((n) => n.variables.hambre > 75).length;
+          const alq = state.ultimaSalidaEconomica.alquilerMedio[z] ?? 0;
+          const defVal = Math.round(derived.defensa[z] ?? 0);
+          const ordVal = Math.round(derived.orden[z] ?? 0);
+
+          let mainNeed = 'Sin urgencias críticas';
+          if (selectedZona.estado === 'no_urbanizada') mainNeed = 'Requiere apertura vial';
+          else if (hungry > zNpcs.length * 0.15) mainNeed = 'Falta abasto de alimento';
+          else if (zCalle > 0) mainNeed = `Vivienda (${zCalle} hogar/es en calle)`;
+          else if (unemployed > Math.max(2, zNpcs.length * 0.15)) mainNeed = `Empleo (${unemployed} sin trabajo)`;
+          else if (ordVal < 40) mainNeed = 'Seguridad y orden zonal';
+          else if (defVal < 35) mainNeed = 'Defensa baja';
+
+          return (
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-2.5 bg-zinc-800/60 rounded-xl p-3.5 font-mono tabular-nums">
+                <div>
+                  <span className="font-sans text-zinc-400 block">Población</span>
+                  <span className="text-base font-bold text-white">{zNpcs.length}</span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Ánimo medio</span>
+                  <span className={`text-base font-bold ${avgMood < 40 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {avgMood}%
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Viviendas</span>
+                  <span className="text-sm font-bold text-zinc-200">
+                    {zOcupadas}/{zCasas.length} · Calle {zCalle}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Alquiler medio</span>
+                  <span className="text-sm font-bold text-amber-300">${alq.toFixed(1)}/p</span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Desempleo</span>
+                  <span className="text-sm font-bold text-zinc-200">{unemployed} vec.</span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Def. / Orden</span>
+                  <span className="text-sm font-bold text-zinc-200">
+                    {defVal}% / {ordVal}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-zinc-800/50 rounded-xl p-3.5 space-y-1">
+                <div className="text-zinc-400">Necesidad principal</div>
+                <div className="text-sm font-semibold text-amber-300">{mainNeed}</div>
+              </div>
+
+              {zFirms.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="font-semibold text-zinc-400">Firmas en la zona ({zFirms.length})</div>
+                  <div className="divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl max-h-[160px] overflow-y-auto">
+                    {zFirms.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => onSelectFirma?.(f.id)}
+                        className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-zinc-800"
+                      >
+                        <span className="text-zinc-100 truncate">
+                          {f.nombre} · <span className="text-zinc-400">{getRubroDisplayName(f.rubro)}</span>
+                        </span>
+                        <span className="font-mono text-zinc-400 shrink-0 ml-2">{f.empleados.length} emp.</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onJumpZone(z)}
+                className="w-full py-2.5 px-4 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors"
+              >
+                Centrar cámara en {selectedZona.nombre}
+              </button>
+            </div>
+          );
+        })()}
+
+        {/* 4E. MEDIO VIEW */}
+        {selectedMedio && (() => {
+          const firmaMedio = selectedMedio.firmaId
+            ? state.firmas.find((f) => f.id === selectedMedio.firmaId)
+            : undefined;
+          const medioNotas = state.noticias.filter((n) => n.medioId === selectedMedio.id).slice(0, 6);
+          const owners: FirmPart[] =
+            firmaMedio?.partes ??
+            selectedMedio.duenoNpcIds.map((id) => ({
+              tipo: 'npc' as const,
+              id,
+              pct: Math.round(100 / Math.max(1, selectedMedio.duenoNpcIds.length)),
+            }));
+
+          return (
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-2.5 bg-zinc-800/60 rounded-xl p-3.5 font-mono tabular-nums">
+                <div>
+                  <span className="font-sans text-zinc-400 block">Alcance</span>
+                  <span className="text-base font-bold text-white">{Math.round(selectedMedio.alcancePct)}%</span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Credibilidad</span>
+                  <span className="text-base font-bold text-emerald-400">
+                    {Math.round(selectedMedio.credibilidad)}%
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Dep. pauta</span>
+                  <span className="text-sm font-bold text-amber-300">
+                    {Math.round(selectedMedio.finanzas.dependenciaPct)}%
+                  </span>
+                </div>
+                <div>
+                  <span className="font-sans text-zinc-400 block">Estado</span>
+                  <span
+                    className={`font-sans text-sm font-bold ${
+                      selectedMedio.activa !== false ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {selectedMedio.activa !== false ? 'Activo' : 'Cerrado'}
+                  </span>
+                </div>
+              </div>
+
+              {owners.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="font-semibold text-zinc-400">Dueños</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {owners.map((pt: FirmPart, idx: number) => {
+                      const npcOwner = pt.tipo === 'npc' ? state.npcs.find((n) => n.id === pt.id) : undefined;
+                      return npcOwner ? (
+                        <button
+                          key={`${pt.id}_${idx}`}
+                          type="button"
+                          onClick={() => onSelectNpc?.(npcOwner.id)}
+                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-emerald-300 rounded-lg"
+                        >
+                          {npcOwner.nombre} {npcOwner.apellido} ({Math.round(pt.pct)}%)
+                        </button>
+                      ) : (
+                        <span key={`${pt.id}_${idx}`} className="px-2.5 py-1 bg-zinc-800 text-zinc-300 rounded-lg">
+                          {pt.tipo === 'estado' ? 'Estado' : pt.id} ({Math.round(pt.pct)}%)
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {firmaMedio && (
+                <button
+                  type="button"
+                  onClick={() => onSelectFirma?.(firmaMedio.id)}
+                  className="w-full py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-semibold rounded-xl text-left flex items-center justify-between"
+                >
+                  <span>Ver firma: {firmaMedio.nombre}</span>
+                  <span className="font-mono">{firmaMedio.empleados.length} emp.</span>
+                </button>
+              )}
+
+              <div className="space-y-2">
+                <div className="font-semibold text-zinc-400">Últimas notas ({medioNotas.length})</div>
+                {medioNotas.length === 0 ? (
+                  <div className="text-zinc-500">Sin notas recientes.</div>
+                ) : (
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                    {medioNotas.map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        onClick={() =>
+                          onInspectCausal(`${n.medioNombre}: ${n.titulo}`, n.causa || `noticia:${n.id}`, n.texto)
+                        }
+                        className="w-full text-left bg-zinc-800/55 hover:bg-zinc-800 rounded-xl p-2.5 space-y-1"
+                      >
+                        <div className="flex justify-between text-[11px] text-zinc-400">
+                          <span>{n.tema}</span>
+                          <span className="font-mono">D{n.dia}</span>
+                        </div>
+                        <div className="font-semibold text-zinc-100 leading-snug">{n.titulo}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 4F. EXPLORAR DIRECTORY (Personas / Hogares / Firmas) */}
+        {inspectorSearchOpen &&
+          !selectedNpc &&
+          !selectedHogar &&
+          !selectedParcela &&
+          !selectedFirma &&
+          !selectedTramo &&
+          !selectedZona &&
+          !selectedMedio &&
+          !selectedLandmark && (() => {
+            const q = directoryQuery.trim().toLowerCase();
+            const npcById = new Map(state.npcs.map((n) => [n.id, n]));
+            const zonesCount = getWorldZones(state).length;
+
+            return (
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-3 gap-1 bg-zinc-800/80 p-1 rounded-xl">
+                  {(
+                    [
+                      { id: 'personas', label: 'Personas' },
+                      { id: 'hogares', label: 'Hogares' },
+                      { id: 'firmas', label: 'Firmas' },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onOpenDirectory?.(t.id)}
+                      className={`py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                        inspectorSearchOpen === t.id
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={directoryQuery}
+                    onChange={(e) => setDirectoryQuery(e.target.value)}
+                    placeholder={`Buscar ${inspectorSearchOpen}…`}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-8 pr-3 py-1.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl max-h-[360px] overflow-y-auto">
+                  {inspectorSearchOpen === 'personas' &&
+                    state.npcs
+                      .filter((n) => {
+                        if (!n.vivo) return false;
+                        if (!q) return true;
+                        const z = getEffectiveZone(n, zonesCount);
+                        const zName = (state.zonas[z]?.nombre ?? z).toLowerCase();
+                        return (
+                          `${n.nombre} ${n.apellido}`.toLowerCase().includes(q) ||
+                          ROLE_CATALOG[n.rol].nombre.toLowerCase().includes(q) ||
+                          zName.includes(q)
+                        );
+                      })
+                      .slice(0, 60)
+                      .map((n) => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => onSelectNpc?.(n.id)}
+                          className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800"
+                        >
+                          <span className="truncate text-zinc-100">
+                            <strong>{n.nombre} {n.apellido}</strong>{' '}
+                            <span className="text-zinc-400">· {ROLE_CATALOG[n.rol].nombre}</span>
+                          </span>
+                          <span className="font-mono text-zinc-400 shrink-0 ml-2">
+                            {n.edad}a · {Math.round(n.variables.satisfaccion)}%
+                          </span>
+                        </button>
+                      ))}
+
+                  {inspectorSearchOpen === 'hogares' &&
+                    state.hogares
+                      .filter((h) => {
+                        if (!q) return true;
+                        const zName = (state.zonas[h.zona]?.nombre ?? h.zona).toLowerCase();
+                        const names = h.miembros
+                          .map((id) => {
+                            const m = npcById.get(id);
+                            return m ? `${m.nombre} ${m.apellido}` : '';
+                          })
+                          .join(' ')
+                          .toLowerCase();
+                        return h.id.toLowerCase().includes(q) || zName.includes(q) || h.estado.includes(q) || names.includes(q);
+                      })
+                      .slice(0, 60)
+                      .map((h) => {
+                        const head = npcById.get(h.miembros[0]);
+                        return (
+                          <button
+                            key={h.id}
+                            type="button"
+                            onClick={() => onSelectHogar?.(h.id)}
+                            className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800"
+                          >
+                            <span className="truncate text-zinc-100">
+                              <strong>{head ? `Familia ${head.apellido}` : h.id}</strong>{' '}
+                              <span className="text-zinc-400">· {h.miembros.length} p.</span>
+                            </span>
+                            <span
+                              className={`font-mono shrink-0 ml-2 ${
+                                h.estado === 'calle'
+                                  ? 'text-rose-400'
+                                  : h.estado === 'acogida'
+                                  ? 'text-amber-300'
+                                  : 'text-emerald-400'
+                              }`}
+                            >
+                              ${h.dinero.toFixed(0)} · {h.estado === 'con_casa' ? 'Casa' : h.estado}
+                            </span>
+                          </button>
+                        );
+                      })}
+
+                  {inspectorSearchOpen === 'firmas' &&
+                    state.firmas
+                      .filter((f) => {
+                        if (!f.activa) return false;
+                        if (!q) return true;
+                        const zName = (state.zonas[f.zona]?.nombre ?? f.zona).toLowerCase();
+                        return (
+                          f.nombre.toLowerCase().includes(q) ||
+                          getRubroDisplayName(f.rubro).toLowerCase().includes(q) ||
+                          zName.includes(q)
+                        );
+                      })
+                      .slice(0, 60)
+                      .map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => onSelectFirma?.(f.id)}
+                          className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800"
+                        >
+                          <span className="truncate text-zinc-100">
+                            <strong>{f.nombre}</strong>{' '}
+                            <span className="text-zinc-400">· {getRubroDisplayName(f.rubro)}</span>
+                          </span>
+                          <span className="font-mono text-zinc-300 shrink-0 ml-2">
+                            {f.empleados.length} emp. · ${Math.round(f.caja)}
+                          </span>
+                        </button>
+                      ))}
+                </div>
+              </div>
+            );
+          })()}
+
         {/* 5. CONSTRUIR LIST (Parcelas + Vías conectables) */}
-        {sideBuildOpen && !selectedNpc && !selectedParcela && !selectedTramo && !selectedLandmark && (() => {
+        {sideBuildOpen &&
+          !selectedNpc &&
+          !selectedHogar &&
+          !selectedParcela &&
+          !selectedFirma &&
+          !selectedTramo &&
+          !selectedZona &&
+          !selectedMedio &&
+          !selectedLandmark &&
+          !inspectorSearchOpen && (() => {
           const sorted = [...state.parcelas].sort((a, b) => a.orden - b.orden);
           const filtered =
             buildFilter === 'libres' ? sorted.filter((p) => p.estado === 'libre') : sorted;

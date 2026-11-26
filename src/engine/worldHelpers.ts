@@ -1,28 +1,37 @@
 import {
+  AGENDA_CONSTANTS,
   BUILDING_CATALOG,
   ECON_CONSTANTS,
   HOUSING_CONSTANTS,
+  LOT_CLASS_MIN_TILES,
+  LOT_CLASS_RANK,
   ROLE_CATALOG,
   VIAL_CONSTANTS,
 } from '../data/catalogs';
 import {
   BuildingInstance,
+  BuildingType,
   Casa,
   ClimatePhenomenon,
   CommunityDerived,
   Firma,
   FirmRubro,
+  FranjaDiaId,
   GameState,
   Hogar,
+  LotClass,
+  MapaV2Grid,
   ModifiableKey,
   Modifier,
   Npc,
+  NpcAgendaSlot,
   Parcela,
   ParcelTipo,
   PersonalityTrait,
   RoleId,
   SimEvent,
   ViaTramo,
+  ZoneDefinition,
   ZoneId,
 } from '../types/game';
 import { computeMaintenanceBreakdown, getActiveBuildings, getBuildingRoleCapacity } from './policies';
@@ -94,6 +103,9 @@ export function getActivePhenomena(state: GameState): ClimatePhenomenon[] {
 }
 
 export function getAnnouncedPhenomena(state: GameState): ClimatePhenomenon[] {
+  // CAOS_PRENSA_V2: sin medios activos no se emiten avisos ni alarma pública
+  const hasActiveMedia = state.medios.some((m) => m.activa !== false);
+  if (!hasActiveMedia) return [];
   const dia = state.reloj.dia;
   return state.clima.fenomenos.filter(
     (f) => typeof f.avisoDias === 'number' && dia >= f.inicioDia - f.avisoDias && dia < f.inicioDia
@@ -145,6 +157,294 @@ export function buildZoneStepMap(
   return dist;
 }
 
+export function getGridDimensionsForPopulation(pop: number): { ancho: number; alto: number } {
+  if (pop > 800) return { ancho: 160, alto: 160 };
+  if (pop > 150) return { ancho: 80, alto: 80 };
+  return { ancho: 48, alto: 48 };
+}
+
+const WORLD_CANVAS_W = 1560;
+const WORLD_CANVAS_H = 980;
+
+export function inferLotClassFromParcel(
+  p: Pick<Parcela, 'clase' | 'w' | 'h' | 'ww' | 'wh' | 'tipoParcela' | 'edificio'>,
+  hintBuildingType?: BuildingType
+): LotClass {
+  if (p.clase) return p.clase;
+  const bType = p.edificio?.tipo ?? hintBuildingType;
+  if (bType && BUILDING_CATALOG[bType]) {
+    return BUILDING_CATALOG[bType].claseMinima;
+  }
+  if (p.tipoParcela === 'agricola' || p.tipoParcela === 'industrial') return 'XL';
+  if (p.tipoParcela === 'especial') return 'L';
+  if (p.tipoParcela === 'publica') return 'L';
+  if (p.w && p.h) {
+    const area = p.w * p.h;
+    if (area >= 36) return 'XL';
+    if (area >= 16) return 'L';
+    if (area >= 9) return 'M';
+    return 'S';
+  }
+  const ww = p.ww ?? 44;
+  if (ww >= 70) return 'XL';
+  if (ww >= 52) return 'L';
+  if (ww >= 45) return 'M';
+  return 'S';
+}
+
+export function canBuildTypeInParcela(parcela: Parcela, tipo: BuildingType): boolean {
+  const def = BUILDING_CATALOG[tipo];
+  if (!def) return false;
+  if (parcela.tipoParcela !== def.parcelTipo) return false;
+  const lotClass = inferLotClassFromParcel(parcela);
+  return LOT_CLASS_RANK[lotClass] >= LOT_CLASS_RANK[def.claseMinima];
+}
+
+const ZONE_CHAR_MAP: Record<ZoneId, string> = {
+  noroeste: 'O',
+  norte: 'N',
+  noreste: 'E',
+  oeste: 'W',
+  centro: 'C',
+  este: 'P',
+  suroeste: 'S',
+  sur: 'U',
+  sureste: 'R',
+  poligono: 'I',
+  ribera: 'B',
+};
+
+function rasterizeLineTiles(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  ancho: number,
+  alto: number
+): Array<[number, number]> {
+  const pts: Array<[number, number]> = [];
+  let cx = clamp(Math.round(x0), 0, ancho - 1);
+  let cy = clamp(Math.round(y0), 0, alto - 1);
+  const tx = clamp(Math.round(x1), 0, ancho - 1);
+  const ty = clamp(Math.round(y1), 0, alto - 1);
+  const dx = Math.abs(tx - cx);
+  const dy = Math.abs(ty - cy);
+  const sx = cx < tx ? 1 : -1;
+  const sy = cy < ty ? 1 : -1;
+  let err = dx - dy;
+
+  for (let steps = 0; steps < ancho + alto + 4; steps++) {
+    pts.push([cx, cy]);
+    if (cx === tx && cy === ty) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      cx += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      cy += sy;
+    }
+  }
+  return pts;
+}
+
+export function syncMapaGridVias(
+  grid: MapaV2Grid,
+  tramos: ViaTramo[]
+): void {
+  const { ancho, alto } = grid;
+  const viaRows: string[][] = Array.from({ length: alto }, () => Array(ancho).fill('.'));
+  for (const t of tramos) {
+    if (!t.construida || t.estado <= 0) continue;
+    const ch = t.tipo === 'puente' ? 'p' : t.tipo === 'camino' ? 'r' : 'c';
+    for (const [bx, by] of t.baldosas ?? []) {
+      if (bx >= 0 && bx < ancho && by >= 0 && by < alto) {
+        viaRows[by][bx] = ch;
+      }
+    }
+  }
+  grid.vias = viaRows.map((r) => r.join(''));
+}
+
+export function buildTileGridAndSyncMap(
+  zonas: Record<ZoneId, ZoneDefinition>,
+  parcelas: Parcela[],
+  tramos: ViaTramo[],
+  targetPop: number
+): MapaV2Grid {
+  const { ancho, alto } = getGridDimensionsForPopulation(targetPop);
+  const zoneIds = Object.keys(zonas);
+
+  const terrainRows: string[][] = Array.from({ length: alto }, () => Array(ancho).fill('.'));
+  const zoneRows: string[][] = Array.from({ length: alto }, () => Array(ancho).fill(' '));
+
+  const riverXMin = 1192;
+  const riverXMax = 1236;
+
+  // Map each tile center to nearest zone rect (solid coverage, no gaps, river barrier before ribera)
+  for (let ty = 0; ty < alto; ty++) {
+    const wy = ((ty + 0.5) / alto) * WORLD_CANVAS_H;
+    for (let tx = 0; tx < ancho; tx++) {
+      const wx = ((tx + 0.5) / ancho) * WORLD_CANVAS_W;
+
+      if (wx >= riverXMin && wx <= riverXMax && wy >= 245 && wy <= 765) {
+        terrainRows[ty][tx] = '~';
+      } else if ((wx >= 1245 && wy < 235) || (wx >= 815 && wy >= 780)) {
+        terrainRows[ty][tx] = '^';
+      }
+
+      let bestZone = zoneIds[0] ?? 'centro';
+      let bestDist = Infinity;
+      for (const zId of zoneIds) {
+        const r = zonas[zId].rect;
+        const dx = wx < r.wx ? r.wx - wx : wx > r.wx + r.ww ? wx - (r.wx + r.ww) : 0;
+        const dy = wy < r.wy ? r.wy - wy : wy > r.wy + r.wh ? wy - (r.wy + r.wh) : 0;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) {
+          bestDist = d;
+          bestZone = zId;
+        }
+      }
+      zoneRows[ty][tx] = ZONE_CHAR_MAP[bestZone] ?? bestZone.charAt(0).toUpperCase();
+    }
+  }
+
+  // Derive zone adjacency strictly from orthographic 4-neighbor tile contiguity (+ river bridges)
+  const charToZone: Record<string, ZoneId> = {};
+  for (const zId of zoneIds) {
+    charToZone[ZONE_CHAR_MAP[zId] ?? zId.charAt(0).toUpperCase()] = zId;
+  }
+  const derivedVecinas = new Map<ZoneId, Set<ZoneId>>();
+  for (const zId of zoneIds) derivedVecinas.set(zId, new Set<ZoneId>());
+
+  for (let ty = 0; ty < alto; ty++) {
+    for (let tx = 0; tx < ancho; tx++) {
+      const zA = charToZone[zoneRows[ty][tx]];
+      if (!zA) continue;
+      if (tx + 1 < ancho) {
+        const zB = charToZone[zoneRows[ty][tx + 1]];
+        if (zB && zB !== zA) {
+          derivedVecinas.get(zA)?.add(zB);
+          derivedVecinas.get(zB)?.add(zA);
+        }
+      }
+      if (ty + 1 < alto) {
+        const zB = charToZone[zoneRows[ty + 1][tx]];
+        if (zB && zB !== zA) {
+          derivedVecinas.get(zA)?.add(zB);
+          derivedVecinas.get(zB)?.add(zA);
+        }
+      }
+    }
+  }
+  for (const t of tramos) {
+    if (t.zonaA && t.zonaB && t.zonaA !== t.zonaB) {
+      derivedVecinas.get(t.zonaA)?.add(t.zonaB);
+      derivedVecinas.get(t.zonaB)?.add(t.zonaA);
+    }
+  }
+  for (const zId of zoneIds) {
+    const derived = [...(derivedVecinas.get(zId) ?? [])];
+    if (derived.length > 0) {
+      zonas[zId].vecinas = derived;
+    }
+  }
+
+  // Populate tramo.baldosas from tramo.puntos
+  const tramoById = new Map<string, ViaTramo>();
+  for (const t of tramos) {
+    tramoById.set(t.id, t);
+    const pts = t.puntos && t.puntos.length >= 2
+      ? t.puntos
+      : [
+          {
+            wx: (zonas[t.zonaA]?.rect.wx ?? 415) + (zonas[t.zonaA]?.rect.ww ?? 370) / 2,
+            wy: (zonas[t.zonaA]?.rect.wy ?? 270) + (zonas[t.zonaA]?.rect.wh ?? 225) / 2,
+          },
+          {
+            wx: (zonas[t.zonaB ?? t.zonaA]?.rect.wx ?? 600) + (zonas[t.zonaB ?? t.zonaA]?.rect.ww ?? 370) / 2,
+            wy: (zonas[t.zonaB ?? t.zonaA]?.rect.wy ?? 380) + (zonas[t.zonaB ?? t.zonaA]?.rect.wh ?? 225) / 2,
+          },
+        ];
+    const seen = new Set<string>();
+    const baldosas: Array<[number, number]> = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const gx0 = (pts[i].wx / WORLD_CANVAS_W) * ancho;
+      const gy0 = (pts[i].wy / WORLD_CANVAS_H) * alto;
+      const gx1 = (pts[i + 1].wx / WORLD_CANVAS_W) * ancho;
+      const gy1 = (pts[i + 1].wy / WORLD_CANVAS_H) * alto;
+      for (const [bx, by] of rasterizeLineTiles(gx0, gy0, gx1, gy1, ancho, alto)) {
+        const key = `${bx},${by}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          baldosas.push([bx, by]);
+        }
+      }
+    }
+    t.baldosas = baldosas;
+  }
+
+  // Ensure every parcel has tile coordinates (x, y, w, h), clase, and frente
+  for (const p of parcelas) {
+    const lotClass = inferLotClassFromParcel(p);
+    p.clase = lotClass;
+    const minT = LOT_CLASS_MIN_TILES[lotClass];
+    const scaledW = Math.max(minT.w, Math.round((p.ww / WORLD_CANVAS_W) * ancho));
+    const scaledH = Math.max(minT.h, Math.round((p.wh / WORLD_CANVAS_H) * alto));
+    p.w = scaledW;
+    p.h = scaledH;
+    p.x = clamp(Math.round((p.wx / WORLD_CANVAS_W) * ancho), 0, ancho - 1);
+    p.y = clamp(Math.round((p.wy / WORLD_CANVAS_H) * alto), 0, alto - 1);
+
+    // Ensure parcel footprint doesn't sit on water/mountain tiles
+    for (let dy = 0; dy < Math.min(3, p.h); dy++) {
+      for (let dx = 0; dx < Math.min(3, p.w); dx++) {
+        const tx = clamp(p.x + dx, 0, ancho - 1);
+        const ty = clamp(p.y + dy, 0, alto - 1);
+        if (terrainRows[ty][tx] !== '.') terrainRows[ty][tx] = '.';
+      }
+    }
+
+    const apertura = p.tramoAperturaId ? tramoById.get(p.tramoAperturaId) : undefined;
+    if (apertura?.baldosas && apertura.baldosas.length > 0) {
+      const endPt = apertura.baldosas[apertura.baldosas.length - 1];
+      p.frente = [endPt[0], endPt[1]];
+    } else {
+      const zRect = zonas[p.zona]?.rect;
+      const roadWx = zRect ? zRect.wx + zRect.ww / 2 : p.wx + p.ww / 2;
+      const roadWy = zRect ? zRect.wy + zRect.wh / 2 : p.wy + p.wh / 2;
+      const fx = clamp(Math.round((((p.wx + p.ww / 2) * 0.55 + roadWx * 0.45) / WORLD_CANVAS_W) * ancho), 0, ancho - 1);
+      const fy = clamp(Math.round((((p.wy + p.wh / 2) * 0.55 + roadWy * 0.45) / WORLD_CANVAS_H) * alto), 0, alto - 1);
+      p.frente = [fx, fy];
+    }
+  }
+
+  const zonas_info: MapaV2Grid['zonas_info'] = {};
+  for (const zId of zoneIds) {
+    const z = zonas[zId];
+    zonas_info[zId] = {
+      id: zId,
+      codigo: ZONE_CHAR_MAP[zId] ?? zId.charAt(0).toUpperCase(),
+      nombre: z.nombre,
+      estado: z.estado ?? 'activa',
+      nodoPrincipal: z.nodoPrincipal ?? `n_${zId}`,
+    };
+  }
+
+  const grid: MapaV2Grid = {
+    version: 1,
+    ancho,
+    alto,
+    terreno: terrainRows.map((r) => r.join('')),
+    vias: Array.from({ length: alto }, () => '.'.repeat(ancho)),
+    zonas: zoneRows.map((r) => r.join('')),
+    zonas_info,
+  };
+  syncMapaGridVias(grid, tramos);
+  return grid;
+}
+
 export function getViaTramoCost(tramo: ViaTramo): number {
   if (!tramo.construida || tramo.estado <= 0) return Infinity;
   return tramo.longitud * (1 + VIAL_CONSTANTS.kVial * (1 - clamp(tramo.estado, 0, 100) / 100));
@@ -173,6 +473,16 @@ export function isViaConnectableToNetwork(
   if (tramo.construida || tramo.enObra) return false;
   const builtNodes = getBuiltNetworkNodes(state);
   return builtNodes.has(tramo.nodoA) || builtNodes.has(tramo.nodoB);
+}
+
+export function isLotIsolated(state: Pick<GameState, 'zonas' | 'tramos' | 'distanciasZonas'>, parcela: Parcela): boolean {
+  if (parcela.estado === 'sin_calle' || parcela.estado === 'bloqueada') return true;
+  if (state.zonas[parcela.zona]?.estado === 'no_urbanizada') return true;
+  if (parcela.tramoAperturaId) {
+    const tramo = state.tramos.find((t) => t.id === parcela.tramoAperturaId);
+    if (tramo && (!tramo.construida || tramo.estado <= 0)) return true;
+  }
+  return false;
 }
 
 export function recomputeRoadDistances(state: GameState): void {
@@ -234,6 +544,19 @@ export function recomputeRoadDistances(state: GameState): void {
   }
 
   state.distanciasZonas = matrix;
+
+  // Cache node-to-node / zone-to-zone travel cost map for O(1) lot queries
+  const lotDistCache: Record<string, number> = {};
+  for (const zA of zoneIds) {
+    for (const zB of zoneIds) {
+      lotDistCache[`${zA}:${zB}`] = matrix[zA]?.[zB] ?? Infinity;
+    }
+  }
+  state.distanciasLotes = lotDistCache;
+
+  if (state.mapaGrid) {
+    syncMapaGridVias(state.mapaGrid, state.tramos);
+  }
 }
 
 export function getZoneTravelCost(state: GameState, from: ZoneId, to: ZoneId): number {
@@ -245,6 +568,255 @@ export function getZoneTravelCost(state: GameState, from: ZoneId, to: ZoneId): n
   return typeof stepDist === 'number'
     ? stepDist * 10 + VIAL_CONSTANTS.costoInternoZona
     : Infinity;
+}
+
+export function getLotTravelCost(state: GameState, fromParcel: Parcela, toParcel: Parcela): number {
+  if (isLotIsolated(state, fromParcel) || isLotIsolated(state, toParcel)) return Infinity;
+  if (fromParcel.id === toParcel.id) return 0;
+  if (fromParcel.zona === toParcel.zona) {
+    const fx = fromParcel.frente?.[0] ?? fromParcel.x ?? 0;
+    const fy = fromParcel.frente?.[1] ?? fromParcel.y ?? 0;
+    const tx = toParcel.frente?.[0] ?? toParcel.x ?? 0;
+    const ty = toParcel.frente?.[1] ?? toParcel.y ?? 0;
+    const manhattan = Math.abs(tx - fx) + Math.abs(ty - fy);
+    return Number(Math.max(1, manhattan * 0.4).toFixed(2));
+  }
+  return getZoneTravelCost(state, fromParcel.zona, toParcel.zona);
+}
+
+export function getRouteWaypointsBetween(
+  state: Pick<GameState, 'zonas' | 'tramos'>,
+  fromWx: number,
+  fromWy: number,
+  fromZona: ZoneId,
+  toWx: number,
+  toWy: number,
+  toZona: ZoneId
+): Array<{ wx: number; wy: number }> {
+  if (fromZona === toZona) {
+    return [{ wx: toWx, wy: toWy }];
+  }
+  const path = shortestZonePath(state.zonas, fromZona, toZona);
+  const waypoints: Array<{ wx: number; wy: number }> = [];
+  for (let i = 0; i < path.length - 1; i++) {
+    const zA = path[i];
+    const zB = path[i + 1];
+    const tramo = state.tramos.find(
+      (t) =>
+        t.construida &&
+        t.estado > 0 &&
+        ((t.zonaA === zA && t.zonaB === zB) || (t.zonaA === zB && t.zonaB === zA))
+    );
+    if (tramo?.puntos && tramo.puntos.length >= 2) {
+      const pts = tramo.zonaA === zA ? tramo.puntos : [...tramo.puntos].reverse();
+      for (const pt of pts) {
+        waypoints.push({ wx: pt.wx, wy: pt.wy });
+      }
+    } else {
+      const zRect = state.zonas[zB]?.rect;
+      if (zRect) {
+        waypoints.push({ wx: zRect.wx + zRect.ww / 2, wy: zRect.wy + zRect.wh / 2 });
+      }
+    }
+  }
+  void fromWx;
+  void fromWy;
+  waypoints.push({ wx: toWx, wy: toWy });
+  return waypoints;
+}
+
+export function getFranjaDia(tick: number, ticksPorDia = 120): FranjaDiaId {
+  const hour = (clamp(tick, 0, Math.max(1, ticksPorDia) - 1) / Math.max(1, ticksPorDia)) * 24;
+  if (hour < 6) return 'noche';
+  if (hour < 12) return 'manana';
+  if (hour < 14) return 'mediodia';
+  if (hour < 19) return 'tarde';
+  return 'anochecer';
+}
+
+export function getNpcDailyAgenda(
+  state: Pick<GameState, 'hogares' | 'casas' | 'parcelas' | 'firmas' | 'zonas'>,
+  npc: Npc,
+  ctx?: {
+    hogarById?: Map<string, Hogar>;
+    casaById?: Map<string, Casa>;
+    parcelaById?: Map<string, Parcela>;
+    firmaById?: Map<string, Firma>;
+  }
+): NpcAgendaSlot[] {
+  const hogar = ctx?.hogarById
+    ? ctx.hogarById.get(npc.hogarId)
+    : state.hogares.find((h) => h.id === npc.hogarId);
+  const casa = hogar?.casaId
+    ? ctx?.casaById
+      ? ctx.casaById.get(hogar.casaId)
+      : state.casas.find((c) => c.id === hogar.casaId)
+    : undefined;
+  const homeParcel = casa
+    ? ctx?.parcelaById
+      ? ctx.parcelaById.get(casa.parcelaId)
+      : state.parcelas.find((p) => p.id === casa.parcelaId)
+    : undefined;
+
+  const homeZone = homeParcel?.zona ?? hogar?.zona ?? npc.zona;
+  const homeRect = state.zonas[homeZone]?.rect;
+  const homeWx = homeParcel ? homeParcel.wx + homeParcel.ww / 2 : homeRect ? homeRect.wx + homeRect.ww * 0.5 : npc.mapa.x;
+  const homeWy = homeParcel ? homeParcel.wy + homeParcel.wh / 2 : homeRect ? homeRect.wy + homeRect.wh * 0.5 : npc.mapa.y;
+
+  // Locate work or school parcel
+  let workParcel: Parcela | undefined;
+  let workLabel = 'Trabajando';
+  if (npc.hospital.internado) {
+    workParcel = state.parcelas.find((p) => p.edificio?.id === npc.hospital.edificioId) ??
+      state.parcelas.find((p) => p.edificio?.tipo === 'hospital' && p.edificio.activo);
+    workLabel = 'Internado en hospital';
+  } else if (npc.empleadorId) {
+    const firma = ctx?.firmaById
+      ? ctx.firmaById.get(npc.empleadorId)
+      : state.firmas.find((f) => f.id === npc.empleadorId);
+    const localId = firma?.locales?.[0];
+    if (localId) {
+      workParcel = ctx?.parcelaById
+        ? ctx.parcelaById.get(localId)
+        : state.parcelas.find((p) => p.id === localId);
+    }
+    workLabel = firma ? `Trabajo en ${firma.nombre}` : 'En jornada laboral';
+  } else if (npc.rol === 'estudiante') {
+    workParcel =
+      state.parcelas.find((p) => p.zona === homeZone && p.edificio?.tipo === 'escuela' && p.edificio.activo) ??
+      state.parcelas.find((p) => p.edificio?.tipo === 'escuela' && p.edificio.activo);
+    workLabel = 'Asistiendo a la escuela';
+  } else if (npc.rol === 'policia') {
+    workParcel =
+      state.parcelas.find((p) => p.zona === npc.zona && p.edificio?.tipo === 'comisaria' && p.edificio.activo) ??
+      state.parcelas.find((p) => p.edificio?.tipo === 'comisaria' && p.edificio.activo);
+    workLabel = 'Patrulla y guardia';
+  } else if (npc.rol === 'medico') {
+    workParcel =
+      state.parcelas.find((p) => p.zona === npc.zona && p.edificio?.tipo === 'hospital' && p.edificio.activo) ??
+      state.parcelas.find((p) => p.edificio?.tipo === 'hospital' && p.edificio.activo);
+    workLabel = 'Guardia médica';
+  } else if (npc.rol === 'estatal' || npc.rol === 'ingeniero') {
+    workParcel = state.parcelas.find((p) => p.edificio?.tipo === 'oficina_publica' && p.edificio.activo);
+    workLabel = npc.rol === 'ingeniero' ? 'Supervisión de obras' : 'Gestión pública';
+  } else if (npc.rol === 'docente') {
+    workParcel =
+      state.parcelas.find((p) => p.zona === npc.zona && p.edificio?.tipo === 'escuela' && p.edificio.activo) ??
+      state.parcelas.find((p) => p.edificio?.tipo === 'escuela' && p.edificio.activo);
+    workLabel = 'Dictando clases';
+  } else if (npc.rol === 'jubilado') {
+    workParcel = state.parcelas.find((p) => p.edificio?.tipo === 'plaza');
+    workLabel = 'Paseo por la plaza';
+  } else {
+    workParcel = state.parcelas.find((p) => p.edificio?.tipo === 'plaza');
+    workLabel = 'Buscando empleo / trámites';
+  }
+
+  const workZone = workParcel?.zona ?? npc.zona;
+  const workRect = state.zonas[workZone]?.rect;
+  const workWx = workParcel ? workParcel.wx + workParcel.ww / 2 : workRect ? workRect.wx + workRect.ww * 0.5 : homeWx;
+  const workWy = workParcel ? workParcel.wy + workParcel.wh / 2 : workRect ? workRect.wy + workRect.wh * 0.5 : homeWy;
+
+  // Midday shopping / food parcel in home or work zone
+  const shopParcel =
+    state.parcelas.find(
+      (p) =>
+        (p.zona === homeZone || p.zona === workZone) &&
+        p.edificio?.activo &&
+        (p.edificio.tipo === 'almacen' || p.edificio.tipo === 'supermercado' || p.edificio.tipo === 'restoran')
+    ) ??
+    state.parcelas.find((p) => p.edificio?.tipo === 'plaza');
+  const shopZone = shopParcel?.zona ?? homeZone;
+  const shopWx = shopParcel ? shopParcel.wx + shopParcel.ww / 2 : homeWx;
+  const shopWy = shopParcel ? shopParcel.wy + shopParcel.wh / 2 : homeWy;
+
+  // Afternoon leisure parcel for non-working hours or breaks
+  const leisureParcel =
+    npc.edad >= 18 && (npc.economia.propensionGasto >= 62 || npc.rol === 'jubilado' || npc.rol === 'desempleado')
+      ? state.parcelas.find(
+          (p) =>
+            p.edificio?.activo &&
+            (p.edificio.tipo === 'bar_cafe' ||
+              p.edificio.tipo === 'cine_teatro' ||
+              p.edificio.tipo === 'gimnasio' ||
+              p.edificio.tipo === 'plaza')
+        )
+      : undefined;
+
+  const isHospitalized = npc.hospital.internado;
+  const afternoonUsesLeisure =
+    !isHospitalized &&
+    Boolean(leisureParcel) &&
+    (npc.rol === 'estudiante' || npc.rol === 'jubilado' || npc.rol === 'desempleado');
+
+  const tardeParcel = afternoonUsesLeisure ? leisureParcel : workParcel;
+  const tardeZone = tardeParcel?.zona ?? workZone;
+  const tardeWx = tardeParcel ? tardeParcel.wx + tardeParcel.ww / 2 : workWx;
+  const tardeWy = tardeParcel ? tardeParcel.wy + tardeParcel.wh / 2 : workWy;
+  const tardeActividad = afternoonUsesLeisure
+    ? `Ocio en ${tardeParcel?.nombre ?? 'la ciudad'}`
+    : workLabel;
+
+  const nightPatrol = !isHospitalized && npc.rol === 'policia';
+
+  return [
+    {
+      franja: 'noche',
+      horario: AGENDA_CONSTANTS.franjas[0].horario,
+      actividad: isHospitalized ? 'Internado en hospital' : homeParcel ? 'Descanso en casa' : 'Pernoctando en zona',
+      destinoTipo: isHospitalized ? 'hospital' : homeParcel ? 'casa' : 'zona',
+      zona: isHospitalized ? workZone : homeZone,
+      parcelaId: isHospitalized ? workParcel?.id : homeParcel?.id,
+      wx: isHospitalized ? workWx : homeWx,
+      wy: isHospitalized ? workWy : homeWy,
+    },
+    {
+      franja: 'manana',
+      horario: AGENDA_CONSTANTS.franjas[1].horario,
+      actividad: workLabel,
+      destinoTipo: isHospitalized ? 'hospital' : workParcel ? 'trabajo' : 'zona',
+      zona: workZone,
+      parcelaId: workParcel?.id,
+      wx: workWx,
+      wy: workWy,
+    },
+    {
+      franja: 'mediodia',
+      horario: AGENDA_CONSTANTS.franjas[2].horario,
+      actividad: isHospitalized ? 'Internado en hospital' : shopParcel ? `Compras en ${shopParcel.nombre}` : 'Almuerzo en casa',
+      destinoTipo: isHospitalized ? 'hospital' : shopParcel ? 'parcela' : 'casa',
+      zona: isHospitalized ? workZone : shopZone,
+      parcelaId: isHospitalized ? workParcel?.id : shopParcel?.id,
+      wx: isHospitalized ? workWx : shopWx,
+      wy: isHospitalized ? workWy : shopWy,
+    },
+    {
+      franja: 'tarde',
+      horario: AGENDA_CONSTANTS.franjas[3].horario,
+      actividad: tardeActividad,
+      destinoTipo: isHospitalized ? 'hospital' : afternoonUsesLeisure ? 'parcela' : 'trabajo',
+      zona: tardeZone,
+      parcelaId: tardeParcel?.id,
+      wx: tardeWx,
+      wy: tardeWy,
+    },
+    {
+      franja: 'anochecer',
+      horario: AGENDA_CONSTANTS.franjas[4].horario,
+      actividad: isHospitalized
+        ? 'Internado en hospital'
+        : nightPatrol
+        ? 'Patrulla nocturna'
+        : homeParcel
+        ? 'Regreso al hogar'
+        : 'Regreso a su zona',
+      destinoTipo: isHospitalized ? 'hospital' : nightPatrol ? 'trabajo' : homeParcel ? 'casa' : 'zona',
+      zona: isHospitalized || nightPatrol ? workZone : homeZone,
+      parcelaId: isHospitalized || nightPatrol ? workParcel?.id : homeParcel?.id,
+      wx: isHospitalized || nightPatrol ? workWx : homeWx,
+      wy: isHospitalized || nightPatrol ? workWy : homeWy,
+    },
+  ];
 }
 
 export function getCommuteProductivityFactor(
@@ -260,7 +832,11 @@ export function getCommuteProductivityFactor(
   const cost = getZoneTravelCost(state, npc.zona, firma.zona);
   if (!Number.isFinite(cost)) return 0.65;
   const extra = Math.max(0, cost - VIAL_CONSTANTS.costoInternoZona);
-  return clamp(1 - extra * VIAL_CONSTANTS.kTraslado, 0.72, 1);
+  const horasViaje = extra / Math.max(1, AGENDA_CONSTANTS.baldosasPorHora);
+  const factor = clamp(1 - extra * VIAL_CONSTANTS.kTraslado - horasViaje * 0.05, 0.72, 1);
+  npc.commuteBaldosas = Number(cost.toFixed(1));
+  npc.commutePenalty = Number((1 - factor).toFixed(3));
+  return factor;
 }
 
 export function computeDemandaSuelo(state: GameState): Record<string, number> {
@@ -1118,10 +1694,13 @@ export function addNpcModifier(npc: Npc, mod: Modifier): void {
   }
 }
 
-export function checkEngineInvariants(state: GameState): string[] {
+export function checkEngineInvariants(
+  state: GameState,
+  opts?: { checkMoney?: boolean }
+): string[] {
   const errors: string[] = [];
   const isM4 = state.config.nivelMundo === 'M4' || state.config.economiaModulo === 'fiscal';
-  if (!isM4) {
+  if ((opts?.checkMoney ?? true) && !isM4) {
     const actualMoney = computeTotalWorldMoney(state);
     const expectedMoney =
       state.ultimoDineroTotal + state.auditEntradasDia - state.auditSalidasDia;

@@ -50,18 +50,17 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
     return { ...cloned, ...resolved };
   });
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
-  const preset = SCENARIO_PRESETS[config.escenarioId];
   const testMode = isTestConfig(config);
   const worldLevel: WorldComplexityLevel = config.nivelMundo ?? 'M3';
-  const govLevel: GovernorComplexityLevel = config.nivelGobernador ?? 'G2';
-  const estadoAuto = Boolean(config.estadoAutomatico);
+  const govLevel: GovernorComplexityLevel = config.nivelGobernador ?? 'G0';
+  const estadoAuto = Boolean(config.estadoAutomatico ?? govLevel === 'G0');
 
   const handleSelectScenario = (id: 'elecciones' | 'zombies') => {
     const nextPreset = SCENARIO_PRESETS[id];
     const resolved = resolveComplexityConfig({
       nivelMundo: config.nivelMundo ?? 'M3',
-      nivelGobernador: config.nivelGobernador ?? 'G2',
-      estadoAutomatico: config.estadoAutomatico ?? false,
+      nivelGobernador: config.nivelGobernador ?? 'G0',
+      estadoAutomatico: config.estadoAutomatico ?? true,
     });
     setConfig({
       escenarioId: id,
@@ -70,7 +69,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
       nivelGobernador: resolved.nivelGobernador,
       estadoAutomatico: resolved.estadoAutomatico,
       cantidadMedios: nextPreset.mediosDefault,
-      poblacionInicial: nextPreset.poblacionDefault,
+      poblacionInicial: config.poblacionInicial || nextPreset.poblacionDefault,
       caos: { ...nextPreset.caosDefault },
       semilla: config.semilla,
       usarIaGemini: config.usarIaGemini,
@@ -295,12 +294,41 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               />
             </div>
 
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="text-zinc-300">
-                Población: <strong className="font-mono text-white">{preset.poblacionDefault}</strong>
-              </span>
-              <div className="flex items-center gap-2">
-                <label htmlFor="world-seed-input" className="text-zinc-300">
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-zinc-300">Población inicial</span>
+                <div className="flex items-center gap-1">
+                  {[100, 500, 5000].map((pop) => (
+                    <button
+                      key={pop}
+                      type="button"
+                      onClick={() => setConfig({ ...config, poblacionInicial: pop })}
+                      className={`px-2 py-1 font-mono font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                        config.poblacionInicial === pop
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-zinc-800 text-zinc-300 hover:text-white'
+                      }`}
+                    >
+                      {pop.toLocaleString('es-AR')}
+                    </button>
+                  ))}
+                  <input
+                    id="world-pop-input"
+                    type="number"
+                    aria-label="Población inicial personalizada"
+                    min={20}
+                    max={5000}
+                    value={config.poblacionInicial}
+                    onChange={(e) => {
+                      const val = Math.min(5000, Math.max(20, Math.floor(Number(e.target.value) || 20)));
+                      setConfig({ ...config, poblacionInicial: val });
+                    }}
+                    className="w-16 px-2 py-1 text-right font-mono font-semibold text-white bg-zinc-800 border border-zinc-700 rounded-lg tabular-nums"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="world-seed-input" className="text-zinc-300 font-medium">
                   Semilla
                 </label>
                 <input
@@ -313,7 +341,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                     const val = Math.min(999999999, Math.max(1, Math.floor(Number(e.target.value) || 1)));
                     setConfig({ ...config, semilla: val });
                   }}
-                  className="w-28 px-2.5 py-1.5 text-right font-mono font-semibold text-white bg-zinc-800 border border-zinc-700 rounded-xl"
+                  className="w-28 px-2.5 py-1.5 text-right font-mono font-semibold text-white bg-zinc-800 border border-zinc-700 rounded-xl tabular-nums"
                 />
               </div>
             </div>

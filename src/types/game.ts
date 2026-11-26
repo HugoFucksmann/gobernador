@@ -24,6 +24,40 @@ export type ZoneState = 'activa' | 'no_urbanizada';
 
 export type ViaTipo = 'calle' | 'camino' | 'puente';
 
+export type LotClass = 'S' | 'M' | 'L' | 'XL';
+export type TerrenoTile = '.' | '~' | '^';
+export type FranjaDiaId = 'noche' | 'manana' | 'mediodia' | 'tarde' | 'anochecer';
+
+export interface NpcAgendaSlot {
+  franja: FranjaDiaId;
+  horario: string;
+  actividad: string;
+  destinoTipo: 'casa' | 'trabajo' | 'parcela' | 'zona' | 'hospital';
+  zona: ZoneId;
+  parcelaId?: string;
+  wx?: number;
+  wy?: number;
+}
+
+export interface MapaV2Grid {
+  version: 1;
+  ancho: number;
+  alto: number;
+  terreno: string[];
+  vias: string[];
+  zonas: string[];
+  zonas_info: Record<
+    string,
+    {
+      id: ZoneId;
+      codigo: string;
+      nombre: string;
+      estado: ZoneState;
+      nodoPrincipal: string;
+    }
+  >;
+}
+
 export interface ViaTramo {
   id: string;
   nombre: string;
@@ -44,6 +78,7 @@ export interface ViaTramo {
   zonaAbierta?: ZoneId;
   barreraNatural?: boolean;
   puntos?: Array<{ wx: number; wy: number }>;
+  baldosas?: Array<[number, number]>;
 }
 
 export interface ZoneDefinition {
@@ -185,6 +220,7 @@ export interface BuildingDefinition {
   tipo: BuildingType;
   nombre: string;
   parcelTipo: ParcelTipo;
+  claseMinima: LotClass;
   categoria: 'vivienda' | 'privado' | 'publico' | 'suceso' | 'especial';
   rubro?: FirmRubro;
   categoriaGasto?: SpendCategory;
@@ -232,6 +268,12 @@ export interface Parcela {
   zona: ZoneId;
   distrito: DistrictId;
   tipoParcela: ParcelTipo;
+  clase?: LotClass;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  frente?: [number, number];
   orden: number;
   wx: number;
   wy: number;
@@ -336,18 +378,26 @@ export interface Npc {
   ultimoGolpeOrigen?: string;
   ultimoGolpeCausaId?: string;
   ultimaPerdidaFamiliarDia?: number;
+  commuteBaldosas?: number;
+  commutePenalty?: number;
   extra?: Record<string, number | string | boolean>;
   mapa: {
     x: number;
     y: number;
     destino: { x: number; y: number };
     accion: string;
+    ruta?: Array<{ x: number; y: number }>;
+    zonaDestino?: ZoneId;
+    parcelaDestinoId?: string;
+    franja?: FranjaDiaId;
   };
 }
 
 export interface Hogar {
   id: string;
   miembros: string[];
+  adultoIds?: string[];
+  esAcogida?: boolean;
   casaId: string | null;
   dinero: number;
   despensa: number;
@@ -854,6 +904,12 @@ export interface ScenarioParcelDef {
   zona: ZoneId;
   distrito: DistrictId;
   tipoParcela?: ParcelTipo;
+  clase?: LotClass;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  frente?: [number, number];
   orden: number;
   wx: number;
   wy: number;
@@ -886,6 +942,7 @@ export interface ScenarioPreset {
   zonaPorRol: Record<RoleId, ZoneId[]>;
   zonas: Record<ZoneId, ZoneDefinition>;
   tramos?: ViaTramo[];
+  mapaGrid?: MapaV2Grid;
   mediosCatalog: Array<{
     id: string;
     nombre: string;
@@ -1432,12 +1489,14 @@ export interface GameState {
     diasEnPeriodo: number;
     tick: number;
     ticksPorDia: number;
-    velocidad: 1 | 2 | 4 | 8;
+    velocidad: 1 | 2 | 4 | 5 | 8 | 20;
     pausado: boolean;
   };
+  mapaGrid?: MapaV2Grid;
   zonas: Record<ZoneId, ZoneDefinition>;
   tramos: ViaTramo[];
   distanciasZonas: Record<ZoneId, Record<ZoneId, number>>;
+  distanciasLotes?: Record<string, number>;
   demandaSuelo: Record<string, number>;
   demandaSueloRachas: Record<string, number>;
   npcs: Npc[];

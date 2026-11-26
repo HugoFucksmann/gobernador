@@ -53,7 +53,11 @@ import {
   createInitialGameState,
   resolveComplexityConfig,
 } from './worldGenerator';
-import { computeDemandaSuelo, recomputeRoadDistances } from './worldHelpers';
+import {
+  buildTileGridAndSyncMap,
+  computeDemandaSuelo,
+  recomputeRoadDistances,
+} from './worldHelpers';
 
 export type { ExtraLeverKey };
 
@@ -72,6 +76,7 @@ export interface GameControllerSnapshot {
   aiBusy: boolean;
   aiStatus: AiStatus;
   devMode: boolean;
+  noRender: boolean;
   simStepMs: number;
   manualSaveMeta: SaveSlotMeta | null;
   autoSaveMeta: SaveSlotMeta | null;
@@ -208,6 +213,7 @@ export class GameController {
   private aiAvailable = false;
   private aiBusy = false;
   private devMode = false;
+  private noRender = false;
   private simStepMs = 0;
   private manualSaveMeta: SaveSlotMeta | null = null;
   private autoSaveMeta: SaveSlotMeta | null = null;
@@ -251,6 +257,7 @@ export class GameController {
       aiBusy: this.aiBusy,
       aiStatus: getAiRuntimeStatus(this.state.config.usarIaGemini, this.aiAvailable),
       devMode: this.devMode,
+      noRender: this.noRender,
       simStepMs: this.simStepMs,
       manualSaveMeta: this.manualSaveMeta,
       autoSaveMeta: this.autoSaveMeta,
@@ -353,9 +360,11 @@ export class GameController {
   private syncTimer(): void {
     this.stopTimer();
     if (this.paused || this.state.resultado.estado !== 'jugando') return;
+    const intervalMs = this.noRender && this.speed >= 20 ? 32 : SIMULATION_TICK_MS;
     this.timerId = setInterval(() => {
-      this.tick(this.speed);
-    }, SIMULATION_TICK_MS);
+      const stepTicks = this.noRender && this.speed >= 20 ? TICKS_PER_DAY : this.speed;
+      this.tick(stepTicks);
+    }, intervalMs);
   }
 
   tick(ticks: number = this.speed): void {
@@ -414,11 +423,28 @@ export class GameController {
   }
 
   setSpeed(speed: number): void {
-    const maxSpeed = this.devMode ? 8 : 2;
-    this.speed = Math.min(maxSpeed, Math.max(1, speed));
+    const allowed = [1, 2, 5, 20] as const;
+    const nearest = allowed.reduce((prev, cur) =>
+      Math.abs(cur - speed) < Math.abs(prev - speed) ? cur : prev
+    );
+    this.speed = nearest;
+    this.state = {
+      ...this.state,
+      reloj: {
+        ...this.state.reloj,
+        velocidad: nearest,
+      },
+    };
     if (this.paused) {
       this.paused = false;
     }
+    this.syncTimer();
+    this.commit();
+  }
+
+  setNoRender(enabled: boolean): void {
+    if (this.noRender === enabled) return;
+    this.noRender = enabled;
     this.syncTimer();
     this.commit();
   }
@@ -430,11 +456,62 @@ export class GameController {
       ...this.state,
       devMode: enabled,
     };
-    if (!enabled && this.speed > 2) {
-      this.speed = 2;
+    if (!enabled) {
+      this.noRender = false;
     }
     this.syncTimer();
     this.commit();
+  }
+
+  exportSaveJson(): string {
+    return JSON.stringify(
+      {
+        meta: {
+          dia: this.state.reloj.dia,
+          escenarioNombre:
+            this.state.config.escenarioId === 'zombies' ? 'Apocalipsis Zombie' : 'Año Electoral',
+          savedAt: new Date().toISOString(),
+        },
+        state: this.state,
+      },
+      null,
+      2
+    );
+  }
+
+  importSaveJson(raw: string): { ok: boolean; error?: string } {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      const candidate =
+        parsed && typeof parsed === 'object' && 'state' in parsed
+          ? (parsed as { state: unknown }).state
+          : parsed;
+      if (!isValidSavedGameState(candidate)) {
+        return { ok: false, error: 'El JSON no corresponde a una partida válida.' };
+      }
+      this.applyLoadedState(structuredClone(candidate));
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'No se pudo parsear el JSON de partida.' };
+    }
+  }
+
+  exportMetricsJson(): string {
+    return JSON.stringify(
+      {
+        dia: this.state.reloj.dia,
+        anio: this.state.reloj.anio,
+        semilla: this.state.semilla,
+        config: this.state.config,
+        derived: this.derived,
+        mercadoStats: this.state.mercadoStats,
+        ultimaSalidaEconomica: this.state.ultimaSalidaEconomica,
+        historial: this.state.historial,
+        simStepMs: this.simStepMs,
+      },
+      null,
+      2
+    );
   }
 
   setDevPopulation(poblacionInicial: number): void {
@@ -553,9 +630,18 @@ export class GameController {
     if (!Array.isArray(loaded.tramos) || loaded.tramos.length === 0) {
       loaded.tramos = structuredClone(DEFAULT_TRAMOS);
     }
+    if (!loaded.mapaGrid) {
+      loaded.mapaGrid = buildTileGridAndSyncMap(
+        loaded.zonas,
+        loaded.parcelas ?? [],
+        loaded.tramos,
+        loaded.npcs.length
+      );
+    }
     if (
       !loaded.distanciasZonas ||
-      Object.keys(loaded.distanciasZonas).length < Object.keys(loaded.zonas).length
+      Object.keys(loaded.distanciasZonas).length < Object.keys(loaded.zonas).length ||
+      !loaded.distanciasLotes
     ) {
       recomputeRoadDistances(loaded);
     }

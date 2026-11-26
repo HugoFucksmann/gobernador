@@ -30,6 +30,7 @@ import {
   RoleId,
   ViaTramo,
   ZoneDefinition,
+  ZoneId,
 } from '../types/game';
 import { CameraTarget, CityTab, MapFilter, MapHoverPreview, MapLens, WindowId } from '../types/ui';
 
@@ -39,9 +40,11 @@ interface CityWorldCanvasProps {
   state: GameState;
   derived: CommunityDerived;
   paused: boolean;
+  noRender?: boolean;
   selectedNpcId: string | null;
   selectedParcelaId?: string | null;
   selectedTramoId?: string | null;
+  selectedZonaId?: ZoneId | null;
   hoveredPreview?: MapHoverPreview | null;
   filter: MapFilter;
   lens: MapLens;
@@ -51,6 +54,7 @@ interface CityWorldCanvasProps {
   onSelectNpc: (npcId: string) => void;
   onSelectParcela?: (parcelaId: string) => void;
   onSelectTramo?: (tramoId: string) => void;
+  onSelectZona?: (zonaId: ZoneId) => void;
   onOpenSection: (section: WindowId, tabHint?: CityTab) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
@@ -1013,9 +1017,11 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   state,
   derived,
   paused,
+  noRender = false,
   selectedNpcId,
   selectedParcelaId = null,
   selectedTramoId = null,
+  selectedZonaId = null,
   hoveredPreview = null,
   filter,
   lens,
@@ -1025,6 +1031,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   onSelectNpc,
   onSelectParcela,
   onSelectTramo,
+  onSelectZona,
   onCancelFollow,
   onHoverInfoChange,
 }) => {
@@ -1040,12 +1047,16 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   derivedRef.current = derived;
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  const noRenderRef = useRef(noRender);
+  noRenderRef.current = noRender;
   const selectedIdRef = useRef(selectedNpcId);
   selectedIdRef.current = selectedNpcId;
   const selectedParcelaIdRef = useRef(selectedParcelaId);
   selectedParcelaIdRef.current = selectedParcelaId;
   const selectedTramoIdRef = useRef(selectedTramoId);
   selectedTramoIdRef.current = selectedTramoId;
+  const selectedZonaIdRef = useRef(selectedZonaId);
+  selectedZonaIdRef.current = selectedZonaId;
   const hoveredPreviewRef = useRef(hoveredPreview);
   hoveredPreviewRef.current = hoveredPreview;
   const filterRef = useRef(filter);
@@ -1148,9 +1159,16 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     };
   }, [onCancelFollow]);
 
-  // Handle external zone / district jump requests
+  // Handle external zone / district / coord jump requests
   useEffect(() => {
     if (!cameraTarget) return;
+    if (cameraTarget.wx !== undefined && cameraTarget.wy !== undefined) {
+      const p = worldToIso(cameraTarget.wx, cameraTarget.wy);
+      camRef.current.targetX = clampCamX(p.ix);
+      camRef.current.targetY = clampCamY(p.iy);
+      if (camRef.current.targetZoom < 1.15) camRef.current.targetZoom = 1.24;
+      return;
+    }
     if (cameraTarget.zone === 'all' || cameraTarget.district === 'all') {
       const center = worldToIso(780, 490);
       camRef.current.targetX = center.ix;
@@ -1235,8 +1253,9 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     return { ix, iy, sx, sy };
   };
 
-  // Main 60fps Frustum-Culled Isometric Render Loop
+  // Main 60fps Frustum-Culled Isometric Render Loop (paused when noRender is active)
   useEffect(() => {
+    if (noRender) return;
     let animId = 0;
     let lastTime = performance.now();
     let lastMinimapTime = 0;
@@ -1707,13 +1726,31 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             }
           }
 
-          // Zone Lens Overlay (defensa / orden / integridad / amenaza)
+          // Selected Zone Highlight
+          const selZonaId = selectedZonaIdRef.current;
+          if (selZonaId && st.zonas[selZonaId]?.rect) {
+            const szr = st.zonas[selZonaId].rect!;
+            ctx.save();
+            isoQuadPath(ctx, szr.wx, szr.wy, szr.ww, szr.wh);
+            ctx.fillStyle = 'rgba(20, 184, 166, 0.1)';
+            ctx.fill();
+            ctx.strokeStyle = '#14b8a6';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 6]);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Zone Lens Overlay (defensa / orden / integridad / amenaza / alquiler / firmas / vias)
           const activeLens = lensRef.current;
           if (
             activeLens === 'defensa' ||
             activeLens === 'orden' ||
             activeLens === 'integridad' ||
-            activeLens === 'amenaza'
+            activeLens === 'amenaza' ||
+            activeLens === 'alquiler' ||
+            activeLens === 'firmas' ||
+            activeLens === 'vias'
           ) {
             const curDerived = derivedRef.current;
             const zoneKeys = getWorldZones(st);
@@ -1721,17 +1758,39 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             for (const zk of zoneKeys) {
               const zr = st.zonas[zk]?.rect;
               if (!zr) continue;
-              const val =
-                activeLens === 'defensa'
-                  ? curDerived.defensa[zk] ?? 0
-                  : activeLens === 'orden'
-                  ? curDerived.orden?.[zk] ?? 0
-                  : activeLens === 'integridad'
-                  ? st.gobierno.integridad?.[zk] ?? 100
-                  : curDerived.amenazaPercibida[zk] ?? 0;
-              const strokeCol = evaluateZoneMetricColor(activeLens, val);
+              let strokeCol = '#10b981';
+              let labelText = '';
+              if (activeLens === 'alquiler') {
+                const rent = st.ultimaSalidaEconomica?.alquilerMedio?.[zk] ?? 0;
+                strokeCol = rent > 22 ? '#ef4444' : rent > 14 ? '#f59e0b' : '#10b981';
+                labelText = `${zk.toUpperCase()} $${rent.toFixed(1)}`;
+              } else if (activeLens === 'firmas') {
+                const zFirms = st.firmas.filter((f) => f.activa && f.zona === zk).length;
+                strokeCol = zFirms >= 4 ? '#f59e0b' : zFirms >= 1 ? '#10b981' : '#64748b';
+                labelText = `${zk.toUpperCase()} ${zFirms} fir.`;
+              } else if (activeLens === 'vias') {
+                const zTramos = st.tramos.filter((t) => t.construida && (t.zonaA === zk || t.zonaB === zk));
+                const avgV =
+                  zTramos.length > 0
+                    ? zTramos.reduce((s, t) => s + t.estado, 0) / zTramos.length
+                    : 100;
+                strokeCol = avgV >= 70 ? '#10b981' : avgV >= 40 ? '#f59e0b' : '#ef4444';
+                labelText = `${zk.toUpperCase()} vía ${Math.round(avgV)}%`;
+              } else {
+                const val =
+                  activeLens === 'defensa'
+                    ? curDerived.defensa[zk] ?? 0
+                    : activeLens === 'orden'
+                    ? curDerived.orden?.[zk] ?? 0
+                    : activeLens === 'integridad'
+                    ? st.gobierno.integridad?.[zk] ?? 100
+                    : curDerived.amenazaPercibida[zk] ?? 0;
+                strokeCol = evaluateZoneMetricColor(activeLens, val);
+                labelText = `${zk.toUpperCase()} ${Math.round(val)}%`;
+              }
+
               isoQuadPath(ctx, zr.wx, zr.wy, zr.ww, zr.wh);
-              ctx.globalAlpha = 0.18;
+              ctx.globalAlpha = 0.16;
               ctx.fillStyle = strokeCol;
               ctx.fill();
               ctx.globalAlpha = 0.72;
@@ -1743,12 +1802,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ctx.globalAlpha = 0.92;
               ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
               ctx.beginPath();
-              ctx.roundRect(lblPos.ix - 52, lblPos.iy - 11, 104, 20, 4);
+              ctx.roundRect(lblPos.ix - 56, lblPos.iy - 11, 112, 20, 4);
               ctx.fill();
               ctx.fillStyle = '#f8fafc';
               ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
               ctx.textAlign = 'center';
-              ctx.fillText(`${zk.toUpperCase()} ${Math.round(val)}%`, lblPos.ix, lblPos.iy + 2.5);
+              ctx.fillText(labelText, lblPos.ix, lblPos.iy + 2.5);
               ctx.textAlign = 'start';
             }
             ctx.restore();
@@ -1768,9 +1827,24 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ctx.save();
               isoQuadPath(ctx, p.wx, p.wy, p.ww, p.wh);
               if (p.estado === 'sin_calle') {
-                ctx.fillStyle = isHov || isSel ? 'rgba(245, 158, 11, 0.22)' : 'rgba(71, 85, 105, 0.14)';
+                ctx.fillStyle = isHov || isSel ? 'rgba(245, 158, 11, 0.22)' : 'rgba(71, 85, 105, 0.22)';
                 ctx.fill();
-                ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#fbbf24' : 'rgba(148, 163, 184, 0.45)';
+                // Diagonal hatch inside sin_calle lot
+                ctx.save();
+                ctx.clip();
+                ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+                ctx.lineWidth = 1;
+                for (let hx = 8; hx < p.ww + p.wh; hx += 10) {
+                  const a = worldToIso(p.wx + Math.min(hx, p.ww), p.wy + Math.max(0, hx - p.ww));
+                  const b = worldToIso(p.wx + Math.max(0, hx - p.wh), p.wy + Math.min(hx, p.wh));
+                  ctx.beginPath();
+                  ctx.moveTo(a.ix, a.iy);
+                  ctx.lineTo(b.ix, b.iy);
+                  ctx.stroke();
+                }
+                ctx.restore();
+                isoQuadPath(ctx, p.wx, p.wy, p.ww, p.wh);
+                ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#fbbf24' : 'rgba(148, 163, 184, 0.5)';
                 ctx.lineWidth = isSel || isHov ? 2.2 : 1.1;
                 ctx.setLineDash([4, 4]);
                 ctx.stroke();
@@ -1909,15 +1983,23 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
               if (bld.estado === 'en_obra') {
                 drawIsoBox(c, bx, by, bw, bh, 14, '#d97706', '#78350f', '#92400e');
-                c.fillStyle = 'rgba(15, 23, 42, 0.88)';
+                const pctDone =
+                  bld.diasObraTotal > 0
+                    ? Math.max(0.05, Math.min(1, (bld.diasObraTotal - bld.diasObraRestantes) / bld.diasObraTotal))
+                    : 0.5;
+                c.fillStyle = 'rgba(15, 23, 42, 0.9)';
                 c.beginPath();
-                c.roundRect(center.ix - 30, center.iy - 27, 60, 15, 4);
+                c.roundRect(center.ix - 30, center.iy - 31, 60, 19, 4);
                 c.fill();
                 c.fillStyle = '#fde68a';
-                c.font = '700 7.8px "Plus Jakarta Sans", sans-serif';
+                c.font = '700 7.5px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
-                c.fillText(`OBRA · ${bld.diasObraRestantes}d`, center.ix, center.iy - 17);
+                c.fillText(`OBRA · ${bld.diasObraRestantes}d`, center.ix, center.iy - 20);
                 c.textAlign = 'start';
+                c.fillStyle = '#1e293b';
+                c.fillRect(center.ix - 24, center.iy - 16, 48, 2.5);
+                c.fillStyle = '#10b981';
+                c.fillRect(center.ix - 24, center.iy - 16, 48 * pctDone, 2.5);
                 return;
               }
 
@@ -2260,6 +2342,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     animId = window.requestAnimationFrame(frame);
     return () => {
       window.cancelAnimationFrame(animId);
+    };
+  }, [noRender]);
+
+  // Dispose offscreen caches only on component unmount
+  useEffect(() => {
+    return () => {
       keysHeldRef.current.clear();
       renderPositionsRef.current.clear();
       smokeRef.current.length = 0;
@@ -2334,6 +2422,23 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       }
     }
     return best;
+  };
+
+  const findZoneAt = (ix: number, iy: number): ZoneDefinition | null => {
+    const wCoords = isoToWorld(ix, iy);
+    for (const z of Object.values(stateRef.current.zonas)) {
+      const r = z.rect;
+      if (!r) continue;
+      if (
+        wCoords.wx >= r.wx &&
+        wCoords.wx <= r.wx + r.ww &&
+        wCoords.wy >= r.wy &&
+        wCoords.wy <= r.wy + r.wh
+      ) {
+        return z;
+      }
+    }
+    return null;
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -2498,6 +2603,12 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     const tramo = findTramoAt(coords.ix, coords.iy);
     if (tramo) {
       onSelectTramo?.(tramo.id);
+      return;
+    }
+
+    const zone = findZoneAt(coords.ix, coords.iy);
+    if (zone) {
+      onSelectZona?.(zone.id);
     }
   };
 
@@ -2549,6 +2660,17 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         onWheel={handleWheel}
         className="w-full h-full block cursor-pointer active:cursor-grabbing"
       />
+
+      {noRender && (
+        <div className="pointer-events-none absolute inset-0 z-10 bg-zinc-950/90 flex items-center justify-center p-6">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl px-6 py-4 text-center max-w-sm shadow-2xl space-y-1.5">
+            <div className="text-sm font-bold text-emerald-400">Modo sin dibujo activo</div>
+            <div className="text-xs text-zinc-300">
+              El mapa se omite para simular más rápido. Desactivalo desde la barra de desarrollo superior.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Zero-rerender Tooltip (transformed directly via DOM ref) */}
       <div

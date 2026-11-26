@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowDown, Compass, GitBranch, User, X } from 'lucide-react';
 import { ZONE_TO_DISTRICT } from '../../data/catalogs';
 import { buildCausalChain } from '../../engine/simulation';
-import { CausalStep, DistrictId, GameState } from '../../types/game';
+import { CausalStep, DistrictId, GameState, ZoneId } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
 interface CausalChainListProps {
@@ -11,6 +11,7 @@ interface CausalChainListProps {
   fallbackText?: string;
   onSelectNpc?: (npcId: string) => void;
   onJumpDistrict?: (district: DistrictId | 'all') => void;
+  onJumpZone?: (zone: ZoneId) => void;
 }
 
 const CausalChainList: React.FC<CausalChainListProps> = ({
@@ -19,6 +20,7 @@ const CausalChainList: React.FC<CausalChainListProps> = ({
   fallbackText,
   onSelectNpc,
   onJumpDistrict,
+  onJumpZone,
 }) => {
   const steps: CausalStep[] = buildCausalChain(state, startRef, fallbackText);
 
@@ -44,26 +46,29 @@ const CausalChainList: React.FC<CausalChainListProps> = ({
                 </span>
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">{step.detalle}</p>
-              {(step.npcId || step.zona) && (onSelectNpc || onJumpDistrict) && (
+              {(step.npcId || step.zona) && (onSelectNpc || onJumpDistrict || onJumpZone) && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {step.npcId && onSelectNpc && (
                     <button
                       type="button"
                       onClick={() => onSelectNpc(step.npcId!)}
-                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-zinc-900 hover:bg-zinc-700 text-emerald-400 rounded-lg"
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-zinc-900 hover:bg-zinc-700 text-emerald-400 rounded-lg whitespace-nowrap"
                     >
                       <User className="w-3.5 h-3.5" />
                       Ver vecino
                     </button>
                   )}
-                  {step.zona && onJumpDistrict && (
+                  {step.zona && (onJumpZone || onJumpDistrict) && (
                     <button
                       type="button"
-                      onClick={() => onJumpDistrict(ZONE_TO_DISTRICT[step.zona!] || 'all')}
-                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-zinc-900 hover:bg-zinc-700 text-zinc-200 rounded-lg capitalize"
+                      onClick={() => {
+                        if (onJumpZone) onJumpZone(step.zona!);
+                        else onJumpDistrict?.(ZONE_TO_DISTRICT[step.zona!] || 'all');
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-zinc-900 hover:bg-zinc-700 text-zinc-200 rounded-lg capitalize whitespace-nowrap"
                     >
                       <Compass className="w-3.5 h-3.5" />
-                      Zona {step.zona}
+                      Zona {state.zonas[step.zona]?.nombre ?? step.zona}
                     </button>
                   )}
                 </div>
@@ -89,6 +94,7 @@ interface CausalInspectModalProps {
   onClose: () => void;
   onSelectNpc?: (npcId: string) => void;
   onJumpDistrict?: (district: DistrictId | 'all') => void;
+  onJumpZone?: (zone: ZoneId) => void;
 }
 
 export const CausalInspectModal: React.FC<CausalInspectModalProps> = ({
@@ -99,6 +105,7 @@ export const CausalInspectModal: React.FC<CausalInspectModalProps> = ({
   onClose,
   onSelectNpc,
   onJumpDistrict,
+  onJumpZone,
 }) => {
   return (
     <div
@@ -132,6 +139,14 @@ export const CausalInspectModal: React.FC<CausalInspectModalProps> = ({
                 onJumpDistrict?.(d);
                 onClose();
               }}
+              onJumpZone={
+                onJumpZone
+                  ? (z) => {
+                      onJumpZone(z);
+                      onClose();
+                    }
+                  : undefined
+              }
             />
             <div className="flex justify-end pt-1">
               <button

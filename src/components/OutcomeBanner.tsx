@@ -18,9 +18,13 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
   onDismissMilestone,
   onOpenNewGame,
 }) => {
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
   const missedEvent = state.eventos.find((e) => e.tipo === 'objetivo_perdido');
   const victoryCumplida = Boolean(state.resultado.victoriaCumplida);
   const showMilestone =
+    !isG0 &&
     state.resultado.estado === 'jugando' &&
     (victoryCumplida || Boolean(missedEvent)) &&
     !milestoneBannerDismissed;

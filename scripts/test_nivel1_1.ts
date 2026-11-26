@@ -32,6 +32,7 @@ function mk(opts: { esc?: 'elecciones' | 'zombies'; seed?: number; pop?: number;
     economiaModulo: opts.fiscal ? 'fiscal' : 'base',
     nivelMundo: opts.m ?? 'M1',
     nivelGobernador: opts.g ?? 'G2',
+    estadoAutomatico: (opts.g ?? 'G2') === 'G0',
     poblacionInicial: opts.pop ?? 100,
     cantidadMedios: 2,
     semilla: opts.seed ?? 1,

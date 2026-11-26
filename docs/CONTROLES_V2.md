@@ -70,11 +70,12 @@ En el mundo base solo las ejecuta el estado en piloto automático para servicios
 | Zonas | `defensa`, `orden`, `integridad` y `amenaza` de cada zona |
 | Clima | Fenómenos activos y anunciados, con su origen y días restantes |
 | Medios | Cada medio (firma): dueños, línea, alcance, credibilidad, dependencia, ingresos, campañas y noticias |
-| Persona | La ficha completa de la persona en foco, su hogar, su familia, sus partes y la rutina de cada una (casa, trabajo, compras) |
+| Mapa | La grilla (terreno, vías, zonas), los lotes con su estado y la red de rutas con sus tramos y costos |
+| Persona | La ficha completa de la persona en foco, su hogar, su familia, sus partes y su **agenda** del día (lote de cada franja) |
 | Historial | Las series de MUNDO_V2 §11 |
 | Causas | La cadena "¿por qué pasó esto?" de cualquier evento, persona, hogar, firma o noticia |
 
-El lugar de rutina es solo para la vista: lo deriva el motor del rol y la hora, y ninguna regla lo usa.
+La **agenda** (dónde está cada persona en cada franja del día) la deriva el motor del rol, la etapa, el hogar y la hora (MOTOR_V2 §7) y la UI solo la anima por la red de rutas. Las reglas usan el costo de ruta (compra, trabajo, traslado), no la posición minuto a minuto.
 
 ## 5. Eventos
 

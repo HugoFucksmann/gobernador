@@ -65,6 +65,22 @@ Cada día, en modo de prueba:
 
 Si falla alguna, el motor registra el error con el evento que la rompió.
 
-## 7. Promoción por necesidad
+## 7. Agenda y ubicación
+
+Para que la gente se vea ir a su casa, a su trabajo y a comprar, el motor deriva una **agenda** por persona. Es estado derivado y determinista (función del estado, la semilla y el día); no tiene reglas propias y no genera eventos por persona.
+
+- **Franjas del día** [propuesta]: `noche`, `manana`, `mediodia`, `tarde`, `anochecer`.
+- **Actividad por franja**, según etapa, rol y situación:
+  - Adulto con empleo privado o público: `noche` y `anochecer` en su casa, `manana` y `tarde` en su local o edificio de trabajo, `mediodia` comiendo (en casa o en un local de gastronomía según su gasto).
+  - Estudiante: en la escuela si existe, si no en casa. Jubilado y desempleado: en casa, de compras o de ocio.
+  - Quien tiene `accion` en curso, está internado, fuera de su puesto o en un lote de `zona_destino`: en ese lugar, no en su rutina.
+  - Hogar en calle: duerme en una baldosa de calle de su zona.
+  - **Compras:** en la franja de compras cada hogar va al lote del vendedor que eligió ese día (ECONOMIA_V2 §6) y consume su capacidad de ventas.
+- **Ubicación** = un lote (o una baldosa de calle) por franja.
+- **Viaje:** entre dos franjas, la persona recorre la ruta mínima por la red de vías (MAPA_V2 §6). Tiempo = costo de ruta ÷ `baldosas_por_hora`. Si la ruta no entra en la franja, llega tarde: produce menos ese día (el mismo traslado de MUNDO_V2 §8).
+- **El motor entrega:** la agenda del día de cada persona (lista de franja y lote) y la ruta pedida entre dos lotes. La UI calcula la posición dentro del trayecto con la hora del reloj y anima.
+- **Costo:** la agenda se recalcula por hogar al cambiar el día, no por persona en cada tick, y solo se materializa para lo que la UI muestra.
+
+## 8. Promoción por necesidad
 
 Como MOTOR_V1 §5: lo que hoy es un número (integridad de zonas, zombis como intensidad, servicios como indicador) pasa a entidad solo cuando una regla dependa de ello. **Nuevo:** casas y firmas ya son entidades; los *barrios* y los *edificios públicos con integridad propia* se promueven si una regla lo pide.

@@ -1,6 +1,7 @@
 import {
   ACTION_TABLE,
   ACTOR_CONSTANTS,
+  AGENDA_CONSTANTS,
   BUILDING_CATALOG,
   DIRECTOR_CONSTANTS,
   ECON_CONSTANTS,
@@ -71,11 +72,11 @@ import {
   SubsystemName,
 } from './rng';
 import {
-  getCityErrandPosition,
   getZoneCanvasPosition,
   isTestConfig,
 } from './worldGenerator';
 import {
+  canBuildTypeInParcela,
   checkEngineInvariants,
   clamp,
   compactEvents,
@@ -89,11 +90,15 @@ import {
   getAnnouncedPhenomena,
   getEffectiveTrait,
   getEffectiveZone,
+  getFranjaDia,
   getModifierDelta,
+  getNpcDailyAgenda,
   getNpcProductivity,
+  getRouteWaypointsBetween,
   getStage,
   getWorldZones,
   HospitalFacilityInfo as WorldHospitalFacilityInfo,
+  isLotIsolated,
   isViaConnectableToNetwork,
   recomputeRoadDistances,
   shortestZonePath as shortestZonePathByZones,
@@ -135,10 +140,6 @@ export interface HospitalFacilityInfo extends WorldHospitalFacilityInfo {
 }
 
 export const TICKS_PER_DAY = 120;
-
-function drawRand(state?: { rngState: number }): number {
-  return state ? nextRand(state) : Math.random();
-}
 
 function drawSubRand(
   state: { rng?: SubsystemRngState; rngState: number } | undefined,
@@ -621,8 +622,8 @@ export function orderBuildInParcela(
   }
   const govLevel =
     state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  if (govLevel === 'G0') {
-    return { ok: false, error: 'En G0 no hay órdenes del gobernador.' };
+  if (govLevel === 'G0' || state.config.estadoAutomatico) {
+    return { ok: false, error: 'En modo sin gobernador o Estado automático no hay órdenes manuales.' };
   }
   const def = BUILDING_CATALOG[tipo];
   if (!def || !def.construibleGobernador) {
@@ -635,8 +636,14 @@ export function orderBuildInParcela(
   if (!parcela) {
     return { ok: false, error: 'Parcela inexistente.' };
   }
+  if (isLotIsolated(state, parcela)) {
+    return { ok: false, error: 'La parcela no tiene vía conectada.' };
+  }
   if (parcela.estado !== 'libre') {
     return { ok: false, error: 'La parcela no está libre.' };
+  }
+  if (!canBuildTypeInParcela(parcela, tipo)) {
+    return { ok: false, error: `La parcela (${parcela.tipoParcela}, clase ${parcela.clase ?? 'M'}) no admite ${def.nombre}.` };
   }
   if (state.gobierno.reserva < def.costoObra) {
     return { ok: false, error: `Reserva insuficiente ($${def.costoObra} requeridos).` };
@@ -2014,43 +2021,67 @@ function applyActionEffectsToNpc(
       }
     } else if (ef.id === 'acapara') {
       const spec = EFFECT_CATALOG.acapara[ef.intensidad ?? 'media'];
-      applyModifierToNpc(
-        npc,
-        {
-          afecta: { miedo: spec.miedo },
-          duracionDias: duracion,
-          origen,
-          causa: causaId,
-          texto,
-        },
-        state
-      );
+      const adultTargets = hogar
+        ? hogar.miembros
+            .map((mid) => state.npcs.find((n) => n.id === mid && n.vivo && n.edad >= 18))
+            .filter((n): n is Npc => Boolean(n))
+        : [npc];
+      const targets = adultTargets.length > 0 ? adultTargets : [npc];
+      for (const target of targets) {
+        applyModifierToNpc(
+          target,
+          {
+            afecta: { miedo: spec.miedo },
+            duracionDias: duracion,
+            origen,
+            causa: causaId,
+            texto: target.id === npc.id ? texto : `${npc.nombre}: ${action.nombre}`,
+          },
+          state
+        );
+      }
     } else if (ef.id === 'gasta') {
       const spec = EFFECT_CATALOG.gasta[ef.intensidad ?? 'media'];
-      applyModifierToNpc(
-        npc,
-        {
-          afecta: { propensionGasto: spec.propensionDelta },
-          duracionDias: duracion,
-          origen,
-          causa: causaId,
-          texto,
-        },
-        state
-      );
+      const adultTargets = hogar
+        ? hogar.miembros
+            .map((mid) => state.npcs.find((n) => n.id === mid && n.vivo && n.edad >= 18))
+            .filter((n): n is Npc => Boolean(n))
+        : [npc];
+      const targets = adultTargets.length > 0 ? adultTargets : [npc];
+      for (const target of targets) {
+        applyModifierToNpc(
+          target,
+          {
+            afecta: { propensionGasto: spec.propensionDelta },
+            duracionDias: duracion,
+            origen,
+            causa: causaId,
+            texto: target.id === npc.id ? texto : `${npc.nombre}: ${action.nombre}`,
+          },
+          state
+        );
+      }
     } else if (ef.id === 'ahorra') {
       const spec = EFFECT_CATALOG.ahorra[ef.intensidad ?? 'media'];
-      applyModifierToNpc(
-        npc,
-        {
-          afecta: { propensionGasto: spec.propensionDelta },
-          duracionDias: duracion,
-          origen,
-          causa: causaId,
-          texto,
-        },
-        state
-      );
+      const adultTargets = hogar
+        ? hogar.miembros
+            .map((mid) => state.npcs.find((n) => n.id === mid && n.vivo && n.edad >= 18))
+            .filter((n): n is Npc => Boolean(n))
+        : [npc];
+      const targets = adultTargets.length > 0 ? adultTargets : [npc];
+      for (const target of targets) {
+        applyModifierToNpc(
+          target,
+          {
+            afecta: { propensionGasto: spec.propensionDelta },
+            duracionDias: duracion,
+            origen,
+            causa: causaId,
+            texto: target.id === npc.id ? texto : `${npc.nombre}: ${action.nombre}`,
+          },
+          state
+        );
+      }
     } else if (ef.id === 'difunde') {
       const spec = EFFECT_CATALOG.difunde[ef.intensidad ?? 'media'];
       const theme = ef.temaRumor ?? 'miedo';
@@ -2215,6 +2246,23 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
     npcIds: string[];
   }> = [];
 
+  // Contagion caps for ocupacion & boicot (CASAS_V2 / FIRMAS_V2)
+  const occupiedHogaresSet = new Set(
+    state.hogares.filter((h) => Boolean(h.ocupandoCasaId)).map((h) => h.id)
+  );
+  let emptyHabitableCount = state.casas.filter(
+    (c) => !c.hogarId && !c.ocupadaPorAccion && c.estado > HOUSING_CONSTANTS.umbralAbandonoCasa
+  ).length;
+  const boicotHogaresSet = new Set(
+    state.npcs
+      .filter((n) => n.vivo && n.accionIa?.id === 'boicot')
+      .map((n) => n.hogarId)
+  );
+  const maxBoicotHogares = Math.max(
+    2,
+    Math.round(state.hogares.length * (FIRM_CONSTANTS.maxPctHogaresBoicot / 100))
+  );
+
   for (const { focus, action, zone } of focusesByZoneAction.values()) {
     const popZ = zonePop[zone] || 0;
     if (popZ <= 1) continue;
@@ -2244,6 +2292,19 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
       if (other.accionIa) continue;
       if (action.id === 'paro_firma' && focusAct.firmaObjetivoId && other.empleadorId !== focusAct.firmaObjetivoId) {
         continue;
+      }
+      if (action.id === 'ocupacion') {
+        if (
+          !occupiedHogaresSet.has(other.hogarId) &&
+          (occupiedHogaresSet.size >= HOUSING_CONSTANTS.maxOcupacionesPorPeriodo || emptyHabitableCount <= 0)
+        ) {
+          continue;
+        }
+      }
+      if (action.id === 'boicot') {
+        if (!boicotHogaresSet.has(other.hogarId) && boicotHogaresSet.size >= maxBoicotHogares) {
+          continue;
+        }
       }
       if (!isNpcEligibleForAction(other, action, state, ctx)) continue;
       if (requiresOutOfPostCap && !canRoleLeavePost(state, other.rol, ctx)) continue;
@@ -2292,6 +2353,16 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
         copyText,
         zonesCount
       );
+      if (action.id === 'ocupacion') {
+        const hog = ctx.hogaresById.get(other.hogarId);
+        if (hog?.ocupandoCasaId && !occupiedHogaresSet.has(hog.id)) {
+          occupiedHogaresSet.add(hog.id);
+          emptyHabitableCount = Math.max(0, emptyHabitableCount - 1);
+        }
+      }
+      if (action.id === 'boicot') {
+        boicotHogaresSet.add(other.hogarId);
+      }
       newlyInfectedIds.push(other.id);
     }
 
@@ -2783,54 +2854,133 @@ function enrichedZoneOrDefault(z: ZoneId | undefined, fallback: ZoneId): ZoneId 
 }
 
 function stepNpcPositions(state: GameState, dtTicks: number): void {
-  const baseSpeed = ((5.6 * 10) / TICKS_PER_DAY) * dtTicks;
-  const dayPhase = (state.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY;
-  const firmaZoneById = new Map<string, ZoneId>(state.firmas.map((f) => [f.id, f.zona]));
+  const horasDt = (dtTicks / TICKS_PER_DAY) * 24;
+  const gridAncho = state.mapaGrid?.ancho ?? 48;
+  const pxPerTile = 1560 / Math.max(24, gridAncho);
+  const baseSpeed = AGENDA_CONSTANTS.baldosasPorHora * pxPerTile * horasDt;
+  const franja = getFranjaDia(state.reloj.tick % TICKS_PER_DAY, TICKS_PER_DAY);
+
+  const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
+  const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
+  const parcelaById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
+  const firmaById = new Map<string, Firma>(state.firmas.map((f) => [f.id, f]));
+  const agendaCtx = { hogarById, casaById, parcelaById, firmaById };
+
+  const marketFallback = state.parcelas.find(
+    (p) => p.edificio?.activo && (p.edificio.tipo === 'supermercado' || p.edificio.tipo === 'almacen')
+  );
+
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
     const isUrgent = Boolean(
       npc.accionIa && ['protesta', 'huelga', 'saqueo'].includes(npc.accionIa.id)
     );
-    const speed = isUrgent ? baseSpeed * 1.35 : npc.rol === 'policia' ? baseSpeed * 1.25 : baseSpeed;
-    const dx = npc.mapa.destino.x - npc.mapa.x;
-    const dy = npc.mapa.destino.y - npc.mapa.y;
-    const dist = Math.hypot(dx, dy);
+    const speed = isUrgent ? baseSpeed * 1.35 : npc.rol === 'policia' ? baseSpeed * 1.2 : baseSpeed;
 
-    if (dist <= speed + 1.5) {
-      npc.mapa.x = npc.mapa.destino.x;
-      npc.mapa.y = npc.mapa.destino.y;
-      if (drawRand(state) < 0.42) {
-        if (npc.accionIa && ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(npc.accionIa.id)) {
-          const zTarget = npc.accionIa.id === 'huelga' || npc.accionIa.id === 'protesta' ? 'civico' : 'mercado';
-          npc.mapa.destino = getZoneCanvasPosition(state.zonas[zTarget] ? zTarget : npc.zona, state, state.zonas);
-        } else if (npc.variables.hambre > 75 && drawRand(state) < 0.65) {
-          npc.mapa.destino = getZoneCanvasPosition(state.zonas.mercado ? 'mercado' : npc.zona, state, state.zonas);
-          if (!npc.accionIa) npc.mapa.accion = 'buscando alimento';
-        } else if (!npc.accionIa && !npc.hospital.internado && dayPhase >= 0.78 && npc.rol !== 'policia') {
-          npc.mapa.destino = getZoneCanvasPosition(npc.zona, state, state.zonas);
-          npc.mapa.accion = 'volviendo a casa';
-        } else if (!npc.accionIa && !npc.hospital.internado && dayPhase < 0.5 && npc.rol !== 'policia' && npc.rol !== 'periodista' && drawRand(state) < 0.75) {
-          const workZone = (npc.empleadorId && firmaZoneById.get(npc.empleadorId)) || npc.zona;
-          npc.mapa.destino = getZoneCanvasPosition(workZone, state, state.zonas);
-          npc.mapa.accion =
-            npc.rol === 'estudiante'
-              ? 'estudiando en la escuela'
-              : npc.rol === 'jubilado'
-              ? 'descansando en el parque'
-              : npc.rol === 'desempleado'
-              ? 'buscando trabajo'
-              : 'en su puesto de trabajo';
-        } else {
-          const nextSpot = getCityErrandPosition(npc.rol, npc.zona, state, state.zonas);
-          npc.mapa.destino = { x: nextSpot.x, y: nextSpot.y };
-          if (!npc.accionIa) {
-            npc.mapa.accion = nextSpot.accion;
-          }
+    let targetWx = npc.mapa.destino.x;
+    let targetWy = npc.mapa.destino.y;
+    let targetZone: ZoneId = npc.mapa.zonaDestino ?? npc.zona;
+    let targetParcelaId = npc.mapa.parcelaDestinoId;
+    let desiredAccion = npc.mapa.accion;
+
+    // Determine authoritative goal: urgent action -> hunger errand -> daily 5-franja agenda
+    if (
+      npc.accionIa &&
+      ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(
+        npc.accionIa.id
+      )
+    ) {
+      const actZone: ZoneId =
+        npc.accionIa.zonaDestino && state.zonas[npc.accionIa.zonaDestino]
+          ? npc.accionIa.zonaDestino
+          : npc.accionIa.id === 'huelga' || npc.accionIa.id === 'protesta'
+          ? state.zonas.civico
+            ? 'civico'
+            : npc.zona
+          : state.zonas.mercado
+          ? 'mercado'
+          : npc.zona;
+      const plazaP = state.parcelas.find((p) => p.zona === actZone && p.edificio?.tipo === 'plaza');
+      if (plazaP) {
+        targetWx = plazaP.wx + plazaP.ww / 2;
+        targetWy = plazaP.wy + plazaP.wh / 2;
+        targetParcelaId = plazaP.id;
+      } else {
+        const zR = state.zonas[actZone]?.rect;
+        if (zR) {
+          targetWx = zR.wx + zR.ww / 2;
+          targetWy = zR.wy + zR.wh / 2;
         }
+        targetParcelaId = undefined;
       }
-    } else {
-      npc.mapa.x += (dx / dist) * speed;
-      npc.mapa.y += (dy / dist) * speed;
+      targetZone = actZone;
+      desiredAccion = npc.accionIa.nombre.toLowerCase();
+    } else if (npc.variables.hambre > 78 && !npc.hospital.internado && !npc.accionIa) {
+      const mParcel = marketFallback;
+      if (mParcel) {
+        targetWx = mParcel.wx + mParcel.ww / 2;
+        targetWy = mParcel.wy + mParcel.wh / 2;
+        targetZone = mParcel.zona;
+        targetParcelaId = mParcel.id;
+      }
+      desiredAccion = 'buscando alimento';
+    } else if (npc.mapa.franja !== franja || !npc.mapa.ruta) {
+      const agenda = getNpcDailyAgenda(state, npc, agendaCtx);
+      const slot = agenda.find((s) => s.franja === franja) ?? agenda[0];
+      targetWx = slot.wx ?? targetWx;
+      targetWy = slot.wy ?? targetWy;
+      targetZone = slot.zona;
+      targetParcelaId = slot.parcelaId;
+      desiredAccion = npc.accionIa ? npc.accionIa.nombre.toLowerCase() : slot.actividad;
+    }
+
+    const goalMoved =
+      npc.mapa.franja !== franja ||
+      Math.hypot(targetWx - npc.mapa.destino.x, targetWy - npc.mapa.destino.y) > 4;
+
+    if (goalMoved) {
+      const fromZone = getEffectiveZone(npc, Math.max(1, Object.keys(state.zonas).length));
+      npc.mapa.ruta = getRouteWaypointsBetween(
+        state,
+        npc.mapa.x,
+        npc.mapa.y,
+        fromZone,
+        targetWx,
+        targetWy,
+        targetZone
+      ).map((w) => ({ x: w.wx, y: w.wy }));
+      npc.mapa.destino = { x: targetWx, y: targetWy };
+      npc.mapa.zonaDestino = targetZone;
+      npc.mapa.parcelaDestinoId = targetParcelaId;
+      npc.mapa.franja = franja;
+    }
+    if (!npc.accionIa || desiredAccion) {
+      npc.mapa.accion = desiredAccion;
+    }
+
+    // Advance along road waypoints
+    let budget = speed;
+    const ruta = npc.mapa.ruta;
+    while (budget > 0.01) {
+      const nextWp = ruta && ruta.length > 0 ? ruta[0] : npc.mapa.destino;
+      const dx = nextWp.x - npc.mapa.x;
+      const dy = nextWp.y - npc.mapa.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= budget + 1.2) {
+        npc.mapa.x += dx;
+        npc.mapa.y += dy;
+        budget -= dist;
+        if (ruta && ruta.length > 0) {
+          ruta.shift();
+          if (ruta.length === 0) break;
+        } else {
+          break;
+        }
+      } else {
+        npc.mapa.x += (dx / dist) * budget;
+        npc.mapa.y += (dy / dist) * budget;
+        budget = 0;
+      }
     }
   }
 }
@@ -4042,8 +4192,13 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
     return val <= threshold;
   };
 
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
   const defeatConds: ObjectiveCondition[] = [preset.derrota, ...(preset.derrotasExtra ?? [])];
-  const crossed = defeatConds.find((c) => checkCond(getMetric(c.metrica), c.op, c.umbral));
+  const crossed =
+    govLevel === 'G0'
+      ? undefined
+      : defeatConds.find((c) => checkCond(getMetric(c.metrica), c.op, c.umbral));
   const defeat = crossed ?? preset.derrota;
   const defeatVal = getMetric(defeat.metrica);
   if (derived.poblacion === 0 || crossed) {
@@ -4064,7 +4219,10 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
     state.resultado = {
       ...state.resultado,
       estado: 'derrota',
-      razon: defeat.descripcion,
+      razon:
+        derived.poblacion === 0
+          ? 'La población llegó a cero habitantes.'
+          : defeat.descripcion,
       diaFinal: state.reloj.dia,
     };
     addLog(
@@ -4072,12 +4230,14 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
       'sistema',
       'objetivo:derrota',
       'Fin de partida: Derrota',
-      defeat.descripcion,
+      derived.poblacion === 0 ? 'La población llegó a cero habitantes.' : defeat.descripcion,
       endCause,
       endEvId
     );
     return;
   }
+
+  if (govLevel === 'G0') return;
 
   const plazo = preset.victoria.plazoDia ?? 365;
   const alreadyEvaluatedDeadline =
@@ -4354,6 +4514,7 @@ export function stepSimulation(state: GameState, ticksToRun: number): GameState 
             mapa: {
               ...npc.mapa,
               destino: { ...npc.mapa.destino },
+              ...(npc.mapa.ruta ? { ruta: npc.mapa.ruta.map((w) => ({ ...w })) } : {}),
             },
           }
         : npc
@@ -5113,6 +5274,7 @@ export function planDailyPressPublications(
   }
 
   for (const medio of state.medios) {
+    if (medio.activa === false) continue;
     const livingCols = medio.columnistas
       .map((id) => livingById.get(id))
       .filter((n): n is Npc => Boolean(n));

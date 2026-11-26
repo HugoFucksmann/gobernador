@@ -147,9 +147,35 @@ export function evaluateNpcLensColor(
     return hogar.estado === 'con_casa' ? '#10b981' : '#38bdf8';
   }
 
+  if (lens === 'firmas') {
+    if (npc.partes && npc.partes.length > 0) return '#eab308';
+    const firma = npc.empleadorId ? state?.firmas.find((f) => f.id === npc.empleadorId) : undefined;
+    if (!firma) return ROLE_CATALOG[npc.rol].publico ? '#3b82f6' : '#94a3b8';
+    if (firma.rubro === 'agro') return '#10b981';
+    if (firma.rubro === 'comercio') return '#0ea5e9';
+    if (firma.rubro === 'industria') return '#8b5cf6';
+    if (firma.rubro === 'construccion') return '#f59e0b';
+    if (firma.rubro === 'medio') return '#ec4899';
+    return '#64748b';
+  }
+
   const zonesCount = state ? getWorldZones(state).length : 9;
   const zone: ZoneId = getEffectiveZone(npc, zonesCount);
 
+  if (lens === 'alquiler') {
+    const rent = state?.ultimaSalidaEconomica?.alquilerMedio?.[zone] ?? 12;
+    return rent > 22 ? '#ef4444' : rent > 14 ? '#f59e0b' : '#10b981';
+  }
+  if (lens === 'vias') {
+    const tramosZona = (state?.tramos ?? []).filter(
+      (t) => t.construida && (t.zonaA === zone || t.zonaB === zone)
+    );
+    const avg =
+      tramosZona.length > 0
+        ? tramosZona.reduce((acc, t) => acc + t.estado, 0) / tramosZona.length
+        : 100;
+    return avg >= 70 ? '#10b981' : avg >= 40 ? '#f59e0b' : '#ef4444';
+  }
   if (lens === 'defensa') {
     if (npc.rol === 'policia') return '#1d4ed8';
     const val = derived?.defensa[zone] ?? 50;

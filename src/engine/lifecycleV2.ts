@@ -164,6 +164,9 @@ export function handleNpcDeathV2(
   const hogar = hogarById.get(npc.hogarId);
   if (hogar) {
     hogar.miembros = hogar.miembros.filter((id) => id !== npc.id);
+    if (hogar.adultoIds) {
+      hogar.adultoIds = hogar.adultoIds.filter((id) => id !== npc.id);
+    }
     for (const mid of hogar.miembros) {
       const m = npcById.get(mid);
       if (m && m.vivo) m.ultimaPerdidaFamiliarDia = state.reloj.dia;
@@ -259,6 +262,8 @@ export function handleNpcDeathV2(
           acogida = {
             id: nextSeqId(state, 'h_acogida'),
             miembros: [],
+            adultoIds: [],
+            esAcogida: true,
             casaId: null,
             dinero: 0,
             despensa: 0,
@@ -398,6 +403,9 @@ export function runDailyLifecycleV2(state: GameState): void {
       if (npc.edad === 18 && npc.rol === 'estudiante') {
         npc.educacion.estudiando = false;
         const h = hogarById.get(npc.hogarId);
+        if (h) {
+          h.adultoIds = h.adultoIds ? [...new Set([...h.adultoIds, npc.id])] : [npc.id];
+        }
         const incomeScore = h ? clamp(h.ultimoIngresoNeto / 80, 0, 1) : 0.4;
         const aptScore =
           (npc.personalidad.laboriosidad * 0.6 + npc.personalidad.resiliencia * 0.4) / 100;
@@ -625,6 +633,8 @@ export function runDemographicPeriodV2(state: GameState): void {
       const newHogar: Hogar = {
         id: nextSeqId(state, 'h'),
         miembros: [...combinedMembers],
+        adultoIds: [...combinedMembers].filter((id) => (npcById.get(id)?.edad ?? 0) >= 18),
+        esAcogida: false,
         casaId: targetHouse ? targetHouse.id : null,
         dinero: targetMoney,
         despensa: targetFood,
@@ -812,10 +822,13 @@ export function runDemographicPeriodV2(state: GameState): void {
         h.dinero -= shareCash;
         h.despensa -= shareFood;
         h.miembros = h.miembros.filter((id) => id !== indepCandidate.id);
+        if (h.adultoIds) h.adultoIds = h.adultoIds.filter((id) => id !== indepCandidate.id);
 
         const newHogar: Hogar = {
           id: nextSeqId(state, 'h'),
           miembros: [indepCandidate.id],
+          adultoIds: [indepCandidate.id],
+          esAcogida: false,
           casaId: freeHouse.id,
           dinero: shareCash,
           despensa: shareFood,
@@ -867,11 +880,14 @@ export function runDemographicPeriodV2(state: GameState): void {
           h.dinero -= shareCash;
           h.despensa -= shareFood;
           h.miembros = h.miembros.filter((id) => id !== mover.id);
+          if (h.adultoIds) h.adultoIds = h.adultoIds.filter((id) => id !== mover.id);
           h.periodosHacinado = 0;
 
           const newHogar: Hogar = {
             id: nextSeqId(state, 'h'),
             miembros: [mover.id],
+            adultoIds: [mover.id],
+            esAcogida: false,
             casaId: freeHouse.id,
             dinero: shareCash,
             despensa: shareFood,
@@ -930,10 +946,13 @@ export function runDemographicPeriodV2(state: GameState): void {
           h.dinero -= halfMoney;
           h.despensa -= halfFood;
           h.miembros = h.miembros.filter((id) => id !== b.id);
+          if (h.adultoIds) h.adultoIds = h.adultoIds.filter((id) => id !== b.id);
 
           const newHogar: Hogar = {
             id: nextSeqId(state, 'h'),
             miembros: [b.id],
+            adultoIds: [b.id],
+            esAcogida: false,
             casaId: freeHouse ? freeHouse.id : null,
             dinero: halfMoney,
             despensa: halfFood,

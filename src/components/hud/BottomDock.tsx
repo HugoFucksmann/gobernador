@@ -6,6 +6,7 @@ import {
   Maximize2,
   MoreHorizontal,
   Newspaper,
+  Search,
   Settings2,
   SlidersHorizontal,
   TrendingUp,
@@ -16,17 +17,20 @@ import {
 import { ROLE_CATALOG } from '../../data/catalogs';
 import { GameState, ZoneId } from '../../types/game';
 import { MapFilter, MapLens, WindowId } from '../../types/ui';
+import { InspectorDirectoryTab } from '../../hooks/useGameSession';
 import { UiTooltip } from './UiTooltip';
 
 interface BottomDockProps {
   state: GameState;
   sideBuildOpen: boolean;
+  directoryOpen?: InspectorDirectoryTab | null;
   openWindows: WindowId[];
   mapLens: MapLens;
   mapFilter: MapFilter;
   devMode: boolean;
   hasConditionAlert?: boolean;
   onToggleBuild: () => void;
+  onOpenDirectory: (tab: InspectorDirectoryTab) => void;
   onToggleWindow: (win: WindowId) => void;
   onChangeLens: (lens: MapLens) => void;
   onChangeFilter: (filter: MapFilter) => void;
@@ -38,17 +42,17 @@ interface BottomDockProps {
 
 const LENS_OPTIONS: Array<{ id: MapLens; label: string }> = [
   { id: 'ninguna', label: 'Normal' },
-  { id: 'roles', label: 'Oficios' },
-  { id: 'acciones', label: 'Acciones' },
-  { id: 'vivienda', label: 'Vivienda' },
   { id: 'satisfaccion', label: 'Ánimo' },
-  { id: 'hambre', label: 'Hambre' },
-  { id: 'lealtad', label: 'Apoyo' },
+  { id: 'roles', label: 'Oficios' },
+  { id: 'vivienda', label: 'Vivienda' },
+  { id: 'firmas', label: 'Firmas' },
+  { id: 'alquiler', label: 'Alquiler' },
+  { id: 'vias', label: 'Vías' },
+  { id: 'acciones', label: 'Acciones' },
   { id: 'defensa', label: 'Defensa' },
   { id: 'orden', label: 'Orden' },
   { id: 'integridad', label: 'Integridad' },
   { id: 'amenaza', label: 'Amenaza' },
-  { id: 'hospital', label: 'Salud' },
 ];
 
 const FILTER_OPTIONS: Array<{ id: MapFilter; label: string }> = [
@@ -74,57 +78,83 @@ function getLensLegend(lens: MapLens): Array<{ color: string; label: string }> {
   }
   if (lens === 'vivienda') {
     return [
-      { color: '#10b981', label: 'Propia' },
-      { color: '#38bdf8', label: 'Alquiler' },
+      { color: '#10b981', label: 'Con casa' },
+      { color: '#38bdf8', label: 'Acogida' },
       { color: '#f59e0b', label: 'Hacinada / mora' },
       { color: '#ef4444', label: 'En calle' },
     ];
   }
+  if (lens === 'firmas') {
+    return [
+      { color: '#eab308', label: 'Dueño / socio' },
+      { color: '#10b981', label: 'Agro' },
+      { color: '#0ea5e9', label: 'Comercio' },
+      { color: '#8b5cf6', label: 'Industria' },
+      { color: '#f59e0b', label: 'Obra' },
+      { color: '#3b82f6', label: 'Público' },
+    ];
+  }
+  if (lens === 'alquiler') {
+    return [
+      { color: '#10b981', label: 'Accesible' },
+      { color: '#f59e0b', label: 'Medio' },
+      { color: '#ef4444', label: 'Caro' },
+    ];
+  }
+  if (lens === 'vias') {
+    return [
+      { color: '#10b981', label: 'Buen estado' },
+      { color: '#f59e0b', label: 'Desgaste' },
+      { color: '#ef4444', label: 'Cortada / crítica' },
+    ];
+  }
   if (lens === 'acciones') {
     return [
-      { color: '#d4d4d8', label: 'Normal' },
-      { color: '#10b981', label: 'Foco' },
+      { color: '#cbd5e1', label: 'Normal' },
+      { color: '#a855f7', label: 'Foco' },
       { color: '#f59e0b', label: 'Espontánea' },
-      { color: '#f43f5e', label: 'Condición' },
+      { color: '#ef4444', label: 'Condición' },
     ];
   }
   if (lens === 'satisfaccion' || lens === 'lealtad') {
     return [
       { color: '#10b981', label: 'Alto' },
       { color: '#f59e0b', label: 'Medio' },
-      { color: '#f43f5e', label: 'Bajo' },
+      { color: '#ef4444', label: 'Bajo' },
     ];
   }
   if (lens === 'hambre' || lens === 'amenaza') {
     return [
       { color: '#10b981', label: 'Bajo' },
       { color: '#f59e0b', label: 'Alerta' },
-      { color: '#f43f5e', label: 'Crítico' },
+      { color: '#ef4444', label: 'Crítico' },
     ];
   }
   if (lens === 'hospital') {
     return [
       { color: '#10b981', label: 'Atendido' },
       { color: '#f59e0b', label: 'En riesgo' },
-      { color: '#f43f5e', label: 'Sin cama' },
+      { color: '#ef4444', label: 'Sin cama' },
     ];
   }
   return [
     { color: '#10b981', label: 'Fuerte' },
     { color: '#f59e0b', label: 'Media' },
-    { color: '#f43f5e', label: 'Baja' },
+    { color: '#ef4444', label: 'Baja' },
   ];
 }
 
 export const BottomDock: React.FC<BottomDockProps> = ({
   state,
   sideBuildOpen,
+  directoryOpen,
   openWindows,
   mapLens,
   mapFilter,
   devMode,
   hasConditionAlert,
   onToggleBuild,
+  onOpenDirectory,
   onToggleWindow,
   onChangeLens,
   onChangeFilter,
@@ -146,6 +176,10 @@ export const BottomDock: React.FC<BottomDockProps> = ({
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, []);
 
+  const govLevel =
+    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+
   const legendItems = getLensLegend(mapLens);
   const allZones = Object.values(state.zonas);
   const availableZones =
@@ -153,7 +187,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
 
   const palancasActive = openWindows.includes('palancas');
   const capasActive = popover === 'capas' || mapLens !== 'ninguna' || mapFilter !== 'todos';
-  const moreBadgeCount = state.demandasActivas.length;
+  const moreBadgeCount = isG0 ? 0 : state.demandasActivas.length;
   const moreWindowActive =
     openWindows.includes('economia') ||
     openWindows.includes('ciudad') ||
@@ -169,7 +203,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
         <div className="pointer-events-auto w-[360px] max-w-[calc(100vw-24px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl p-4 shadow-2xl space-y-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-400">Capas del mapa</span>
+              <span className="text-xs font-semibold text-zinc-400">Capas del mapa (12)</span>
               {mapLens !== 'ninguna' && (
                 <button
                   type="button"
@@ -337,7 +371,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
           >
             <span className="flex items-center gap-2.5">
               <Compass className="w-4 h-4 text-emerald-400" />
-              Ciudad y Vías
+              Ciudad, Hechos y Vías
             </span>
             {(moreBadgeCount > 0 || hasConditionAlert) && (
               <span
@@ -388,53 +422,75 @@ export const BottomDock: React.FC<BottomDockProps> = ({
         <div className="pointer-events-none flex flex-wrap items-center justify-center gap-3 bg-zinc-900/90 backdrop-blur-sm border border-zinc-700/70 rounded-xl px-3.5 py-1.5 text-xs text-zinc-200 shadow-lg">
           {legendItems.map((item) => (
             <span key={item.label} className="flex items-center gap-1.5 whitespace-nowrap">
-              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+              <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.color }} />
               <span>{item.label}</span>
             </span>
           ))}
         </div>
       )}
 
-      {/* Main Centered 4-Button Game Dock */}
+      {/* Main Centered Game Dock */}
       <nav
         aria-label="Accesos principales"
         className="pointer-events-auto flex items-center gap-2 bg-zinc-900/92 backdrop-blur-md border border-zinc-700/80 rounded-2xl p-2 shadow-2xl"
       >
-        <UiTooltip text="Parcelas, obras públicas y vías" placement="top">
+        <UiTooltip text="Buscar personas, hogares y firmas" placement="top">
           <button
             type="button"
             onClick={() => {
               setPopover(null);
-              onToggleBuild();
+              onOpenDirectory('personas');
             }}
             className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
-              sideBuildOpen
+              directoryOpen
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
             }`}
           >
-            <Hammer className="w-4 h-4 shrink-0" />
-            <span>Construir</span>
+            <Search className="w-4 h-4 shrink-0" />
+            <span>Explorar</span>
           </button>
         </UiTooltip>
 
-        <UiTooltip text="Impuestos, salarios, ayuda y alimento" placement="top">
-          <button
-            type="button"
-            onClick={() => {
-              setPopover(null);
-              onToggleWindow('palancas');
-            }}
-            className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
-              palancasActive
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
-            }`}
-          >
-            <SlidersHorizontal className="w-4 h-4 shrink-0" />
-            <span>Palancas</span>
-          </button>
-        </UiTooltip>
+        {!isG0 && (
+          <>
+            <UiTooltip text="Parcelas, obras públicas y vías" placement="top">
+              <button
+                type="button"
+                onClick={() => {
+                  setPopover(null);
+                  onToggleBuild();
+                }}
+                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                  sideBuildOpen
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
+                }`}
+              >
+                <Hammer className="w-4 h-4 shrink-0" />
+                <span>Construir</span>
+              </button>
+            </UiTooltip>
+
+            <UiTooltip text="Impuestos, salarios, ayuda y alimento" placement="top">
+              <button
+                type="button"
+                onClick={() => {
+                  setPopover(null);
+                  onToggleWindow('palancas');
+                }}
+                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                  palancasActive
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
+                }`}
+              >
+                <SlidersHorizontal className="w-4 h-4 shrink-0" />
+                <span>Palancas</span>
+              </button>
+            </UiTooltip>
+          </>
+        )}
 
         <UiTooltip text="Capas del mapa, filtros y zonas" placement="top">
           <button
@@ -458,14 +514,14 @@ export const BottomDock: React.FC<BottomDockProps> = ({
             className={`relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 ${
               popover === 'mas' || moreWindowActive
                 ? 'bg-emerald-600 text-white shadow-md'
-                : hasConditionAlert || moreBadgeCount > 0
+                : !isG0 && (hasConditionAlert || moreBadgeCount > 0)
                 ? 'bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
                 : 'text-zinc-200 hover:bg-zinc-800 hover:text-white'
             }`}
           >
             <MoreHorizontal className="w-4 h-4 shrink-0" />
             <span>Más</span>
-            {(moreBadgeCount > 0 || hasConditionAlert) && (
+            {(moreBadgeCount > 0 || (!isG0 && hasConditionAlert)) && (
               <span
                 className={`font-mono text-xs font-bold ${
                   hasConditionAlert ? 'text-rose-400' : 'text-amber-300'

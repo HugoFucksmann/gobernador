@@ -84,6 +84,7 @@ Como CAOS_PRENSA_V1 §8 (relevancia, cola del día, qué publica cada medio, ton
 | `demografia` | Nacimiento o muerte relevante, hito de población, ola de muertes | Baja a alta | Neutra o mala |
 | `familia` | Herencia grande, pareja o nacimiento destacado | Baja | Neutra |
 
+- El tema `obras` incluye `via_fin` y `zona_abierta` (valencia buena).
 - Los de v1 siguen (aviso, clima, ataque, salud, hambre, precio, impago, conflicto, empresas, gobierno, obras, presiones, vecinos, objetivo), salvo que `empresas` se amplía a firmas.
 - **Culpa:** el hecho es del gobierno si su cadena de causas llega a un evento `control`. Los hechos de firmas y familias no son culpa del gobierno salvo que la cadena llegue a un control.
 - **Capacidad diaria** = columnistas vivos × `noticias_por_columnista`. Elige por relevancia × su interés (el sensacionalismo pesa `ataque`, `conflicto`, `hambre`, `vecinos` y `vivienda`). Autor: un columnista al azar.

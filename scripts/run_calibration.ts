@@ -28,6 +28,7 @@ import {
   stepHeadlessDay,
 } from '../src/engine/simulation';
 import { createInitialGameState } from '../src/engine/worldGenerator';
+import { canBuildTypeInParcela } from '../src/engine/worldHelpers';
 import {
   BuildingType,
   FixedPublicRoleId,
@@ -134,8 +135,8 @@ function applyPresetToRuntime(): void {
 function buildOnFreeParcels(state: GameState, tipos: BuildingType[]): number {
   let built = 0;
   for (const tipo of tipos) {
-    const free = state.parcelas.find((p) => p.estado === 'libre');
-    if (!free) break;
+    const free = state.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, tipo));
+    if (!free) continue;
     const res = orderBuildInParcela(state, free.id, tipo);
     if (res.ok) built += 1;
   }
@@ -266,8 +267,9 @@ function applyFullStrategistPolicy(state: GameState): void {
 
   // 2. Build services & suceso works when budget permits
   const inConstruction = state.parcelas.filter((p) => p.estado === 'en_obra').length;
-  const freeParcela = state.parcelas.find((p) => p.estado === 'libre');
-  if (freeParcela && inConstruction === 0 && state.gobierno.reserva >= 1800) {
+  const findFreeFor = (tipo: BuildingType) =>
+    state.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, tipo));
+  if (inConstruction === 0 && state.gobierno.reserva >= 1800) {
     const activeTypes = new Set(
       state.parcelas
         .filter((p) => p.edificio && p.edificio.estado === 'ocupada')
@@ -279,20 +281,25 @@ function applyFullStrategistPolicy(state: GameState): void {
     const hasPandemic = allFen.some((f) => f.tipo === 'pandemia');
     const hasZombie = allFen.some((f) => f.tipo === 'plaga_zombie');
 
+    let chosenBuild: BuildingType | null = null;
     if (state.config.escenarioId === 'zombies' && comisarias < 2 && state.gobierno.reserva >= 1800) {
-      orderBuildInParcela(state, freeParcela.id, 'comisaria');
+      chosenBuild = 'comisaria';
     } else if ((govLevel === 'G2' || govLevel === 'G3') && hasDrought && !activeTypes.has('riego') && state.gobierno.reserva >= 1900) {
-      orderBuildInParcela(state, freeParcela.id, 'riego');
+      chosenBuild = 'riego';
     } else if ((govLevel === 'G2' || govLevel === 'G3') && hasDrought && !activeTypes.has('silo') && state.gobierno.reserva >= 2100) {
-      orderBuildInParcela(state, freeParcela.id, 'silo');
+      chosenBuild = 'silo';
     } else if ((govLevel === 'G2' || govLevel === 'G3') && hasZombie && !activeTypes.has('muralla') && state.gobierno.reserva >= 2200) {
-      orderBuildInParcela(state, freeParcela.id, 'muralla');
+      chosenBuild = 'muralla';
     } else if ((govLevel === 'G2' || govLevel === 'G3') && hasPandemic && !activeTypes.has('hospital_campana') && state.gobierno.reserva >= 1700) {
-      orderBuildInParcela(state, freeParcela.id, 'hospital_campana');
+      chosenBuild = 'hospital_campana';
     } else if ((d.hospitalOcupacionPct > 95 || d.esperandoCama > 1) && hospitales < 2 && state.gobierno.reserva >= 2400) {
-      orderBuildInParcela(state, freeParcela.id, 'hospital');
+      chosenBuild = 'hospital';
     } else if (state.config.escenarioId === 'elecciones' && state.gobierno.indicadores.seguridad < 45 && comisarias < 2 && state.gobierno.reserva >= 2600) {
-      orderBuildInParcela(state, freeParcela.id, 'comisaria');
+      chosenBuild = 'comisaria';
+    }
+    if (chosenBuild) {
+      const target = findFreeFor(chosenBuild);
+      if (target) orderBuildInParcela(state, target.id, chosenBuild);
     }
   }
 }
@@ -1244,8 +1251,8 @@ function verifyNewSystems() {
 
   // 2. G1 vs G2 building gating + build/demolish lifecycle + hospital patient relocation
   const g1 = makeInitState(7, 'elecciones', { nivelMundo: 'M0', nivelGobernador: 'G1' });
-  const free1 = g1.parcelas.find((p) => p.estado === 'libre');
-  assert(Boolean(free1), 'Expected free parcela in G1');
+  const free1 = g1.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, 'hospital'));
+  assert(Boolean(free1), 'Expected free public L parcela in G1');
   if (free1) {
     const blockedSuceso = orderBuildInParcela(g1, free1.id, 'muralla');
     assert(!blockedSuceso.ok, 'Muralla (suceso) should be blocked in G1');
@@ -1296,12 +1303,14 @@ function verifyNewSystems() {
   stepHeadlessDay(g2);
   assert(getAnnouncedPhenomena(g2).length >= 1, 'Expected announced drought to appear during aviso window');
 
-  const freeParcels = g2.parcelas.filter((p) => p.estado === 'libre');
-  assert(freeParcels.length >= 4, 'Expected at least 4 free parcels');
-  if (freeParcels.length >= 3) {
-    const pSilo = freeParcels[0];
-    const pRiego = freeParcels[1];
-    const pCamp = freeParcels[2];
+  const freePublicParcels = g2.parcelas.filter(
+    (p) => p.estado === 'libre' && canBuildTypeInParcela(p, 'silo')
+  );
+  assert(freePublicParcels.length >= 3, `Expected at least 3 free public parcels, got ${freePublicParcels.length}`);
+  if (freePublicParcels.length >= 3) {
+    const pSilo = freePublicParcels[0];
+    const pRiego = freePublicParcels[1];
+    const pCamp = freePublicParcels[2];
     assert(orderBuildInParcela(g2, pSilo.id, 'silo').ok, 'Silo build order should succeed in G2');
     assert(orderBuildInParcela(g2, pRiego.id, 'riego').ok, 'Riego build order should succeed in G2');
     assert(orderBuildInParcela(g2, pCamp.id, 'hospital_campana').ok, 'Hospital campana build should succeed in G2');

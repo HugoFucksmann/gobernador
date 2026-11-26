@@ -6,6 +6,8 @@ export type LandmarkId = 'palacio' | 'prensa' | 'mercado';
 
 export type MapFilter = 'todos' | 'acciones' | 'descontentos' | 'hambre' | 'calle';
 
+export type SimSpeed = 1 | 2 | 5 | 20;
+
 export type MapLens =
   | 'ninguna'
   | 'roles'
@@ -18,6 +20,9 @@ export type MapLens =
   | 'accion'
   | 'lealtad'
   | 'vivienda'
+  | 'firmas'
+  | 'alquiler'
+  | 'vias'
   | 'defensa'
   | 'orden'
   | 'integridad'
@@ -37,7 +42,6 @@ export type CityTab =
   | 'vias'
   | 'clima'
   | 'ciudad'
-  | 'despacho'
   | 'alertas'
   | 'obras'
   | 'vecinos'
@@ -53,9 +57,21 @@ export type EconomyTab =
   | 'comercio'
   | 'fiscal';
 
+export type InspectorTarget =
+  | { tipo: 'npc'; id: string }
+  | { tipo: 'hogar'; id: string }
+  | { tipo: 'parcela'; id: string }
+  | { tipo: 'firma'; id: string }
+  | { tipo: 'via'; id: string }
+  | { tipo: 'zona'; id: ZoneId }
+  | { tipo: 'medio'; id: string }
+  | { tipo: 'hecho'; id: string; source: 'log' | 'evento' };
+
 export interface CameraTarget {
   district?: DistrictId | 'all';
   zone?: ZoneId | 'all';
+  wx?: number;
+  wy?: number;
   seq: number;
 }
 

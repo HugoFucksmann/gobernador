@@ -24,9 +24,9 @@ import {
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   escenarioId: 'elecciones',
   economiaModulo: 'base',
-  nivelMundo: 'M2',
-  nivelGobernador: 'G2',
-  estadoAutomatico: false,
+  nivelMundo: 'M3',
+  nivelGobernador: 'G0',
+  estadoAutomatico: true,
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,
   caos: { ...SCENARIO_PRESETS.elecciones.caosDefault },

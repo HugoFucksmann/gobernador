@@ -29,14 +29,149 @@ import {
   BuildingType,
   CommunityDerived,
   DistrictId,
-  EventLogEntry,
   GameState,
   RoleId,
+  SimEvent,
   ZoneId,
 } from '../../types/game';
 import { CityTab, MapHoverPreview } from '../../types/ui';
 import { RctWindow } from './RctWindow';
 import { UiTooltip } from './UiTooltip';
+
+type FactCategoryFilter =
+  | 'todas'
+  | 'vida'
+  | 'familia'
+  | 'mercado'
+  | 'vivienda'
+  | 'obras'
+  | 'clima'
+  | 'caos'
+  | 'prensa';
+
+function classifyFactCategory(
+  simEvent: SimEvent | undefined,
+  bitCat?: string,
+  titulo = '',
+  detalle = ''
+): Exclude<FactCategoryFilter, 'todas'> {
+  if (simEvent) {
+    switch (simEvent.tipo) {
+      case 'muerte':
+      case 'nacimiento':
+      case 'hospital_saturado':
+      case 'internacion':
+      case 'alta':
+        return 'vida';
+      case 'pareja':
+      case 'separacion':
+      case 'hogar_nuevo':
+      case 'hogar_disuelto':
+      case 'herencia':
+        return 'familia';
+      case 'firma_fundada':
+      case 'firma_compra':
+      case 'firma_quiebra':
+      case 'monopolio':
+      case 'impago':
+      case 'empresa_aumento':
+      case 'empresa_recorte':
+      case 'empresa_despido':
+        return 'mercado';
+      case 'desalojo':
+      case 'mudanza':
+      case 'calle_inicio':
+      case 'calle_fin':
+      case 'casa_construida':
+      case 'casa_estado':
+        return 'vivienda';
+      case 'obra_inicio':
+      case 'obra_fin':
+      case 'demolicion':
+      case 'via_inicio':
+      case 'via_fin':
+      case 'via_estado':
+      case 'ruta_cortada':
+      case 'zona_abierta':
+        return 'obras';
+      case 'fenomeno_inicio':
+      case 'fenomeno_fin':
+      case 'aviso':
+        return 'clima';
+      case 'accion_inicio':
+      case 'golpe':
+      case 'demanda':
+      case 'medida':
+        return 'caos';
+      case 'noticia':
+      case 'medio_cambio_linea':
+      case 'medio_cierre':
+        return 'prensa';
+      default:
+        break;
+    }
+  }
+  const hay = `${titulo} ${detalle}`.toLowerCase();
+  if (bitCat === 'clima') return 'clima';
+  if (bitCat === 'caos') return 'caos';
+  if (bitCat === 'prensa') return 'prensa';
+  if (hay.includes('vivienda') || hay.includes('casa') || hay.includes('alquiler') || hay.includes('desaloj')) {
+    return 'vivienda';
+  }
+  if (hay.includes('obra') || hay.includes('vía') || hay.includes('parcela') || hay.includes('puente')) {
+    return 'obras';
+  }
+  if (hay.includes('pareja') || hay.includes('herencia') || hay.includes('hogar')) return 'familia';
+  if (hay.includes('naci') || hay.includes('muert') || hay.includes('fallec') || hay.includes('salud')) return 'vida';
+  if (bitCat === 'economia') return 'mercado';
+  return 'vida';
+}
+
+function describeSimEvent(ev: SimEvent, state: GameState): { titulo: string; detalle: string } | null {
+  const getFirmaName = (id: string) => state.firmas.find((f) => f.id === id)?.nombre ?? id;
+  switch (ev.tipo) {
+    case 'nacimiento':
+      return { titulo: 'Nacimiento', detalle: `Nuevo integrante en zona ${ev.zona}.` };
+    case 'muerte':
+      return {
+        titulo: `Fallecimiento (${ev.esNatural ? 'natural' : ev.esperandoCama ? 'sin cama' : 'salud/golpe'})`,
+        detalle: `Ocurrido en zona ${ev.zona}.`,
+      };
+    case 'pareja':
+      return { titulo: 'Nueva pareja / hogar', detalle: `Formación de hogar en zona ${ev.zona}.` };
+    case 'herencia':
+      return { titulo: 'Herencia registrada', detalle: `Bienes transferidos en zona ${ev.zona}.` };
+    case 'desalojo':
+      return { titulo: 'Desalojo de vivienda', detalle: `Hogar acumula ${ev.periodosSinPagar} impago(s) en ${ev.zona}.` };
+    case 'calle_inicio':
+      return { titulo: 'Hogar en situación de calle', detalle: `Sin vivienda en zona ${ev.zona}.` };
+    case 'casa_construida':
+      return { titulo: 'Vivienda construida', detalle: `Nueva ${ev.tipoCasa} en zona ${ev.zona}.` };
+    case 'firma_fundada':
+      return { titulo: `Firma fundada: ${getFirmaName(ev.firmaId)}`, detalle: `Rubro ${ev.rubro} en zona ${ev.zona}.` };
+    case 'firma_compra':
+      return { titulo: `Compra de local (${getFirmaName(ev.compradorId)})`, detalle: `Expansión en zona ${ev.zona}.` };
+    case 'firma_quiebra':
+      return { titulo: `Quiebra: ${getFirmaName(ev.firmaId)}`, detalle: `Cierre de actividad en zona ${ev.zona}.` };
+    case 'monopolio':
+      return {
+        titulo: `Concentración (${getFirmaName(ev.firmaId)})`,
+        detalle: `${Math.round(ev.cuota * 100)}% en ${ev.rubro}.`,
+      };
+    case 'obra_fin':
+      return { titulo: `Obra terminada (${ev.edificio})`, detalle: `Habilitada en zona ${ev.zona}.` };
+    case 'via_fin':
+      return { titulo: `Vía habilitada`, detalle: `Conexión completada en zona ${ev.zona}.` };
+    case 'ruta_cortada':
+      return { titulo: `Ruta cortada`, detalle: `Tramo interrumpido en zona ${ev.zona}.` };
+    case 'via_estado':
+      return { titulo: `Estado de vía (${Math.round(ev.estado)}%)`, detalle: `Condición vial en zona ${ev.zona}.` };
+    case 'zona_abierta':
+      return { titulo: `Zona habilitada`, detalle: `Nueva conexión urbana en ${ev.zona}.` };
+    default:
+      return null;
+  }
+}
 
 interface CityWindowProps {
   state: GameState;
@@ -49,6 +184,7 @@ interface CityWindowProps {
   onJumpZone: (z: ZoneId | 'all') => void;
   onSelectRoleSample: (role: RoleId) => void;
   onSelectNpc: (npcId: string) => void;
+  onSelectHogar?: (hogarId: string) => void;
   onSelectParcela: (parcelaId: string) => void;
   onSelectTramo: (tramoId: string) => void;
   onBuildInParcela: (parcelaId: string, tipo: BuildingType) => { ok: boolean; error?: string };
@@ -70,6 +206,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   onJumpZone,
   onSelectRoleSample,
   onSelectNpc,
+  onSelectHogar,
   onSelectParcela,
   onSelectTramo,
   onBuildVia,
@@ -80,7 +217,9 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   onInspectCausal,
 }) => {
   const [cityTab, setCityTab] = useState<CityTab>('alertas');
-  const [logFilter, setLogFilter] = useState<EventLogEntry['categoria'] | 'todas'>('todas');
+  const [logFilter, setLogFilter] = useState<FactCategoryFilter>('todas');
+  const [logZoneFilter, setLogZoneFilter] = useState<ZoneId | 'todas'>('todas');
+  const [vecinosView, setVecinosView] = useState<'personas' | 'hogares'>('personas');
   const [npcQuery, setNpcQuery] = useState<string>('');
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -445,7 +584,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                     const def = Math.round(derived.defensa[z] ?? 0);
                     const ord = Math.round(derived.orden?.[z] ?? 0);
                     const integ = Math.round(state.gobierno.integridad?.[z] ?? 100);
-                    const dem = (state.demandaSuelo?.[z] ?? 1).toFixed(2);
+                    const dem = (state.demandaSuelo?.[`${z}:residencial`] ?? 1).toFixed(2);
                     return (
                       <button
                         key={z}
@@ -605,7 +744,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 })}
               </div>
 
-              {preset.hitos.length > 0 && (
+              {!isG0 && preset.hitos.length > 0 && (
                 <div className="pt-3 border-t border-zinc-800 space-y-2">
                   <div className="text-xs font-semibold text-zinc-400">Hitos</div>
                   {preset.hitos.map((h) => {
@@ -753,171 +892,391 @@ export const CityWindow: React.FC<CityWindowProps> = ({
             </div>
           )}
 
-          {cityTab === 'vecinos' && (
-            <div className="space-y-4 text-sm">
-              <div className="relative">
-                <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={npcQuery}
-                  onChange={(e) => setNpcQuery(e.target.value)}
-                  placeholder="Buscar vecino, oficio o zona…"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
+          {cityTab === 'vecinos' && (() => {
+            const ageBuckets = [
+              { label: '0–17', min: 0, max: 17, count: 0 },
+              { label: '18–34', min: 18, max: 34, count: 0 },
+              { label: '35–54', min: 35, max: 54, count: 0 },
+              { label: '55–64', min: 55, max: 64, count: 0 },
+              { label: '65+', min: 65, max: 200, count: 0 },
+            ];
+            let acogidaCount = 0;
+            for (const n of state.npcs) {
+              if (!n.vivo) continue;
+              const b = ageBuckets.find((k) => n.edad >= k.min && n.edad <= k.max);
+              if (b) b.count += 1;
+            }
+            for (const h of state.hogares) {
+              if (h.estado === 'acogida') acogidaCount += 1;
+            }
+            const maxBucket = Math.max(1, ...ageBuckets.map((b) => b.count));
 
-              <div className="max-h-[200px] overflow-y-auto divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl">
-                {(() => {
-                  const q = npcQuery.trim().toLowerCase();
-                  const matches: Array<{ npc: (typeof state.npcs)[number]; z: ReturnType<typeof getEffectiveZone> }> = [];
-                  for (const n of state.npcs) {
-                    if (!n.vivo) continue;
-                    const z = getEffectiveZone(n, zonesCount);
-                    if (q) {
-                      const roleLabel = ROLE_CATALOG[n.rol].nombre.toLowerCase();
-                      if (
-                        !n.nombre.toLowerCase().includes(q) &&
-                        !roleLabel.includes(q) &&
-                        !z.includes(q)
-                      ) {
-                        continue;
-                      }
-                    }
-                    matches.push({ npc: n, z });
-                    if (matches.length >= 45) break;
-                  }
-                  return matches.map(({ npc: n, z }) => (
-                    <button
-                      key={n.id}
-                      type="button"
-                      onClick={() => onSelectNpc(n.id)}
-                      className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800 text-xs transition-colors"
-                    >
-                      <span className="truncate text-zinc-100">
-                        <strong>{n.nombre} {n.apellido}</strong>{' '}
-                        <span className="text-zinc-400">
-                          · {ROLE_CATALOG[n.rol].nombre} · {state.zonas[z]?.nombre ?? z}
-                        </span>
-                      </span>
-                      <span className="font-mono text-zinc-400 tabular-nums shrink-0 ml-2">
-                        {Math.round(n.variables.salud)}% / {Math.round(n.variables.hambre)}%
-                      </span>
-                    </button>
-                  ));
-                })()}
-              </div>
-
-              <div className="pt-2 border-t border-zinc-800 space-y-2">
-                <div className="text-xs font-semibold text-zinc-400">Oficios</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {(Object.keys(ROLE_CATALOG) as RoleId[]).map((rId) => {
-                    const def = ROLE_CATALOG[rId];
-                    const count = derived.roles[rId];
-                    return (
-                      <button
-                        key={rId}
-                        type="button"
-                        disabled={count === 0}
-                        onClick={() => onSelectRoleSample(rId)}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 disabled:opacity-35 text-left text-xs transition-colors"
-                      >
-                        <span className="flex items-center gap-2 truncate text-zinc-200">
-                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: def.color }} />
-                          <span className="truncate">{def.nombre}</span>
-                        </span>
-                        <span className="font-mono text-zinc-400 tabular-nums">{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {cityTab === 'bitacora' && (
-            <div className="space-y-4">
-              <UiTooltip
-                text={`Meta: ${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion}`}
-                placement="top"
-                className="w-full"
-              >
-                <div className="w-full bg-zinc-800/55 rounded-xl p-3.5 space-y-1.5 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-white">{preset.nombre}</span>
-                    <span className="font-mono text-xs tabular-nums">
-                      <span
-                        className={
-                          estadoObjetivo === 'Cumplido'
-                            ? 'text-emerald-400 font-bold'
-                            : estadoObjetivo === 'Perdido'
-                            ? 'text-rose-400 font-bold'
-                            : 'text-amber-300 font-bold'
-                        }
-                      >
-                        {estadoObjetivo}
-                      </span>
-                      <span className="text-zinc-400 ml-2">
-                        D{state.reloj.dia}/{preset.victoria.plazoDia ?? 365}
-                      </span>
-                    </span>
+            return (
+              <div className="space-y-4 text-sm">
+                {/* Demographic Summary + Age Pyramid */}
+                <div className="bg-zinc-800/55 rounded-xl p-3.5 space-y-3">
+                  <div className="grid grid-cols-4 gap-2 text-xs font-mono tabular-nums">
+                    <div>
+                      <span className="font-sans text-zinc-400 block">Edad media</span>
+                      <span className="font-bold text-white">{derived.edadMedia.toFixed(1)}a</span>
+                    </div>
+                    <div>
+                      <span className="font-sans text-zinc-400 block">Natalidad</span>
+                      <span className="font-bold text-emerald-400">{derived.natalidad.toFixed(1)}%</span>
+                    </div>
+                    <div>
+                      <span className="font-sans text-zinc-400 block">Mortalidad</span>
+                      <span className="font-bold text-rose-400">{derived.mortalidad.toFixed(1)}%</span>
+                    </div>
+                    <div>
+                      <span className="font-sans text-zinc-400 block">Acogida</span>
+                      <span className="font-bold text-amber-300">{acogidaCount} hog.</span>
+                    </div>
                   </div>
-                  <p className="text-xs text-zinc-300">{preset.victoria.descripcion}</p>
+                  <div className="space-y-1">
+                    {ageBuckets.map((b) => {
+                      const pct = Math.round((b.count / Math.max(1, derived.poblacion)) * 100);
+                      const barW = Math.round((b.count / maxBucket) * 100);
+                      return (
+                        <div key={b.label} className="grid grid-cols-[44px_1fr_54px] items-center gap-2 text-[11px] font-mono tabular-nums">
+                          <span className="text-zinc-400">{b.label}</span>
+                          <div className="h-2 bg-zinc-900 rounded-sm overflow-hidden">
+                            <div className="h-full bg-emerald-500/85 rounded-sm" style={{ width: `${barW}%` }} />
+                          </div>
+                          <span className="text-right text-zinc-300">{b.count} ({pct}%)</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </UiTooltip>
 
-              <div className="flex flex-wrap gap-1.5">
-                {(['todas', 'gobernador', 'caos', 'sistema', 'economia', 'clima', 'prensa'] as const).map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setLogFilter(c)}
-                    className={`px-3 py-1.5 text-xs rounded-xl capitalize transition-colors ${
-                      logFilter === c
-                        ? 'bg-emerald-600 text-white font-semibold'
-                        : 'bg-zinc-800 text-zinc-300 hover:text-white'
-                    }`}
-                  >
-                    {c === 'todas' ? 'Todas' : c === 'economia' ? 'Economía' : c}
-                  </button>
-                ))}
+                {/* Personas / Hogares toggle */}
+                <div className="flex items-center gap-2">
+                  <div className="grid grid-cols-2 gap-1 bg-zinc-800/80 p-1 rounded-xl text-xs shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setVecinosView('personas')}
+                      className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                        vecinosView === 'personas' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Personas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVecinosView('hogares')}
+                      className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                        vecinosView === 'hogares' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Hogares ({state.hogares.length})
+                    </button>
+                  </div>
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={npcQuery}
+                      onChange={(e) => setNpcQuery(e.target.value)}
+                      placeholder={
+                        vecinosView === 'personas'
+                          ? 'Buscar vecino, oficio o zona…'
+                          : 'Buscar hogar o zona…'
+                      }
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-9 pr-3 py-1.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {vecinosView === 'personas' ? (
+                  <div className="max-h-[190px] overflow-y-auto divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl">
+                    {(() => {
+                      const q = npcQuery.trim().toLowerCase();
+                      const matches: Array<{ npc: (typeof state.npcs)[number]; z: ReturnType<typeof getEffectiveZone> }> = [];
+                      for (const n of state.npcs) {
+                        if (!n.vivo) continue;
+                        const z = getEffectiveZone(n, zonesCount);
+                        if (q) {
+                          const roleLabel = ROLE_CATALOG[n.rol].nombre.toLowerCase();
+                          const zName = (state.zonas[z]?.nombre ?? z).toLowerCase();
+                          if (
+                            !`${n.nombre} ${n.apellido}`.toLowerCase().includes(q) &&
+                            !roleLabel.includes(q) &&
+                            !z.includes(q) &&
+                            !zName.includes(q)
+                          ) {
+                            continue;
+                          }
+                        }
+                        matches.push({ npc: n, z });
+                        if (matches.length >= 45) break;
+                      }
+                      return matches.map(({ npc: n, z }) => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => onSelectNpc(n.id)}
+                          className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800 text-xs transition-colors"
+                        >
+                          <span className="truncate text-zinc-100">
+                            <strong>{n.nombre} {n.apellido}</strong>{' '}
+                            <span className="text-zinc-400">
+                              · {ROLE_CATALOG[n.rol].nombre} · {state.zonas[z]?.nombre ?? z}
+                            </span>
+                          </span>
+                          <span className="font-mono text-zinc-400 tabular-nums shrink-0 ml-2">
+                            {Math.round(n.variables.salud)}% / {Math.round(n.variables.hambre)}%
+                          </span>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                ) : (
+                  <div className="max-h-[190px] overflow-y-auto divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl">
+                    {(() => {
+                      const q = npcQuery.trim().toLowerCase();
+                      const npcById = new Map(state.npcs.map((n) => [n.id, n]));
+                      const matches = state.hogares
+                        .filter((h) => {
+                          if (!q) return true;
+                          const zName = (state.zonas[h.zona]?.nombre ?? h.zona).toLowerCase();
+                          const memberNames = h.miembros
+                            .map((id) => {
+                              const m = npcById.get(id);
+                              return m ? `${m.nombre} ${m.apellido}` : '';
+                            })
+                            .join(' ')
+                            .toLowerCase();
+                          return (
+                            h.id.toLowerCase().includes(q) ||
+                            zName.includes(q) ||
+                            h.estado.includes(q) ||
+                            memberNames.includes(q)
+                          );
+                        })
+                        .slice(0, 45);
+                      return matches.map((h) => {
+                        const head = npcById.get(h.miembros[0]);
+                        const label = head ? `Familia ${head.apellido} (${head.nombre})` : h.id;
+                        return (
+                          <button
+                            key={h.id}
+                            type="button"
+                            onClick={() => onSelectHogar?.(h.id)}
+                            className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800 text-xs transition-colors"
+                          >
+                            <span className="truncate text-zinc-100">
+                              <strong>{label}</strong>{' '}
+                              <span className="text-zinc-400">
+                                · {h.miembros.length} p. · {state.zonas[h.zona]?.nombre ?? h.zona}
+                              </span>
+                            </span>
+                            <span
+                              className={`font-mono tabular-nums shrink-0 ml-2 ${
+                                h.estado === 'calle'
+                                  ? 'text-rose-400 font-semibold'
+                                  : h.estado === 'acogida'
+                                  ? 'text-amber-300'
+                                  : 'text-emerald-400'
+                              }`}
+                            >
+                              ${h.dinero.toFixed(0)} · {h.estado === 'con_casa' ? 'Casa' : h.estado}
+                            </span>
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-zinc-800 space-y-2">
+                  <div className="text-xs font-semibold text-zinc-400">Oficios</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(Object.keys(ROLE_CATALOG) as RoleId[]).map((rId) => {
+                      const def = ROLE_CATALOG[rId];
+                      const count = derived.roles[rId];
+                      return (
+                        <button
+                          key={rId}
+                          type="button"
+                          disabled={count === 0}
+                          onClick={() => onSelectRoleSample(rId)}
+                          className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 disabled:opacity-35 text-left text-xs transition-colors"
+                        >
+                          <span className="flex items-center gap-2 truncate text-zinc-200">
+                            <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: def.color }} />
+                            <span className="truncate">{def.nombre}</span>
+                          </span>
+                          <span className="font-mono text-zinc-400 tabular-nums">{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
+            );
+          })()}
 
-              <div className="divide-y divide-zinc-800 max-h-[260px] overflow-y-auto pr-1">
-                {state.bitacora
-                  .filter((e) => logFilter === 'todas' || e.categoria === logFilter)
-                  .slice(0, 40)
-                  .map((entry) => (
-                    <div key={entry.id} className="py-2.5 text-sm">
+          {cityTab === 'bitacora' && (() => {
+            const simById = new Map(state.eventos.map((ev) => [ev.id, ev]));
+            const seenSimIds = new Set<string>();
+            interface FactItem {
+              id: string;
+              dia: number;
+              category: Exclude<FactCategoryFilter, 'todas'>;
+              zona?: ZoneId;
+              titulo: string;
+              detalle: string;
+              causalRef?: string;
+            }
+            const facts: FactItem[] = [];
+            for (const entry of state.bitacora) {
+              const simEv = entry.simEventId ? simById.get(entry.simEventId) : undefined;
+              if (simEv) seenSimIds.add(simEv.id);
+              const cat = classifyFactCategory(simEv, entry.categoria, entry.titulo, entry.detalle);
+              facts.push({
+                id: entry.id,
+                dia: entry.dia,
+                category: cat,
+                zona: simEv?.zona,
+                titulo: entry.titulo,
+                detalle: entry.detalle,
+                causalRef: entry.simEventId || entry.causa,
+              });
+            }
+            for (const ev of state.eventos) {
+              if (seenSimIds.has(ev.id)) continue;
+              const desc = describeSimEvent(ev, state);
+              if (!desc) continue;
+              facts.push({
+                id: `ev_${ev.id}`,
+                dia: ev.dia,
+                category: classifyFactCategory(ev),
+                zona: ev.zona,
+                titulo: desc.titulo,
+                detalle: desc.detalle,
+                causalRef: ev.id,
+              });
+            }
+            facts.sort((a, b) => b.dia - a.dia);
+
+            const filteredFacts = facts
+              .filter((f) => logFilter === 'todas' || f.category === logFilter)
+              .filter((f) => logZoneFilter === 'todas' || f.zona === logZoneFilter)
+              .slice(0, 50);
+
+            return (
+              <div className="space-y-4">
+                {!isG0 && (
+                  <UiTooltip
+                    text={`Meta: ${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion}`}
+                    placement="top"
+                    className="w-full"
+                  >
+                    <div className="w-full bg-zinc-800/55 rounded-xl p-3.5 space-y-1.5 text-sm">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-zinc-100">{entry.titulo}</span>
-                        <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
-                          D{entry.dia}
+                        <span className="font-bold text-white">{preset.nombre}</span>
+                        <span className="font-mono text-xs tabular-nums">
+                          <span
+                            className={
+                              estadoObjetivo === 'Cumplido'
+                                ? 'text-emerald-400 font-bold'
+                                : estadoObjetivo === 'Perdido'
+                                ? 'text-rose-400 font-bold'
+                                : 'text-amber-300 font-bold'
+                            }
+                          >
+                            {estadoObjetivo}
+                          </span>
+                          <span className="text-zinc-400 ml-2">
+                            D{state.reloj.dia}/{preset.victoria.plazoDia ?? 365}
+                          </span>
                         </span>
                       </div>
-                      <p className="text-zinc-400 text-xs mt-1">{entry.detalle}</p>
-                      {(entry.simEventId || entry.causa) && (
-                        <div className="flex justify-end mt-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onInspectCausal(
-                                entry.titulo,
-                                entry.simEventId || entry.causa,
-                                entry.detalle
-                              )
-                            }
-                            className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:underline"
-                          >
-                            <GitBranch className="w-3.5 h-3.5" />
-                            ¿Por qué?
-                          </button>
-                        </div>
-                      )}
+                      <p className="text-xs text-zinc-300">{preset.victoria.descripcion}</p>
                     </div>
+                  </UiTooltip>
+                )}
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    ['todas', 'vida', 'familia', 'mercado', 'vivienda', 'obras', 'clima', 'caos', 'prensa'] as const
+                  ).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setLogFilter(c)}
+                      className={`px-2.5 py-1 text-xs rounded-xl capitalize transition-colors whitespace-nowrap ${
+                        logFilter === c
+                          ? 'bg-emerald-600 text-white font-semibold'
+                          : 'bg-zinc-800 text-zinc-300 hover:text-white'
+                      }`}
+                    >
+                      {c}
+                    </button>
                   ))}
+                  <select
+                    aria-label="Filtrar registro por zona"
+                    value={logZoneFilter}
+                    onChange={(e) => setLogZoneFilter(e.target.value as ZoneId | 'todas')}
+                    className="ml-auto bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-xl px-2.5 py-1"
+                  >
+                    <option value="todas">Todas las zonas</option>
+                    {allZoneDefs.map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="divide-y divide-zinc-800 max-h-[260px] overflow-y-auto pr-1">
+                  {filteredFacts.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-zinc-400">
+                      Sin hechos registrados para este filtro.
+                    </div>
+                  ) : (
+                    filteredFacts.map((entry) => (
+                      <div key={entry.id} className="py-2.5 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-zinc-100">{entry.titulo}</span>
+                          <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
+                            D{entry.dia}
+                          </span>
+                        </div>
+                        <p className="text-zinc-400 text-xs mt-1">{entry.detalle}</p>
+                        {(entry.zona || entry.causalRef) && (
+                          <div className="flex items-center justify-end gap-3 mt-1.5">
+                            {entry.zona && (
+                              <button
+                                type="button"
+                                onClick={() => onJumpZone(entry.zona!)}
+                                className="text-xs font-semibold text-zinc-300 hover:text-white hover:underline whitespace-nowrap"
+                              >
+                                Ir ({state.zonas[entry.zona]?.nombre ?? entry.zona})
+                              </button>
+                            )}
+                            {entry.causalRef && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onInspectCausal(entry.titulo, entry.causalRef, entry.detalle)
+                                }
+                                className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:underline whitespace-nowrap"
+                              >
+                                <GitBranch className="w-3.5 h-3.5" />
+                                ¿Por qué?
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </RctWindow>
     </div>
