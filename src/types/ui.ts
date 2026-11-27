@@ -1,6 +1,8 @@
 import { DistrictId, ZoneId } from './game';
 
-export type WindowId = 'palancas' | 'economia' | 'ciudad' | 'gaceta';
+export type WindowId = 'palancas' | 'economia' | 'ciudad' | 'gaceta' | 'despacho';
+
+export type DespachoTab = 'resumen' | 'historial' | 'informe' | 'notables';
 
 export type LandmarkId = 'palacio' | 'prensa' | 'mercado';
 

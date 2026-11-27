@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  BookOpen,
   Compass,
   Hammer,
   Layers,
@@ -191,7 +192,8 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   const moreWindowActive =
     openWindows.includes('economia') ||
     openWindows.includes('ciudad') ||
-    openWindows.includes('gaceta');
+    openWindows.includes('gaceta') ||
+    openWindows.includes('despacho');
 
   return (
     <div
@@ -382,6 +384,24 @@ export const BottomDock: React.FC<BottomDockProps> = ({
                 {moreBadgeCount > 0 ? moreBadgeCount : '!'}
               </span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              onToggleWindow('despacho');
+              setPopover(null);
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+              openWindows.includes('despacho')
+                ? 'bg-emerald-600 text-white'
+                : 'text-zinc-200 hover:bg-zinc-800'
+            }`}
+          >
+            <span className="flex items-center gap-2.5">
+              <BookOpen className="w-4 h-4 text-emerald-300" />
+              Despacho de lectura
+            </span>
           </button>
 
           <div className="my-1.5 border-t border-zinc-800" />

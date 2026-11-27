@@ -1480,7 +1480,9 @@
         "p_ext2_este_2",
         "p_ext2_este_3",
         "p_ext2_sureste_1",
-        "p_ext2_sureste_2"
+        "p_ext2_sureste_2",
+        "p_hito_este_1",
+        "p_hito_este_2"
       ],
       "puntos": [
         {
@@ -2223,12 +2225,13 @@
     },
     {
       "id": "p_hito_este_1",
-      "nombre": "Parcela Este I (Hito)",
+      "nombre": "Parcela Este I",
       "zona": "este",
       "distrito": "civico",
       "tipoParcela": "publica",
       "orden": 4,
-      "estadoInicial": "bloqueada",
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
       "wx": 824,
       "wy": 340,
       "ww": 52,
@@ -2245,12 +2248,13 @@
     },
     {
       "id": "p_hito_este_2",
-      "nombre": "Parcela Este II (Hito)",
+      "nombre": "Parcela Este II",
       "zona": "este",
       "distrito": "civico",
       "tipoParcela": "publica",
       "orden": 5,
-      "estadoInicial": "bloqueada",
+      "estadoInicial": "sin_calle",
+      "tramoAperturaId": "via_calle_este_com",
       "wx": 824,
       "wy": 394,
       "ww": 52,

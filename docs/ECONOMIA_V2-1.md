@@ -21,7 +21,7 @@
 | Estado | `reserva` | Impuesto | Nómina, pensiones, ayuda, garantía, acogida, obras, mantenimiento público, importación, fondos de prensa |
 
 **Calendario diario:** producción → comercio exterior → precio → compras de comida → gasto de vida → consumo.
-**Día de pago:** firmas (sueldos y ganancias) → alquileres y mantenimiento → estado → mercado de vivienda → mercado de compras → quiebras → inversión, emprendimientos y construcción. El impuesto se retiene en cada pago a una persona.
+**Día de pago:** pagos del estado a firmas (mantenimiento, obras y fondos de prensa) y alquileres públicos, que se acreditan **antes** de liquidar las firmas → firmas (sueldos y ganancias) → alquileres y mantenimiento privados → estado (el orden de prioridad de ECONOMIA_V1 §5 se mantiene) → mercado de vivienda → mercado de compras → quiebras → inversión, emprendimientos y construcción.
 
 ## 3. Hogar
 
@@ -139,6 +139,8 @@ El reparto de ventas de v1 se mantiene, por firma, con una **caja** nueva:
 - **Emprender:** una persona (adulta, con ahorro sobre `ahorro_min_emprender` y alta `propension_emprender`) abre una firma chica en un rubro con demanda no cubierta (por categoría de gasto, margen alto, cuota baja) en una parcela libre del tipo correcto de su zona o vecina. Ella es la dueña y gerente. Puede ser desempleada, empleada o jubilada.
 - **Construir vivienda:** si `calle_pct` o el hacinamiento de una zona superan su umbral, una firma de construcción o inmobiliaria levanta casas en parcelas residenciales libres, si el alquiler esperado recupera la inversión en `periodos_recupero`. Una firma o un hogar rico construyen también para su propio uso.
 - **Fundar un medio:** una persona con formación de periodista y ahorro, o una firma con caja alta, funda un medio. La línea editorial sale de sus dueños (CAOS_PRENSA_V2 §7).
+- **Suelo [propuesta]:** los lotes `libre` son del estado. Quien construye lo compra al `precio_lote` = `precio_base_lote`[clase] × (1 + `k_acceso` × accesibilidad), con accesibilidad 0-1 según la cercanía por ruta al centro comercial de la ciudad. El pago entra a la reserva. Sin mercado de suelo ni especulación en esta etapa; el lote se vende junto con su edificio.
+- **Costo de obra por terreno:** el costo de construir un edificio en un lote se multiplica por el factor de su terreno (MAPA_V2 §3b).
 - Cada hecho tiene origen y causa (por ejemplo, "abrió un restorán porque la zona tenía un solo almacén y margen alto").
 
 ## 9. Compras, monopolio, fusión y quiebra
@@ -171,8 +173,9 @@ Como ECONOMIA_V1 §5 (reserva, nómina, pensiones, ayuda social, garantía, obra
 
 - **Comida de menores:** la paga el hogar. El estado la paga solo si el hogar no puede o el menor está en acogida (costo diario de acogida).
 - **Obras públicas:** las obras de edificios y de vías (EDIFICIOS_V2 §3 y §3b) se pagan a firmas de construcción, no al comercio como en v1.
+- **Banco central:** el estado es el banco central: la reserva y la emisión (`fiscal`) son su única función monetaria. No hay bancos privados ni crédito.
 - **Mantenimiento de vías:** sale de la reserva el día de pago, a firmas de construcción, junto con el de los edificios.
-- **Entradas nuevas:** herencias sin herederos, remates de firmas y locales, excedente de firmas sin dueño.
+- **Entradas nuevas:** herencias sin herederos, remates de firmas y locales, excedente de firmas sin dueño, venta de lotes.
 - **Sin gobernador:** el estado sigue sus reglas del preset y la regla de piloto automático (MUNDO_V2 §9): sostiene servicios y no cambia tasas ni sueldos.
 
 ## 11. Comercio exterior
@@ -185,6 +188,7 @@ Como ECONOMIA_V1 §7. El estado importa comida con la reserva; las firmas `agro`
 |---|---|
 | Exportación (agro e industria) | Importación del estado |
 | Emisión (solo `fiscal`) | Importación privada de bienes del comercio |
+| Dinero que traen los migrantes | Dinero que se llevan los emigrantes |
 
 Todo lo demás circula, incluidos los fondos del estado a los medios, sueldos, alquileres, compras, herencias, publicidad, indemnizaciones y remates. El dinero de un hogar sin herederos y el excedente de una firma sin dueño **no salen del mundo**: pasan a la reserva del estado. Con `fiscal`, la emisión y la inflación entran por la extensión (sección 14).
 
@@ -206,7 +210,7 @@ Las de ECONOMIA_V1 §11 siguen valiendo (recorte que se contagia, auge, pánico,
 
 ## 14. Extensión `fiscal` (M4)
 
-Como ECONOMIA_V1 §9 (emisión y inflación dinámica) más el **crédito [propuesta]**: bancos (firma de rubro `banco`) prestan a hogares y firmas con intereses, con riesgo de impago y quiebra del banco. Se diseña cuando M0-M3 estén calibrados y sin sobrecargar el mundo base. El crédito rompe el principio 3, así que sale en su propia extensión.
+**M4 conserva solo la emisión y la inflación dinámica** de ECONOMIA_V1 §9. El crédito queda fuera hasta especificarlo; no hay rubro `banco` ni `oficina_banco` en el catálogo. Boceto del crédito, sin implementar: 
 
 ## 15. Lo que el resto del juego lee
 

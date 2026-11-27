@@ -25,6 +25,7 @@ import {
   Firma,
   GameState,
   Hogar,
+  LecturaIndicadorId,
   MapaV2Grid,
   Npc,
   Parcela,
@@ -49,6 +50,7 @@ interface CityWorldCanvasProps {
   hoveredPreview?: MapHoverPreview | null;
   filter: MapFilter;
   lens: MapLens;
+  lecturaHeatIndicator?: LecturaIndicadorId | null;
   followSelected: boolean;
   cameraTarget: CameraTarget | null;
   zoomRequest: { delta: number; seq: number } | null;
@@ -432,11 +434,13 @@ function buildStaticTerrainCanvas(
       }
     }
 
-    // Terrain tiles strictly from state.mapaGrid.terreno
+    // Terrain tiles strictly from state.mapaGrid.terreno + altura relief
     for (let gy = 0; gy < alto; gy++) {
       const row = mapaGrid.terreno[gy] ?? '';
+      const altRow = mapaGrid.altura?.[gy] ?? '';
       for (let gx = 0; gx < ancho; gx++) {
         const ch = row[gx] ?? '.';
+        const alt = Math.max(0, Math.min(9, Number(altRow[gx] ?? '4') || 4));
         const wx = gx * tw;
         const wy = gy * th;
         if (ch === '~') {
@@ -455,11 +459,31 @@ function buildStaticTerrainCanvas(
           ctx.fillStyle = rockHiCol;
           isoQuadPath(ctx, wx + tw * 0.15, wy + th * 0.15, tw * 0.5, th * 0.5);
           ctx.fill();
+        } else if (ch === '%') {
+          ctx.fillStyle = hasDrought ? '#9c9b64' : '#4d7c3f';
+          isoQuadPath(ctx, wx, wy, tw + 0.35, th + 0.35);
+          ctx.fill();
+          if (alt >= 5) {
+            ctx.fillStyle = `rgba(255,255,255,${((alt - 4) * 0.03).toFixed(2)})`;
+            ctx.fill();
+          }
+          const cIso = worldToIso(wx + tw * 0.5, wy + th * 0.5);
+          ctx.fillStyle = hasDrought ? '#787143' : '#2f5e2c';
+          ctx.beginPath();
+          ctx.arc(cIso.ix, cIso.iy - 2, Math.max(2.6, tw * 0.28), 0, Math.PI * 2);
+          ctx.fill();
         } else {
           const even = ((gx + gy) & 1) === 0;
           ctx.fillStyle = even ? grassA : grassB;
           isoQuadPath(ctx, wx, wy, tw + 0.35, th + 0.35);
           ctx.fill();
+          if (alt > 4) {
+            ctx.fillStyle = `rgba(255,255,255,${((alt - 4) * 0.025).toFixed(2)})`;
+            ctx.fill();
+          } else if (alt < 4) {
+            ctx.fillStyle = `rgba(15,23,42,${((4 - alt) * 0.03).toFixed(2)})`;
+            ctx.fill();
+          }
         }
       }
     }
@@ -598,7 +622,7 @@ function buildMinimapBgCanvas(
     };
   };
 
-  // Water & mountain tiles from state.mapaGrid.terreno
+  // Water, mountain & scrubland tiles from state.mapaGrid.terreno
   if (mapaGrid && mapaGrid.ancho > 0 && mapaGrid.alto > 0) {
     const tw = WORLD_W / mapaGrid.ancho;
     const th = WORLD_H / mapaGrid.alto;
@@ -606,8 +630,8 @@ function buildMinimapBgCanvas(
       const row = mapaGrid.terreno[gy] ?? '';
       for (let gx = 0; gx < mapaGrid.ancho; gx++) {
         const ch = row[gx] ?? '.';
-        if (ch !== '~' && ch !== '^') continue;
-        ctx.fillStyle = ch === '~' ? '#0284c7' : '#64748b';
+        if (ch !== '~' && ch !== '^' && ch !== '%') continue;
+        ctx.fillStyle = ch === '~' ? '#0284c7' : ch === '^' ? '#64748b' : '#3f6212';
         const pt = mapPoint((gx + 0.5) * tw, (gy + 0.5) * th);
         const sz = Math.max(1.8, tw * MINIMAP_SCALE * 1.4);
         ctx.fillRect(pt.mx - sz / 2, pt.my - sz / 2, sz, sz);
@@ -682,7 +706,8 @@ function drawIsoNpc(
   selectedId: string | null,
   isPaused: boolean,
   active: boolean,
-  nowSec: number
+  nowSec: number,
+  notableType?: 'empresario' | 'medio'
 ) {
   const inHospital = Boolean(npc.hospital.internado);
   const waitingBed = Boolean(npc.hospital.esperandoCama);
@@ -831,6 +856,22 @@ function drawIsoNpc(
     c.textAlign = 'center';
     c.fillText(offDuty ? `${badgeText}⏸` : badgeText, 0, -20.5 - bob);
     c.textAlign = 'start';
+  }
+
+  if (notableType && active) {
+    const nx = inHospital || waitingBed || npc.accionIa ? 10 : 0;
+    const ny = inHospital || waitingBed || npc.accionIa ? -20 - bob : -24 - bob;
+    c.fillStyle = notableType === 'empresario' ? '#f59e0b' : '#ec4899';
+    c.strokeStyle = '#0f172a';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(nx, ny - 4.5);
+    c.lineTo(nx + 4.5, ny);
+    c.lineTo(nx, ny + 4.5);
+    c.lineTo(nx - 4.5, ny);
+    c.closePath();
+    c.fill();
+    c.stroke();
   }
 
   c.restore();
@@ -1103,6 +1144,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   hoveredPreview = null,
   filter,
   lens,
+  lecturaHeatIndicator = null,
   followSelected,
   cameraTarget,
   zoomRequest,
@@ -1141,6 +1183,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   filterRef.current = filter;
   const lensRef = useRef(lens);
   lensRef.current = lens;
+  const lecturaHeatRef = useRef(lecturaHeatIndicator);
+  lecturaHeatRef.current = lecturaHeatIndicator;
   const followRef = useRef(followSelected);
   followRef.current = followSelected;
   const onHoverInfoRef = useRef(onHoverInfoChange);
@@ -1605,7 +1649,9 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
           const zoneList = Object.values(st.zonas);
           const zoneStateKey = zoneList.map((z) => `${z.id}:${z.estado}`).join('|');
-          const gridKey = st.mapaGrid ? `${st.mapaGrid.ancho}x${st.mapaGrid.alto}` : 'nogrid';
+          const gridKey = st.mapaGrid
+            ? `${st.mapaGrid.ancho}x${st.mapaGrid.alto}:${st.mapaGrid.terreno[0]?.slice(0, 8) ?? ''}:${st.mapaGrid.altura?.[0]?.slice(0, 8) ?? ''}`
+            : 'nogrid';
           const terrainKey = `${st.semilla}_${gridKey}_${hasDrought ? 1 : 0}_${hasPlague ? 1 : 0}_${zoneStateKey}`;
           if (!terrainCacheRef.current || terrainCacheRef.current.key !== terrainKey) {
             terrainCacheRef.current = {
@@ -1874,13 +1920,56 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ctx.restore();
           }
 
-          // Interactive Parcel Footprints (libre / bloqueada / sin_calle / hovered / selected)
+          // Lectura Indicator Zone Heatmap Overlay (from Tema panel)
+          const heatId = lecturaHeatRef.current;
+          if (heatId && st.lectura?.indicadores[heatId]) {
+            const heatInd = st.lectura.indicadores[heatId];
+            const zoneKeys = getWorldZones(st);
+            const vals = zoneKeys.map((zk) => {
+              const s = heatInd.seriesPorZona[zk];
+              return s && s.length > 0 ? s[s.length - 1] : heatInd.valor;
+            });
+            const minV = Math.min(...vals);
+            const maxV = Math.max(...vals);
+            const higherGood = heatId !== 'vivienda' && heatId !== 'empleo';
+            ctx.save();
+            zoneKeys.forEach((zk, idx) => {
+              const zr = st.zonas[zk]?.rect;
+              if (!zr) return;
+              const val = vals[idx];
+              const ratio = maxV > minV ? (val - minV) / (maxV - minV) : 0.5;
+              const goodRatio = higherGood ? ratio : 1 - ratio;
+              const heatCol = goodRatio >= 0.65 ? '#10b981' : goodRatio >= 0.35 ? '#f59e0b' : '#ef4444';
+              isoQuadPath(ctx, zr.wx, zr.wy, zr.ww, zr.wh);
+              ctx.globalAlpha = 0.2;
+              ctx.fillStyle = heatCol;
+              ctx.fill();
+              ctx.globalAlpha = 0.78;
+              ctx.strokeStyle = heatCol;
+              ctx.lineWidth = 2.4;
+              ctx.stroke();
+
+              const lblPos = worldToIso(zr.wx + zr.ww * 0.5, zr.wy + zr.wh * 0.5);
+              ctx.globalAlpha = 0.92;
+              ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+              ctx.beginPath();
+              ctx.roundRect(lblPos.ix - 56, lblPos.iy - 11, 112, 20, 4);
+              ctx.fill();
+              ctx.fillStyle = '#f8fafc';
+              ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(`${zk.toUpperCase()} · ${val}`, lblPos.ix, lblPos.iy + 2.5);
+              ctx.textAlign = 'start';
+            });
+            ctx.restore();
+          }
+
+          // Interactive Parcel Footprints (libre / sin_calle / hovered / selected)
           for (const p of st.parcelas) {
             const isSel = selectedParcelaIdRef.current === p.id;
             const isHov = hoveredParcelaIdRef.current === p.id || preview?.parcelaId === p.id;
             if (
               p.estado === 'libre' ||
-              p.estado === 'bloqueada' ||
               p.estado === 'sin_calle' ||
               isSel ||
               isHov
@@ -1908,13 +1997,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#fbbf24' : 'rgba(148, 163, 184, 0.5)';
                 ctx.lineWidth = isSel || isHov ? 2.2 : 1.1;
                 ctx.setLineDash([4, 4]);
-                ctx.stroke();
-              } else if (p.estado === 'bloqueada') {
-                ctx.fillStyle = isHov || isSel ? 'rgba(100,116,139,0.28)' : 'rgba(15,23,42,0.16)';
-                ctx.fill();
-                ctx.strokeStyle = isSel ? '#14b8a6' : isHov ? '#94a3b8' : 'rgba(100,116,139,0.55)';
-                ctx.lineWidth = isSel || isHov ? 2.2 : 1.4;
-                ctx.setLineDash([5, 5]);
                 ctx.stroke();
               } else if (p.estado === 'libre') {
                 ctx.fillStyle = isSel || isHov ? 'rgba(20,184,166,0.24)' : 'rgba(16,185,129,0.12)';
@@ -1983,19 +2065,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                   c.fillText('SIN VÍA', center.ix, center.iy + 2);
                   c.textAlign = 'start';
                 }
-                return;
-              }
-
-              if (parcel.estado === 'bloqueada') {
-                c.fillStyle = 'rgba(15, 23, 42, 0.72)';
-                c.beginPath();
-                c.roundRect(center.ix - 28, center.iy - 9, 56, 17, 4);
-                c.fill();
-                c.fillStyle = '#94a3b8';
-                c.font = '600 8px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText('BLOQUEADA', center.ix, center.iy + 2.5);
-                c.textAlign = 'start';
                 return;
               }
 
@@ -2164,6 +2233,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           renderQueue.sort((a, b) => a.depth - b.depth);
           const curSelectedId = selectedIdRef.current;
           const isSimPaused = pausedRef.current;
+          const notableMap = new Map((st.lectura?.notables ?? []).map((n) => [n.npcId, n.tipo]));
           for (let i = 0; i < renderQueue.length; i++) {
             const item = renderQueue[i];
             if (item.kind === 'npc') {
@@ -2186,7 +2256,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 curSelectedId,
                 isSimPaused,
                 isVisible,
-                nowSec
+                nowSec,
+                notableMap.get(n.id)
               );
             } else {
               item.draw(ctx);
@@ -2495,8 +2566,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ? `Parcela sin vía · ${zName}`
             : parcela.estado === 'libre'
             ? `Parcela libre (${parcela.tipoParcela}) · ${zName}`
-            : parcela.estado === 'bloqueada'
-            ? `Parcela bloqueada · ${zName}`
             : parcela.estado === 'en_obra' && bDef && b
             ? `En obra: ${bDef.nombre} (${b.diasObraRestantes}d)`
             : bDef
@@ -2507,8 +2576,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ? 'Requiere conectar vía pública'
             : parcela.estado === 'libre'
             ? 'Clic para construir obra'
-            : parcela.estado === 'bloqueada'
-            ? 'Clic para ver condición'
             : 'Clic para inspeccionar';
         setHoverTooltipData({
           kind: 'parcela',

@@ -25,7 +25,7 @@ export type ZoneState = 'activa' | 'no_urbanizada';
 export type ViaTipo = 'calle' | 'camino' | 'puente';
 
 export type LotClass = 'S' | 'M' | 'L' | 'XL';
-export type TerrenoTile = '.' | '~' | '^';
+export type TerrenoTile = '.' | '%' | '~' | '^';
 export type FranjaDiaId = 'noche' | 'manana' | 'mediodia' | 'tarde' | 'anochecer';
 
 export interface NpcAgendaSlot {
@@ -44,8 +44,10 @@ export interface MapaV2Grid {
   ancho: number;
   alto: number;
   terreno: string[];
+  altura?: string[];
   vias: string[];
   zonas: string[];
+  sueloUtilPct?: number;
   zonas_info: Record<
     string,
     {
@@ -101,7 +103,8 @@ export type PersonalityTrait =
   | 'laboriosidad'
   | 'codicia'
   | 'rebeldia'
-  | 'resiliencia';
+  | 'resiliencia'
+  | 'sociabilidad';
 
 export type NpcVariable =
   | 'salud'
@@ -193,6 +196,7 @@ export type PublicBuildingType =
   | 'hospital'
   | 'comisaria'
   | 'escuela'
+  | 'universidad'
   | 'oficina_publica'
   | 'muralla'
   | 'silo'
@@ -208,7 +212,7 @@ export type BuildingType =
   | SpecialBuildingType;
 
 export type BuildingOwner = 'estado' | 'alimento' | 'comercio' | string;
-export type ParcelState = 'sin_calle' | 'bloqueada' | 'libre' | 'en_obra' | 'ocupada';
+export type ParcelState = 'sin_calle' | 'libre' | 'en_obra' | 'ocupada';
 
 export type OwnerRef = {
   tipo: 'hogar' | 'npc' | 'firma' | 'estado';
@@ -236,6 +240,7 @@ export interface BuildingDefinition {
   areaServicio?: ServiceAreaId;
   puestos: Partial<Record<RoleId, number>>;
   camasHospital?: number;
+  lugaresEstudio?: number;
   bonusDefensa?: number;
   defensaMuralla?: number;
   siloExtraDias?: number;
@@ -339,6 +344,26 @@ export interface ActiveNpcAction {
   texto: string;
 }
 
+export interface NpcRitmo {
+  cronotipo: number; // -2 a +2 horas
+  gustos: Record<SpendCategory, number>; // pesos suman ~100
+  habitos: string[]; // 2-3 parcelaIds de ocio/compras habituales
+  turno: number; // 0 | 1 | 2 según rubro
+  diasDescanso: number[]; // días de semana (0-6)
+  faltandoHoy?: boolean;
+  llegadaRetrasoHoras?: number;
+  libreHoyActividad?: 'casa' | 'ocio' | 'compras' | 'visita' | 'pasear';
+  libreHoyParcelaId?: string;
+  visitaHoyId?: string;
+}
+
+export interface NpcCapacitacion {
+  rolObjetivo: RoleId;
+  educObjetivo: number;
+  periodosRestantes: number;
+  diasRestantes: number;
+}
+
 export interface Npc {
   id: string;
   nombre: string;
@@ -365,6 +390,8 @@ export interface Npc {
     propensionEmprender: number;
     ultimoIngresoNeto: number;
   };
+  ritmo: NpcRitmo;
+  capacitacion?: NpcCapacitacion | null;
   hospital: {
     internado: boolean;
     esperandoCama: boolean;
@@ -408,6 +435,8 @@ export interface Hogar {
   alquilerPagadoPeriodo: number;
   noPudoPagarComida?: boolean;
   ocupandoCasaId?: string | null;
+  periodosEnCalle?: number;
+  periodosDescontento?: number;
   creditoDeuda?: number;
 }
 
@@ -571,6 +600,7 @@ export interface PressFact {
     empresa?: string;
     firma?: string;
     dueno?: string;
+    persona?: string;
     hogar?: string;
     familia?: string;
     control?: string;
@@ -845,6 +875,7 @@ export interface WorldConfig {
   caos: ChaosSettings;
   semilla: number;
   usarIaGemini: boolean;
+  lecturaActiva?: boolean;
 }
 
 export interface ObjectiveCondition {
@@ -949,7 +980,7 @@ export interface EventLogEntry {
   detalle: string;
 }
 
-export type SimEvent =
+export type SimEvent = (
   | {
       id: string;
       dia: number;
@@ -1133,15 +1164,6 @@ export type SimEvent =
       zona: ZoneId;
       parcelaId: string;
       edificio: BuildingType;
-      causa?: string;
-    }
-  | {
-      id: string;
-      dia: number;
-      tipo: 'parcela_habilitada';
-      zona: ZoneId;
-      parcelaId: string;
-      hitoId: string;
       causa?: string;
     }
   | {
@@ -1417,7 +1439,40 @@ export type SimEvent =
       zona: ZoneId;
       viaId: string;
       causa?: string;
-    };
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'migracion_llegada';
+      zona: ZoneId;
+      hogarId: string;
+      cantidad: number;
+      dinero: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'migracion_salida';
+      zona: ZoneId;
+      hogarId: string;
+      cantidad: number;
+      dinero: number;
+      motivo: 'calle' | 'descontento';
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'capacitacion_inicio' | 'capacitacion_fin';
+      zona: ZoneId;
+      npcId: string;
+      rolObjetivo: RoleId;
+      educNivel: number;
+      costo?: number;
+      causa?: string;
+    }
+) & { notable?: boolean };
 
 export interface CausalStep {
   id: string;
@@ -1444,11 +1499,121 @@ export interface EconomyOutput {
 }
 
 export interface SubsystemRngState {
+  terreno: number;
   clima: number;
   caos: number;
   vida: number;
   mercado: number;
   prensa: number;
+  ritmo: number;
+}
+
+export type LecturaIndicadorId =
+  | 'poblacion'
+  | 'vivienda'
+  | 'comida'
+  | 'empleo'
+  | 'estado'
+  | 'animo'
+  | 'orden';
+
+export type LecturaEstado = 'bien' | 'atencion' | 'mal';
+
+export interface LecturaTexto {
+  clave: string;
+  params: Record<string, string | number>;
+}
+
+export interface LecturaCausaTop {
+  causa: string;
+  peso: number;
+  eventoRaizId: string;
+}
+
+export interface LecturaIndicador {
+  id: LecturaIndicadorId;
+  valor: number;
+  referencia: number;
+  estado: LecturaEstado;
+  tendencia: {
+    dir: -1 | 0 | 1;
+    magnitud: number;
+  };
+  serie: number[];
+  seriePeriodos?: Array<{ periodo: number; valor: number }>;
+  serieAnios?: Array<{ anio: number; valor: number }>;
+  seriesPorZona: Record<ZoneId, number[]>;
+  causasTop: LecturaCausaTop[];
+  texto: LecturaTexto;
+}
+
+export interface LecturaAlerta {
+  id: string;
+  severidad: 1 | 2 | 3;
+  indicador: LecturaIndicadorId;
+  entidad: string;
+  causa?: string;
+  dia: number;
+  activa: boolean;
+  texto: LecturaTexto;
+}
+
+export interface LecturaNotable {
+  npcId: string;
+  nombre: string;
+  tipo: 'empresario' | 'medio';
+  motivo: string;
+  peso: number;
+  diaIngreso: number;
+  zona: ZoneId;
+  firmaId?: string;
+  medioId?: string;
+}
+
+export interface LecturaInterlocutor {
+  npcId: string;
+  tipo: 'empresario' | 'medio';
+  posturaHaciaEstado: number; // -100 a 100
+  intereses: string[];
+  pedidos: Array<Record<string, unknown>>;
+}
+
+export interface LecturaInformeCambio {
+  indicador: LecturaIndicadorId;
+  antes: number;
+  despues: number;
+  estadoAntes: LecturaEstado;
+  estadoDespues: LecturaEstado;
+  causaPrincipal?: string;
+  eventoRaizId?: string;
+  entidades: string[];
+  texto: LecturaTexto;
+}
+
+export interface LecturaInforme {
+  periodo: number;
+  dia: number;
+  cambios: LecturaInformeCambio[];
+  hechosNotables: Array<{
+    eventoId: string;
+    dia: number;
+    tipo: string;
+    npcId?: string;
+    zona: ZoneId;
+    texto: LecturaTexto;
+  }>;
+}
+
+export interface LecturaState {
+  indicadores: Record<LecturaIndicadorId, LecturaIndicador>;
+  ordenIndicadores: LecturaIndicadorId[];
+  alertas: LecturaAlerta[];
+  ultimoAlertaDiaPorClave: Record<string, number>;
+  rachasTendenciaMala: Record<LecturaIndicadorId, number>;
+  notables: LecturaNotable[];
+  informes: LecturaInforme[];
+  ultimoDiaActualizado: number;
+  ultimoPeriodoActualizado: number;
 }
 
 export interface GameState {
@@ -1548,6 +1713,8 @@ export interface GameState {
   };
   autopilotLastBuildDay?: number;
   autopilotLastViaDay?: number;
+  vacantesCriticasRachas?: Record<string, number>;
+  lectura?: LecturaState;
   auditEntradasDia: number;
   auditSalidasDia: number;
   ultimoDineroTotal: number;

@@ -2,11 +2,13 @@ import { CityWorldCanvas } from './components/CityWorldCanvas';
 import { BottomDock } from './components/hud/BottomDock';
 import { CausalInspectModal } from './components/hud/CausalChainView';
 import { CityWindow } from './components/hud/CityWindow';
+import { DespachoWindow } from './components/hud/DespachoWindow';
 import { EconomyWindow } from './components/hud/EconomyWindow';
 import { GameHudTop } from './components/hud/GameHudTop';
 import { GazetteWindow } from './components/hud/GazetteWindow';
 import { LeversWindow } from './components/hud/LeversWindow';
 import { SideInspectorPanel } from './components/hud/SideInspectorPanel';
+import { TemaDrawer } from './components/hud/TemaDrawer';
 import { OutcomeBanner } from './components/OutcomeBanner';
 import { StartBriefingModal } from './components/StartBriefingModal';
 import { WorldConfigModal } from './components/WorldConfigModal';
@@ -14,7 +16,7 @@ import { useGameSession } from './hooks/useGameSession';
 
 export default function App() {
   const session = useGameSession();
-  const zFor = (id: 'palancas' | 'economia' | 'ciudad' | 'gaceta') =>
+  const zFor = (id: 'palancas' | 'economia' | 'ciudad' | 'gaceta' | 'despacho') =>
     22 + Math.max(0, session.openWindows.indexOf(id));
 
   return (
@@ -32,6 +34,7 @@ export default function App() {
         hoveredPreview={session.hoveredPreview}
         filter={session.mapFilter}
         lens={session.mapLens}
+        lecturaHeatIndicator={session.lecturaHeatId}
         followSelected={session.followSelected}
         cameraTarget={session.cameraTarget}
         zoomRequest={session.zoomRequest}
@@ -56,6 +59,7 @@ export default function App() {
         noRender={session.noRender}
         simStepMs={session.simStepMs}
         soundMuted={session.soundMuted}
+        activeTemaId={session.activeTemaId}
         paydaySummary={session.paydaySummary}
         monthlySummary={session.monthlySummary}
         onTogglePause={session.togglePause}
@@ -66,6 +70,8 @@ export default function App() {
         onDismissMonthly={session.dismissMonthlySummary}
         onSetNoRender={session.setNoRender}
         onSetDevPopulation={session.setDevPopulation}
+        onSetDevSeed={session.setDevSeed}
+        onSetLecturaActiva={session.setLecturaActiva}
         onSetDevComplexity={session.setDevComplexity}
         onSetEstadoAutomatico={session.setEstadoAutomatico}
         onForceClimate={session.forceClimatePhenomenon}
@@ -75,7 +81,23 @@ export default function App() {
         onOpenObjetivo={() => session.openCiudadTab('bitacora')}
         onOpenEconomia={() => session.openWindow('economia')}
         onOpenDemandas={() => session.openCiudadTab('alertas')}
+        onOpenTema={session.openTema}
+        onOpenDespacho={session.openDespachoTab}
       />
+
+      {session.activeTemaId && session.state.config.lecturaActiva !== false && (
+        <TemaDrawer
+          state={session.state}
+          indicatorId={session.activeTemaId}
+          heatmapActive={session.lecturaHeatId === session.activeTemaId}
+          onToggleHeatmap={session.toggleLecturaHeatmap}
+          onJumpZone={session.jumpToZone}
+          onInspectCausal={(title, ref, fallbackText) =>
+            session.openCausalInspect({ title, ref, fallbackText })
+          }
+          onClose={() => session.setActiveTemaId(null)}
+        />
+      )}
 
       {/* 3. Unified Lateral Panel (NPC, Hogar, Parcela, Firma, Vía, Zona, Medio, Landmark, Explorar, Construir) */}
       <SideInspectorPanel
@@ -185,6 +207,25 @@ export default function App() {
           onTriggerPress={session.triggerPressManual}
           onOpenPalancas={() => session.openWindow('palancas')}
           onSelectMedio={session.selectMedio}
+          onInspectCausal={(title, ref, fallbackText) =>
+            session.openCausalInspect({ title, ref, fallbackText })
+          }
+        />
+      )}
+
+      {session.openWindows.includes('despacho') && (
+        <DespachoWindow
+          state={session.state}
+          zIndex={zFor('despacho')}
+          tabRequest={session.despachoTabRequest}
+          heatmapIndicatorId={session.lecturaHeatId}
+          onFocus={() => session.focusWindow('despacho')}
+          onClose={() => session.closeWindow('despacho')}
+          onOpenTema={session.openTema}
+          onToggleHeatmap={session.toggleLecturaHeatmap}
+          onJumpZone={session.jumpToZone}
+          onSelectNpc={session.selectNpc}
+          onFollowNpc={session.followNpcById}
           onInspectCausal={(title, ref, fallbackText) =>
             session.openCausalInspect({ title, ref, fallbackText })
           }

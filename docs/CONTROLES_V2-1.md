@@ -28,6 +28,11 @@
 
 Cada control tiene un rango válido (parámetros del preset) y el mundo acota lo que recibe.
 
+**Unidades del motor (decididas):**
+- `salario_publico`: % del valor base (`salarioBasePublico`), rango 50-150. La UI muestra también el monto diario equivalente.
+- `puestos[ingeniero]` y `operacion[obras]`: el motor los expone juntos como un único nivel de obras 0..5; el contrato conserva los dos controles y el nivel los fija a la vez.
+- `tope_precio`: tres modos (`libre` = sin tope, `moderado` = 1,25×, `estricto` = 0,6× el `precio_base`).
+
 **Valencia de cada cambio** (para el tono de la prensa): como v1: subir `tasa_impuesto` o bajar `salario_publico`, `puestos`, `operacion`, `ayuda_social` o `garantia_pct` es mala noticia; un `tope_precio` más bajo es buena; `flujo_exterior_pct` y `fondos_prensa` son neutros. Inaugurar un edificio público o una vía es buena noticia; demolerlo, mala.
 
 ## 3. Órdenes y medidas
@@ -39,7 +44,6 @@ Cada control tiene un rango válido (parámetros del preset) y el mundo acota lo
 | `construir {tipo, parcela}` | La parcela es pública y libre, y la reserva cubre el costo (EDIFICIOS_V2 §3) |
 | `construir_via {tipo, tramo}` | El tramo está en el suelo urbanizable, se conecta a la red construida y la reserva cubre el costo (EDIFICIOS_V2 §3b) |
 | `demoler {parcela}` | La parcela tiene un edificio público |
-| `habilitar {parcelas[]}` | Las parcelas están bloqueadas |
 
 En el mundo base solo las ejecuta el estado en piloto automático para servicios, y las firmas y hogares construyen por su cuenta con sus propias reglas (no son órdenes).
 
@@ -74,6 +78,7 @@ En el mundo base solo las ejecuta el estado en piloto automático para servicios
 | Persona | La ficha completa de la persona en foco, su hogar, su familia, sus partes y su **agenda** del día (lote de cada franja) |
 | Historial | Las series de MUNDO_V2 §11 |
 | Causas | La cadena "¿por qué pasó esto?" de cualquier evento, persona, hogar, firma o noticia |
+| Lectura | Indicadores de vistazo con estado, tendencia, serie y causas; alertas priorizadas; informe periódico; personas notables e interlocutores (LECTURA_V2) |
 
 La **agenda** (dónde está cada persona en cada franja del día) la deriva el motor del rol, la etapa, el hogar y la hora (MOTOR_V2 §7) y la UI solo la anima por la red de rutas. Las reglas usan el costo de ruta (compra, trabajo, traslado), no la posición minuto a minuto.
 
@@ -83,6 +88,10 @@ Cada evento lleva `id`, día, zona, actores, `origen` y, si lo hay, `causa`. Los
 
 ```
 nacimiento          {npc, hogar, padres[]}
+migracion_llegada  {hogar, personas[], dinero}
+migracion_salida   {hogar, personas[], causa}
+capacitacion_inicio {npc, rol_objetivo}
+capacitacion_fin   {npc, educacion}
 pareja              {npcs[], hogar_nuevo}
 separacion          {npcs[], hogares[]}
 hogar_nuevo         {hogar, miembros[], motivo: independizacion | pareja | hacinamiento}

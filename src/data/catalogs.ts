@@ -98,6 +98,15 @@ export const LOT_CLASS_MIN_TILES: Record<LotClass, { w: number; h: number }> = {
   XL: { w: 6, h: 6 },
 };
 
+export const PERSONALITY_TRAITS = [
+  'valentia',
+  'laboriosidad',
+  'codicia',
+  'rebeldia',
+  'resiliencia',
+  'sociabilidad',
+] as const;
+
 export const AGENDA_CONSTANTS = {
   baldosasPorHora: 18,
   franjas: [
@@ -500,11 +509,26 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     parcelTipo: 'publica',
     claseMinima: 'L',
     categoria: 'publico',
-    construibleGobernador: false,
+    construibleGobernador: true,
     requiereG2: false,
-    costoObra: 0,
-    mantenimientoPeriodo: 0,
-    diasObra: 0,
+    costoObra: 280,
+    mantenimientoPeriodo: 18,
+    diasObra: 3,
+    lugaresEstudio: 50,
+    puestos: puestos({ docente: 4 }),
+  },
+  universidad: {
+    tipo: 'universidad',
+    nombre: 'Universidad',
+    parcelTipo: 'publica',
+    claseMinima: 'L',
+    categoria: 'publico',
+    construibleGobernador: true,
+    requiereG2: false,
+    costoObra: 420,
+    mantenimientoPeriodo: 28,
+    diasObra: 4,
+    lugaresEstudio: 40,
     puestos: puestos({ docente: 4 }),
   },
   oficina_publica: {
@@ -629,6 +653,8 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
 export const GOVERNOR_BUILDABLE_TYPES: BuildingType[] = [
   'hospital',
   'comisaria',
+  'escuela',
+  'universidad',
   'muralla',
   'silo',
   'riego',
@@ -839,6 +865,82 @@ export const VIAL_CONSTANTS = {
   kLujo: 0.28,
   precioExternoBienes: 3.1,
   produccionBaseObreroBienes: 5.0,
+} as const;
+
+export const TERRAIN_CONSTANTS = {
+  baldosasPorPersona: 14,
+  ladoMin: 48,
+  ladoMax: 180,
+  nivelAgua: 0.21,
+  umbralMonte: 0.62,
+  umbralMontana: 0.8,
+  umbralPendiente: 0.16,
+  nRios: 2,
+  sueloMinimoPct: 0.54,
+  areaMinimaNucleoPct: 0.3,
+  factorMonte: 1.35,
+  factorPendiente: 1.25,
+  costoPuentePorBaldosa: 24,
+} as const;
+
+export const LAND_CONSTANTS = {
+  precioBaseLote: {
+    S: 30,
+    M: 55,
+    L: 90,
+    XL: 135,
+  } as Record<LotClass, number>,
+  kAcceso: 0.65,
+} as const;
+
+export const EDUCATION_CONSTANTS = {
+  edadEgreso: 18,
+  edadMaxJovenUniv: 24,
+  rutaMaxEducacion: 42,
+  umbralCoberturaEscuela: 0.75,
+  umbralCoberturaUniversidad: 0.65,
+} as const;
+
+export const MIGRATION_CONSTANTS = {
+  maxLlegadas: 2,
+  dineroMigranteBase: 75,
+  periodosParaEmigrar: 4,
+  umbralEmigrarSatisfaccion: 30,
+  periodosDescontentoEmigrar: 4,
+} as const;
+
+export const TRAINING_CONSTANTS = {
+  periodosVacanteCritica: 3,
+  periodosCapacitacion: 2,
+  costoCapacitacion: 45,
+  edadMaxCapacitacion: 50,
+  aptitudMinCapacitacion: 52,
+} as const;
+
+export const RITMO_CONSTANTS = {
+  pHabito: 0.72,
+  faltazgoBaseProb: 0.04,
+  faltazgoPenaltyFactor: 0.55,
+  cronotipoMin: -2,
+  cronotipoMax: 2,
+} as const;
+
+export const LECTURA_CONSTANTS = {
+  ventanaReferencia: 21,
+  ventanaTendencia: 7,
+  bandaEstable: 0.04,
+  umbralAtencion: 0.15,
+  umbralMal: 0.32,
+  histeresisFactor: 0.8,
+  periodosTendenciaMala: 3,
+  enfriamientoAlertaDias: 7,
+  alertasVisiblesMax: 3,
+  ventanaSerieDias: 60,
+  notablesMax: 12,
+  notablesPct: 0.04,
+  pesoAlto: 45,
+  pesoBajo: 25,
+  diasMinNotable: 14,
 } as const;
 
 export const SPEND_CATEGORY_WEIGHTS: Record<SpendCategory, number> = {

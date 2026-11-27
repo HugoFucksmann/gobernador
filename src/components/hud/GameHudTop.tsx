@@ -1,16 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Activity,
+  AlertCircle,
   AlertTriangle,
-  Building2,
+  BookOpen,
+  Briefcase,
   CheckCircle2,
   CloudRain,
   Coins,
   Download,
   EyeOff,
+  FileBarChart2,
   Home,
   Pause,
   Play,
+  Shield,
   Skull,
+  Smile,
   StepForward,
   TrendingUp,
   Upload,
@@ -21,17 +27,24 @@ import {
   X,
 } from 'lucide-react';
 import { ECON_CONSTANTS, PERIOD_DAYS, SCENARIO_PRESETS } from '../../data/catalogs';
+import {
+  alertas_visibles,
+  formatLecturaTexto,
+  indicadores_resumen,
+} from '../../engine/lecturaV2';
 import { estimatePeriodBudget, sumPeriodExpenses } from '../../engine/policies';
 import { getActivePhenomena, getAnnouncedPhenomena } from '../../engine/simulation';
 import {
   CommunityDerived,
   GameState,
   GovernorComplexityLevel,
+  LecturaIndicadorId,
   PhenomenonType,
   WorldComplexityLevel,
   ZoneId,
 } from '../../types/game';
-import { AiStatus, MonthlySummary, PaydaySummary } from '../../types/ui';
+import { AiStatus, DespachoTab, MonthlySummary, PaydaySummary } from '../../types/ui';
+import { INDICATOR_LABELS, SparklineSvg } from './TemaDrawer';
 import { UiTooltip } from './UiTooltip';
 
 interface GameHudTopProps {
@@ -45,6 +58,7 @@ interface GameHudTopProps {
   noRender: boolean;
   simStepMs: number;
   soundMuted: boolean;
+  activeTemaId: LecturaIndicadorId | null;
   paydaySummary: PaydaySummary | null;
   monthlySummary: MonthlySummary | null;
   onTogglePause: () => void;
@@ -54,6 +68,8 @@ interface GameHudTopProps {
   onDismissPayday: () => void;
   onDismissMonthly: () => void;
   onSetDevPopulation: (pop: number) => void;
+  onSetDevSeed: (semilla: number) => void;
+  onSetLecturaActiva: (enabled: boolean) => void;
   onSetDevComplexity: (nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel) => void;
   onSetEstadoAutomatico: (enabled: boolean) => void;
   onSetNoRender: (enabled: boolean) => void;
@@ -64,9 +80,24 @@ interface GameHudTopProps {
   onOpenObjetivo: () => void;
   onOpenEconomia: () => void;
   onOpenDemandas: () => void;
+  onOpenTema: (id: LecturaIndicadorId) => void;
+  onOpenDespacho: (tab?: DespachoTab) => void;
 }
 
 const SPEEDS = [1, 2, 5, 20] as const;
+
+const GLANCE_META: Record<
+  LecturaIndicadorId,
+  { short: string; Icon: React.ComponentType<{ className?: string }> }
+> = {
+  poblacion: { short: 'Pob', Icon: Users },
+  vivienda: { short: 'Viv', Icon: Home },
+  comida: { short: 'Com', Icon: Wheat },
+  empleo: { short: 'Emp', Icon: Briefcase },
+  estado: { short: 'Est', Icon: Activity },
+  animo: { short: 'Áni', Icon: Smile },
+  orden: { short: 'Ord', Icon: Shield },
+};
 
 export const GameHudTop: React.FC<GameHudTopProps> = ({
   state,
@@ -79,6 +110,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   noRender,
   simStepMs,
   soundMuted,
+  activeTemaId,
   paydaySummary,
   monthlySummary,
   onTogglePause,
@@ -88,6 +120,8 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   onDismissPayday,
   onDismissMonthly,
   onSetDevPopulation,
+  onSetDevSeed,
+  onSetLecturaActiva,
   onSetDevComplexity,
   onSetEstadoAutomatico,
   onSetNoRender,
@@ -98,11 +132,14 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   onOpenObjetivo,
   onOpenEconomia,
   onOpenDemandas,
+  onOpenTema,
+  onOpenDespacho,
 }) => {
   const zoneIds = Object.keys(state.zonas);
   const [devFenom, setDevFenom] = useState<PhenomenonType>('sequia');
   const [devZona, setDevZona] = useState<ZoneId>(zoneIds[0] ?? 'centro');
   const [devPopInput, setDevPopInput] = useState<number>(state.config.poblacionInicial);
+  const [devSeedInput, setDevSeedInput] = useState<number>(state.semilla);
   const [devImportFeedback, setDevImportFeedback] = useState<string | null>(null);
   const [fps, setFps] = useState<number>(60);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -110,6 +147,10 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   useEffect(() => {
     setDevPopInput(state.config.poblacionInicial);
   }, [state.config.poblacionInicial]);
+
+  useEffect(() => {
+    setDevSeedInput(state.semilla);
+  }, [state.semilla]);
 
   useEffect(() => {
     if (!state.zonas[devZona] && zoneIds.length > 0) {
@@ -220,6 +261,11 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       ? 'text-amber-300'
       : 'text-zinc-400';
 
+  const lecturaOn = state.config.lecturaActiva !== false;
+  const summaryIndicators = lecturaOn ? indicadores_resumen(state) : [];
+  const visibleAlerts = lecturaOn ? alertas_visibles(state) : [];
+  const totalInformes = state.lectura?.informes.length ?? 0;
+
   const daysToClose = Math.max(1, PERIOD_DAYS - state.reloj.diasEnPeriodo);
   const reserveColor =
     reserveWeeks < 1.5 || fin.impago
@@ -233,18 +279,6 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       : state.alimento.diasStock < 10
       ? 'text-amber-300'
       : 'text-zinc-100';
-  const popColor =
-    derived.poblacionPct < 75
-      ? 'text-rose-400'
-      : derived.hambreCriticaPct > 20 || derived.descontentosPct > 30
-      ? 'text-amber-300'
-      : 'text-zinc-100';
-  const streetColor =
-    derived.callePct > 18
-      ? 'text-rose-400'
-      : derived.callePct > 8
-      ? 'text-amber-300'
-      : 'text-emerald-400';
 
   const triggerDownload = (filename: string, payload: string) => {
     if (typeof window === 'undefined' || typeof Blob === 'undefined') return;
@@ -455,50 +489,96 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
           )}
         </div>
 
-        {/* Right HUD Capsule: World Observatory KPIs (Pob · Hog · Calle % · Firmas) + Governor Treasury */}
-        <div className="pointer-events-auto hidden sm:flex items-center gap-4 bg-zinc-900/90 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-4 py-2 shadow-2xl font-mono tabular-nums text-sm">
-          <UiTooltip
-            text={`Población: ${derived.poblacion} vivos · Ánimo ${derived.satisfaccionMedia}% · Hambre crítica ${derived.hambreCriticaPct}% · Natalidad ${derived.natalidad}%`}
-          >
-            <div className="flex items-center gap-1.5 cursor-default whitespace-nowrap">
-              <Users className={`w-4 h-4 shrink-0 ${popColor}`} />
-              <span className="font-sans text-xs text-zinc-400">Pob</span>
-              <span className={`font-bold ${popColor}`}>{derived.poblacion.toLocaleString('es-AR')}</span>
+        {/* Right HUD Capsule: Lectura Glance Indicators + Despacho + Governor Treasury */}
+        <div className="pointer-events-auto hidden sm:flex items-center gap-2 bg-zinc-900/90 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-3 py-1.5 shadow-2xl font-mono tabular-nums text-xs">
+          {lecturaOn && summaryIndicators.length > 0 ? (
+            <div className="flex items-center gap-1">
+              {summaryIndicators.map((ind) => {
+                const { short, Icon } = GLANCE_META[ind.id];
+                const toneColor =
+                  ind.estado === 'mal'
+                    ? 'text-rose-400'
+                    : ind.estado === 'atencion'
+                    ? 'text-amber-300'
+                    : 'text-emerald-400';
+                const stroke =
+                  ind.estado === 'mal'
+                    ? '#fb7185'
+                    : ind.estado === 'atencion'
+                    ? '#fbbf24'
+                    : '#10b981';
+                const trendArrow =
+                  ind.tendencia.dir > 0 ? '↑' : ind.tendencia.dir < 0 ? '↓' : '→';
+                const trendColor =
+                  ind.tendencia.dir > 0
+                    ? 'text-emerald-400'
+                    : ind.tendencia.dir < 0
+                    ? 'text-rose-400'
+                    : 'text-zinc-500';
+                const isActive = activeTemaId === ind.id;
+                const tooltipText = `${INDICATOR_LABELS[ind.id]}: ${ind.valor} (ref. ${ind.referencia}) · ${formatLecturaTexto(ind.texto)}`;
+                return (
+                  <UiTooltip key={ind.id} text={tooltipText}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenTema(ind.id)}
+                      aria-label={`Abrir tema ${INDICATOR_LABELS[ind.id]}`}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded-xl border transition-colors whitespace-nowrap shrink-0 ${
+                        isActive
+                          ? 'bg-emerald-950/75 border-emerald-500/70 text-white'
+                          : ind.estado === 'mal'
+                          ? 'bg-rose-950/35 border-rose-500/40 hover:bg-rose-950/60'
+                          : ind.estado === 'atencion'
+                          ? 'bg-amber-950/30 border-amber-500/35 hover:bg-amber-950/55'
+                          : 'bg-zinc-800/55 border-transparent hover:bg-zinc-800'
+                      }`}
+                    >
+                      <Icon className={`w-3.5 h-3.5 shrink-0 ${toneColor}`} />
+                      <span className="font-sans text-[11px] font-semibold text-zinc-200">
+                        {short}
+                      </span>
+                      <span className={`font-bold ${trendColor}`}>{trendArrow}</span>
+                      <SparklineSvg values={ind.serie} stroke={stroke} width={30} height={14} />
+                      {devMode && (
+                        <span className="text-[11px] font-bold text-zinc-100">{ind.valor}</span>
+                      )}
+                    </button>
+                  </UiTooltip>
+                );
+              })}
             </div>
-          </UiTooltip>
-
-          <UiTooltip
-            text={`Hogares: ${derived.hogares} · Hacinamiento ${derived.hacinamientoPct}% · Despensa media ${derived.despensaMediaDias.toFixed(1)}d`}
-          >
-            <div className="flex items-center gap-1.5 cursor-default whitespace-nowrap">
-              <Home className="w-4 h-4 shrink-0 text-sky-400" />
-              <span className="font-sans text-xs text-zinc-400">Hog</span>
-              <span className="font-bold text-zinc-100">{derived.hogares.toLocaleString('es-AR')}</span>
+          ) : (
+            <div className="flex items-center gap-3 px-1 text-zinc-300">
+              <span>Pob {derived.poblacion.toLocaleString('es-AR')}</span>
+              <span>Calle {derived.callePct}%</span>
             </div>
-          </UiTooltip>
+          )}
 
-          <UiTooltip text={`Hogares en la calle: ${derived.callePct}% · Carga alquiler media ${derived.alquilerCargaMediaPct}%`}>
+          <div className="h-4 w-px bg-zinc-700/70" aria-hidden="true" />
+
+          <UiTooltip text="Despacho de lectura: resumen, historial, informe y personas clave">
             <button
               type="button"
-              onClick={onOpenEconomia}
-              className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
+              onClick={() => onOpenDespacho('resumen')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-zinc-800/85 hover:bg-emerald-600 text-zinc-100 font-sans text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
             >
-              <span className="font-sans text-xs text-zinc-400">Calle</span>
-              <span className={`font-bold ${streetColor}`}>{derived.callePct}%</span>
+              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Despacho</span>
             </button>
           </UiTooltip>
 
-          <UiTooltip text={`Firmas activas: ${derived.mercado.firmas} · Concentración máx. ${derived.mercado.cuotaMayorPct}%`}>
-            <button
-              type="button"
-              onClick={onOpenEconomia}
-              className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
-            >
-              <Building2 className="w-4 h-4 shrink-0 text-amber-400" />
-              <span className="font-sans text-xs text-zinc-400">Firmas</span>
-              <span className="font-bold text-zinc-100">{derived.mercado.firmas}</span>
-            </button>
-          </UiTooltip>
+          {lecturaOn && totalInformes > 0 && (
+            <UiTooltip text="Abrir el último informe periódico">
+              <button
+                type="button"
+                onClick={() => onOpenDespacho('informe')}
+                className="flex items-center gap-1 px-2 py-1 rounded-xl bg-zinc-800/75 hover:bg-zinc-700 text-emerald-300 font-sans text-xs font-semibold transition-colors whitespace-nowrap shrink-0"
+              >
+                <FileBarChart2 className="w-3.5 h-3.5" />
+                <span>Informe</span>
+              </button>
+            </UiTooltip>
+          )}
 
           {!isG0 && (
             <>
@@ -576,6 +656,35 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
           )}
         </div>
       </div>
+
+      {/* Lectura Visible Alerts Strip (max 3) */}
+      {lecturaOn && visibleAlerts.length > 0 && (
+        <div className="pointer-events-auto self-end flex flex-wrap items-center justify-end gap-2">
+          {visibleAlerts.map((al) => {
+            const sevStyle =
+              al.severidad >= 3
+                ? 'bg-rose-950/85 border-rose-500/50 text-rose-200 hover:bg-rose-900/80'
+                : al.severidad === 2
+                ? 'bg-amber-950/85 border-amber-500/50 text-amber-200 hover:bg-amber-900/75'
+                : 'bg-zinc-900/90 border-sky-500/40 text-sky-200 hover:bg-zinc-800';
+            return (
+              <button
+                key={al.id}
+                type="button"
+                onClick={() => onOpenTema(al.indicador)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-medium shadow-lg backdrop-blur-md transition-colors ${sevStyle}`}
+              >
+                {al.severidad >= 3 ? (
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span>{formatLecturaTexto(al.texto)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Non-pausing Weekly Payday Summary Strip (only in Governor mode) */}
       {paydaySummary && !isG0 && (
@@ -746,6 +855,35 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               />
               <span>Auto</span>
             </label>
+            <label className="flex items-center gap-1.5 cursor-pointer text-zinc-200 px-1.5 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={lecturaOn}
+                onChange={(e) => onSetLecturaActiva(e.target.checked)}
+                className="rounded border-zinc-600"
+              />
+              <span>Lectura</span>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-zinc-400">Semilla</span>
+            <input
+              type="number"
+              min={1}
+              max={99999999}
+              value={devSeedInput}
+              onChange={(e) => setDevSeedInput(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              aria-label="Semilla dev"
+              className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-right font-mono text-zinc-100"
+            />
+            <button
+              type="button"
+              onClick={() => onSetDevSeed(devSeedInput)}
+              className="px-2.5 py-1 font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg whitespace-nowrap shrink-0"
+            >
+              Regenerar
+            </button>
           </div>
 
           <div className="flex items-center gap-1.5">

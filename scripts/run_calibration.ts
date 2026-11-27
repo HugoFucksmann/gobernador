@@ -18,6 +18,7 @@ import {
   getActivePhenomena,
   getAnnouncedPhenomena,
   orderBuildInParcela,
+  orderBuildVia,
   orderDemolishParcela,
   pickActionText,
   pickChaosCandidateNpc,
@@ -1333,18 +1334,23 @@ function verifyNewSystems() {
     );
   }
 
-  // 4. Hito unlocking a bloqueada parcela
+  // 4. Hitos remain governor goals while road expansion opens sin_calle parcels
   const hState = makeInitState(15, 'elecciones', {
     nivelMundo: 'M1',
     nivelGobernador: 'G2',
     disableRandomWeather: true,
   });
-  const lockedBefore = hState.parcelas.filter((p) => p.estado === 'bloqueada').length;
+  hState.gobierno.reserva = 5000;
+  const sinCalleBefore = hState.parcelas.filter((p) => p.estado === 'sin_calle').length;
+  const tramoToOpen = hState.tramos.find((t) => !t.construida && !t.enObra);
+  if (tramoToOpen) {
+    orderBuildVia(hState, tramoToOpen.id);
+  }
   for (let i = 0; i < 28; i++) stepHeadlessDay(hState);
-  const lockedAfter = hState.parcelas.filter((p) => p.estado === 'bloqueada').length;
+  const sinCalleAfter = hState.parcelas.filter((p) => p.estado === 'sin_calle').length;
   assert(
-    hState.hitosCumplidos.length >= 1 && lockedAfter < lockedBefore,
-    `Expected hito to unlock at least 1 parcela (cumplidos=${hState.hitosCumplidos.length}, lockedBefore=${lockedBefore}, lockedAfter=${lockedAfter})`
+    hState.hitosCumplidos.length >= 1 && (sinCalleAfter < sinCalleBefore || hState.tramos.some((t) => t.construida)),
+    `Expected hito goal and road opening (cumplidos=${hState.hitosCumplidos.length}, sinCalleBefore=${sinCalleBefore}, sinCalleAfter=${sinCalleAfter})`
   );
 
   // 5. Actor demand creation + accept (lock) + reject (measure)

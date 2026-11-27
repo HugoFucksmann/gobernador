@@ -7,6 +7,7 @@ import {
   DistrictId,
   GovernorComplexityLevel,
   GovernorLevers,
+  LecturaIndicadorId,
   PhenomenonType,
   RoleId,
   WorldComplexityLevel,
@@ -16,6 +17,7 @@ import {
 import {
   CameraTarget,
   CityTab,
+  DespachoTab,
   LandmarkId,
   MapFilter,
   MapHoverPreview,
@@ -39,7 +41,7 @@ interface CausalInspectTarget {
   fallbackText?: string;
 }
 
-export type InspectorDirectoryTab = 'personas' | 'hogares' | 'firmas';
+export type InspectorDirectoryTab = 'personas' | 'hogares' | 'firmas' | 'notables';
 
 export function useGameSession() {
   const controllerRef = useRef<GameController | null>(null);
@@ -54,6 +56,9 @@ export function useGameSession() {
   const [hasStarted, setHasStarted] = useState<boolean>(false);
   const [openWindows, setOpenWindows] = useState<WindowId[]>([]);
   const [ciudadTabRequest, setCiudadTabRequest] = useState<{ tab: CityTab; seq: number } | null>(null);
+  const [despachoTabRequest, setDespachoTabRequest] = useState<{ tab: DespachoTab; seq: number } | null>(null);
+  const [activeTemaId, setActiveTemaId] = useState<LecturaIndicadorId | null>(null);
+  const [lecturaHeatId, setLecturaHeatId] = useState<LecturaIndicadorId | null>(null);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [selectedHogarId, setSelectedHogarId] = useState<string | null>(null);
   const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
@@ -195,6 +200,8 @@ export function useGameSession() {
           setCausalInspect(null);
         } else if (showConfigModal) {
           setShowConfigModal(false);
+        } else if (activeTemaId) {
+          setActiveTemaId(null);
         } else if (openWindows.length > 0) {
           setOpenWindows((prev) => prev.slice(0, -1));
         } else if (
@@ -224,6 +231,7 @@ export function useGameSession() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     hasStarted,
+    activeTemaId,
     openWindows.length,
     selectedNpcId,
     selectedHogarId,
@@ -374,6 +382,17 @@ export function useGameSession() {
   const setDevMode = useCallback((enabled: boolean) => controller.setDevMode(enabled), [controller]);
   const setNoRender = useCallback((enabled: boolean) => controller.setNoRender(enabled), [controller]);
   const setDevPopulation = useCallback((pop: number) => controller.setDevPopulation(pop), [controller]);
+  const setDevSeed = useCallback((semilla: number) => controller.setDevSeed(semilla), [controller]);
+  const setLecturaActiva = useCallback(
+    (enabled: boolean) => {
+      if (!enabled) {
+        setActiveTemaId(null);
+        setLecturaHeatId(null);
+      }
+      controller.setLecturaActiva(enabled);
+    },
+    [controller]
+  );
   const setEstadoAutomatico = useCallback(
     (enabled: boolean) => controller.setEstadoAutomatico(enabled),
     [controller]
@@ -604,6 +623,31 @@ export function useGameSession() {
     [openWindow]
   );
 
+  const openDespachoTab = useCallback(
+    (tab: DespachoTab = 'resumen') => {
+      openWindow('despacho');
+      uiSeqRef.current += 1;
+      setDespachoTabRequest({ tab, seq: uiSeqRef.current });
+    },
+    [openWindow]
+  );
+
+  const openTema = useCallback((id: LecturaIndicadorId) => {
+    setActiveTemaId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const toggleLecturaHeatmap = useCallback((id: LecturaIndicadorId) => {
+    setLecturaHeatId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const followNpcById = useCallback(
+    (npcId: string) => {
+      selectNpc(npcId);
+      setFollowSelected(true);
+    },
+    [selectNpc]
+  );
+
   const openLandmarkWindow = useCallback(
     (winId: WindowId, _tabHint?: CityTab) => {
       const lm: LandmarkId =
@@ -661,6 +705,9 @@ export function useGameSession() {
     hasStarted,
     openWindows,
     ciudadTabRequest,
+    despachoTabRequest,
+    activeTemaId,
+    lecturaHeatId,
     followSelected,
     mapFilter,
     mapLens,
@@ -681,12 +728,17 @@ export function useGameSession() {
     toggleWindow,
     focusWindow,
     openCiudadTab,
+    openDespachoTab,
+    openTema,
+    setActiveTemaId,
+    toggleLecturaHeatmap,
     openLandmarkWindow,
     toggleBuildPanel,
     openInspectorDirectory,
     setInspectorSearchOpen,
     clearSidePanel,
     setFollowSelected,
+    followNpcById,
     cancelFollow,
     setMapFilter,
     setMapLens,
@@ -718,6 +770,8 @@ export function useGameSession() {
     setDevMode,
     setNoRender,
     setDevPopulation,
+    setDevSeed,
+    setLecturaActiva,
     setEstadoAutomatico,
     setDevComplexity,
     forceClimatePhenomenon,

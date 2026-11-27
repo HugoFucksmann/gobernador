@@ -22,9 +22,10 @@
   "id": "npc_07", "nombre": "Marta", "apellido": "Gil", "edad": 34, "cumple_dia": 212,
   "hogar": "h_12", "pareja": "npc_09", "padres": ["npc_02", "npc_03"],
   "educacion": 1,
-  "personalidad": { "valentia": 35, "laboriosidad": 80, "codicia": 60, "rebeldia": 20, "resiliencia": 55 },
+  "personalidad": { "valentia": 35, "laboriosidad": 80, "codicia": 60, "rebeldia": 20, "resiliencia": 55, "sociabilidad": 50 },
   "variables": { "salud": 90, "hambre": 20, "miedo": 10, "satisfaccion": 65, "lealtad": 70 },
   "economia": { "ingreso_pos": 60, "propension_gasto": 45, "propension_emprender": 30 },
+  "ritmo": { "cronotipo": -1, "gustos": { "bienes": 30, "gastronomia": 40, "servicios": 10, "entretenimiento": 20 }, "habitos": ["l_club_2", "l_bar_5"] },
   "partes": [{ "firma": "f_3", "pct": 50 }],
   "rol": "comerciante", "empleador": "f_3", "zona": "este", "internado": false, "accion": null,
   "modificadores": []
@@ -36,6 +37,19 @@
 - **`dinero` y `despensa` pasan al hogar** (sección 3). La persona conserva `ingreso_pos`, `propension_gasto` y `propension_emprender` (fija, sale de codicia, laboriosidad y rebeldía más la semilla).
 - **`partes`:** su propiedad de firmas (ECONOMIA_V2 §5). Las partes no son un rol: un desempleado puede ser dueño y un empresario puede estar sin partes.
 - **`empleador`:** la firma donde trabaja, si es empleado privado.
+- **Personalidad y rutina:** cada rasgo tiene un efecto en el día a día (detalle en MOTOR_V2 §7). Los rasgos y el `ritmo` salen de la semilla y se mezclan al nacer.
+
+| Rasgo / dato | Efecto |
+|---|---|
+| `laboriosidad` | puntualidad, productividad, emprender |
+| `codicia` | ahorro frente a gasto, comprar firmas, aceptar un alquiler caro |
+| `valentia` | riesgo, emprender, salir de noche |
+| `rebeldia` | faltazgos, protesta (caos) |
+| `resiliencia` | velocidad de recuperación de la satisfacción |
+| `sociabilidad` | ocio fuera de casa, visitas, pareja, hijos |
+| `ritmo.cronotipo` | desfase de horas (−2 a +2) en salida y regreso; derivado de la semilla y la edad |
+| `ritmo.gustos` | pesos por categoría de gasto: dispersan el consumo |
+| `ritmo.habitos` | 2-3 lugares de ocio y compras habituales |
 
 ## 3. Hogar
 
@@ -45,7 +59,7 @@
 ```
 
 - **Unidad de consumo, vivienda y herencia.** Cobra el ingreso de todos sus miembros y paga comida, alquiler, mantenimiento propio y gasto de vida (ECONOMIA_V2 §3).
-- **Estados:** `con_casa` o `calle`.
+- **Estados:** `con_casa` o `calle`. Los menores sin adulto ni pariente pasan a un hogar de acogida (ver Composición), que no ocupa casa.
 - **Composición:** al menos un adulto. Un menor sin adulto en su hogar pasa al hogar de un pariente (hermano, abuelo, tío por `padres`). Sin pariente, pasa a un **hogar de acogida** **[propuesta]**: lo paga el estado y no ocupa casa.
 - **Despensa:** días de comida de todos sus miembros; se conserva solo con casa.
 - Los hogares se crean al generar el mundo, por pareja, por independización o por separación por hacinamiento (sección 5), y se disuelven cuando mueren todos sus miembros.
@@ -68,13 +82,15 @@ Cada evento que cambia la composición de un hogar genera un evento con origen (
 
 - **Etapas** como v1: menor (< 18), adulto (18-64), jubilado (65 o más). La edad sube en su `cumple_dia`.
 - **Mortalidad por edad:** probabilidad diaria que crece con la edad (casi nula hasta la adultez, alta en la vejez), más las causas de MUNDO_V1 §6 (golpes, hambre crítica). No es evitable por el estado: no suma `culpa`.
-- **Educación:** al egresar a los 18, el nivel sale de la aptitud (laboriosidad, resiliencia), del ingreso de su hogar y de la oferta educativa de su zona **[propuesta]**; no hay educación como servicio en el mundo base.
+- **Educación:** al egresar a los 18, el nivel sale de la aptitud (laboriosidad, resiliencia), del ingreso de su hogar y de los edificios educativos al alcance por ruta **[propuesta]**: el nivel 2 pide una `escuela` al alcance y el nivel 3 pide una `universidad` al alcance. Sin ellas, el tope es 1 y 2 respectivamente. No hay carreras ni pipeline por oficio.
 - **Parejas:** cada período demográfico, adultos solteros se emparejan por cercanía de zona, edades próximas y afinidad de personalidad. La pareja se muda a un solo hogar (el que tenga casa más grande; si ninguno tiene, a calle o al hogar de los padres).
 - **Nacimientos:** cada período demográfico, un hogar con una pareja en edad fértil (`edad_fertil`), casa con lugar y satisfacción sobre `umbral_natalidad` tira un nacimiento. La probabilidad baja con ingreso insuficiente o falta de espacio; hay un `tope_natalidad` global por período. El bebé nace menor, en ese hogar, con rasgos mezclados de sus padres más la semilla.
 - **Independización:** a partir de `edad_independizacion`, un hijo con ingreso suficiente y una casa libre que pueda pagar forma hogar propio; si no, se queda.
 - **Separaciones:** una pareja puede separarse (probabilidad baja, sube con la pobreza y el hacinamiento). Los bienes y los hijos se reparten por regla fija **[propuesta]**.
 - **Muerte y herencia:** al morir una persona, su `dinero` es del hogar. Sus partes de firma pasan al cónyuge y a los hijos en partes iguales (ECONOMIA_V2 §9). Si muere el último miembro, el hogar se disuelve y todo (dinero, casa, partes) va a sus hijos adultos (cada uno a su hogar), o a un pariente, o al estado si no hay nadie.
 - **Duelo:** como MUNDO_V1 §6: baja la satisfacción en su hogar y su zona, más lealtad solo en muertes evitables.
+- **Migración [propuesta]:** cada período demográfico, si hay casas libres y vacantes, llegan hasta `max_llegadas` hogares nuevos (personas generadas por semilla) con `dinero_migrante`, que entra como dinero del exterior (ECONOMIA_V2 §12). Se van los hogares sin casa propia ni partes de firma que llevan más de `periodos_para_emigrar` en la calle o con satisfacción bajo `umbral_emigrar` sostenida; su dinero sale del mundo. Eventos `migracion_llegada` y `migracion_salida` con causa. Es la válvula contra la extinción en mundos chicos; `max_llegadas` en 0 la apaga.
+- **Capacitación [propuesta]:** si un puesto crítico (médico, docente, policía, ingeniero u otro con `educ_min`) queda vacante más de `periodos_vacante_critica` y nadie cumple la educación pedida, un adulto de aptitud alta (laboriosidad, resiliencia) y menos de `edad_max_capacitacion` se capacita durante `periodos_capacitacion`: no trabaja ese tiempo, su hogar paga `costo_capacitacion` y al terminar sube un nivel de `educacion` hasta el máximo que permiten las escuelas y universidades al alcance. Evento `capacitacion_inicio` y `capacitacion_fin` con causa. Es lo que permite que un mundo chico cubra un rol que le falta sin esperar una generación.
 - **Longevidad del mundo:** con las reglas correctas, la población se sostiene o se acomoda a la economía; no hay tope artificial salvo `tope_natalidad`.
 
 ## 6. Salud
@@ -83,6 +99,7 @@ Como MUNDO_V1 §6 (golpes, hambre crítica, vulnerabilidad por edad, hospital, c
 
 - La **calle** suma un recargo diario de daño y frena la cura natural.
 - La **mortalidad por edad** es una causa más.
+- **Enfermedad común:** no hay subsistema. `salud` tiene una deriva diaria que baja con la edad, la calle y el hambre; al caer bajo el umbral de internación la persona va al hospital con cama libre (MUNDO_V1 §6). Así el hospital trabaja aunque no haya golpes.
 - Al morir: sale de su hogar, su puesto queda vacante, si era columnista sale de su medio y se abre la herencia (sección 5).
 
 ## 7. Roles
@@ -121,7 +138,7 @@ Como MUNDO_V1 §6 (golpes, hambre crítica, vulnerabilidad por edad, hospital, c
 
 - **8 a 12 zonas activas al empezar** (más con escala alta), más las zonas `no_urbanizada` que traiga el preset. Cada zona es un conjunto de baldosas; la vecindad (contigüidad) se deriva del mapa y la distancia entre zonas es el número de pasos entre vecinas, como MUNDO_V1 §4.
 - **Tipos de parcela:** `residencial`, `comercial`, `agricola`, `industrial`, `publica` y `especial`. Cada zona define cuántas de cada tipo y en qué orden. `especial` reserva puntos de interés del mapa (plaza, puerto, muelle de comercio exterior) y no se edifica.
-- **Estados:** `sin_calle` (existe en el suelo urbanizable pero no tiene acceso), `bloqueada` (se habilita más adelante por hitos, capa del gobernador), `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` no admite ninguna obra.
+- **Estados:** `sin_calle` (existe en el suelo urbanizable pero no tiene acceso), `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` no admite ninguna obra.
 - Cada lote tiene posición y tamaño en el mapa (MAPA_V2 §4); sus eventos se ven ahí.
 - **Carácter de zona [propuesta]:** centro con comercios y edificios públicos, anillo residencial, periferia con campos. Los precios de alquiler y la demanda de comercio varían por zona.
 - **Red vial y expansión de la ciudad.**
@@ -144,7 +161,7 @@ Como MUNDO_V1 §6 (golpes, hambre crítica, vulnerabilidad por edad, hospital, c
 - **Servicios, seguridad, defensa, orden e integridad:** como MUNDO_V1 §7 y §8, con estos cambios:
   - La referencia de cobertura se calcula sobre la **población actual** de cada zona (no la inicial), así los nacimientos y las muertes ajustan sin desbalancear.
   - La **calle** suma miedo y necesidad de orden en su zona.
-- **Estado en piloto automático [propuesta]:** sin gobernador, el estado sostiene los servicios con una regla fija: cuando la cobertura de policía o médico cae bajo la referencia y la reserva alcanza, construye una comisaría u hospital en una parcela pública libre; cuando sobra capacidad por mucho tiempo, no demuele. Esta regla existe solo para calibrar y desaparece cuando entra el gobernador (CONTROLES_V2 §1).
+- **Estado en piloto automático [propuesta]:** sin gobernador, el estado sostiene los servicios con una regla fija: cuando la cobertura de policía, médico, escuela o universidad cae bajo la referencia y la reserva alcanza, construye una comisaría, un hospital, una escuela o una universidad en una parcela pública libre (la cobertura de escuela se mide sobre los menores y la de universidad sobre los jóvenes de la zona y su entorno); cuando sobra capacidad por mucho tiempo, no demuele. Esta regla existe solo para calibrar y desaparece cuando entra el gobernador (CONTROLES_V2 §1).
 - **Vías en piloto automático [propuesta]:** cuando la demanda de suelo de un tipo de parcela en una zona supera `umbral_demanda_suelo` durante `periodos_demanda_suelo` y la reserva alcanza, el estado construye el tramo que abre más parcelas de ese tipo (calle dentro de la zona; camino o puente hacia una zona no urbanizada si la zona se llenó). Elige el tramo de menor costo por parcela abierta. Si la reserva no alcanza, espera.
 - **Viviendas y locales** no son del estado en el mundo base.
 
@@ -178,7 +195,7 @@ Como MUNDO_V1 §10 (productividad, hambre, miedo, satisfacción, lealtad), más:
 
 El generador (con semilla) arma un mundo consistente y cierra las cuentas de ECONOMIA_V2 §14:
 
-1. Zonas, vecindad y parcelas por tipo.
+1. **Terreno** por semilla (MAPA_V2 §3b), núcleo en el mayor claro, zonas, vecindad y parcelas por tipo.
 2. Pirámide de edades y hogares por familias: parejas, hijos, abuelos, solos, con `padres` y `pareja` coherentes.
 3. Educación, roles y personalidad de cada persona.
 4. Casas: se asignan una por hogar según capacidad y se reparte la propiedad entre hogares, personas e inmobiliarias; algunos hogares empiezan en la calle.
@@ -194,9 +211,9 @@ Cada nivel suma sin cambiar los controles (CONTROLES_V2 §2):
 
 | Nivel | Qué tiene |
 |---|---|
-| **M0** | Hogares, casas, ciclo de vida, familias, calle y mercado de vivienda, con la economía de v1 (dos firmas fijas) |
+| **M0** | Hogares, casas, ciclo de vida, familias, calle y mercado de vivienda, con la economía de v1 (dos firmas fijas); terreno por semilla, migración y agenda con turnos y ritmo |
 | **M1** | + firmas genéricas, propiedad, emprender, comprar, crecer, quebrar, alquiler y publicidad |
 | **M2** | + zonas completas, clima, salud, servicios, seguridad y estado en piloto automático |
 | **M3** | + caos y prensa con medios como firmas |
-| **M4** | + extensión `fiscal` y crédito |
-| Futuro | Zombis como agentes, edificios con integridad propia, coordenadas y combate (promoción por necesidad, MOTOR_V2 §7) |
+| **M4** | + extensión `fiscal` (emisión e inflación; sin banco ni crédito) |
+| Futuro | Zombis como agentes, edificios con integridad propia, coordenadas y combate (promoción por necesidad, MOTOR_V2 §8) |

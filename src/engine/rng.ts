@@ -11,11 +11,13 @@ export function normalizeSeed(seed?: number): number {
 export function initSubsystemRng(seed: number): SubsystemRngState {
   const s = normalizeSeed(seed);
   return {
+    terreno: normalizeSeed((s ^ 0x517cc1b7) >>> 0),
     clima: normalizeSeed((s ^ 0x9e3779b9) >>> 0),
     caos: normalizeSeed((s ^ 0x85ebca6b) >>> 0),
     vida: normalizeSeed((s ^ 0xc2b2ae35) >>> 0),
     mercado: normalizeSeed((s ^ 0x27d4eb2f) >>> 0),
     prensa: normalizeSeed((s ^ 0x165667b1) >>> 0),
+    ritmo: normalizeSeed((s ^ 0xa5a55a5a) >>> 0),
   };
 }
 
@@ -48,7 +50,10 @@ export function nextSubRand(
   if (!state.rng) {
     state.rng = initSubsystemRng(state.rngState || 1);
   }
-  const cur = typeof state.rng[sub] === 'number' ? state.rng[sub] : state.rngState;
+  const cur =
+    typeof state.rng[sub] === 'number'
+      ? state.rng[sub]
+      : initSubsystemRng(state.rngState || 1)[sub];
   const step = mulberry32Step(cur);
   state.rng[sub] = step.nextState;
   return step.value;

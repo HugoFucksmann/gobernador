@@ -2,6 +2,7 @@ import {
   BUILDING_CATALOG,
   DEMOG_CONSTANTS,
   ECON_CONSTANTS,
+  EDUCATION_CONSTANTS,
   FIRM_CONSTANTS,
   HOUSING_CONSTANTS,
   LEVEL11_CONSTANTS,
@@ -43,6 +44,10 @@ import {
   getEffectivePropensionGasto,
   getFirmaRoleCaps,
   getNpcProductivity,
+  getParcelLandPrice,
+  getParcelTerrainTiles,
+  getTerrainBuildCostInfo,
+  getViaTerrainTiles,
   getWorldZones,
   getZoneTravelCost,
   isLotIsolated,
@@ -338,7 +343,8 @@ export function runDailyEconomyV2(state: GameState): void {
   const pickCategorySeller = (
     cat: SpendCategory,
     zona: ZoneId,
-    boycottedFirmId?: string
+    boycottedFirmId?: string,
+    preferredParcelIds?: Set<string>
   ): Firma | undefined => {
     const list = sellersByCat[cat];
     let best: Firma | undefined;
@@ -349,7 +355,9 @@ export function runDailyEconomyV2(state: GameState): void {
       if (left <= 0.5) continue;
       const travel = getZoneTravelCost(state, zona, f.zona);
       if (!Number.isFinite(travel)) continue;
-      const score = travel * 0.14 + f.margenPoder * 24 + (firmAvgMargenAdj.get(f.id) ?? 0) * 16;
+      const habitBonus =
+        preferredParcelIds && f.locales.some((pid) => preferredParcelIds.has(pid)) ? -1.8 : 0;
+      const score = travel * 0.14 + f.margenPoder * 24 + (firmAvgMargenAdj.get(f.id) ?? 0) * 16 + habitBonus;
       if (score < bestScore) {
         bestScore = score;
         best = f;
@@ -555,10 +563,32 @@ export function runDailyEconomyV2(state: GameState): void {
           }
         } else {
           const luxShift = clamp((h.dinero - colchon) / Math.max(40, colchon * 2), 0, 1) * VIAL_CONSTANTS.kLujo;
-          const wBienes = Math.max(0.22, SPEND_CATEGORY_WEIGHTS.bienes - luxShift * 0.35);
-          const wGastro = SPEND_CATEGORY_WEIGHTS.gastronomia + luxShift * 0.2;
-          const wServ = SPEND_CATEGORY_WEIGHTS.servicios;
-          const wEntret = SPEND_CATEGORY_WEIGHTS.entretenimiento + luxShift * 0.15 + Math.max(0, avgResil - 0.5) * 0.08;
+          const gustoBoost: Record<SpendCategory, number> = {
+            bienes: 0,
+            gastronomia: 0,
+            servicios: 0,
+            entretenimiento: 0,
+          };
+          const preferredParcels = new Set<string>();
+          for (const a of adults) {
+            const g = a.ritmo?.gustos;
+            if (g) {
+              gustoBoost.bienes += ((g.bienes - 25) / 100) * (0.18 / adults.length);
+              gustoBoost.gastronomia += ((g.gastronomia - 25) / 100) * (0.18 / adults.length);
+              gustoBoost.servicios += ((g.servicios - 25) / 100) * (0.18 / adults.length);
+              gustoBoost.entretenimiento += ((g.entretenimiento - 25) / 100) * (0.18 / adults.length);
+            }
+            if (a.ritmo?.libreHoyParcelaId) preferredParcels.add(a.ritmo.libreHoyParcelaId);
+            for (const hab of a.ritmo?.habitos ?? []) preferredParcels.add(hab);
+          }
+          const wBienes = Math.max(0.2, SPEND_CATEGORY_WEIGHTS.bienes - luxShift * 0.35 + gustoBoost.bienes);
+          const wGastro = SPEND_CATEGORY_WEIGHTS.gastronomia + luxShift * 0.2 + gustoBoost.gastronomia;
+          const wServ = SPEND_CATEGORY_WEIGHTS.servicios + gustoBoost.servicios;
+          const wEntret =
+            SPEND_CATEGORY_WEIGHTS.entretenimiento +
+            luxShift * 0.15 +
+            Math.max(0, avgResil - 0.5) * 0.08 +
+            gustoBoost.entretenimiento;
           const wSum = wBienes + wGastro + wServ + wEntret;
 
           const catWeights: Array<[SpendCategory, number]> = [
@@ -571,7 +601,7 @@ export function runDailyEconomyV2(state: GameState): void {
           for (const [cat, weight] of catWeights) {
             const catWanted = actualSpend * weight;
             if (catWanted <= 0.01) continue;
-            const catSeller = pickCategorySeller(cat, h.zona, boycotted);
+            const catSeller = pickCategorySeller(cat, h.zona, boycotted, preferredParcels);
             if (!catSeller) continue; // unserved category -> household saves that portion
             const capAvail = spendCapLeft.get(`${cat}:${catSeller.id}`) ?? 0;
             const catSpend = Math.min(catWanted, capAvail, h.dinero);
@@ -640,9 +670,9 @@ export function runDailyEconomyV2(state: GameState): void {
     const requiredFood = count * ECON_CONSTANTS.consumoPorNpc;
     const consumed = Math.min(h.despensa, requiredFood);
     h.despensa = Math.max(0, h.despensa - consumed);
-    if (isStreet && h.despensa > 0.5 * count) {
-      // Street households cannot store large pantry overnight
-      h.despensa = 0.5 * count;
+    if (isStreet) {
+      // ECONOMIA_V2 §3: hogares en la calle no conservan despensa al cierre del día
+      h.despensa = 0;
     }
 
     const foodRatio = clamp(consumed / Math.max(0.1, requiredFood), 0, 1);
@@ -947,17 +977,22 @@ export function runPaydayEconomyV2(state: GameState): void {
         f.periodosEnPerdida += 1;
       }
 
-      // Track factor tramos and layoffs
-      if (factor > 1.01) {
+      // Track factor tramos and layoffs (including pending despidosPendientes)
+      const factorLayoff = factor < ECON_CONSTANTS.pisoSueldoPct / 100;
+      const hasPendingLayoff = f.despidosPendientes > 0;
+      if (factor > 1.01 && !hasPendingLayoff) {
         f.ultimoTramo = 'aumento';
         f.periodosFactorAlto += 1;
         f.periodosFactorBajo = 0;
-      } else if (factor < ECON_CONSTANTS.pisoSueldoPct / 100) {
-        f.ultimoTramo = 'despido';
+      } else if (factorLayoff || hasPendingLayoff) {
+        f.ultimoTramo = factorLayoff ? 'despido' : f.ultimoTramo;
         f.periodosFactorAlto = 0;
-        f.periodosFactorBajo += 1;
+        if (factorLayoff) f.periodosFactorBajo += 1;
         if (isM1Plus && f.empleados.length > 1) {
-          const layoffs = Math.min(ECON_CONSTANTS.maxPaseDesempleoPorDia, f.empleados.length - 1);
+          const requested = hasPendingLayoff
+            ? Math.max(f.despidosPendientes, factorLayoff ? 1 : 0)
+            : ECON_CONSTANTS.maxPaseDesempleoPorDia;
+          const layoffs = Math.min(ECON_CONSTANTS.maxPaseDesempleoPorDia, requested, f.empleados.length - 1);
           for (let i = 0; i < layoffs; i++) {
             const firedId = f.empleados.pop();
             if (firedId) {
@@ -968,17 +1003,24 @@ export function runPaydayEconomyV2(state: GameState): void {
               }
             }
           }
-          emitSimEvent(state, {
-            id: nextSeqId(state, 'ev_emp_desp'),
-            dia: state.reloj.dia,
-            tipo: 'empresa_despido',
-            zona: f.zona,
-            empresaId: f.id,
-            cantidad: layoffs,
-            factor: f.factor,
-            origen: `firma:${f.id}/respuesta`,
-            causa: f.ultimaCausa,
-          });
+          if (f.despidosPendientes > 0) {
+            f.despidosPendientes = Math.max(0, f.despidosPendientes - layoffs);
+          }
+          if (layoffs > 0) {
+            emitSimEvent(state, {
+              id: nextSeqId(state, 'ev_emp_desp'),
+              dia: state.reloj.dia,
+              tipo: 'empresa_despido',
+              zona: f.zona,
+              empresaId: f.id,
+              cantidad: layoffs,
+              factor: f.factor,
+              origen: hasPendingLayoff && !factorLayoff ? `firma:${f.id}/medida` : `firma:${f.id}/respuesta`,
+              causa: f.ultimaCausa,
+            });
+          }
+        } else if (f.despidosPendientes > 0) {
+          f.despidosPendientes = 0;
         }
       } else if (factor < 0.99) {
         f.ultimoTramo = 'recorte';
@@ -1386,10 +1428,12 @@ export function runPaydayEconomyV2(state: GameState): void {
   acum.importaciones = 0;
   acum.exportaciones = 0;
 
-  // Autopilot public service & road builds when estadoAutomatico is enabled (MUNDO_V2 §9)
+  // Autopilot public service & road builds when estadoAutomatico is enabled (MUNDO_V2 §9, EDIFICIOS_V2 §3)
+  // oficina_publica is preset-only and never built by autopilot.
   const autoState = state.config.estadoAutomatico ?? state.config.nivelGobernador === 'G0';
   if (isM2Plus && autoState) {
-    const vivosCount = state.npcs.filter((n) => n.vivo).length;
+    const vivosList = state.npcs.filter((n) => n.vivo);
+    const vivosCount = vivosList.length;
     const caps = getBuildingJobCaps(
       state.parcelas,
       vivosCount,
@@ -1399,28 +1443,57 @@ export function runPaydayEconomyV2(state: GameState): void {
     );
     const targetMed = Math.max(1, Math.round(vivosCount * ECON_CONSTANTS.objetivoCobertura.medico));
     const targetPol = Math.max(1, Math.round(vivosCount * ECON_CONSTANTS.objetivoCobertura.policia));
-    let toBuild: 'hospital' | 'comisaria' | null = null;
-    if (caps.medico < targetMed * 0.8 && state.gobierno.reserva >= BUILDING_CATALOG.hospital.costoObra * 1.6) {
-      toBuild = 'hospital';
-    } else if (caps.policia < targetPol * 0.8 && state.gobierno.reserva >= BUILDING_CATALOG.comisaria.costoObra * 1.6) {
-      toBuild = 'comisaria';
+    const menoresCount = vivosList.filter((n) => n.edad < EDUCATION_CONSTANTS.edadEgreso).length;
+    const jovenesCount = vivosList.filter(
+      (n) => n.edad >= EDUCATION_CONSTANTS.edadEgreso && n.edad <= EDUCATION_CONSTANTS.edadMaxJovenUniv
+    ).length;
+    let escuelaCupo = 0;
+    let univCupo = 0;
+    for (const p of state.parcelas) {
+      const b = p.edificio;
+      if (!b || (b.estado !== 'ocupada' && b.estado !== 'en_obra')) continue;
+      if (b.tipo === 'escuela') escuelaCupo += BUILDING_CATALOG.escuela.lugaresEstudio ?? 18;
+      if (b.tipo === 'universidad') univCupo += BUILDING_CATALOG.universidad.lugaresEstudio ?? 14;
     }
+
+    let toBuild: 'hospital' | 'comisaria' | 'escuela' | 'universidad' | null = null;
+    if (caps.medico < targetMed * 0.8 && state.gobierno.reserva >= BUILDING_CATALOG.hospital.costoObra * 1.4) {
+      toBuild = 'hospital';
+    } else if (caps.policia < targetPol * 0.8 && state.gobierno.reserva >= BUILDING_CATALOG.comisaria.costoObra * 1.4) {
+      toBuild = 'comisaria';
+    } else if (
+      menoresCount > 0 &&
+      escuelaCupo < menoresCount * EDUCATION_CONSTANTS.umbralCoberturaEscuela &&
+      state.gobierno.reserva >= BUILDING_CATALOG.escuela.costoObra * 1.4
+    ) {
+      toBuild = 'escuela';
+    } else if (
+      jovenesCount > 0 &&
+      univCupo < jovenesCount * EDUCATION_CONSTANTS.umbralCoberturaUniversidad &&
+      state.gobierno.reserva >= BUILDING_CATALOG.universidad.costoObra * 1.4
+    ) {
+      toBuild = 'universidad';
+    }
+
     const freePub = toBuild
       ? state.parcelas.find(
           (p) =>
             p.tipoParcela === 'publica' &&
             p.estado === 'libre' &&
             !isLotIsolated(state, p) &&
-            canBuildTypeInParcela(p, toBuild!)
+            canBuildTypeInParcela(p, toBuild!) &&
+            getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false).buildable
         )
       : undefined;
     if (toBuild && freePub && (!state.autopilotLastBuildDay || state.reloj.dia - state.autopilotLastBuildDay >= 21)) {
       const def = BUILDING_CATALOG[toBuild];
+      const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, freePub), false);
+      const effectiveCost = Number((def.costoObra * tInfo.multiplier).toFixed(2));
       const payee = constructoras[0] ?? state.firmas.find((f) => f.activa);
-      if (payee) {
-        state.gobierno.reserva -= def.costoObra;
-        state.gobierno.acumuladoPeriodo.obras += def.costoObra;
-        payee.ventas += def.costoObra;
+      if (payee && tInfo.buildable && state.gobierno.reserva >= effectiveCost * 1.35) {
+        state.gobierno.reserva -= effectiveCost;
+        state.gobierno.acumuladoPeriodo.obras += effectiveCost;
+        payee.ventas += effectiveCost;
         freePub.estado = 'en_obra';
         freePub.edificio = {
           id: nextSeqId(state, 'ed'),
@@ -1444,7 +1517,7 @@ export function runPaydayEconomyV2(state: GameState): void {
           parcelaId: freePub.id,
           edificio: toBuild,
           dueno: 'estado',
-          costo: def.costoObra,
+          costo: effectiveCost,
           diasObra: def.diasObra,
           causa: 'estado:piloto_automatico',
         });
@@ -1475,11 +1548,14 @@ export function runPaydayEconomyV2(state: GameState): void {
     if (hotEntry) {
       const [hotZone, hotTipo] = hotEntry[0].split(':');
       const connectable = (state.tramos ?? []).filter((t) => isViaConnectableToNetwork(state, t));
-      let bestTramo: (typeof connectable)[number] | null = null;
+      let bestTramo: { tramo: (typeof connectable)[number]; cost: number } | null = null;
       let bestScore = Infinity;
 
       for (const t of connectable) {
-        if (state.gobierno.reserva < t.costoObra * 1.35) continue;
+        const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getViaTerrainTiles(state, t), t.tipo === 'puente');
+        if (!tInfo.buildable) continue;
+        const effectiveCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
+        if (state.gobierno.reserva < effectiveCost * 1.35) continue;
         const opensMatchingType = t.parcelasAbiertas.filter((pid) => {
           const p = parcelById.get(pid);
           return p && (p.zona === hotZone || t.zonaAbierta === p.zona) && p.tipoParcela === hotTipo;
@@ -1487,26 +1563,27 @@ export function runPaydayEconomyV2(state: GameState): void {
         const touchesHot = t.zonaA === hotZone || t.zonaB === hotZone;
         const totalOpen = Math.max(1, t.parcelasAbiertas.length);
         const relevance = opensMatchingType > 0 ? 0.45 : touchesHot ? 0.8 : 1.3;
-        const score = (t.costoObra / totalOpen) * relevance;
+        const score = (effectiveCost / totalOpen) * relevance;
         if (score < bestScore) {
           bestScore = score;
-          bestTramo = t;
+          bestTramo = { tramo: t, cost: effectiveCost };
         }
       }
 
       if (bestTramo) {
+        const { tramo: chosenTramo, cost: effectiveCost } = bestTramo;
         const payee =
-          constructoras.find((f) => f.zona === bestTramo.zonaA || f.zona === bestTramo.zonaB) ??
+          constructoras.find((f) => f.zona === chosenTramo.zonaA || f.zona === chosenTramo.zonaB) ??
           constructoras[0] ??
           state.firmas.find((f) => f.activa);
         if (payee) {
-          state.gobierno.reserva -= bestTramo.costoObra;
-          state.gobierno.acumuladoPeriodo.obras += bestTramo.costoObra;
-          payee.ventas += bestTramo.costoObra;
+          state.gobierno.reserva -= effectiveCost;
+          state.gobierno.acumuladoPeriodo.obras += effectiveCost;
+          payee.ventas += effectiveCost;
           const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
-          const dias = Math.max(2, Math.round(bestTramo.diasObraTotal * diasFactor));
-          bestTramo.enObra = true;
-          bestTramo.diasObraRestantes = dias;
+          const dias = Math.max(2, Math.round(chosenTramo.diasObraTotal * diasFactor));
+          chosenTramo.enObra = true;
+          chosenTramo.diasObraRestantes = dias;
           state.autopilotLastViaDay = state.reloj.dia;
           state.demandaSueloRachas[hotEntry[0]] = 0;
 
@@ -1514,12 +1591,12 @@ export function runPaydayEconomyV2(state: GameState): void {
             id: nextSeqId(state, 'ev_via_i'),
             dia: state.reloj.dia,
             tipo: 'via_inicio',
-            zona: bestTramo.zonaA,
-            tramoId: bestTramo.id,
-            tramoNombre: bestTramo.nombre,
-            tipoVia: bestTramo.tipo,
-            parcelasAbiertas: [...bestTramo.parcelasAbiertas],
-            costo: bestTramo.costoObra,
+            zona: chosenTramo.zonaA,
+            tramoId: chosenTramo.id,
+            tramoNombre: chosenTramo.nombre,
+            tipoVia: chosenTramo.tipo,
+            parcelasAbiertas: [...chosenTramo.parcelasAbiertas],
+            costo: effectiveCost,
             diasObra: dias,
             causa: 'estado:demanda_suelo',
           });
@@ -1739,7 +1816,7 @@ export function runPaydayEconomyV2(state: GameState): void {
   for (const c of state.casas) {
     const base = BUILDING_CATALOG[c.tipo].alquilerBase ?? 12;
     const zIdx = state.zonas[c.zona]?.demandaAlquilerIndice ?? 1;
-    const targetAlq = base * (0.4 + 0.6 * (c.estado / 100)) * zIdx;
+    const targetAlq = base * (c.estado / 100) * zIdx;
     const floor = base * HOUSING_CONSTANTS.alquilerPisoFactor;
     if (!c.hogarId) {
       c.alquiler = Number(
@@ -2054,20 +2131,34 @@ export function runPaydayEconomyV2(state: GameState): void {
           : null;
       if (!targetBuilding) continue;
       const def = BUILDING_CATALOG[targetBuilding];
-      if (f.caja < def.costoObra * 1.4) continue;
-      const freeParcel = state.parcelas.find(
-        (p) =>
-          p.tipoParcela === def.parcelTipo &&
-          p.estado === 'libre' &&
-          !isLotIsolated(state, p) &&
-          canBuildTypeInParcela(p, targetBuilding) &&
-          Number.isFinite(getZoneTravelCost(state, f.zona, p.zona))
-      );
-      if (!freeParcel) continue;
+      let chosenPlan: { parcel: Parcela; buildCost: number; landPrice: number; totalCost: number } | null = null;
+      for (const p of state.parcelas) {
+        if (
+          p.tipoParcela !== def.parcelTipo ||
+          p.estado !== 'libre' ||
+          isLotIsolated(state, p) ||
+          !canBuildTypeInParcela(p, targetBuilding) ||
+          !Number.isFinite(getZoneTravelCost(state, f.zona, p.zona))
+        ) {
+          continue;
+        }
+        const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false);
+        if (!tInfo.buildable) continue;
+        const buildCost = Number((def.costoObra * tInfo.multiplier).toFixed(2));
+        const landPrice = getParcelLandPrice(state, p).precioLote;
+        const totalCost = Number((buildCost + landPrice).toFixed(2));
+        if (f.caja >= totalCost * 1.2) {
+          chosenPlan = { parcel: p, buildCost, landPrice, totalCost };
+          break;
+        }
+      }
+      if (!chosenPlan) continue;
 
-      f.caja -= def.costoObra;
-      if (constr) constr.ventas += def.costoObra;
-      else state.gobierno.reserva += def.costoObra;
+      const { parcel: freeParcel, buildCost, landPrice, totalCost } = chosenPlan;
+      f.caja -= totalCost;
+      if (constr) constr.ventas += buildCost;
+      else state.gobierno.reserva += buildCost;
+      state.gobierno.reserva += landPrice;
 
       freeParcel.estado = 'en_obra';
       freeParcel.edificio = {
@@ -2096,7 +2187,7 @@ export function runPaydayEconomyV2(state: GameState): void {
         parcelaId: freeParcel.id,
         edificio: targetBuilding,
         dueno: f.id,
-        costo: def.costoObra,
+        costo: totalCost,
         diasObra: def.diasObra,
         causa: `firma:${f.id}/inversion`,
       });
@@ -2191,21 +2282,41 @@ export function runPaydayEconomyV2(state: GameState): void {
       if (!h || h.dinero < FIRM_CONSTANTS.ahorroMinEmprender) continue;
       if (nextSubRand(state, 'mercado') >= DEMOG_CONSTANTS.probEmprenderBase) continue;
 
-      let chosenPlan: { buildingType: BuildingType; rubro: FirmRubro; freeP: Parcela; cause: string } | null = null;
+      let chosenPlan: {
+        buildingType: BuildingType;
+        rubro: FirmRubro;
+        freeP: Parcela;
+        cause: string;
+        buildCost: number;
+        landPrice: number;
+      } | null = null;
 
       if (cand.rol === 'periodista' && state.config.cantidadMedios > 0) {
         const mDef = BUILDING_CATALOG.oficina_medio;
-        if (h.dinero >= mDef.costoObra + 40) {
-          const freeP = state.parcelas.find(
-            (p) =>
-              p.tipoParcela === mDef.parcelTipo &&
-              p.estado === 'libre' &&
-              !isLotIsolated(state, p) &&
-              canBuildTypeInParcela(p, 'oficina_medio') &&
-              Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
-          );
-          if (freeP) {
-            chosenPlan = { buildingType: 'oficina_medio', rubro: 'medio', freeP, cause: 'mercado:emprendimiento_medio' };
+        for (const p of state.parcelas) {
+          if (
+            p.tipoParcela !== mDef.parcelTipo ||
+            p.estado !== 'libre' ||
+            isLotIsolated(state, p) ||
+            !canBuildTypeInParcela(p, 'oficina_medio') ||
+            !Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
+          ) {
+            continue;
+          }
+          const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false);
+          if (!tInfo.buildable) continue;
+          const buildCost = Number((mDef.costoObra * tInfo.multiplier).toFixed(2));
+          const landPrice = getParcelLandPrice(state, p).precioLote;
+          if (h.dinero >= buildCost + landPrice + 40) {
+            chosenPlan = {
+              buildingType: 'oficina_medio',
+              rubro: 'medio',
+              freeP: p,
+              cause: 'mercado:emprendimiento_medio',
+              buildCost,
+              landPrice,
+            };
+            break;
           }
         }
       }
@@ -2214,31 +2325,46 @@ export function runPaydayEconomyV2(state: GameState): void {
         for (const item of demandRanking) {
           for (const bType of item.buildings) {
             const bDef = BUILDING_CATALOG[bType];
-            if (h.dinero < bDef.costoObra + 40) continue;
-            const freeP = state.parcelas.find(
-              (p) =>
-                p.tipoParcela === bDef.parcelTipo &&
-                p.estado === 'libre' &&
-                !isLotIsolated(state, p) &&
-                canBuildTypeInParcela(p, bType) &&
-                Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
-            );
-            if (freeP) {
-              chosenPlan = { buildingType: bType, rubro: item.rubro, freeP, cause: item.cause };
-              break;
+            for (const p of state.parcelas) {
+              if (
+                p.tipoParcela !== bDef.parcelTipo ||
+                p.estado !== 'libre' ||
+                isLotIsolated(state, p) ||
+                !canBuildTypeInParcela(p, bType) ||
+                !Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
+              ) {
+                continue;
+              }
+              const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false);
+              if (!tInfo.buildable) continue;
+              const buildCost = Number((bDef.costoObra * tInfo.multiplier).toFixed(2));
+              const landPrice = getParcelLandPrice(state, p).precioLote;
+              if (h.dinero >= buildCost + landPrice + 40) {
+                chosenPlan = {
+                  buildingType: bType,
+                  rubro: item.rubro,
+                  freeP: p,
+                  cause: item.cause,
+                  buildCost,
+                  landPrice,
+                };
+                break;
+              }
             }
+            if (chosenPlan) break;
           }
           if (chosenPlan) break;
         }
       }
 
       if (!chosenPlan) continue;
-      const { buildingType, rubro, freeP, cause: founderCause } = chosenPlan;
+      const { buildingType, rubro, freeP, cause: founderCause, buildCost, landPrice } = chosenPlan;
       const def = BUILDING_CATALOG[buildingType];
 
-      h.dinero -= def.costoObra + 35;
-      if (constr) constr.ventas += def.costoObra;
-      else state.gobierno.reserva += def.costoObra;
+      h.dinero -= buildCost + landPrice + 35;
+      if (constr) constr.ventas += buildCost;
+      else state.gobierno.reserva += buildCost;
+      state.gobierno.reserva += landPrice;
 
       const newFirmId = nextSeqId(state, 'f');
       const newFirm: Firma = {
@@ -2384,26 +2510,33 @@ export function runPaydayEconomyV2(state: GameState): void {
 
       const freeRes = freeResByZone.get(z);
       if (!freeRes) continue;
+      const resTerrain = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, freeRes), false);
+      if (!resTerrain.buildable) continue;
       const desiredHouseType: HouseType = calleZ >= 12 ? 'casa_chica' : 'casa_mediana';
       const houseType: HouseType = canBuildTypeInParcela(freeRes, desiredHouseType) ? desiredHouseType : 'casa_chica';
       if (!canBuildTypeInParcela(freeRes, houseType)) continue;
       const def = BUILDING_CATALOG[houseType];
+      const buildCost = Number((def.costoObra * resTerrain.multiplier).toFixed(2));
+      const landPrice = getParcelLandPrice(state, freeRes).precioLote;
+      const totalResCost = Number((buildCost + landPrice).toFixed(2));
+
       const zDem = state.zonas[z]?.demandaAlquilerIndice ?? 1;
       const expectedRent = (def.alquilerBase ?? 12) * zDem;
-      if (expectedRent * HOUSING_CONSTANTS.periodosRecuperoInversionCasa < def.costoObra * 0.75) {
+      if (expectedRent * HOUSING_CONSTANTS.periodosRecuperoInversionCasa < totalResCost * 0.75) {
         continue;
       }
 
       const builder =
-        inmobiliarias.find((f) => !sinInversionFirms.has(f.id) && f.caja >= def.costoObra) ??
-        constructoras.find((f) => !sinInversionFirms.has(f.id) && f.caja >= def.costoObra);
+        inmobiliarias.find((f) => !sinInversionFirms.has(f.id) && f.caja >= totalResCost) ??
+        constructoras.find((f) => !sinInversionFirms.has(f.id) && f.caja >= totalResCost);
       if (!builder) continue;
 
       freeResByZone.delete(z);
 
-      builder.caja -= def.costoObra;
-      if (constr) constr.ventas += def.costoObra;
-      else state.gobierno.reserva += def.costoObra;
+      builder.caja -= totalResCost;
+      if (constr) constr.ventas += buildCost;
+      else state.gobierno.reserva += buildCost;
+      state.gobierno.reserva += landPrice;
 
       freeRes.estado = 'en_obra';
       freeRes.edificio = {

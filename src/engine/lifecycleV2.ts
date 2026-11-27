@@ -1,12 +1,17 @@
 import {
+  BUILDING_CATALOG,
   DEMOG_CONSTANTS,
   ECON_CONSTANTS,
+  EDUCATION_CONSTANTS,
   FIRM_CONSTANTS,
   HOUSING_CONSTANTS,
+  MIGRATION_CONSTANTS,
   PERIOD_DAYS,
   PERIOD_DAYS_DEMOG,
   ROLE_CATALOG,
+  SPANISH_LAST_NAMES,
   SPANISH_NAMES,
+  TRAINING_CONSTANTS,
   VIAL_CONSTANTS,
 } from '../data/catalogs';
 import {
@@ -24,10 +29,13 @@ import {
 import { getBuildingJobCaps } from './policies';
 import { nextSeqId, nextSubRand, subRandInt, subRandRange } from './rng';
 import {
+  buildSeededNpcRitmo,
   clamp,
   emitSimEvent,
+  getEffectiveTrait,
   getFirmaRoleCaps,
   getZoneTravelCost,
+  isLotIsolated,
 } from './worldHelpers';
 
 const TRAITS: PersonalityTrait[] = [
@@ -36,6 +44,7 @@ const TRAITS: PersonalityTrait[] = [
   'codicia',
   'rebeldia',
   'resiliencia',
+  'sociabilidad',
 ];
 
 function normalizeFirmPartes(firma: Firma, npcsById: Map<string, Npc>): void {
@@ -370,15 +379,63 @@ export function handleNpcDeathV2(
   }
 }
 
-export function runDailyLifecycleV2(state: GameState): void {
-  const diaAnio = ((state.reloj.dia - 1) % 365) + 1;
-  const escuelasPorZona = new Map<ZoneId, number>();
+function getReachableEduLimits(
+  state: GameState,
+  zone: ZoneId
+): { maxLevel: 1 | 2 | 3; schoolRatio: number; univRatio: number } {
+  let schoolSeats = 0;
+  let univSeats = 0;
+  const schoolCoveredZones = new Set<ZoneId>();
+  const univCoveredZones = new Set<ZoneId>();
+
   for (const p of state.parcelas) {
-    if (p.edificio?.activo && p.edificio.tipo === 'escuela') {
-      escuelasPorZona.set(p.zona, (escuelasPorZona.get(p.zona) ?? 0) + 1);
+    if (!p.edificio?.activo || isLotIsolated(state, p)) continue;
+    if (p.edificio.tipo !== 'escuela' && p.edificio.tipo !== 'universidad') continue;
+    const cost = getZoneTravelCost(state, zone, p.zona);
+    if (!Number.isFinite(cost) || cost > EDUCATION_CONSTANTS.rutaMaxEducacion) continue;
+    const seats = BUILDING_CATALOG[p.edificio.tipo].lugaresEstudio ?? (p.edificio.tipo === 'universidad' ? 40 : 50);
+    if (p.edificio.tipo === 'escuela') {
+      schoolSeats += seats;
+      schoolCoveredZones.add(p.zona);
+    } else {
+      univSeats += seats;
+      univCoveredZones.add(p.zona);
     }
   }
+
+  let minorsInCovered = 0;
+  let youthInCovered = 0;
+  for (const n of state.npcs) {
+    if (!n.vivo) continue;
+    if (n.edad < EDUCATION_CONSTANTS.edadEgreso && (schoolCoveredZones.has(n.zona) || n.zona === zone)) {
+      minorsInCovered++;
+    } else if (
+      n.edad >= EDUCATION_CONSTANTS.edadEgreso &&
+      n.edad <= EDUCATION_CONSTANTS.edadMaxJovenUniv &&
+      (univCoveredZones.has(n.zona) || n.zona === zone)
+    ) {
+      youthInCovered++;
+    }
+  }
+
+  const schoolRatio =
+    schoolSeats > 0
+      ? clamp(schoolSeats / Math.max(1, minorsInCovered * EDUCATION_CONSTANTS.umbralCoberturaEscuela), 0.25, 1)
+      : 0;
+  const univRatio =
+    univSeats > 0
+      ? clamp(univSeats / Math.max(1, youthInCovered * EDUCATION_CONSTANTS.umbralCoberturaUniversidad), 0.25, 1)
+      : 0;
+
+  const maxLevel: 1 | 2 | 3 = schoolSeats === 0 ? 1 : univSeats === 0 ? 2 : 3;
+  return { maxLevel, schoolRatio, univRatio };
+}
+
+export function runDailyLifecycleV2(state: GameState): void {
+  const diaAnio = ((state.reloj.dia - 1) % 365) + 1;
   const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
+  const govLevel = state.config.nivelGobernador ?? 'G0';
+  const extraEduLever = govLevel === 'G3' ? (state.gobierno.extras?.vigentes?.nivelEducacion ?? 0) : 0;
 
   const vivosSnapshot = state.npcs.filter((n) => n.vivo);
   for (const npc of vivosSnapshot) {
@@ -396,34 +453,71 @@ export function runDailyLifecycleV2(state: GameState): void {
       continue;
     }
 
-    // 2. Birthday check
+    // 2. Active capacitacion countdown
+    if (npc.capacitacion) {
+      npc.capacitacion.diasRestantes -= 1;
+      npc.capacitacion.periodosRestantes = Math.max(0, Math.ceil(npc.capacitacion.diasRestantes / PERIOD_DAYS));
+      if (npc.capacitacion.diasRestantes <= 0) {
+        const finished = npc.capacitacion;
+        const { maxLevel } = getReachableEduLimits(state, npc.zona);
+        const newLevel = clamp(
+          Math.max(npc.educacion.nivel, Math.min(maxLevel, finished.educObjetivo)),
+          0,
+          3
+        );
+        npc.educacion.nivel = newLevel;
+        npc.capacitacion = null;
+        npc.mapa.accion = 'buscando empleo';
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_cap_f'),
+          dia: state.reloj.dia,
+          tipo: 'capacitacion_fin',
+          zona: npc.zona,
+          npcId: npc.id,
+          rolObjetivo: finished.rolObjetivo,
+          educNivel: newLevel,
+          causa: 'vida:capacitacion',
+        });
+      }
+    }
+
+    // 3. Birthday check
     if (npc.cumpleanosDia === diaAnio) {
       npc.edad += 1;
 
-      // Graduation at 18
-      if (npc.edad === 18 && npc.rol === 'estudiante') {
+      // Graduation at 18: cap by road-reachable escuela (level 2) & universidad (level 3)
+      if (npc.edad === EDUCATION_CONSTANTS.edadEgreso && npc.rol === 'estudiante') {
         npc.educacion.estudiando = false;
         const h = hogarById.get(npc.hogarId);
         if (h) {
           h.adultoIds = h.adultoIds ? [...new Set([...h.adultoIds, npc.id])] : [npc.id];
         }
+        const { maxLevel, schoolRatio, univRatio } = getReachableEduLimits(state, npc.zona);
         const incomeScore = h ? clamp(h.ultimoIngresoNeto / 80, 0, 1) : 0.4;
         const aptScore =
           (npc.personalidad.laboriosidad * 0.6 + npc.personalidad.resiliencia * 0.4) / 100;
-        const schoolBonus = (escuelasPorZona.get(npc.zona) ?? 0) > 0 ? 0.12 : 0;
-        const extraEduc = 0; // En el mundo base no hay educación como servicio
+        const schoolBonus = schoolRatio * 0.14;
+        const extraEduc = extraEduLever * 0.03;
         const score =
           aptScore * 0.55 +
           incomeScore * 0.35 +
           schoolBonus +
           extraEduc +
           nextSubRand(state, 'vida') * 0.15;
-        npc.educacion.nivel = score >= 0.72 ? 3 : score >= 0.42 ? 2 : 1;
+
+        let rawLevel = score >= 0.72 ? 3 : score >= 0.42 ? 2 : 1;
+        if (maxLevel < 2 || (schoolRatio < 1 && nextSubRand(state, 'vida') > schoolRatio)) {
+          rawLevel = Math.min(rawLevel, 1);
+        } else if (maxLevel < 3 || (univRatio < 1 && nextSubRand(state, 'vida') > univRatio)) {
+          rawLevel = Math.min(rawLevel, 2);
+        }
+        npc.educacion.nivel = rawLevel;
         npc.rol = 'desempleado';
       }
 
       // Retirement at 65
       if (npc.edad === 65 && npc.rol !== 'jubilado') {
+        if (npc.capacitacion) npc.capacitacion = null;
         if (npc.empleadorId) {
           const f = state.firmas.find((x) => x.id === npc.empleadorId);
           if (f) {
@@ -440,6 +534,157 @@ export function runDailyLifecycleV2(state: GameState): void {
         npc.rol = 'jubilado';
       }
     }
+  }
+}
+
+/**
+ * Capacitación (MUNDO_V2 §5): si un rol crítico (educMin > 0) acumula vacantes sin candidatos
+ * durante `periodosVacanteCritica`, un adulto apto se capacita pagando `costoCapacitacion`
+ * al Estado (sin pérdida de dinero) hasta el tope que permiten escuela/universidad al alcance.
+ */
+export function runTrainingPeriodV2(state: GameState): void {
+  const vivos = state.npcs.filter((n) => n.vivo);
+  const pop = vivos.length;
+  if (pop === 0) return;
+
+  if (!state.vacantesCriticasRachas) state.vacantesCriticasRachas = {};
+
+  const caps = getBuildingJobCaps(
+    state.parcelas,
+    pop,
+    state.gobierno.palancasVigentes.nivelObras,
+    state.config.poblacionInicial,
+    state.gobierno.cuposFijos
+  );
+
+  const demandByRole = Object.assign(Object.create(null), {
+    medico: caps.medico,
+    policia: caps.policia,
+    ingeniero: caps.ingeniero,
+    docente: caps.docente,
+    estatal: caps.estatal,
+  }) as Partial<Record<RoleId, number>>;
+  for (const f of state.firmas) {
+    if (!f.activa || f.locales.length === 0) continue;
+    const fCaps = getFirmaRoleCaps(state, f);
+    for (const [rStr, cnt] of Object.entries(fCaps)) {
+      if (typeof cnt === 'number' && cnt > 0) {
+        const r = rStr as RoleId;
+        demandByRole[r] = (demandByRole[r] ?? 0) + cnt;
+      }
+    }
+  }
+
+  const filledByRole: Partial<Record<RoleId, number>> = {};
+  for (const n of vivos) {
+    filledByRole[n.rol] = (filledByRole[n.rol] ?? 0) + 1;
+    if (n.capacitacion) {
+      filledByRole[n.capacitacion.rolObjetivo] = (filledByRole[n.capacitacion.rolObjetivo] ?? 0) + 1;
+    }
+  }
+
+  const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
+  const criticalRoles: RoleId[] = [
+    'medico',
+    'docente',
+    'policia',
+    'ingeniero',
+    'estatal',
+    'tecnico',
+    'comerciante',
+    'constructor',
+    'inmobiliario',
+    'periodista',
+  ];
+
+  for (const rol of criticalRoles) {
+    const def = ROLE_CATALOG[rol];
+    if (def.educMin <= 0) continue;
+    const needed = (demandByRole[rol] ?? 0) - (filledByRole[rol] ?? 0);
+    const hasEligibleUnemp = vivos.some(
+      (n) =>
+        n.rol === 'desempleado' &&
+        !n.capacitacion &&
+        n.edad >= 18 &&
+        n.edad < 65 &&
+        n.educacion.nivel >= def.educMin
+    );
+
+    if (needed > 0 && !hasEligibleUnemp) {
+      state.vacantesCriticasRachas[rol] = (state.vacantesCriticasRachas[rol] ?? 0) + 1;
+    } else {
+      state.vacantesCriticasRachas[rol] = 0;
+    }
+
+    if ((state.vacantesCriticasRachas[rol] ?? 0) < TRAINING_CONSTANTS.periodosVacanteCritica) {
+      continue;
+    }
+
+    let bestCand: Npc | null = null;
+    let bestApt = -1;
+    let bestReachMax = 1;
+    for (const n of vivos) {
+      if (
+        n.edad < 18 ||
+        n.edad >= TRAINING_CONSTANTS.edadMaxCapacitacion ||
+        n.capacitacion ||
+        n.hospital.internado
+      ) {
+        continue;
+      }
+      if (n.rol !== 'desempleado' && ROLE_CATALOG[n.rol].educMin > 0) continue;
+      if (n.rol === 'estudiante') continue;
+      if (n.educacion.nivel >= def.educMin) continue;
+
+      const apt = (n.personalidad.laboriosidad + n.personalidad.resiliencia) * 0.5;
+      if (apt < TRAINING_CONSTANTS.aptitudMinCapacitacion) continue;
+
+      const { maxLevel } = getReachableEduLimits(state, n.zona);
+      if (maxLevel < n.educacion.nivel + 1) continue;
+
+      const h = hogarById.get(n.hogarId);
+      if (!h || h.estado === 'acogida' || h.dinero < TRAINING_CONSTANTS.costoCapacitacion + 15) continue;
+
+      const score = apt + (n.rol === 'desempleado' ? 15 : 0);
+      if (score > bestApt) {
+        bestApt = score;
+        bestCand = n;
+        bestReachMax = maxLevel;
+      }
+    }
+
+    if (!bestCand) continue;
+    const candH = hogarById.get(bestCand.hogarId);
+    if (!candH) continue;
+
+    candH.dinero -= TRAINING_CONSTANTS.costoCapacitacion;
+    state.gobierno.reserva += TRAINING_CONSTANTS.costoCapacitacion;
+    if (bestCand.empleadorId) {
+      const f = state.firmas.find((x) => x.id === bestCand!.empleadorId);
+      if (f) f.empleados = f.empleados.filter((id) => id !== bestCand!.id);
+      bestCand.empleadorId = null;
+    }
+    bestCand.rol = 'desempleado';
+    const diasCap = TRAINING_CONSTANTS.periodosCapacitacion * PERIOD_DAYS;
+    bestCand.capacitacion = {
+      rolObjetivo: rol,
+      educObjetivo: Math.min(bestReachMax, Math.min(def.educMin, bestCand.educacion.nivel + 1)),
+      periodosRestantes: TRAINING_CONSTANTS.periodosCapacitacion,
+      diasRestantes: diasCap,
+    };
+    state.vacantesCriticasRachas[rol] = 0;
+
+    emitSimEvent(state, {
+      id: nextSeqId(state, 'ev_cap_i'),
+      dia: state.reloj.dia,
+      tipo: 'capacitacion_inicio',
+      zona: bestCand.zona,
+      npcId: bestCand.id,
+      rolObjetivo: rol,
+      educNivel: bestCand.capacitacion.educObjetivo,
+      costo: TRAINING_CONSTANTS.costoCapacitacion,
+      causa: 'mercado:vacante_critica',
+    });
   }
 }
 
@@ -509,7 +754,8 @@ export function runDemographicPeriodV2(state: GameState): void {
     for (let i = 0; i < pool.length - 1 && pairingsThisPeriod < maxPairings; i++) {
       const a = pool[i];
       if (used.has(a.id) || a.parejaId) continue;
-      if (nextSubRand(state, 'vida') >= DEMOG_CONSTANTS.probParejaPeriodo) continue;
+      const socProbMult = 0.7 + (getEffectiveTrait(a, 'sociabilidad') / 100) * 0.65;
+      if (nextSubRand(state, 'vida') >= DEMOG_CONSTANTS.probParejaPeriodo * socProbMult) continue;
 
       let best: Npc | null = null;
       let bestScore = -999;
@@ -526,7 +772,8 @@ export function runDemographicPeriodV2(state: GameState): void {
         }
         const ageDiff = Math.abs(a.edad - b.edad);
         if (ageDiff > 14) continue;
-        const score = 20 - ageDiff;
+        const socDiff = Math.abs((a.personalidad.sociabilidad ?? 50) - (b.personalidad.sociabilidad ?? 50));
+        const score = 20 - ageDiff + (10 - socDiff * 0.12);
         if (score > bestScore) {
           bestScore = score;
           best = b;
@@ -720,16 +967,19 @@ export function runDemographicPeriodV2(state: GameState): void {
     const avgSat = (p1.variables.satisfaccion + p2.variables.satisfaccion) * 0.5;
     if (avgSat < DEMOG_CONSTANTS.umbralNatalidadSatisfaccion) continue;
     const freeSpaceBonus = h.miembros.length < casa.capacidad ? 1 : 0.45;
+    const avgSoc = ((p1.personalidad.sociabilidad ?? 50) + (p2.personalidad.sociabilidad ?? 50)) * 0.5;
+    const socFertMult = clamp(0.85 + avgSoc / 300, 0.8, 1.25);
     const prob =
       DEMOG_CONSTANTS.probNacimientoBase *
       freeSpaceBonus *
+      socFertMult *
       clamp(avgSat / 65, 0.6, 1.4);
 
     if (nextSubRand(state, 'vida') >= prob) continue;
 
     const childTraits = {} as Record<PersonalityTrait, number>;
     for (const tr of TRAITS) {
-      const avg = (p1.personalidad[tr] + p2.personalidad[tr]) * 0.5;
+      const avg = ((p1.personalidad[tr] ?? 50) + (p2.personalidad[tr] ?? 50)) * 0.5;
       childTraits[tr] = Math.round(clamp(avg + subRandRange(state, 'vida', -14, 14), 5, 95));
     }
 
@@ -751,6 +1001,8 @@ export function runDemographicPeriodV2(state: GameState): void {
       vivo: true,
       educacion: { nivel: 0, estudiando: true },
       personalidad: childTraits,
+      ritmo: buildSeededNpcRitmo(babyId, 0, state.semilla, []),
+      capacitacion: null,
       variables: {
         salud: 96,
         hambre: 8,
@@ -949,9 +1201,21 @@ export function runDemographicPeriodV2(state: GameState): void {
           h.miembros = h.miembros.filter((id) => id !== b.id);
           if (h.adultoIds) h.adultoIds = h.adultoIds.filter((id) => id !== b.id);
 
+          // Split minor dependents equitably between partner A (stays) and B (moves)
+          const minorsInH = h.miembros.filter((mid) => {
+            const m = npcById.get(mid);
+            return Boolean(m && m.vivo && m.edad < 18);
+          });
+          const moveMinors = minorsInH.filter((_, idx) => idx % 2 === 1);
+          if (moveMinors.length > 0) {
+            const moveSet = new Set(moveMinors);
+            h.miembros = h.miembros.filter((id) => !moveSet.has(id));
+          }
+
+          const newMembers = [b.id, ...moveMinors];
           const newHogar: Hogar = {
             id: nextSeqId(state, 'h'),
-            miembros: [b.id],
+            miembros: newMembers,
             adultoIds: [b.id],
             esAcogida: false,
             casaId: freeHouse ? freeHouse.id : null,
@@ -968,8 +1232,13 @@ export function runDemographicPeriodV2(state: GameState): void {
             freeHouse.hogarId = newHogar.id;
             freeHouse.ocupadaPorAccion = false;
           }
-          b.hogarId = newHogar.id;
-          b.zona = newHogar.zona;
+          for (const mid of newMembers) {
+            const m = npcById.get(mid);
+            if (m) {
+              m.hogarId = newHogar.id;
+              m.zona = newHogar.zona;
+            }
+          }
           state.hogares.push(newHogar);
           hogarById.set(newHogar.id, newHogar);
 
@@ -985,6 +1254,216 @@ export function runDemographicPeriodV2(state: GameState): void {
         }
       }
     }
+  }
+
+  // 5. Migración (llegadas por casas libres + vacantes; salidas por calle o descontento sostenido)
+  let openVacancies = 0;
+  for (const f of state.firmas) {
+    if (!f.activa || f.locales.length === 0) continue;
+    const fCaps = getFirmaRoleCaps(state, f);
+    const totalCap = Object.values(fCaps).reduce((s, c) => s + (c ?? 0), 0);
+    openVacancies += Math.max(0, totalCap - f.empleados.length);
+  }
+  const habitPool = state.parcelas
+    .filter((p) => p.edificio?.activo && (p.edificio.tipo === 'almacen' || p.edificio.tipo === 'tienda' || p.edificio.tipo === 'bar_cafe' || p.edificio.tipo === 'restoran' || p.edificio.tipo === 'cine_teatro'))
+    .map((p) => p.id);
+
+  // Llegadas
+  let arrivals = 0;
+  for (const [z, arr] of freeHousesByZone.entries()) {
+    if (arrivals >= MIGRATION_CONSTANTS.maxLlegadas || openVacancies <= 0) break;
+    while (arr.length > 0 && arrivals < MIGRATION_CONSTANTS.maxLlegadas && openVacancies > 0) {
+      const house = arr.shift()!;
+      const memberCount = house.capacidad >= 4 && nextSubRand(state, 'vida') < 0.45 ? 2 : 1;
+      const surname = SPANISH_LAST_NAMES[subRandInt(state, 'vida', 0, SPANISH_LAST_NAMES.length - 1)];
+      const newHId = nextSeqId(state, 'h_mig');
+      const newMembers: string[] = [];
+      const newAdults: string[] = [];
+      for (let k = 0; k < memberCount; k++) {
+        const mId = nextSeqId(state, 'npc');
+        const edad = subRandInt(state, 'vida', 22, 42);
+        const pers = {
+          valentia: subRandInt(state, 'vida', 30, 82),
+          laboriosidad: subRandInt(state, 'vida', 42, 88),
+          codicia: subRandInt(state, 'vida', 25, 76),
+          rebeldia: subRandInt(state, 'vida', 15, 58),
+          resiliencia: subRandInt(state, 'vida', 38, 86),
+          sociabilidad: subRandInt(state, 'vida', 28, 84),
+        };
+        const zRect = state.zonas[z]?.rect;
+        const mx = zRect ? zRect.wx + zRect.ww * 0.5 : 420;
+        const my = zRect ? zRect.wy + zRect.wh * 0.5 : 320;
+        const migrant: Npc = {
+          id: mId,
+          nombre: SPANISH_NAMES[subRandInt(state, 'vida', 0, SPANISH_NAMES.length - 1)],
+          apellido: surname,
+          edad,
+          cumpleanosDia: subRandInt(state, 'vida', 1, 365),
+          hogarId: newHId,
+          parejaId: null,
+          padresIds: [],
+          rol: 'desempleado',
+          empleadorId: null,
+          partes: [],
+          zona: z,
+          vivo: true,
+          educacion: { nivel: subRandInt(state, 'vida', 1, 2), estudiando: false },
+          personalidad: pers,
+          ritmo: buildSeededNpcRitmo(mId, edad, state.semilla, habitPool),
+          capacitacion: null,
+          variables: {
+            salud: subRandInt(state, 'vida', 82, 96),
+            hambre: 14,
+            miedo: 8,
+            satisfaccion: 62,
+            lealtad: 52,
+          },
+          economia: {
+            ingresoPos: subRandInt(state, 'vida', 35, 75),
+            propensionGasto: 62,
+            propensionEmprender: Math.round(pers.codicia * 0.4 + pers.rebeldia * 0.2 + 12),
+            ultimoIngresoNeto: 0,
+          },
+          hospital: { internado: false, esperandoCama: false, diasInternado: 0 },
+          accionIa: null,
+          modificadores: [],
+          mapa: { x: mx, y: my, destino: { x: mx, y: my }, accion: 'recién llegado' },
+        };
+        state.npcs.push(migrant);
+        npcById.set(migrant.id, migrant);
+        newMembers.push(migrant.id);
+        newAdults.push(migrant.id);
+      }
+      if (newMembers.length === 2) {
+        const pA = npcById.get(newMembers[0])!;
+        const pB = npcById.get(newMembers[1])!;
+        pA.parejaId = pB.id;
+        pB.parejaId = pA.id;
+      }
+      const migDinero = MIGRATION_CONSTANTS.dineroMigranteBase * memberCount;
+      state.auditEntradasDia += migDinero;
+      const migHogar: Hogar = {
+        id: newHId,
+        miembros: newMembers,
+        adultoIds: newAdults,
+        esAcogida: false,
+        casaId: house.id,
+        dinero: migDinero,
+        despensa: memberCount * 2,
+        estado: 'con_casa',
+        periodosSinPagar: 0,
+        periodosHacinado: 0,
+        periodosEnCalle: 0,
+        periodosDescontento: 0,
+        zona: z,
+        ultimoIngresoNeto: 0,
+        alquilerPagadoPeriodo: 0,
+      };
+      house.hogarId = migHogar.id;
+      house.ocupadaPorAccion = false;
+      state.hogares.push(migHogar);
+      hogarById.set(migHogar.id, migHogar);
+      arrivals++;
+      openVacancies = Math.max(0, openVacancies - memberCount);
+
+      emitSimEvent(state, {
+        id: nextSeqId(state, 'ev_mig_l'),
+        dia: state.reloj.dia,
+        tipo: 'migracion_llegada',
+        zona: z,
+        hogarId: migHogar.id,
+        cantidad: memberCount,
+        dinero: migDinero,
+        causa: 'mercado:casas_y_vacantes',
+      });
+    }
+  }
+
+  // Salidas: track street & discontent streaks; emigrate if no owned house & no firm shares
+  let departures = 0;
+  const maxDepartures = 2;
+  const livingNow = state.npcs.filter((n) => n.vivo).length;
+  for (const h of [...state.hogares]) {
+    if (h.estado === 'acogida') continue;
+    const members = h.miembros.map((id) => npcById.get(id)).filter((m): m is Npc => Boolean(m && m.vivo));
+    if (members.length === 0) continue;
+
+    if (h.estado === 'calle' && !h.ocupandoCasaId) {
+      h.periodosEnCalle = (h.periodosEnCalle ?? 0) + 1;
+    } else {
+      h.periodosEnCalle = 0;
+    }
+    const avgSat = members.reduce((s, m) => s + m.variables.satisfaccion, 0) / members.length;
+    if (avgSat < MIGRATION_CONSTANTS.umbralEmigrarSatisfaccion) {
+      h.periodosDescontento = (h.periodosDescontento ?? 0) + 1;
+    } else {
+      h.periodosDescontento = 0;
+    }
+
+    if (departures >= maxDepartures || livingNow - members.length < 25) continue;
+    const shouldLeave =
+      (h.periodosEnCalle ?? 0) >= MIGRATION_CONSTANTS.periodosParaEmigrar ||
+      (h.periodosDescontento ?? 0) >= MIGRATION_CONSTANTS.periodosDescontentoEmigrar;
+    if (!shouldLeave) continue;
+
+    const ownsFirm = members.some((m) => m.partes.length > 0);
+    const ownsHouse = state.casas.some(
+      (c) =>
+        (c.dueno.tipo === 'hogar' && c.dueno.id === h.id) ||
+        (c.dueno.tipo === 'npc' && h.miembros.includes(c.dueno.id))
+    );
+    if (ownsFirm || ownsHouse) continue;
+
+    const exitMoney = h.dinero;
+    const motivo: 'calle' | 'descontento' =
+      (h.periodosEnCalle ?? 0) >= MIGRATION_CONSTANTS.periodosParaEmigrar ? 'calle' : 'descontento';
+    state.auditSalidasDia += exitMoney;
+    h.dinero = 0;
+    h.despensa = 0;
+    if (h.casaId) {
+      const occC = casaById.get(h.casaId);
+      if (occC && occC.hogarId === h.id) occC.hogarId = null;
+    }
+    if (h.ocupandoCasaId) {
+      const sq = casaById.get(h.ocupandoCasaId);
+      if (sq) sq.ocupadaPorAccion = false;
+      h.ocupandoCasaId = null;
+    }
+    for (const m of members) {
+      m.vivo = false;
+      m.hospital.internado = false;
+      m.hospital.esperandoCama = false;
+      m.accionIa = null;
+      m.capacitacion = null;
+      if (m.empleadorId) {
+        const f = state.firmas.find((x) => x.id === m.empleadorId);
+        if (f) f.empleados = f.empleados.filter((id) => id !== m.id);
+        m.empleadorId = null;
+      }
+      if (m.parejaId) {
+        const p = npcById.get(m.parejaId);
+        if (p && !h.miembros.includes(p.id)) p.parejaId = null;
+        m.parejaId = null;
+      }
+      for (const med of state.medios) {
+        if (med.columnistas.includes(m.id)) med.columnistas = med.columnistas.filter((id) => id !== m.id);
+        if (med.duenoNpcIds.includes(m.id)) med.duenoNpcIds = med.duenoNpcIds.filter((id) => id !== m.id);
+      }
+    }
+    state.hogares = state.hogares.filter((x) => x.id !== h.id);
+    departures++;
+
+    emitSimEvent(state, {
+      id: nextSeqId(state, 'ev_mig_s'),
+      dia: state.reloj.dia,
+      tipo: 'migracion_salida',
+      zona: h.zona,
+      hogarId: h.id,
+      cantidad: members.length,
+      dinero: Number(exitMoney.toFixed(2)),
+      motivo,
+      causa: motivo === 'calle' ? 'vivienda:calle_prolongada' : 'vida:descontento_sostenido',
+    });
   }
 }
 
@@ -1021,7 +1500,7 @@ export function assignRolesAndJobsV2(state: GameState): void {
   for (const n of vivos) {
     if (ROLE_CATALOG[n.rol].publico) {
       pubCount[n.rol as PublicRoleId]++;
-    } else if (n.rol === 'desempleado' && n.edad >= 18 && n.edad < 65) {
+    } else if (n.rol === 'desempleado' && !n.capacitacion && n.edad >= 18 && n.edad < 65) {
       unemployedAdults.push(n);
     }
   }

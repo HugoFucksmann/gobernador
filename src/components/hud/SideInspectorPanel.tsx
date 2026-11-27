@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  Award,
   Building2,
   Crosshair,
   Hammer,
@@ -9,7 +10,6 @@ import {
   Home,
   IdCard,
   Landmark,
-  Lock,
   MapPin,
   Newspaper,
   Route,
@@ -27,6 +27,7 @@ import {
   OBRAS_LEVEL_TABLE,
   ROLE_CATALOG,
 } from '../../data/catalogs';
+import { interlocutor } from '../../engine/lecturaV2';
 import { evaluateNpcTopMoodFactor, getNpcDistrictName } from '../../engine/npcInsights';
 import { getBuildingJobCaps, sumPeriodExpenses } from '../../engine/policies';
 import {
@@ -42,7 +43,10 @@ import {
 import {
   getFranjaDia,
   getNpcDailyAgenda,
+  getParcelLandPrice,
+  getParcelTerrainTiles,
   getRubroDisplayName,
+  getTerrainBuildCostInfo,
   isViaConnectableToNetwork,
 } from '../../engine/worldHelpers';
 import { InspectorDirectoryTab } from '../../hooks/useGameSession';
@@ -92,6 +96,7 @@ const TRAIT_LABELS: Record<PersonalityTrait, string> = {
   codicia: 'Codicia',
   rebeldia: 'Rebeldía',
   resiliencia: 'Resiliencia',
+  sociabilidad: 'Sociabilidad',
 };
 
 function describeBuilding(def: BuildingDefinition): string {
@@ -471,19 +476,33 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           const employerFirm = selectedNpc.empleadorId
             ? state.firmas.find((f) => f.id === selectedNpc.empleadorId)
             : undefined;
+          const notableInfo = state.lectura?.notables.find((nt) => nt.npcId === selectedNpc.id);
 
           return (
             <div className="space-y-4">
               <div className="flex items-center gap-3.5">
                 <CitizenAvatar npc={selectedNpc} />
                 <div className="min-w-0 flex-1 space-y-1">
-                  <div className="text-xs text-zinc-400 truncate">
-                    {districtName} ({effZone}) · {stage}
+                  <div className="text-xs text-zinc-400 truncate flex items-center gap-1.5">
+                    <span>
+                      {districtName} ({effZone}) · {stage}
+                    </span>
+                    {notableInfo && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold capitalize">
+                        <Award className="w-3 h-3" />
+                        {notableInfo.tipo}
+                      </span>
+                    )}
                   </div>
                   <div className="text-sm font-medium text-zinc-100 truncate capitalize">
                     {selectedNpc.accionIa ? selectedNpc.accionIa.nombre : selectedNpc.mapa.accion}
                   </div>
                   <div className="text-xs text-amber-300 truncate">{topFactor}</div>
+                  {selectedNpc.capacitacion && (
+                    <div className="text-xs font-semibold text-sky-300">
+                      Capacitándose: {ROLE_CATALOG[selectedNpc.capacitacion.rolObjetivo].nombre} ({selectedNpc.capacitacion.diasRestantes}d)
+                    </div>
+                  )}
                   {(selectedNpc.hospital.internado || selectedNpc.hospital.esperandoCama) && (
                     <div className="text-xs font-semibold text-rose-300">
                       {selectedNpc.hospital.internado
@@ -652,6 +671,80 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                         })}
                       </div>
                     </div>
+
+                    {selectedNpc.ritmo && (
+                      <div className="bg-zinc-800/45 border border-zinc-800 rounded-xl p-3 space-y-1.5 text-xs">
+                        <div className="font-semibold text-zinc-300">Ritmo y hábitos</div>
+                        <div className="grid grid-cols-2 gap-1.5 text-zinc-300">
+                          <span>
+                            Turno: <strong className="text-white capitalize">{selectedNpc.ritmo.turno}</strong>
+                          </span>
+                          <span>
+                            Cronotipo:{' '}
+                            <strong className="text-white font-mono">
+                              {selectedNpc.ritmo.cronotipo > 0 ? `+${selectedNpc.ritmo.cronotipo}` : selectedNpc.ritmo.cronotipo}h
+                            </strong>
+                          </span>
+                          <span>
+                            Libre hoy:{' '}
+                            <strong className="text-emerald-300 capitalize">
+                              {selectedNpc.ritmo.libreHoyActividad ?? 'descanso'}
+                            </strong>
+                          </span>
+                          <span>
+                            Hábitos: <strong className="text-white">{selectedNpc.ritmo.habitos.length}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {notableInfo && (() => {
+                      const inter = interlocutor(state, selectedNpc.id);
+                      const recentNotables = state.eventos
+                        .filter(
+                          (ev) =>
+                            ev.notable &&
+                            (('npcId' in ev && ev.npcId === selectedNpc.id) ||
+                              ('duenoId' in ev && ev.duenoId === selectedNpc.id) ||
+                              ('compradorId' in ev && ev.compradorId === selectedNpc.id))
+                        )
+                        .slice(-3)
+                        .reverse();
+                      return (
+                        <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3 space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between font-semibold text-amber-300">
+                            <span className="flex items-center gap-1.5">
+                              <Award className="w-3.5 h-3.5" />
+                              Persona clave ({notableInfo.tipo})
+                            </span>
+                            <span className="font-mono">Peso {Math.round(notableInfo.peso)}</span>
+                          </div>
+                          <div className="text-zinc-200">{notableInfo.motivo}</div>
+                          {inter && (
+                            <div className="text-zinc-400">
+                              Postura: {inter.posturaHaciaEstado > 0 ? '+' : ''}
+                              {inter.posturaHaciaEstado} · {inter.intereses.join(', ')}
+                            </div>
+                          )}
+                          {recentNotables.length > 0 && (
+                            <div className="pt-1 space-y-1 border-t border-amber-500/20">
+                              {recentNotables.map((ev) => (
+                                <div key={ev.id} className="flex justify-between text-[11px] text-zinc-300">
+                                  <span>{ev.tipo} (D{ev.dia})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => onInspectCausal(`Hecho notable (D${ev.dia})`, ev.id)}
+                                    className="text-emerald-400 hover:underline"
+                                  >
+                                    ¿Por qué?
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {selectedNpc.modificadores.length > 0 ? (
                       <div className="space-y-2 max-h-[160px] overflow-y-auto divide-y divide-zinc-800 pt-1">
@@ -911,34 +1004,40 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 </div>
               )}
 
-              {selectedParcela.estado === 'bloqueada' && (
-                <div className="bg-zinc-800/60 rounded-xl p-4 space-y-2">
-                  <div className="flex items-center gap-2 font-semibold text-zinc-200">
-                    <Lock className="w-4 h-4 text-zinc-400" />
-                    <span>Bloqueada</span>
-                  </div>
-                  <div className="text-xs text-zinc-300">
-                    Se habilita al avanzar el desarrollo de la zona o cumplir hitos.
-                  </div>
-                </div>
-              )}
-
-              {selectedParcela.estado === 'libre' && (
+              {selectedParcela.estado === 'libre' && (() => {
+                const terrainInfo = getTerrainBuildCostInfo(
+                  state.mapaGrid,
+                  getParcelTerrainTiles(state, selectedParcela)
+                );
+                const { precioLote: landPrice } = getParcelLandPrice(state, selectedParcela);
+                return (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-emerald-400">
-                      Parcela {selectedParcela.tipoParcela} disponible
+                      Parcela {selectedParcela.tipoParcela} ({selectedParcela.clase ?? 'M'}) disponible
                     </span>
                     <span className="font-mono text-zinc-300 tabular-nums">
                       Caja ${Math.round(state.gobierno.reserva)}
                     </span>
                   </div>
 
+                  {!terrainInfo.buildable && (
+                    <div className="bg-rose-950/50 border border-rose-500/40 rounded-xl p-3 text-xs text-rose-200">
+                      Terreno escarpado o agua: no edificable.
+                    </div>
+                  )}
+
+                  {terrainInfo.buildable && Math.abs(terrainInfo.multiplier - 1) >= 0.02 && (
+                    <div className="bg-zinc-800/55 border border-zinc-700/60 rounded-xl px-3 py-2 text-xs text-amber-300">
+                      Factor de terreno sobre costo de obra: ×{terrainInfo.multiplier.toFixed(2)}
+                    </div>
+                  )}
+
                   {selectedParcela.tipoParcela !== 'publica' ? (
                     <div className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl p-3.5 text-xs text-zinc-300 space-y-1">
                       <div className="font-semibold text-white">Parcela de iniciativa privada</div>
                       <div>
-                        Las constructoras, inmobiliarias y emprendedores construyen viviendas y comercios aquí según la demanda zonal ({(state.demandaSuelo[`${selectedParcela.zona}:${selectedParcela.tipoParcela}`] ?? 1).toFixed(2)}x).
+                        Las constructoras, inmobiliarias y emprendedores construyen viviendas y comercios aquí según la demanda zonal ({(state.demandaSuelo[`${selectedParcela.zona}:${selectedParcela.tipoParcela}`] ?? 1).toFixed(2)}x) · Precio de lote: <span className="font-mono text-emerald-300">${landPrice}</span>.
                       </div>
                     </div>
                   ) : (
@@ -952,13 +1051,14 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       <div className="space-y-2.5">
                         {GOVERNOR_BUILDABLE_TYPES.map((tipo) => {
                           const def = BUILDING_CATALOG[tipo];
+                          const effectiveCost = Math.round(def.costoObra * terrainInfo.multiplier);
                           const gatedG2 = Boolean(def.requiereG2) && isG1;
-                          const noFunds = state.gobierno.reserva < def.costoObra;
+                          const noFunds = state.gobierno.reserva < effectiveCost;
                           const estDays = Math.max(
                             1,
                             Math.round(def.diasObra * obrasRow.diasObraFactor * infraFactor)
                           );
-                          const disabled = isG0 || gatedG2 || noFunds;
+                          const disabled = isG0 || gatedG2 || noFunds || !terrainInfo.buildable;
 
                           return (
                             <div
@@ -974,7 +1074,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                                   />
                                 </div>
                                 <div className="font-mono text-xs text-amber-300 tabular-nums">
-                                  ${def.costoObra} · {estDays}d · Mant. ${def.mantenimientoPeriodo}/per
+                                  ${effectiveCost} · {estDays}d · Mant. ${def.mantenimientoPeriodo}/per
                                 </div>
                               </div>
 
@@ -988,7 +1088,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                                 }}
                                 className="px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors whitespace-nowrap"
                               >
-                                {gatedG2 ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
+                                {!terrainInfo.buildable ? 'No apta' : gatedG2 ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
                               </button>
                             </div>
                           );
@@ -997,7 +1097,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     </>
                   )}
                 </div>
-              )}
+                );
+              })()}
 
               {(selectedParcela.estado === 'en_obra' || selectedParcela.estado === 'ocupada') && b && bDef && (() => {
                 let statusLabel = 'Operativo';
@@ -1931,12 +2032,13 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
 
             return (
               <div className="space-y-3 text-xs">
-                <div className="grid grid-cols-3 gap-1 bg-zinc-800/80 p-1 rounded-xl">
+                <div className="grid grid-cols-4 gap-1 bg-zinc-800/80 p-1 rounded-xl">
                   {(
                     [
                       { id: 'personas', label: 'Personas' },
                       { id: 'hogares', label: 'Hogares' },
                       { id: 'firmas', label: 'Firmas' },
+                      { id: 'notables', label: 'Clave' },
                     ] as const
                   ).map((t) => (
                     <button
@@ -2069,6 +2171,39 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                           </span>
                         </button>
                       ))}
+
+                  {inspectorSearchOpen === 'notables' &&
+                    (state.lectura?.notables ?? [])
+                      .filter((nt) => {
+                        if (!q) return true;
+                        const zName = (state.zonas[nt.zona]?.nombre ?? nt.zona).toLowerCase();
+                        return (
+                          nt.nombre.toLowerCase().includes(q) ||
+                          nt.tipo.toLowerCase().includes(q) ||
+                          nt.motivo.toLowerCase().includes(q) ||
+                          zName.includes(q)
+                        );
+                      })
+                      .map((nt) => (
+                        <button
+                          key={nt.npcId}
+                          type="button"
+                          onClick={() => {
+                            onSelectNpc?.(nt.npcId);
+                            onJumpZone(nt.zona);
+                          }}
+                          className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-zinc-800"
+                        >
+                          <span className="truncate text-zinc-100 flex items-center gap-1.5">
+                            <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <strong className="truncate">{nt.nombre}</strong>
+                            <span className="text-zinc-400 truncate">· {nt.motivo}</span>
+                          </span>
+                          <span className="font-mono text-amber-300 shrink-0 ml-2">
+                            {Math.round(nt.peso)}
+                          </span>
+                        </button>
+                      ))}
                 </div>
               </div>
             );
@@ -2149,8 +2284,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                             ? `Libre (${p.tipoParcela})`
                             : p.estado === 'sin_calle'
                             ? 'Sin vía de acceso'
-                            : p.estado === 'bloqueada'
-                            ? 'Bloqueada'
                             : p.estado === 'en_obra' && b && bDef
                             ? `${bDef.nombre} · ${b.diasObraRestantes}d`
                             : bDef
@@ -2161,7 +2294,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                             ? 'text-emerald-400'
                             : p.estado === 'en_obra'
                             ? 'text-amber-300'
-                            : p.estado === 'sin_calle' || p.estado === 'bloqueada'
+                            : p.estado === 'sin_calle'
                             ? 'text-zinc-500'
                             : 'text-zinc-300';
 

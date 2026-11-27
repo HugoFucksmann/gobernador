@@ -143,7 +143,7 @@ export function getBuildingJobCaps(
   for (const b of getActiveBuildings(parcelas)) {
     const caps = getBuildingRoleCapacity(b);
     if (b.tipo === 'oficina_publica') oficinaCount++;
-    if (b.tipo === 'escuela') escuelaCount++;
+    if (b.tipo === 'escuela' || b.tipo === 'universidad') escuelaCount++;
 
     policia += caps.policia ?? 0;
     medico += caps.medico ?? 0;
@@ -213,10 +213,10 @@ export function computeMaintenanceBreakdown(
     const def = BUILDING_CATALOG[b.tipo];
     if (
       (def.categoria === 'publico' || def.categoria === 'suceso') &&
-      def.mantenimientoPeriodo > 0 &&
-      def.areaServicio
+      def.mantenimientoPeriodo > 0
     ) {
-      mantenimientoPorArea[def.areaServicio] += def.mantenimientoPeriodo;
+      const area: ServiceAreaId = def.areaServicio ?? 'infraestructura';
+      mantenimientoPorArea[area] += def.mantenimientoPeriodo;
     }
   }
 

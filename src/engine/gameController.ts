@@ -54,10 +54,12 @@ import {
   resolveComplexityConfig,
 } from './worldGenerator';
 import {
+  buildSeededNpcRitmo,
   buildTileGridAndSyncMap,
   computeDemandaSuelo,
   recomputeRoadDistances,
 } from './worldHelpers';
+import { initLecturaState } from './lecturaV2';
 
 export type { ExtraLeverKey };
 
@@ -534,6 +536,31 @@ export class GameController {
     this.commit();
   }
 
+  setLecturaActiva(enabled: boolean): void {
+    const nextLectura =
+      enabled && !this.state.lectura
+        ? initLecturaState(this.state, this.derived)
+        : this.state.lectura;
+    this.state = {
+      ...this.state,
+      config: {
+        ...this.state.config,
+        lecturaActiva: enabled,
+      },
+      lectura: nextLectura,
+    };
+    this.commit();
+  }
+
+  setDevSeed(semilla: number): void {
+    if (!this.devMode) return;
+    const norm = normalizeSeed(semilla);
+    this.startNewGame({
+      ...this.state.config,
+      semilla: norm,
+    });
+  }
+
   setDevComplexity(nivelMundo: WorldComplexityLevel, nivelGobernador: GovernorComplexityLevel): void {
     if (!this.devMode) return;
     const resolved = resolveComplexityConfig({
@@ -607,6 +634,12 @@ export class GameController {
     loaded.rngState = normalizeSeed(loaded.rngState ?? loaded.semilla);
     if (!loaded.rng) {
       loaded.rng = initSubsystemRng(loaded.rngState || loaded.semilla || 1);
+    } else {
+      const fallbackRng = initSubsystemRng(loaded.rngState || loaded.semilla || 1);
+      loaded.rng = {
+        ...fallbackRng,
+        ...loaded.rng,
+      };
     }
     if (typeof loaded.idSeq !== 'number') {
       loaded.idSeq = 0;
@@ -635,7 +668,8 @@ export class GameController {
         loaded.zonas,
         loaded.parcelas ?? [],
         loaded.tramos,
-        loaded.npcs.length
+        loaded.npcs.length,
+        loaded.semilla
       );
     }
     if (
@@ -671,6 +705,9 @@ export class GameController {
     }
     if (!loaded.demandaSueloRachas) {
       loaded.demandaSueloRachas = {};
+    }
+    if (!loaded.vacantesCriticasRachas) {
+      loaded.vacantesCriticasRachas = {};
     }
 
     loaded.gobierno.palancasVigentes = migrateLegacyLevers(loaded.gobierno.palancasVigentes, preset.id);
@@ -868,6 +905,15 @@ export class GameController {
 
     for (const npc of loaded.npcs) {
       if (!npc.extra) npc.extra = {};
+      if (typeof npc.personalidad.sociabilidad !== 'number') {
+        npc.personalidad.sociabilidad = 50;
+      }
+      if (!npc.ritmo) {
+        npc.ritmo = buildSeededNpcRitmo(npc.id, npc.edad, loaded.semilla);
+      }
+      if (npc.capacitacion === undefined) {
+        npc.capacitacion = null;
+      }
       if ('progreso' in (npc.educacion as unknown as Record<string, unknown>)) {
         delete (npc.educacion as unknown as Record<string, unknown>).progreso;
       }
@@ -909,15 +955,14 @@ export class GameController {
     }
     if (Array.isArray(loaded.parcelas)) {
       for (const p of loaded.parcelas) {
+        if ((p.estado as string) === 'bloqueada') {
+          p.estado = 'sin_calle';
+        }
         if (p.edificio && (p.edificio as { tipo?: string }).tipo === 'oficina_banco') {
           p.edificio = null;
           p.estado = 'libre';
         }
       }
-    }
-    if (loaded.gobierno?.extras) {
-      loaded.gobierno.extras.vigentes.nivelEducacion = 0;
-      loaded.gobierno.extras.objetivo.nivelEducacion = 0;
     }
 
     if (!Array.isArray(loaded.parcelas) || loaded.parcelas.length === 0) {
@@ -973,21 +1018,23 @@ export class GameController {
         valorNuevo: number | string;
         causa?: string;
       };
-      loaded.eventos = (loaded.eventos as Array<SimEvent | LegacyPalancaEvent>).map((ev) =>
-        ev.tipo === 'palanca'
-          ? {
-              id: ev.id,
-              dia: ev.dia,
-              tipo: 'control' as const,
-              zona: ev.zona,
-              control: ev.palanca,
-              palanca: ev.palanca,
-              valorAnterior: ev.valorAnterior,
-              valorNuevo: ev.valorNuevo,
-              causa: ev.causa,
-            }
-          : ev
-      );
+      loaded.eventos = (loaded.eventos as Array<SimEvent | LegacyPalancaEvent>)
+        .filter((ev) => (ev as { tipo?: string }).tipo !== 'parcela_habilitada')
+        .map((ev) =>
+          ev.tipo === 'palanca'
+            ? {
+                id: ev.id,
+                dia: ev.dia,
+                tipo: 'control' as const,
+                zona: ev.zona,
+                control: ev.palanca,
+                palanca: ev.palanca,
+                valorAnterior: ev.valorAnterior,
+                valorNuevo: ev.valorNuevo,
+                causa: ev.causa,
+              }
+            : ev
+        );
     }
 
     const tempDerived = deriveCommunityStats(loaded);
@@ -998,6 +1045,10 @@ export class GameController {
         poblacion: tempDerived.poblacion,
         satisfaccionMedia: tempDerived.satisfaccionMedia,
       };
+    }
+
+    if (!loaded.lectura && loaded.config.lecturaActiva !== false) {
+      loaded.lectura = initLecturaState(loaded, tempDerived);
     }
 
     this.state = loaded;

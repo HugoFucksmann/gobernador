@@ -90,12 +90,14 @@ import {
   getAnnouncedPhenomena,
   getEffectiveTrait,
   getEffectiveZone,
-  getFranjaDia,
   getModifierDelta,
   getNpcDailyAgenda,
   getNpcProductivity,
+  getParcelTerrainTiles,
   getRouteWaypointsBetween,
   getStage,
+  getTerrainBuildCostInfo,
+  getViaTerrainTiles,
   getWorldZones,
   getZoneTravelCost,
   HospitalFacilityInfo as WorldHospitalFacilityInfo,
@@ -103,6 +105,7 @@ import {
   isViaConnectableToNetwork,
   recomputeRoadDistances,
   shortestZonePath as shortestZonePathByZones,
+  updateDailyNpcRitmoAndHabits,
 } from './worldHelpers';
 import {
   pickRandomZoneSub,
@@ -114,7 +117,12 @@ import {
   handleNpcDeathV2,
   runDailyLifecycleV2,
   runDemographicPeriodV2,
+  runTrainingPeriodV2,
 } from './lifecycleV2';
+import {
+  updateLecturaDaily,
+  updateLecturaPayday,
+} from './lecturaV2';
 
 export {
   checkEngineInvariants,
@@ -326,7 +334,7 @@ export function computeHospitalFacilities(
   _medicosActivos?: number
 ): { facilities: HospitalFacilityInfo[]; totalBeds: number; fullCount: number } {
   const parcelById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
-  const raw = computeHospitalFacilitiesRaw(state.parcelas, state.npcs, state.zonas);
+  const raw = computeHospitalFacilitiesRaw(state.parcelas, state.npcs, state.zonas, state.distanciasZonas);
   const facilities: HospitalFacilityInfo[] = raw
     .map((f) => {
       const parcela = parcelById.get(f.parcelaId);
@@ -640,8 +648,13 @@ export function orderBuildInParcela(
   if (!canBuildTypeInParcela(parcela, tipo)) {
     return { ok: false, error: `La parcela (${parcela.tipoParcela}, clase ${parcela.clase ?? 'M'}) no admite ${def.nombre}.` };
   }
-  if (state.gobierno.reserva < def.costoObra) {
-    return { ok: false, error: `Reserva insuficiente ($${def.costoObra} requeridos).` };
+  const terrainInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, parcela), false);
+  if (!terrainInfo.buildable) {
+    return { ok: false, error: 'El terreno de la parcela no es edificable (agua o montaña).' };
+  }
+  const buildCost = Number((def.costoObra * terrainInfo.multiplier).toFixed(2));
+  if (state.gobierno.reserva < buildCost) {
+    return { ok: false, error: `Reserva insuficiente ($${buildCost} requeridos).` };
   }
 
   const constructoras = state.firmas.filter((f) => f.activa && f.rubro === 'construccion');
@@ -660,12 +673,12 @@ export function orderBuildInParcela(
     state.gobierno.indicadores.infraestructura
   );
 
-  state.gobierno.reserva = Number((state.gobierno.reserva - def.costoObra).toFixed(2));
+  state.gobierno.reserva = Number((state.gobierno.reserva - buildCost).toFixed(2));
   state.gobierno.acumuladoPeriodo.obras = Number(
-    (state.gobierno.acumuladoPeriodo.obras + def.costoObra).toFixed(2)
+    (state.gobierno.acumuladoPeriodo.obras + buildCost).toFixed(2)
   );
   // Public construction payment flows ONLY into payeeFirm.ventas to strictly conserve world money
-  payeeFirm.ventas = Number((payeeFirm.ventas + def.costoObra).toFixed(2));
+  payeeFirm.ventas = Number((payeeFirm.ventas + buildCost).toFixed(2));
 
   parcela.estado = 'en_obra';
   parcela.edificio = {
@@ -693,7 +706,7 @@ export function orderBuildInParcela(
     parcelaId: parcela.id,
     edificio: tipo,
     dueno: 'estado',
-    costo: def.costoObra,
+    costo: buildCost,
     diasObra,
   });
   addLog(
@@ -701,7 +714,7 @@ export function orderBuildInParcela(
     'gobernador',
     `orden:construir/${tipo}`,
     `Inicio de obra: ${def.nombre}`,
-    `En ${parcela.nombre} (${parcela.zona}) · $${def.costoObra} · ${diasObra} días.`,
+    `En ${parcela.nombre} (${parcela.zona}) · $${buildCost} · ${diasObra} días.`,
     undefined,
     evId
   );
@@ -734,8 +747,17 @@ export function orderBuildVia(
   if (!isViaConnectableToNetwork(state, tramo)) {
     return { ok: false, error: 'El tramo debe conectar con la red vial activa.' };
   }
-  if (state.gobierno.reserva < tramo.costoObra) {
-    return { ok: false, error: `Reserva insuficiente ($${tramo.costoObra} requeridos).` };
+  const terrainInfo = getTerrainBuildCostInfo(
+    state.mapaGrid,
+    getViaTerrainTiles(state, tramo),
+    tramo.tipo === 'puente'
+  );
+  if (!terrainInfo.buildable) {
+    return { ok: false, error: 'El trazado atraviesa terreno infranqueable sin puente.' };
+  }
+  const buildCost = Number((tramo.costoObra * terrainInfo.multiplier + terrainInfo.bridgeExtraCost).toFixed(2));
+  if (state.gobierno.reserva < buildCost) {
+    return { ok: false, error: `Reserva insuficiente ($${buildCost} requeridos).` };
   }
 
   const constructoras = state.firmas.filter((f) => f.activa && f.rubro === 'construccion');
@@ -756,11 +778,11 @@ export function orderBuildVia(
     )
   );
 
-  state.gobierno.reserva = Number((state.gobierno.reserva - tramo.costoObra).toFixed(2));
+  state.gobierno.reserva = Number((state.gobierno.reserva - buildCost).toFixed(2));
   state.gobierno.acumuladoPeriodo.obras = Number(
-    (state.gobierno.acumuladoPeriodo.obras + tramo.costoObra).toFixed(2)
+    (state.gobierno.acumuladoPeriodo.obras + buildCost).toFixed(2)
   );
-  payeeFirm.ventas = Number((payeeFirm.ventas + tramo.costoObra).toFixed(2));
+  payeeFirm.ventas = Number((payeeFirm.ventas + buildCost).toFixed(2));
 
   tramo.enObra = true;
   tramo.diasObraRestantes = diasObra;
@@ -776,7 +798,7 @@ export function orderBuildVia(
     tramoNombre: tramo.nombre,
     tipoVia: tramo.tipo,
     parcelasAbiertas: [...tramo.parcelasAbiertas],
-    costo: tramo.costoObra,
+    costo: buildCost,
     diasObra,
   });
   addLog(
@@ -784,7 +806,7 @@ export function orderBuildVia(
     'gobernador',
     `orden:construir_via/${tramo.tipo}`,
     `Inicio de obra vial: ${tramo.nombre}`,
-    `${tramo.tipo.toUpperCase()} (${tramo.zonaA}–${tramo.zonaB}) · $${tramo.costoObra} · ${diasObra} días.`,
+    `${tramo.tipo.toUpperCase()} (${tramo.zonaA}–${tramo.zonaB}) · $${buildCost} · ${diasObra} días.`,
     undefined,
     evId
   );
@@ -890,7 +912,12 @@ function stepBuildingsDaily(state: GameState): void {
             capacidad: def.capacidadCasa ?? 4,
             estado: b.estadoSalud ?? 100,
             dueno: b.duenoRef ?? { tipo: 'estado', id: 'estado' },
-            alquiler: Number(((def.alquilerBase ?? 12) * zoneDem).toFixed(2)),
+            alquiler: Number(
+              Math.max(
+                (def.alquilerBase ?? 12) * HOUSING_CONSTANTS.alquilerPisoFactor,
+                (def.alquilerBase ?? 12) * ((b.estadoSalud ?? 100) / 100) * zoneDem
+              ).toFixed(2)
+            ),
             hogarId: null,
             diasVaciaSinMantenimiento: 0,
             alquilerCobradoPeriodo: 0,
@@ -1083,9 +1110,6 @@ function checkHitosAtPayday(state: GameState, derived: CommunityDerived): void {
     state.hitosCumplidos.push(hito.id);
     const parcela = state.parcelas.find((p) => p.id === hito.parcelaId);
     const zone: ZoneId = parcela?.zona ?? 'centro';
-    if (parcela && parcela.estado === 'bloqueada') {
-      parcela.estado = 'libre';
-    }
     const hitoEvId = nextSeqId(state, `ev_${dia}`);
     emitSimEvent(state, {
       id: hitoEvId,
@@ -1096,26 +1120,12 @@ function checkHitosAtPayday(state: GameState, derived: CommunityDerived): void {
       nombre: hito.nombre,
       parcelaId: hito.parcelaId,
     });
-    if (parcela) {
-      const habEvId = nextSeqId(state, `ev_${dia}`);
-      emitSimEvent(state, {
-        id: habEvId,
-        dia,
-        tipo: 'parcela_habilitada',
-        zona: parcela.zona,
-        parcelaId: parcela.id,
-        hitoId: hito.id,
-        causa: hitoEvId,
-      });
-    }
     addLog(
       state,
       'gobernador',
       `hito:${hito.id}`,
       `Hito cumplido: ${hito.nombre}`,
-      parcela
-        ? `Se habilitó la parcela ${parcela.nombre} (${parcela.zona}) para nuevas construcciones.`
-        : hito.descripcion,
+      hito.descripcion,
       hitoEvId,
       hitoEvId
     );
@@ -2864,7 +2874,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
   const gridAncho = state.mapaGrid?.ancho ?? 48;
   const pxPerTile = 1560 / Math.max(24, gridAncho);
   const baseSpeed = AGENDA_CONSTANTS.baldosasPorHora * pxPerTile * horasDt;
-  const franja = getFranjaDia(state.reloj.tick % TICKS_PER_DAY, TICKS_PER_DAY);
+  const hourOfDay = ((state.reloj.tick % TICKS_PER_DAY) / TICKS_PER_DAY) * 24;
 
   const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
   const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
@@ -2878,6 +2888,19 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
 
   for (const npc of state.npcs) {
     if (!npc.vivo) continue;
+    const crono = npc.ritmo?.cronotipo ?? 0;
+    const npcHour = (((hourOfDay - crono) % 24) + 24) % 24;
+    const npcFranja =
+      npcHour < 6
+        ? 'noche'
+        : npcHour < 12
+        ? 'manana'
+        : npcHour < 14
+        ? 'mediodia'
+        : npcHour < 19
+        ? 'tarde'
+        : 'anochecer';
+
     const isUrgent = Boolean(
       npc.accionIa && ['protesta', 'huelga', 'saqueo'].includes(npc.accionIa.id)
     );
@@ -2889,7 +2912,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
     let targetParcelaId = npc.mapa.parcelaDestinoId;
     let desiredAccion = npc.mapa.accion;
 
-    // Determine authoritative goal: urgent action -> hunger errand -> daily 5-franja agenda
+    // Determine authoritative goal: urgent action -> hunger errand -> daily 5-franja agenda (staggered by cronotipo)
     if (
       npc.accionIa &&
       ['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(
@@ -2930,9 +2953,9 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
         targetParcelaId = mParcel.id;
       }
       desiredAccion = 'buscando alimento';
-    } else if (npc.mapa.franja !== franja || !npc.mapa.ruta) {
+    } else if (npc.mapa.franja !== npcFranja || !npc.mapa.ruta) {
       const agenda = getNpcDailyAgenda(state, npc, agendaCtx);
-      const slot = agenda.find((s) => s.franja === franja) ?? agenda[0];
+      const slot = agenda.find((s) => s.franja === npcFranja) ?? agenda[0];
       targetWx = slot.wx ?? targetWx;
       targetWy = slot.wy ?? targetWy;
       targetZone = slot.zona;
@@ -2941,7 +2964,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
     }
 
     const goalMoved =
-      npc.mapa.franja !== franja ||
+      npc.mapa.franja !== npcFranja ||
       Math.hypot(targetWx - npc.mapa.destino.x, targetWy - npc.mapa.destino.y) > 4;
 
     if (goalMoved) {
@@ -2958,7 +2981,7 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
       npc.mapa.destino = { x: targetWx, y: targetWy };
       npc.mapa.zonaDestino = targetZone;
       npc.mapa.parcelaDestinoId = targetParcelaId;
-      npc.mapa.franja = franja;
+      npc.mapa.franja = npcFranja;
     }
     if (!npc.accionIa || desiredAccion) {
       npc.mapa.accion = desiredAccion;
@@ -3666,7 +3689,7 @@ function runDailyVariablesV2(state: GameState): void {
   const segService = state.gobierno.indicadores.seguridad / 100;
   const saludService = state.gobierno.indicadores.salud / 100;
   const activeZombies = activePhenomena.filter((f) => f.tipo === 'plaga_zombie');
-  const hospFacilities = computeHospitalFacilitiesRaw(state.parcelas, state.npcs, state.zonas);
+  const hospFacilities = computeHospitalFacilitiesRaw(state.parcelas, state.npcs, state.zonas, state.distanciasZonas);
   const totalHospitalBeds = hospFacilities.reduce((s, f) => s + f.camasEfectivas, 0);
   let internadosCount = 0;
   for (const n of vivos) {
@@ -4373,9 +4396,10 @@ function advanceDay(state: GameState): void {
     state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
   const allowGovernorComplex = govLevel === 'G2' || govLevel === 'G3';
 
-  // 1. Controls take effect, buildings & roads advance/activate
+  // 1. Controls take effect, buildings & roads advance/activate, daily NPC ritmo/habits update
   applyLeverChanges(state);
   stepBuildingsDaily(state);
+  updateDailyNpcRitmoAndHabits(state);
 
   const minHitKeep = state.reloj.dia - ECON_CONSTANTS.golpeAmenazaVentanaDias;
   for (const z of Object.keys(state.golpesPorZonaHistorial) as ZoneId[]) {
@@ -4513,10 +4537,13 @@ function advanceDay(state: GameState): void {
       .filter((m) => m.diasRestantes > 0);
   }
 
-  // 10. Payday settlement V2 (firms, rent, maintenance, state, housing, M&A, bankruptcies, construction, autopilot, media)
+  // 10. Payday settlement V2 (firms, rent, maintenance, state, housing, M&A, bankruptcies, construction, autopilot, media, training)
   let settledThisDay = false;
   if (state.reloj.diasEnPeriodo >= PERIOD_DAYS) {
     runPaydayEconomyV2(state);
+    if (!isM0) {
+      runTrainingPeriodV2(state);
+    }
     state.reloj.diasEnPeriodo = 0;
     state.reloj.periodo += 1;
     settledThisDay = true;
@@ -4530,8 +4557,14 @@ function advanceDay(state: GameState): void {
   // 12. Role changes & job matching
   assignRolesAndJobsV2(state);
 
-  // 13. Derived community stats, period snapshot & history
+  // 13. Derived community stats, period snapshot, lectura & history
   const derived = deriveCommunityStats(state);
+  if (state.config.lecturaActiva !== false) {
+    updateLecturaDaily(state, derived);
+    if (settledThisDay) {
+      updateLecturaPayday(state, derived);
+    }
+  }
   if (settledThisDay) {
     state.metricasPeriodoAnterior = {
       apoyoPct: derived.apoyoPct,
@@ -5014,6 +5047,44 @@ function collectDailyPressFacts(
           familia: `familia ${famApellido}`,
           hogar: ev.tipo === 'pareja' ? ev.hogarNuevoId : ev.casaId ?? 'patrimonio familiar',
           cifra: ev.tipo === 'herencia' ? `$${Math.round(ev.dinero)}` : 'nuevo hogar',
+        },
+      });
+    } else if (ev.tipo === 'migracion_llegada' || ev.tipo === 'migracion_salida') {
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'demografia',
+        relevancia: relMap.demografia ?? 58,
+        valencia: ev.tipo === 'migracion_llegada' ? 'buena' : 'mala',
+        esDelGobierno: false,
+        zona: ev.zona,
+        origen: `vida:${ev.tipo}`,
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          hogar: ev.hogarId,
+          cifra:
+            ev.tipo === 'migracion_llegada'
+              ? `+${ev.cantidad} migrantes`
+              : `-${ev.cantidad} emigrantes`,
+        },
+      });
+    } else if (ev.tipo === 'capacitacion_fin') {
+      const trained = npcById.get(ev.npcId);
+      facts.push({
+        id: nextSeqId(state, `pf_${dia}`),
+        dia,
+        tema: 'empresas',
+        relevancia: 52,
+        valencia: 'buena',
+        esDelGobierno: false,
+        zona: ev.zona,
+        origen: 'vida:capacitacion',
+        causa: ev.id,
+        datos: {
+          zona: ev.zona,
+          persona: trained?.nombre ?? ev.npcId,
+          cifra: ROLE_CATALOG[ev.rolObjetivo]?.nombre ?? ev.rolObjetivo,
         },
       });
     }
@@ -5744,15 +5815,6 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         titulo: `Demolición de ${BUILDING_CATALOG[ev.edificio].nombre}`,
         detalle: `Se liberó la parcela ${ev.parcelaId}.`,
       };
-    case 'parcela_habilitada':
-      return {
-        id: ev.id,
-        dia: ev.dia,
-        tipo: ev.tipo,
-        zona: ev.zona,
-        titulo: `Parcela habilitada: ${ev.parcelaId}`,
-        detalle: `Desbloqueada por hito ${ev.hitoId}.`,
-      };
     case 'hito':
       return {
         id: ev.id,
@@ -5760,7 +5822,7 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         tipo: ev.tipo,
         zona: ev.zona,
         titulo: `Hito de prosperidad: ${ev.nombre}`,
-        detalle: `Habilita la parcela ${ev.parcelaId}.`,
+        detalle: `Meta cumplida en ${ev.zona}.`,
       };
     case 'demanda':
       return {
@@ -6008,6 +6070,44 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         titulo: `Nueva zona habilitada: ${state.zonas[ev.zona]?.nombre ?? ev.zona}`,
         detalle: `Conectada por la vía ${ev.viaId}.`,
       };
+    case 'migracion_llegada':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Llegada migratoria (+${ev.cantidad})`,
+        detalle: `Hogar ${ev.hogarId} se instaló en ${ev.zona} ($${Math.round(ev.dinero)}).`,
+      };
+    case 'migracion_salida':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Emigración de hogar (-${ev.cantidad})`,
+        detalle: `Hogar ${ev.hogarId} dejó la ciudad por ${ev.motivo}.`,
+      };
+    case 'capacitacion_inicio':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        npcId: ev.npcId,
+        titulo: `Inicio de capacitación (${ev.rolObjetivo})`,
+        detalle: `${npcName(ev.npcId)} comenzó a formarse ($${ev.costo ?? 0}).`,
+      };
+    case 'capacitacion_fin':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        npcId: ev.npcId,
+        titulo: `Capacitación completada (${ev.rolObjetivo})`,
+        detalle: `${npcName(ev.npcId)} alcanzó nivel educativo ${ev.educNivel}.`,
+      };
   }
 }
 
@@ -6203,9 +6303,6 @@ function governorLevel(state: GameState): GovernorComplexityLevel {
 export function setExtraLever(state: GameState, key: ExtraLeverKey, value: number): { ok: boolean; error?: string } {
   if (state.resultado.estado !== 'jugando') return { ok: false, error: 'La partida ya finalizó.' };
   if (governorLevel(state) !== 'G3') return { ok: false, error: 'Esta palanca está disponible desde el nivel de gobernador G3.' };
-  if (key === 'nivelEducacion') {
-    return { ok: false, error: 'En el mundo base no hay educación como servicio.' };
-  }
   const b = EXTRA_LEVER_BOUNDS[key];
   if (!b || !Number.isFinite(value)) return { ok: false, error: 'Palanca o valor inválido.' };
   const v = clamp(Math.round(value / b.step) * b.step, b.min, b.max);
@@ -6215,11 +6312,8 @@ export function setExtraLever(state: GameState, key: ExtraLeverKey, value: numbe
 
 function applyExtraControls(state: GameState): void {
   const ex = state.gobierno.extras;
-  if (!ex) return;
-  ex.objetivo.nivelEducacion = 0;
-  ex.vigentes.nivelEducacion = 0;
+  if (!ex || governorLevel(state) !== 'G3') return;
   for (const key of EXTRA_LEVER_KEYS) {
-    if (key === 'nivelEducacion') continue;
     const prev = ex.vigentes[key];
     const next = ex.objetivo[key];
     if (Math.abs(next - prev) >= 0.01) {
@@ -6234,7 +6328,7 @@ export function estimateExtrasCost(state: GameState, ex: { subsidioAlimento: num
   const refDia = referenciaSueldosAlimento(state);
   return {
     subsidio: Number((refDia * (ex.subsidioAlimento / 100) * PERIOD_DAYS).toFixed(1)),
-    educacion: 0,
+    educacion: Number((ex.nivelEducacion * 18).toFixed(1)),
     acceso: state.medios.length > 0 ? Number((ex.acceso * LEVEL11_CONSTANTS.accesoCostoPorPunto).toFixed(1)) : 0,
     presion: 0,
   };
@@ -6251,9 +6345,7 @@ function referenciaSueldosAlimento(state: GameState): number {
 /** Costos y efectos diarios de las palancas 1.1 (después de la economía diaria). */
 function runLevel11Daily(state: GameState): void {
   const ex = state.gobierno.extras;
-  if (!ex) return;
-  ex.vigentes.nivelEducacion = 0;
-  ex.objetivo.nivelEducacion = 0;
+  if (!ex || governorLevel(state) !== 'G3') return;
   const v = ex.vigentes;
   const acum = state.gobierno.acumuladoPeriodo;
 

@@ -132,11 +132,13 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Acceso: sube el alcance de los medios', avg(a, (m) => m.alcancePct) > avg(base, (m) => m.alcancePct), `${avg(a, (m) => m.alcancePct).toFixed(1)} vs ${avg(base, (m) => m.alcancePct).toFixed(1)}`);
 }
 
-// ───── 6. Educación como servicio queda apagada en el mundo base
+// ───── 6. Educación activa en mundo base y palanca en G3
 {
-  const e = mk({ g: 'G3', seed: 11 });
+  let e = mk({ g: 'G3', seed: 11 });
   const r = setExtraLever(e, 'nivelEducacion', 5);
-  check('Educación: nivelEducacion permanece apagada incluso en G3', !r.ok && (e.gobierno.extras?.vigentes.nivelEducacion ?? 0) === 0, r.error ?? '');
+  e = days(e, 2);
+  const ctrlEd = e.eventos.find((ev) => ev.tipo === 'control' && ev.control === 'nivel_educacion');
+  check('Educación: nivelEducacion funciona en G3 y no se fuerza a 0', r.ok && (e.gobierno.extras?.vigentes.nivelEducacion ?? 0) === 5 && Boolean(ctrlEd), `vig=${e.gobierno.extras?.vigentes.nivelEducacion}`);
 }
 
 // ───── 7. Contraofertas

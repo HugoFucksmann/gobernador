@@ -17,7 +17,7 @@
 | `publica` | El estado | Hospital, comisaría, escuela, oficina pública |
 | `especial` | Nadie (la preset) | Plaza, puerto, muelle de comercio exterior |
 
-- Estados: `sin_calle`, `bloqueada`, `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` espera a que el estado construya la vía que la abre (sección 3b). Las bloqueadas se habilitan más adelante (capa del gobernador).
+- Estados: `sin_calle`, `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` espera a que el estado construya la vía que la abre (sección 3b).
 - Cada parcela tiene su zona y un lugar fijo. El orden dentro de la zona decide quién ocupa primero.
 - Una parcela solo admite los edificios de su tipo y solo si tiene calle.
 
@@ -41,12 +41,16 @@
 |---|---|---|---|---|
 | `hospital` | Camas (`camas_por_hospital`) | Médicos | Educación 3 | Los internados van al hospital con cama libre más cercano |
 | `comisaria` | Base de policía y `bonus_defensa` en su zona | Policías | Educación 1 | Los policías nuevos arrancan en su zona |
-| `escuela` | Nada en el mundo base; viene en el preset | Docentes | Educación 2 | — |
-| `oficina_publica` | Igual que la escuela | Estatales | Educación 1 | — |
+| `escuela` | Lugares de estudio (`lugares_por_escuela`); permite educación 2 al egresar si está al alcance | Docentes | Educación 2 | Los menores estudian en la más cercana con lugar |
+| `universidad` | Lugares (`lugares_por_universidad`); permite educación 3 al egresar si está al alcance | Docentes | Educación 3 | Igual que la escuela |
+| `oficina_publica` | Nada en el mundo base; viene en el preset | Estatales | Educación 1 | — |
 
+- **Cupo educativo:** `lugares_por_escuela` y `lugares_por_universidad` no simulan estudiantes en aula. Fijan la cobertura: al egresar a los 18, el nivel 2 (o 3) se habilita si hay una escuela (o universidad) al alcance por ruta con lugares sobre los menores (o jóvenes) que cubre. La UI sí muestra a los menores en la escuela en su franja de estudio.
+- **`oficina_publica`:** parcela pública del preset, clase M (MAPA_V2 §4), puestos Estatales (educación 1) y sin construcción automática.
+- Costo de obra, días de obra, mantenimiento y lugares de escuela y universidad: parámetros con nombre en el catálogo, con valores razonables sin calibrar.
 - Cada edificio genera sus puestos; los cubren personas que cumplen el requisito. Sin personal, no funciona (camas = min(camas del edificio, médicos × `pacientes_por_medico`)).
-- Costo de obra (una vez), días de obra y mantenimiento por período, pagados por el estado.
-- **Estado en piloto automático:** construye hospitales y comisarías en parcelas públicas libres según MUNDO_V2 §9. Escuelas y oficinas vienen con el preset.
+- Costo de obra (una vez, multiplicado por el factor del terreno, MAPA_V2 §3b), días de obra y mantenimiento por período, pagados por el estado.
+- **Estado en piloto automático:** construye hospitales, comisarías, escuelas y universidades en parcelas públicas libres según MUNDO_V2 §9. Las oficinas vienen con el preset.
 
 ## 3b. Vías (las construye el estado)
 
@@ -96,4 +100,4 @@ Murallas, silos, riego y hospitales de campaña (v1) **no existen en el mundo ba
 
 ## 6. Fuera del mundo base
 
-Viviendas públicas, refugios, subsidios, dique (pide crecida), edificios con integridad propia (promoción por necesidad, MOTOR_V2 §7), servicios privados (clínicas y escuelas privadas) y bancos (extensión `fiscal`, ECONOMIA_V2 §14).
+Viviendas públicas, refugios, subsidios, dique (pide crecida), edificios con integridad propia (promoción por necesidad, MOTOR_V2 §8), servicios privados (clínicas, escuelas y universidades privadas) y bancos (extensión `fiscal`, ECONOMIA_V2 §14).

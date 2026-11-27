@@ -59,10 +59,15 @@ function classifyFactCategory(
     switch (simEvent.tipo) {
       case 'muerte':
       case 'nacimiento':
+      case 'migracion_llegada':
+      case 'migracion_salida':
       case 'hospital_saturado':
       case 'internacion':
       case 'alta':
         return 'vida';
+      case 'capacitacion_inicio':
+      case 'capacitacion_fin':
+        return 'mercado';
       case 'pareja':
       case 'separacion':
       case 'hogar_nuevo':
@@ -168,6 +173,14 @@ function describeSimEvent(ev: SimEvent, state: GameState): { titulo: string; det
       return { titulo: `Estado de vía (${Math.round(ev.estado)}%)`, detalle: `Condición vial en zona ${ev.zona}.` };
     case 'zona_abierta':
       return { titulo: `Zona habilitada`, detalle: `Nueva conexión urbana en ${ev.zona}.` };
+    case 'migracion_llegada':
+      return { titulo: `Inmigración`, detalle: `Nuevo hogar incorporado en zona ${ev.zona}.` };
+    case 'migracion_salida':
+      return { titulo: `Emigración`, detalle: `Salida de vecino/hogar desde zona ${ev.zona}.` };
+    case 'capacitacion_inicio':
+      return { titulo: `Inicio de capacitación`, detalle: `Formación hacia ${ev.rolObjetivo} en ${ev.zona}.` };
+    case 'capacitacion_fin':
+      return { titulo: `Capacitación completada`, detalle: `Nuevo ${ev.rolObjetivo} en ${ev.zona}.` };
     default:
       return null;
   }
@@ -672,12 +685,6 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                               Requiere vía{openingVia ? `: ${openingVia.nombre}` : ''}
                             </span>
                           )}
-                          {p.estado === 'bloqueada' && (
-                            <span className="text-zinc-400 flex items-center gap-1.5">
-                              <Lock className="w-3.5 h-3.5 text-zinc-500" />
-                              Se habilita por progreso o apertura vial
-                            </span>
-                          )}
                           {p.estado === 'libre' && (
                             <span className="text-emerald-400 font-medium">Libre · {zoneName}</span>
                           )}
@@ -709,7 +716,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                             Ver vía
                           </button>
                         )}
-                        {p.estado !== 'bloqueada' && p.estado !== 'sin_calle' && (
+                        {p.estado !== 'sin_calle' && (
                           <button
                             type="button"
                             onClick={() => {

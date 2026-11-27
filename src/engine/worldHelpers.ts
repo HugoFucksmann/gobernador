@@ -3,9 +3,12 @@ import {
   BUILDING_CATALOG,
   ECON_CONSTANTS,
   HOUSING_CONSTANTS,
+  LAND_CONSTANTS,
   LOT_CLASS_MIN_TILES,
   LOT_CLASS_RANK,
+  RITMO_CONSTANTS,
   ROLE_CATALOG,
+  TERRAIN_CONSTANTS,
   VIAL_CONSTANTS,
 } from '../data/catalogs';
 import {
@@ -25,17 +28,19 @@ import {
   Modifier,
   Npc,
   NpcAgendaSlot,
+  NpcRitmo,
   Parcela,
   ParcelTipo,
   PersonalityTrait,
   RoleId,
   SimEvent,
+  TerrenoTile,
   ViaTramo,
   ZoneDefinition,
   ZoneId,
 } from '../types/game';
 import { computeMaintenanceBreakdown, getActiveBuildings, getBuildingRoleCapacity } from './policies';
-import { nextSeqId } from './rng';
+import { nextSeqId, normalizeSeed } from './rng';
 
 export function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
@@ -157,10 +162,472 @@ export function buildZoneStepMap(
   return dist;
 }
 
-export function getGridDimensionsForPopulation(pop: number): { ancho: number; alto: number } {
-  if (pop > 800) return { ancho: 160, alto: 160 };
-  if (pop > 150) return { ancho: 80, alto: 80 };
-  return { ancho: 48, alto: 48 };
+function terrainStepRng(seedRef: { s: number }): number {
+  const next = (seedRef.s + 0x6d2b79f5) >>> 0;
+  let t = Math.imul(next ^ (next >>> 15), 1 | next);
+  t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+  seedRef.s = next;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+function makeNoiseSampler(cols: number, rows: number, seedRef: { s: number }) {
+  const grid: number[] = new Array((cols + 1) * (rows + 1));
+  for (let i = 0; i < grid.length; i++) {
+    grid[i] = terrainStepRng(seedRef);
+  }
+  const stride = cols + 1;
+  return (nx: number, ny: number): number => {
+    const gx = clamp(nx, 0, 1) * cols;
+    const gy = clamp(ny, 0, 1) * rows;
+    const x0 = Math.min(cols - 1, Math.floor(gx));
+    const y0 = Math.min(rows - 1, Math.floor(gy));
+    const fx = gx - x0;
+    const fy = gy - y0;
+    const ux = fx * fx * (3 - 2 * fx);
+    const uy = fy * fy * (3 - 2 * fy);
+    const v00 = grid[y0 * stride + x0];
+    const v10 = grid[y0 * stride + x0 + 1];
+    const v01 = grid[(y0 + 1) * stride + x0];
+    const v11 = grid[(y0 + 1) * stride + x0 + 1];
+    const top = v00 + (v10 - v00) * ux;
+    const bot = v01 + (v11 - v01) * ux;
+    return top + (bot - top) * uy;
+  };
+}
+
+interface GeneratedTerrainData {
+  terrainRows: TerrenoTile[][];
+  alturaRows: number[][];
+  sueloUtilPct: number;
+  clearingCenter: { nx: number; ny: number };
+}
+
+function generateTerrainLayerAttempt(
+  ancho: number,
+  alto: number,
+  seed: number,
+  hasRibera: boolean
+): GeneratedTerrainData & { valid: boolean } {
+  const rng = { s: normalizeSeed(seed) };
+  const oct1 = makeNoiseSampler(6, 6, rng);
+  const oct2 = makeNoiseSampler(14, 14, rng);
+  const phaseX = terrainStepRng(rng) * 0.16 - 0.08;
+  const phaseY = terrainStepRng(rng) * 0.16 - 0.08;
+
+  const height: number[][] = Array.from({ length: alto }, () => new Array(ancho).fill(0.4));
+  const alturaRows: number[][] = Array.from({ length: alto }, () => new Array(ancho).fill(4));
+  const terrainRows: TerrenoTile[][] = Array.from({ length: alto }, () => new Array<TerrenoTile>(ancho).fill('.'));
+
+  // 1. 2-octave value noise heightfield with gentle interior livable basin
+  for (let ty = 0; ty < alto; ty++) {
+    const ny = (ty + 0.5) / alto;
+    for (let tx = 0; tx < ancho; tx++) {
+      const nx = (tx + 0.5) / ancho;
+      const n1 = oct1(nx, ny);
+      const n2 = oct2(nx, ny);
+      const dx = nx - (0.44 + phaseX);
+      const dy = ny - (0.46 + phaseY);
+      const radial = Math.hypot(dx, dy);
+      // Keep central valley mid-height while edges can become sea/lakes or peaks
+      const basinPull = radial < 0.34 ? 0 : (radial - 0.34) * 0.38;
+      const rawH = clamp(n1 * 0.65 + n2 * 0.35 + basinPull * (n1 > 0.5 ? 0.85 : -0.85), 0.02, 0.98);
+      height[ty][tx] = rawH;
+      alturaRows[ty][tx] = Math.min(9, Math.max(0, Math.floor(rawH * 10)));
+    }
+  }
+
+  // 2. Water below nivelAgua + mountain above umbralMontana
+  for (let ty = 0; ty < alto; ty++) {
+    for (let tx = 0; tx < ancho; tx++) {
+      const h = height[ty][tx];
+      if (h < TERRAIN_CONSTANTS.nivelAgua) {
+        terrainRows[ty][tx] = '~';
+      } else if (h >= TERRAIN_CONSTANTS.umbralMontana) {
+        terrainRows[ty][tx] = '^';
+      }
+    }
+  }
+
+  // 3. Rivers (n_rios high points descending by steepest slope to water or map edge)
+  const highCandidates: Array<{ x: number; y: number; h: number }> = [];
+  for (let ty = 1; ty < alto - 1; ty++) {
+    for (let tx = 1; tx < ancho - 1; tx++) {
+      if (height[ty][tx] >= 0.62) {
+        highCandidates.push({ x: tx, y: ty, h: height[ty][tx] });
+      }
+    }
+  }
+  highCandidates.sort((a, b) => b.h - a.h);
+
+  const carveRiverFrom = (startX: number, startY: number, widthTwo: boolean) => {
+    let cx = startX;
+    let cy = startY;
+    const seen = new Set<string>();
+    const dirs: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (let steps = 0; steps < ancho + alto; steps++) {
+      const key = `${cx},${cy}`;
+      if (seen.has(key)) break;
+      seen.add(key);
+      terrainRows[cy][cx] = '~';
+      if (widthTwo && cx + 1 < ancho) terrainRows[cy][cx + 1] = '~';
+      if (cx === 0 || cy === 0 || cx === ancho - 1 || cy === alto - 1) break;
+
+      let bestX = -1;
+      let bestY = -1;
+      let bestScore = height[cy][cx];
+      for (const [dx, dy] of dirs) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= ancho || ny < 0 || ny >= alto) continue;
+        if (seen.has(`${nx},${ny}`)) continue;
+        const nh = height[ny][nx];
+        if (terrainRows[ny][nx] === '~' && steps > 3) {
+          bestX = nx;
+          bestY = ny;
+          bestScore = -1;
+          break;
+        }
+        if (nh < bestScore) {
+          bestScore = nh;
+          bestX = nx;
+          bestY = ny;
+        }
+      }
+      if (bestX < 0) {
+        // Nudge toward nearest border if caught in local minimum
+        const dLeft = cx;
+        const dRight = ancho - 1 - cx;
+        const dTop = cy;
+        const dBot = alto - 1 - cy;
+        const m = Math.min(dLeft, dRight, dTop, dBot);
+        if (m === dRight) cx++;
+        else if (m === dLeft) cx--;
+        else if (m === dBot) cy++;
+        else cy--;
+      } else {
+        cx = bestX;
+        cy = bestY;
+        if (bestScore < 0) {
+          terrainRows[cy][cx] = '~';
+          break;
+        }
+      }
+    }
+  };
+
+  const usedStarts: Array<{ x: number; y: number }> = [];
+  for (let r = 0; r < TERRAIN_CONSTANTS.nRios; r++) {
+    const picked = highCandidates.find((cand) =>
+      usedStarts.every((u) => Math.hypot(u.x - cand.x, u.y - cand.y) > ancho * 0.28)
+    );
+    if (picked) {
+      usedStarts.push(picked);
+      carveRiverFrom(picked.x, picked.y, r === 0 && ancho >= 48);
+    }
+  }
+
+  // Ensure ribera natural river barrier between east bank and ribera exists across seeds
+  if (hasRibera) {
+    const riverX = clamp(Math.round((1214 / WORLD_CANVAS_W) * ancho), 2, ancho - 4);
+    const yStart = clamp(Math.round((230 / WORLD_CANVAS_H) * alto), 1, alto - 2);
+    const yEnd = clamp(Math.round((780 / WORLD_CANVAS_H) * alto), yStart + 2, alto - 1);
+    for (let ty = yStart; ty <= yEnd; ty++) {
+      const meander = Math.round(Math.sin(ty * 0.25 + phaseX * 20) * 1);
+      const rx = clamp(riverX + meander, 1, ancho - 2);
+      terrainRows[ty][rx] = '~';
+      if (rx + 1 < ancho) terrainRows[ty][rx + 1] = '~';
+    }
+  }
+
+  // 4. Monte ('%') for heights between umbralMonte and umbralMontana OR steep slope
+  for (let ty = 0; ty < alto; ty++) {
+    for (let tx = 0; tx < ancho; tx++) {
+      if (terrainRows[ty][tx] !== '.') continue;
+      const h = height[ty][tx];
+      let maxDiff = 0;
+      if (tx > 0) maxDiff = Math.max(maxDiff, Math.abs(h - height[ty][tx - 1]));
+      if (tx + 1 < ancho) maxDiff = Math.max(maxDiff, Math.abs(h - height[ty][tx + 1]));
+      if (ty > 0) maxDiff = Math.max(maxDiff, Math.abs(h - height[ty - 1][tx]));
+      if (ty + 1 < alto) maxDiff = Math.max(maxDiff, Math.abs(h - height[ty + 1][tx]));
+      if (h >= TERRAIN_CONSTANTS.umbralMonte || maxDiff >= TERRAIN_CONSTANTS.umbralPendiente) {
+        terrainRows[ty][tx] = '%';
+      }
+    }
+  }
+
+  // 5. Compute suelo_util_pct and largest contiguous '.' clearing via BFS
+  let sueloCount = 0;
+  for (let ty = 0; ty < alto; ty++) {
+    for (let tx = 0; tx < ancho; tx++) {
+      if (terrainRows[ty][tx] === '.') sueloCount++;
+    }
+  }
+  const sueloUtilPct = sueloCount / Math.max(1, ancho * alto);
+
+  const visited = new Uint8Array(ancho * alto);
+  let bestArea = 0;
+  let bestSumX = 0;
+  let bestSumY = 0;
+  const qx = new Int32Array(ancho * alto);
+  const qy = new Int32Array(ancho * alto);
+
+  for (let sy = 0; sy < alto; sy++) {
+    for (let sx = 0; sx < ancho; sx++) {
+      const idx = sy * ancho + sx;
+      if (visited[idx] || terrainRows[sy][sx] !== '.') continue;
+      let head = 0;
+      let tail = 0;
+      qx[tail] = sx;
+      qy[tail] = sy;
+      tail++;
+      visited[idx] = 1;
+      let sumX = 0;
+      let sumY = 0;
+
+      while (head < tail) {
+        const cx = qx[head];
+        const cy = qy[head];
+        head++;
+        sumX += cx;
+        sumY += cy;
+        if (cx + 1 < ancho) {
+          const ni = cy * ancho + cx + 1;
+          if (!visited[ni] && terrainRows[cy][cx + 1] === '.') {
+            visited[ni] = 1;
+            qx[tail] = cx + 1;
+            qy[tail] = cy;
+            tail++;
+          }
+        }
+        if (cx > 0) {
+          const ni = cy * ancho + cx - 1;
+          if (!visited[ni] && terrainRows[cy][cx - 1] === '.') {
+            visited[ni] = 1;
+            qx[tail] = cx - 1;
+            qy[tail] = cy;
+            tail++;
+          }
+        }
+        if (cy + 1 < alto) {
+          const ni = (cy + 1) * ancho + cx;
+          if (!visited[ni] && terrainRows[cy + 1][cx] === '.') {
+            visited[ni] = 1;
+            qx[tail] = cx;
+            qy[tail] = cy + 1;
+            tail++;
+          }
+        }
+        if (cy > 0) {
+          const ni = (cy - 1) * ancho + cx;
+          if (!visited[ni] && terrainRows[cy - 1][cx] === '.') {
+            visited[ni] = 1;
+            qx[tail] = cx;
+            qy[tail] = cy - 1;
+            tail++;
+          }
+        }
+      }
+
+      if (tail > bestArea) {
+        bestArea = tail;
+        bestSumX = sumX;
+        bestSumY = sumY;
+      }
+    }
+  }
+
+  const areaMin = ancho * alto * TERRAIN_CONSTANTS.areaMinimaNucleoPct;
+  const valid =
+    sueloUtilPct >= TERRAIN_CONSTANTS.sueloMinimoPct && bestArea >= areaMin;
+
+  return {
+    terrainRows,
+    alturaRows,
+    sueloUtilPct,
+    clearingCenter:
+      bestArea > 0
+        ? { nx: bestSumX / bestArea / ancho, ny: bestSumY / bestArea / alto }
+        : { nx: 0.45, ny: 0.45 },
+    valid,
+  };
+}
+
+function generateValidatedTerrain(
+  ancho: number,
+  alto: number,
+  semilla: number,
+  hasRibera: boolean
+): GeneratedTerrainData {
+  const baseSeed = normalizeSeed((semilla ^ 0x517cc1b7) >>> 0);
+  let fallback: GeneratedTerrainData | null = null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = generateTerrainLayerAttempt(
+      ancho,
+      alto,
+      (baseSeed + attempt * 0x9e3779b9) >>> 0,
+      hasRibera
+    );
+    if (!fallback || candidate.sueloUtilPct > fallback.sueloUtilPct) {
+      fallback = candidate;
+    }
+    if (candidate.valid) {
+      return candidate;
+    }
+  }
+  return fallback!;
+}
+
+export function getGridDimensionsForPopulation(
+  pop: number,
+  semilla = 1,
+  hasRibera = true
+): { ancho: number; alto: number; sueloUtilPct: number } {
+  const probe = generateValidatedTerrain(48, 48, semilla, hasRibera);
+  const lado = clamp(
+    Math.round(
+      Math.sqrt(
+        (Math.max(50, pop) * TERRAIN_CONSTANTS.baldosasPorPersona) /
+          Math.max(0.35, probe.sueloUtilPct)
+      )
+    ),
+    TERRAIN_CONSTANTS.ladoMin,
+    TERRAIN_CONSTANTS.ladoMax
+  );
+  return { ancho: lado, alto: lado, sueloUtilPct: probe.sueloUtilPct };
+}
+
+export function getTerrainBuildCostInfo(
+  grid: MapaV2Grid | undefined,
+  tiles: Array<[number, number]>,
+  isBridge = false
+): {
+  buildable: boolean;
+  multiplier: number;
+  bridgeExtraCost: number;
+  waterTiles: number;
+  monteTiles: number;
+  steepTiles: number;
+  mountainTiles: number;
+} {
+  if (!grid || tiles.length === 0) {
+    return {
+      buildable: true,
+      multiplier: 1,
+      bridgeExtraCost: 0,
+      waterTiles: 0,
+      monteTiles: 0,
+      steepTiles: 0,
+      mountainTiles: 0,
+    };
+  }
+  let waterTiles = 0;
+  let monteTiles = 0;
+  let steepTiles = 0;
+  let mountainTiles = 0;
+
+  for (const [rawX, rawY] of tiles) {
+    const tx = clamp(Math.round(rawX), 0, grid.ancho - 1);
+    const ty = clamp(Math.round(rawY), 0, grid.alto - 1);
+    const ch = (grid.terreno[ty]?.[tx] ?? '.') as TerrenoTile;
+    if (ch === '^') mountainTiles++;
+    else if (ch === '~') waterTiles++;
+    else if (ch === '%') monteTiles++;
+
+    if (grid.altura && grid.altura[ty]) {
+      const h0 = Number(grid.altura[ty][tx] ?? '4');
+      let maxDiff = 0;
+      const neighbors: Array<[number, number]> = [[tx + 1, ty], [tx - 1, ty], [tx, ty + 1], [tx, ty - 1]];
+      for (const [nx, ny] of neighbors) {
+        if (nx >= 0 && nx < grid.ancho && ny >= 0 && ny < grid.alto && grid.altura[ny]) {
+          const hn = Number(grid.altura[ny][nx] ?? '4');
+          maxDiff = Math.max(maxDiff, Math.abs(h0 - hn) / 9);
+        }
+      }
+      if (maxDiff >= TERRAIN_CONSTANTS.umbralPendiente) steepTiles++;
+    }
+  }
+
+  const buildable = mountainTiles === 0 && (isBridge || waterTiles === 0);
+  let multiplier = 1;
+  if (monteTiles > 0) multiplier *= TERRAIN_CONSTANTS.factorMonte;
+  if (steepTiles > 0) multiplier *= TERRAIN_CONSTANTS.factorPendiente;
+  const bridgeExtraCost = isBridge ? waterTiles * TERRAIN_CONSTANTS.costoPuentePorBaldosa : 0;
+
+  return {
+    buildable,
+    multiplier: Number(multiplier.toFixed(3)),
+    bridgeExtraCost: Number(bridgeExtraCost.toFixed(1)),
+    waterTiles,
+    monteTiles,
+    steepTiles,
+    mountainTiles,
+  };
+}
+
+export function getParcelTerrainTiles(state: Pick<GameState, 'mapaGrid'>, parcela: Parcela): Array<[number, number]> {
+  const grid = state.mapaGrid;
+  const ancho = grid?.ancho ?? 48;
+  const alto = grid?.alto ?? 48;
+  const x0 = clamp(parcela.x ?? Math.round((parcela.wx / WORLD_CANVAS_W) * ancho), 0, ancho - 1);
+  const y0 = clamp(parcela.y ?? Math.round((parcela.wy / WORLD_CANVAS_H) * alto), 0, alto - 1);
+  const w = Math.max(1, parcela.w ?? 2);
+  const h = Math.max(1, parcela.h ?? 2);
+  const tiles: Array<[number, number]> = [];
+  for (let dy = 0; dy < Math.min(4, h); dy++) {
+    for (let dx = 0; dx < Math.min(4, w); dx++) {
+      tiles.push([clamp(x0 + dx, 0, ancho - 1), clamp(y0 + dy, 0, alto - 1)]);
+    }
+  }
+  return tiles;
+}
+
+export function getViaTerrainTiles(
+  state: Pick<GameState, 'mapaGrid' | 'zonas'>,
+  tramo: ViaTramo
+): Array<[number, number]> {
+  if (tramo.baldosas && tramo.baldosas.length > 0) {
+    return tramo.baldosas;
+  }
+  const grid = state.mapaGrid;
+  const ancho = grid?.ancho ?? 48;
+  const alto = grid?.alto ?? 48;
+  const rectA = state.zonas[tramo.zonaA]?.rect;
+  const rectB = tramo.zonaB ? state.zonas[tramo.zonaB]?.rect : undefined;
+  if (!rectA && !rectB) return [];
+  const ax = rectA ? rectA.wx + rectA.ww / 2 : (rectB!.wx + rectB!.ww / 2);
+  const ay = rectA ? rectA.wy + rectA.wh / 2 : (rectB!.wy + rectB!.wh / 2);
+  const bx = rectB ? rectB.wx + rectB.ww / 2 : ax;
+  const by = rectB ? rectB.wy + rectB.wh / 2 : ay;
+  const tiles: Array<[number, number]> = [];
+  const steps = 6;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const wx = ax + (bx - ax) * t;
+    const wy = ay + (by - ay) * t;
+    const tx = clamp(Math.round((wx / WORLD_CANVAS_W) * (ancho - 1)), 0, ancho - 1);
+    const ty = clamp(Math.round((wy / WORLD_CANVAS_H) * (alto - 1)), 0, alto - 1);
+    if (!tiles.some(([x, y]) => x === tx && y === ty)) {
+      tiles.push([tx, ty]);
+    }
+  }
+  return tiles;
+}
+
+export function getParcelLandPrice(
+  state: GameState,
+  parcela: Parcela
+): { precioLote: number; accesibilidad: number } {
+  const lotClass = inferLotClassFromParcel(parcela);
+  const base = LAND_CONSTANTS.precioBaseLote[lotClass] ?? LAND_CONSTANTS.precioBaseLote.M;
+  const centroParcel = state.parcelas.find((p) => p.zona === 'centro' && p.estado !== 'sin_calle');
+  let dist = getZoneTravelCost(state, parcela.zona, 'centro');
+  if (centroParcel && parcela.estado !== 'sin_calle') {
+    const lotDist = getLotTravelCost(state, parcela, centroParcel);
+    if (Number.isFinite(lotDist)) dist = lotDist;
+  }
+  const accesibilidad = Number.isFinite(dist) ? clamp(1 - dist / 42, 0, 1) : 0;
+  const precioLote = Number((base * (1 + LAND_CONSTANTS.kAcceso * accesibilidad)).toFixed(2));
+  return { precioLote, accesibilidad: Number(accesibilidad.toFixed(3)) };
 }
 
 const WORLD_CANVAS_W = 1560;
@@ -271,29 +738,23 @@ export function buildTileGridAndSyncMap(
   zonas: Record<ZoneId, ZoneDefinition>,
   parcelas: Parcela[],
   tramos: ViaTramo[],
-  targetPop: number
+  targetPop: number,
+  semilla = 1
 ): MapaV2Grid {
-  const { ancho, alto } = getGridDimensionsForPopulation(targetPop);
+  const hasRibera = Boolean(zonas.ribera);
+  const { ancho, alto } = getGridDimensionsForPopulation(targetPop, semilla, hasRibera);
   const zoneIds = Object.keys(zonas);
 
-  const terrainRows: string[][] = Array.from({ length: alto }, () => Array(ancho).fill('.'));
+  const generated = generateValidatedTerrain(ancho, alto, semilla, hasRibera);
+  const terrainRows = generated.terrainRows;
+  const alturaRows = generated.alturaRows;
   const zoneRows: string[][] = Array.from({ length: alto }, () => Array(ancho).fill(' '));
 
-  const riverXMin = 1192;
-  const riverXMax = 1236;
-
-  // Map each tile center to nearest zone rect (solid coverage, no gaps, river barrier before ribera)
+  // Map each tile center to nearest zone rect (solid coverage, no gaps)
   for (let ty = 0; ty < alto; ty++) {
     const wy = ((ty + 0.5) / alto) * WORLD_CANVAS_H;
     for (let tx = 0; tx < ancho; tx++) {
       const wx = ((tx + 0.5) / ancho) * WORLD_CANVAS_W;
-
-      if (wx >= riverXMin && wx <= riverXMax && wy >= 245 && wy <= 765) {
-        terrainRows[ty][tx] = '~';
-      } else if ((wx >= 1245 && wy < 235) || (wx >= 815 && wy >= 780)) {
-        terrainRows[ty][tx] = '^';
-      }
-
       let bestZone = zoneIds[0] ?? 'centro';
       let bestDist = Infinity;
       for (const zId of zoneIds) {
@@ -310,7 +771,7 @@ export function buildTileGridAndSyncMap(
     }
   }
 
-  // Derive zone adjacency strictly from orthographic 4-neighbor tile contiguity (+ river bridges)
+  // Derive zone adjacency strictly from orthographic 4-neighbor tile contiguity (+ tramos)
   const charToZone: Record<string, ZoneId> = {};
   for (const zId of zoneIds) {
     charToZone[ZONE_CHAR_MAP[zId] ?? zId.charAt(0).toUpperCase()] = zId;
@@ -351,7 +812,7 @@ export function buildTileGridAndSyncMap(
     }
   }
 
-  // Populate tramo.baldosas from tramo.puntos
+  // Populate tramo.baldosas from tramo.puntos and clear non-bridge roads over water/mountain
   const tramoById = new Map<string, ViaTramo>();
   for (const t of tramos) {
     tramoById.set(t.id, t);
@@ -379,13 +840,21 @@ export function buildTileGridAndSyncMap(
         if (!seen.has(key)) {
           seen.add(key);
           baldosas.push([bx, by]);
+          if (t.construida && t.tipo !== 'puente' && terrainRows[by][bx] !== '.') {
+            terrainRows[by][bx] = '.';
+          }
+          if (!t.construida && t.tipo !== 'puente' && (terrainRows[by][bx] === '~' || terrainRows[by][bx] === '^')) {
+            terrainRows[by][bx] = '%';
+          }
         }
       }
     }
     t.baldosas = baldosas;
   }
 
-  // Ensure every parcel has tile coordinates (x, y, w, h), clase, and frente
+  // Ensure every parcel has tile coordinates (x, y, w, h), clase, and frente;
+  // Clear mountain/water under buildable/starting parcels while preserving '%' (monte) on non-occupied expansion plots
+  let finalSuelo = 0;
   for (const p of parcelas) {
     const lotClass = inferLotClassFromParcel(p);
     p.clase = lotClass;
@@ -397,12 +866,15 @@ export function buildTileGridAndSyncMap(
     p.x = clamp(Math.round((p.wx / WORLD_CANVAS_W) * ancho), 0, ancho - 1);
     p.y = clamp(Math.round((p.wy / WORLD_CANVAS_H) * alto), 0, alto - 1);
 
-    // Ensure parcel footprint doesn't sit on water/mountain tiles
     for (let dy = 0; dy < Math.min(3, p.h); dy++) {
       for (let dx = 0; dx < Math.min(3, p.w); dx++) {
         const tx = clamp(p.x + dx, 0, ancho - 1);
         const ty = clamp(p.y + dy, 0, alto - 1);
-        if (terrainRows[ty][tx] !== '.') terrainRows[ty][tx] = '.';
+        if (p.estado === 'ocupada' || p.estado === 'en_obra') {
+          terrainRows[ty][tx] = '.';
+        } else if (terrainRows[ty][tx] === '~' || terrainRows[ty][tx] === '^') {
+          terrainRows[ty][tx] = p.estado === 'libre' ? '.' : '%';
+        }
       }
     }
 
@@ -419,6 +891,13 @@ export function buildTileGridAndSyncMap(
       p.frente = [fx, fy];
     }
   }
+
+  for (let ty = 0; ty < alto; ty++) {
+    for (let tx = 0; tx < ancho; tx++) {
+      if (terrainRows[ty][tx] === '.') finalSuelo++;
+    }
+  }
+  const sueloUtilPct = Number((finalSuelo / Math.max(1, ancho * alto)).toFixed(3));
 
   const zonas_info: MapaV2Grid['zonas_info'] = {};
   for (const zId of zoneIds) {
@@ -437,8 +916,10 @@ export function buildTileGridAndSyncMap(
     ancho,
     alto,
     terreno: terrainRows.map((r) => r.join('')),
+    altura: alturaRows.map((r) => r.join('')),
     vias: Array.from({ length: alto }, () => '.'.repeat(ancho)),
     zonas: zoneRows.map((r) => r.join('')),
+    sueloUtilPct,
     zonas_info,
   };
   syncMapaGridVias(grid, tramos);
@@ -476,7 +957,7 @@ export function isViaConnectableToNetwork(
 }
 
 export function isLotIsolated(state: Pick<GameState, 'zonas' | 'tramos' | 'distanciasZonas'>, parcela: Parcela): boolean {
-  if (parcela.estado === 'sin_calle' || parcela.estado === 'bloqueada') return true;
+  if (parcela.estado === 'sin_calle') return true;
   if (state.zonas[parcela.zona]?.estado === 'no_urbanizada') return true;
   if (parcela.tramoAperturaId) {
     const tramo = state.tramos.find((t) => t.id === parcela.tramoAperturaId);
@@ -772,8 +1253,277 @@ export function getFranjaDia(tick: number, ticksPorDia = 120): FranjaDiaId {
   return 'anochecer';
 }
 
+function hashNpcSeed(semilla: number, npcId: string, salt = 0): number {
+  let h = (normalizeSeed(semilla) ^ (salt * 0x9e3779b9)) >>> 0;
+  for (let i = 0; i < npcId.length; i++) {
+    h = Math.imul(h ^ npcId.charCodeAt(i), 0x85ebca6b) >>> 0;
+  }
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function hashFloat(seed: number): number {
+  const step = (seed + 0x6d2b79f5) >>> 0;
+  let t = Math.imul(step ^ (step >>> 15), 1 | step);
+  t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+export function getShiftScheduleForNpc(
+  npc: Pick<Npc, 'rol' | 'ritmo'>,
+  firmRubro?: FirmRubro
+): { startH: number; endH: number } {
+  const turno = npc.ritmo?.turno ?? 0;
+  if (npc.rol === 'estudiante' || npc.rol === 'docente') {
+    return { startH: 8, endH: 13 };
+  }
+  if (npc.rol === 'policia') {
+    return turno % 3 === 1 ? { startH: 8, endH: 16 } : turno % 3 === 2 ? { startH: 16, endH: 24 } : { startH: 0, endH: 8 };
+  }
+  if (npc.rol === 'medico') {
+    return turno % 3 === 1 ? { startH: 8, endH: 16 } : turno % 3 === 2 ? { startH: 16, endH: 24 } : { startH: 0, endH: 8 };
+  }
+  if (npc.rol === 'estatal' || npc.rol === 'ingeniero') {
+    return { startH: 9, endH: 17 };
+  }
+  switch (firmRubro) {
+    case 'agro':
+      return { startH: 6, endH: 15 };
+    case 'industria':
+      return turno % 2 === 1 ? { startH: 14, endH: 22 } : { startH: 6, endH: 14 };
+    case 'comercio':
+      return turno % 2 === 1 ? { startH: 14.5, endH: 20 } : { startH: 9, endH: 14.5 };
+    case 'gastronomia':
+      return turno % 2 === 1 ? { startH: 17.5, endH: 24 } : { startH: 11, endH: 17.5 };
+    case 'servicios':
+      return turno % 2 === 1 ? { startH: 14, endH: 19 } : { startH: 9, endH: 14 };
+    case 'entretenimiento':
+      return { startH: 16, endH: 26 };
+    default:
+      return { startH: 9, endH: 17 };
+  }
+}
+
+export function buildSeededNpcRitmo(
+  npcId: string,
+  edad: number,
+  semilla: number,
+  habitPoolIds: string[] = []
+): NpcRitmo {
+  const baseH = hashNpcSeed(semilla, npcId, 11);
+  const r1 = hashFloat(baseH);
+  const r2 = hashFloat(baseH + 1);
+  const r3 = hashFloat(baseH + 2);
+  const r4 = hashFloat(baseH + 3);
+  const r5 = hashFloat(baseH + 4);
+
+  // Cronotipo: -2 a +2h (younger later, older earlier)
+  const ageShift = edad < 30 ? 0.65 : edad >= 55 ? -0.65 : 0;
+  const rawCrono = (r1 * 4 - 2) + ageShift;
+  const cronotipo = Number(clamp(Math.round(rawCrono * 2) / 2, RITMO_CONSTANTS.cronotipoMin, RITMO_CONSTANTS.cronotipoMax).toFixed(1));
+
+  // Gustos across 4 spend categories summing to 100
+  const wB = 20 + r2 * 40;
+  const wG = 15 + r3 * 35;
+  const wS = 12 + r4 * 30;
+  const wE = 10 + r5 * 35;
+  const sumW = wB + wG + wS + wE;
+  const bienes = Math.round((wB / sumW) * 100);
+  const gastronomia = Math.round((wG / sumW) * 100);
+  const servicios = Math.round((wS / sumW) * 100);
+  const entretenimiento = Math.max(5, 100 - bienes - gastronomia - servicios);
+
+  const turno = Math.floor(hashFloat(baseH + 5) * 3);
+  const d1 = Math.floor(hashFloat(baseH + 6) * 7);
+  const hasTwoRestDays = hashFloat(baseH + 7) < 0.65;
+  const d2 = (d1 + 1 + Math.floor(hashFloat(baseH + 8) * 5)) % 7;
+  const diasDescanso = hasTwoRestDays ? [d1, d2] : [d1];
+
+  const habitos: string[] = [];
+  if (habitPoolIds.length > 0) {
+    const targetHabits = Math.min(3, habitPoolIds.length);
+    const startIdx = Math.floor(hashFloat(baseH + 9) * habitPoolIds.length);
+    for (let k = 0; k < targetHabits; k++) {
+      const pid = habitPoolIds[(startIdx + k * 3) % habitPoolIds.length];
+      if (pid && !habitos.includes(pid)) habitos.push(pid);
+    }
+  }
+
+  return {
+    cronotipo,
+    gustos: { bienes, gastronomia, servicios, entretenimiento },
+    habitos,
+    turno,
+    diasDescanso,
+  };
+}
+
+export function updateDailyNpcRitmoAndHabits(state: GameState): void {
+  const dia = state.reloj.dia;
+  const weekDay = dia % 7;
+  const activeLeisureAndShopParcels = state.parcelas.filter(
+    (p) =>
+      p.edificio?.activo &&
+      (p.edificio.tipo === 'almacen' ||
+        p.edificio.tipo === 'supermercado' ||
+        p.edificio.tipo === 'tienda' ||
+        p.edificio.tipo === 'kiosco' ||
+        p.edificio.tipo === 'restoran' ||
+        p.edificio.tipo === 'bar_cafe' ||
+        p.edificio.tipo === 'cine_teatro' ||
+        p.edificio.tipo === 'club' ||
+        p.edificio.tipo === 'gimnasio' ||
+        p.edificio.tipo === 'peluqueria' ||
+        p.edificio.tipo === 'taller')
+  );
+  const activeParcelMap = new Map(activeLeisureAndShopParcels.map((p) => [p.id, p]));
+  const leisureCandidates = activeLeisureAndShopParcels.filter(
+    (p) =>
+      p.edificio?.tipo === 'cine_teatro' ||
+      p.edificio?.tipo === 'club' ||
+      p.edificio?.tipo === 'bar_cafe' ||
+      p.edificio?.tipo === 'restoran' ||
+      p.edificio?.tipo === 'gimnasio'
+  );
+  const shopCandidates = activeLeisureAndShopParcels.filter(
+    (p) =>
+      p.edificio?.tipo === 'almacen' ||
+      p.edificio?.tipo === 'supermercado' ||
+      p.edificio?.tipo === 'tienda' ||
+      p.edificio?.tipo === 'kiosco'
+  );
+  const firmaById = new Map(state.firmas.map((f) => [f.id, f]));
+
+  for (const n of state.npcs) {
+    if (!n.vivo) continue;
+    if (!n.ritmo) {
+      n.ritmo = buildSeededNpcRitmo(
+        n.id,
+        n.edad,
+        state.semilla,
+        activeLeisureAndShopParcels.map((p) => p.id)
+      );
+    }
+    // Forget closed habit parcels
+    n.ritmo.habitos = (n.ritmo.habitos ?? []).filter((pid) => activeParcelMap.has(pid));
+    if (n.ritmo.habitos.length < 2 && activeLeisureAndShopParcels.length > 0) {
+      const hSeed = hashNpcSeed(state.semilla, n.id, dia + 17);
+      const pick = activeLeisureAndShopParcels[Math.floor(hashFloat(hSeed) * activeLeisureAndShopParcels.length)];
+      if (pick && !n.ritmo.habitos.includes(pick.id)) n.ritmo.habitos.push(pick.id);
+    }
+
+    const rSeed = hashNpcSeed(state.semilla, n.id, dia * 31 + 7);
+    const rAbs = hashFloat(rSeed);
+    const rAct = hashFloat(rSeed + 1);
+    const rHab = hashFloat(rSeed + 2);
+    const rPick = hashFloat(rSeed + 3);
+
+    const isRestDay = (n.ritmo.diasDescanso ?? []).includes(weekDay);
+    const hasJob =
+      n.edad >= 18 &&
+      n.edad < 65 &&
+      n.rol !== 'desempleado' &&
+      n.rol !== 'estudiante' &&
+      !n.hospital.internado &&
+      !n.capacitacion;
+
+    if (hasJob && !isRestDay) {
+      const rebelTerm = (getEffectiveTrait(n, 'rebeldia') / 100) * 0.08;
+      const healthTerm = Math.max(0, 75 - n.variables.salud) * 0.0018;
+      const satTerm = Math.max(0, 55 - n.variables.satisfaccion) * 0.0014;
+      const probFalta = clamp(RITMO_CONSTANTS.faltazgoBaseProb + rebelTerm + healthTerm + satTerm, 0, 0.25);
+      n.ritmo.faltandoHoy = rAbs < probFalta;
+    } else {
+      n.ritmo.faltandoHoy = false;
+    }
+
+    // Arrival delay from commute & low laboriosidad
+    let commuteCost: number = VIAL_CONSTANTS.costoInternoZona;
+    if (n.empleadorId) {
+      const firma = firmaById.get(n.empleadorId);
+      if (firma) commuteCost = getZoneTravelCost(state, n.zona, firma.zona);
+    }
+    const travelHours = Number.isFinite(commuteCost)
+      ? commuteCost / Math.max(1, AGENDA_CONSTANTS.baldosasPorHora)
+      : 1.5;
+    const lazyDelay = ((100 - getEffectiveTrait(n, 'laboriosidad')) / 100) * 0.6;
+    n.ritmo.llegadaRetrasoHoras = Number((travelHours + lazyDelay).toFixed(2));
+
+    // Free-time choice via utility = necessity * personality
+    const soc = getEffectiveTrait(n, 'sociabilidad');
+    const cod = getEffectiveTrait(n, 'codicia');
+    const val = getEffectiveTrait(n, 'valentia');
+    const propGasto = getEffectivePropensionGasto(n);
+    const gustos = n.ritmo.gustos;
+
+    const uCasa =
+      28 +
+      Math.max(0, 72 - n.variables.salud) * 0.9 +
+      (n.variables.hambre > 55 ? 16 : 0) +
+      (100 - soc) * 0.22;
+    const uOcio =
+      18 +
+      soc * 0.36 +
+      val * 0.14 +
+      Math.max(0, 62 - n.variables.satisfaccion) * 0.55 +
+      ((gustos.entretenimiento + gustos.gastronomia) * 0.25) -
+      (n.variables.salud < 45 ? 18 : 0);
+    const uCompras =
+      16 +
+      propGasto * 0.3 +
+      (100 - cod) * 0.16 +
+      (n.variables.hambre > 45 ? 18 : 0) +
+      ((gustos.bienes + gustos.servicios) * 0.22);
+    const uVisita = 12 + soc * 0.34 + (n.padresIds.length > 0 || n.parejaId ? 10 : 0);
+    const uPasear = 14 + (100 - n.variables.miedo) * 0.14 + (isRestDay ? 10 : 0);
+
+    const totalU = uCasa + uOcio + uCompras + uVisita + uPasear;
+    let cursor = rAct * totalU;
+    let act: NonNullable<NpcRitmo['libreHoyActividad']> = 'casa';
+    if ((cursor -= uCasa) <= 0) act = 'casa';
+    else if ((cursor -= uOcio) <= 0) act = 'ocio';
+    else if ((cursor -= uCompras) <= 0) act = 'compras';
+    else if ((cursor -= uVisita) <= 0) act = 'visita';
+    else act = 'pasear';
+    n.ritmo.libreHoyActividad = act;
+
+    // Habit vs exploration selection
+    let chosenParcel: Parcela | undefined;
+    const pool = act === 'ocio' ? leisureCandidates : act === 'compras' ? shopCandidates : [];
+    if (pool.length > 0) {
+      const habitMatches = n.ritmo.habitos
+        .map((pid) => activeParcelMap.get(pid))
+        .filter((p): p is Parcela => Boolean(p && pool.some((c) => c.id === p.id)));
+      if (habitMatches.length > 0 && rHab < RITMO_CONSTANTS.pHabito) {
+        chosenParcel = habitMatches[Math.floor(rPick * habitMatches.length)];
+      } else {
+        // Explore weighted by gustos & closeness
+        let bestScore = -1;
+        for (const cand of pool) {
+          const bDef = cand.edificio ? BUILDING_CATALOG[cand.edificio.tipo] : undefined;
+          const catWeight = bDef?.categoriaGasto ? (gustos[bDef.categoriaGasto] ?? 20) : 20;
+          const dist = getZoneTravelCost(state, n.zona, cand.zona);
+          const distPenalty = Number.isFinite(dist) ? dist : 45;
+          const noise = hashFloat(rSeed + cand.orden) * 28;
+          const score = catWeight * 0.9 - distPenalty * 0.55 + noise;
+          if (score > bestScore) {
+            bestScore = score;
+            chosenParcel = cand;
+          }
+        }
+        if (chosenParcel && !n.ritmo.habitos.includes(chosenParcel.id)) {
+          if (n.ritmo.habitos.length >= 3) n.ritmo.habitos.shift();
+          n.ritmo.habitos.push(chosenParcel.id);
+        }
+      }
+    }
+    n.ritmo.libreHoyParcelaId = chosenParcel?.id;
+  }
+}
+
 export function getNpcDailyAgenda(
-  state: Pick<GameState, 'hogares' | 'casas' | 'parcelas' | 'firmas' | 'zonas'>,
+  state: Pick<GameState, 'hogares' | 'casas' | 'parcelas' | 'firmas' | 'zonas' | 'reloj'>,
   npc: Npc,
   ctx?: {
     hogarById?: Map<string, Hogar>;
@@ -801,47 +1551,74 @@ export function getNpcDailyAgenda(
   const homeWx = homeParcel ? homeParcel.wx + homeParcel.ww / 2 : homeRect ? homeRect.wx + homeRect.ww * 0.5 : npc.mapa.x;
   const homeWy = homeParcel ? homeParcel.wy + homeParcel.wh / 2 : homeRect ? homeRect.wy + homeRect.wh * 0.5 : npc.mapa.y;
 
-  // Locate work or school parcel
+  const dia = state.reloj?.dia ?? 1;
+  const isRestDay = (npc.ritmo?.diasDescanso ?? []).includes(dia % 7);
+  const crono = npc.ritmo?.cronotipo ?? 0;
+
   let workParcel: Parcela | undefined;
   let workLabel = 'Trabajando';
+  let firmRubro: FirmRubro | undefined;
   if (npc.hospital.internado) {
     workParcel = state.parcelas.find((p) => p.edificio?.id === npc.hospital.edificioId) ??
       state.parcelas.find((p) => p.edificio?.tipo === 'hospital' && p.edificio.activo);
     workLabel = 'Internado en hospital';
+  } else if (npc.capacitacion) {
+    workParcel =
+      state.parcelas.find((p) => p.zona === homeZone && (p.edificio?.tipo === 'universidad' || p.edificio?.tipo === 'escuela') && p.edificio.activo) ??
+      state.parcelas.find((p) => (p.edificio?.tipo === 'universidad' || p.edificio?.tipo === 'escuela') && p.edificio.activo);
+    workLabel = `Capacitándose (${npc.capacitacion.rolObjetivo})`;
+  } else if (npc.accionIa?.zonaDestino || npc.accionIa?.fueraDePuesto) {
+    workParcel =
+      state.parcelas.find((p) => p.zona === (npc.accionIa?.zonaDestino ?? homeZone) && p.edificio?.tipo === 'plaza') ??
+      state.parcelas.find((p) => p.edificio?.tipo === 'plaza');
+    workLabel = npc.accionIa.nombre;
   } else if (npc.empleadorId) {
     const firma = ctx?.firmaById
       ? ctx.firmaById.get(npc.empleadorId)
       : state.firmas.find((f) => f.id === npc.empleadorId);
+    firmRubro = firma?.rubro;
     const localId = firma?.locales?.[0];
     if (localId) {
       workParcel = ctx?.parcelaById
         ? ctx.parcelaById.get(localId)
         : state.parcelas.find((p) => p.id === localId);
     }
-    workLabel = firma ? `Trabajo en ${firma.nombre}` : 'En jornada laboral';
+    workLabel = npc.ritmo?.faltandoHoy
+      ? 'Ausente del turno'
+      : isRestDay
+      ? 'Día de descanso'
+      : firma
+      ? `Turno en ${firma.nombre}`
+      : 'En jornada laboral';
   } else if (npc.rol === 'estudiante') {
+    const eduType = npc.edad >= 18 ? 'universidad' : 'escuela';
     workParcel =
-      state.parcelas.find((p) => p.zona === homeZone && p.edificio?.tipo === 'escuela' && p.edificio.activo) ??
+      state.parcelas.find((p) => p.zona === homeZone && p.edificio?.tipo === eduType && p.edificio.activo) ??
+      state.parcelas.find((p) => p.edificio?.tipo === eduType && p.edificio.activo) ??
       state.parcelas.find((p) => p.edificio?.tipo === 'escuela' && p.edificio.activo);
-    workLabel = 'Asistiendo a la escuela';
+    workLabel = workParcel
+      ? eduType === 'universidad'
+        ? 'Cursando en universidad'
+        : 'Asistiendo a la escuela'
+      : 'Estudio en casa';
   } else if (npc.rol === 'policia') {
     workParcel =
       state.parcelas.find((p) => p.zona === npc.zona && p.edificio?.tipo === 'comisaria' && p.edificio.activo) ??
       state.parcelas.find((p) => p.edificio?.tipo === 'comisaria' && p.edificio.activo);
-    workLabel = 'Patrulla y guardia';
+    workLabel = isRestDay ? 'Franco policial' : 'Patrulla y guardia';
   } else if (npc.rol === 'medico') {
     workParcel =
       state.parcelas.find((p) => p.zona === npc.zona && p.edificio?.tipo === 'hospital' && p.edificio.activo) ??
       state.parcelas.find((p) => p.edificio?.tipo === 'hospital' && p.edificio.activo);
-    workLabel = 'Guardia médica';
+    workLabel = isRestDay ? 'Descanso médico' : 'Guardia médica';
   } else if (npc.rol === 'estatal' || npc.rol === 'ingeniero') {
     workParcel = state.parcelas.find((p) => p.edificio?.tipo === 'oficina_publica' && p.edificio.activo);
-    workLabel = npc.rol === 'ingeniero' ? 'Supervisión de obras' : 'Gestión pública';
+    workLabel = isRestDay ? 'Día libre' : npc.rol === 'ingeniero' ? 'Supervisión de obras' : 'Gestión pública';
   } else if (npc.rol === 'docente') {
     workParcel =
-      state.parcelas.find((p) => p.zona === npc.zona && p.edificio?.tipo === 'escuela' && p.edificio.activo) ??
-      state.parcelas.find((p) => p.edificio?.tipo === 'escuela' && p.edificio.activo);
-    workLabel = 'Dictando clases';
+      state.parcelas.find((p) => p.zona === npc.zona && (p.edificio?.tipo === 'escuela' || p.edificio?.tipo === 'universidad') && p.edificio.activo) ??
+      state.parcelas.find((p) => (p.edificio?.tipo === 'escuela' || p.edificio?.tipo === 'universidad') && p.edificio.activo);
+    workLabel = isRestDay ? 'Día libre' : 'Dictando clases';
   } else if (npc.rol === 'jubilado') {
     workParcel = state.parcelas.find((p) => p.edificio?.tipo === 'plaza');
     workLabel = 'Paseo por la plaza';
@@ -850,13 +1627,43 @@ export function getNpcDailyAgenda(
     workLabel = 'Buscando empleo / trámites';
   }
 
+  const sched = getShiftScheduleForNpc(npc, firmRubro);
+  const worksMorning =
+    !npc.hospital.internado &&
+    !isRestDay &&
+    !npc.ritmo?.faltandoHoy &&
+    !(npc.accionIa?.fueraDePuesto) &&
+    npc.rol !== 'jubilado' &&
+    npc.rol !== 'desempleado' &&
+    (sched.startH + crono < 13);
+  const worksAfternoon =
+    !npc.hospital.internado &&
+    !isRestDay &&
+    !npc.ritmo?.faltandoHoy &&
+    !(npc.accionIa?.fueraDePuesto) &&
+    npc.rol !== 'jubilado' &&
+    npc.rol !== 'desempleado' &&
+    (sched.endH + crono >= 14);
+  const worksEvening =
+    !npc.hospital.internado &&
+    !isRestDay &&
+    !npc.ritmo?.faltandoHoy &&
+    (sched.endH + crono >= 20 || (npc.rol === 'policia' && (npc.ritmo?.turno ?? 0) % 3 === 2));
+
   const workZone = workParcel?.zona ?? npc.zona;
   const workRect = state.zonas[workZone]?.rect;
   const workWx = workParcel ? workParcel.wx + workParcel.ww / 2 : workRect ? workRect.wx + workRect.ww * 0.5 : homeWx;
   const workWy = workParcel ? workParcel.wy + workParcel.wh / 2 : workRect ? workRect.wy + workRect.wh * 0.5 : homeWy;
 
-  // Midday shopping / food parcel in home or work zone
+  // Shopping / food parcel in home or work zone
+  const habitParcel = npc.ritmo?.libreHoyParcelaId
+    ? ctx?.parcelaById
+      ? ctx.parcelaById.get(npc.ritmo.libreHoyParcelaId)
+      : state.parcelas.find((p) => p.id === npc.ritmo.libreHoyParcelaId)
+    : undefined;
+
   const shopParcel =
+    habitParcel ??
     state.parcelas.find(
       (p) =>
         (p.zona === homeZone || p.zona === workZone) &&
@@ -868,34 +1675,64 @@ export function getNpcDailyAgenda(
   const shopWx = shopParcel ? shopParcel.wx + shopParcel.ww / 2 : homeWx;
   const shopWy = shopParcel ? shopParcel.wy + shopParcel.wh / 2 : homeWy;
 
-  // Afternoon leisure parcel for non-working hours or breaks
+  const libreAct = npc.ritmo?.libreHoyActividad ?? 'casa';
   const leisureParcel =
-    npc.edad >= 18 && (npc.economia.propensionGasto >= 62 || npc.rol === 'jubilado' || npc.rol === 'desempleado')
+    habitParcel ??
+    (libreAct === 'ocio' || libreAct === 'compras'
       ? state.parcelas.find(
           (p) =>
             p.edificio?.activo &&
             (p.edificio.tipo === 'bar_cafe' ||
               p.edificio.tipo === 'cine_teatro' ||
+              p.edificio.tipo === 'club' ||
               p.edificio.tipo === 'gimnasio' ||
               p.edificio.tipo === 'plaza')
         )
-      : undefined;
+      : libreAct === 'pasear'
+      ? state.parcelas.find((p) => p.edificio?.tipo === 'plaza')
+      : homeParcel);
 
   const isHospitalized = npc.hospital.internado;
-  const afternoonUsesLeisure =
+  const morningParcel = isHospitalized ? workParcel : worksMorning ? workParcel : libreAct === 'compras' ? shopParcel : homeParcel;
+  const morningZone = morningParcel?.zona ?? (worksMorning ? workZone : homeZone);
+  const morningWx = morningParcel ? morningParcel.wx + morningParcel.ww / 2 : worksMorning ? workWx : homeWx;
+  const morningWy = morningParcel ? morningParcel.wy + morningParcel.wh / 2 : worksMorning ? workWy : homeWy;
+
+  const afternoonUsesWork = !isHospitalized && worksAfternoon;
+  const tardeParcel = isHospitalized ? workParcel : afternoonUsesWork ? workParcel : leisureParcel;
+  const tardeZone = tardeParcel?.zona ?? (afternoonUsesWork ? workZone : homeZone);
+  const tardeWx = tardeParcel ? tardeParcel.wx + tardeParcel.ww / 2 : afternoonUsesWork ? workWx : homeWx;
+  const tardeWy = tardeParcel ? tardeParcel.wy + tardeParcel.wh / 2 : afternoonUsesWork ? workWy : homeWy;
+  const tardeActividad = isHospitalized
+    ? 'Internado en hospital'
+    : afternoonUsesWork
+    ? workLabel
+    : libreAct === 'ocio' && tardeParcel
+    ? `Ocio en ${tardeParcel.nombre}`
+    : libreAct === 'compras' && tardeParcel
+    ? `Compras en ${tardeParcel.nombre}`
+    : libreAct === 'visita'
+    ? 'Visita familiar'
+    : libreAct === 'pasear'
+    ? 'Paseo por el barrio'
+    : 'Tiempo libre en casa';
+
+  const eveningAtLeisure =
     !isHospitalized &&
-    Boolean(leisureParcel) &&
-    (npc.rol === 'estudiante' || npc.rol === 'jubilado' || npc.rol === 'desempleado');
-
-  const tardeParcel = afternoonUsesLeisure ? leisureParcel : workParcel;
-  const tardeZone = tardeParcel?.zona ?? workZone;
-  const tardeWx = tardeParcel ? tardeParcel.wx + tardeParcel.ww / 2 : workWx;
-  const tardeWy = tardeParcel ? tardeParcel.wy + tardeParcel.wh / 2 : workWy;
-  const tardeActividad = afternoonUsesLeisure
-    ? `Ocio en ${tardeParcel?.nombre ?? 'la ciudad'}`
-    : workLabel;
-
-  const nightPatrol = !isHospitalized && npc.rol === 'policia';
+    !worksEvening &&
+    libreAct === 'ocio' &&
+    getEffectiveTrait(npc, 'valentia') >= 45 &&
+    Boolean(leisureParcel);
+  const eveningParcel = isHospitalized
+    ? workParcel
+    : worksEvening
+    ? workParcel
+    : eveningAtLeisure
+    ? leisureParcel
+    : homeParcel;
+  const eveningZone = eveningParcel?.zona ?? (worksEvening ? workZone : homeZone);
+  const eveningWx = eveningParcel ? eveningParcel.wx + eveningParcel.ww / 2 : worksEvening ? workWx : homeWx;
+  const eveningWy = eveningParcel ? eveningParcel.wy + eveningParcel.wh / 2 : worksEvening ? workWy : homeWy;
 
   return [
     {
@@ -911,12 +1748,12 @@ export function getNpcDailyAgenda(
     {
       franja: 'manana',
       horario: AGENDA_CONSTANTS.franjas[1].horario,
-      actividad: workLabel,
-      destinoTipo: isHospitalized ? 'hospital' : workParcel ? 'trabajo' : 'zona',
-      zona: workZone,
-      parcelaId: workParcel?.id,
-      wx: workWx,
-      wy: workWy,
+      actividad: isHospitalized ? 'Internado en hospital' : worksMorning ? workLabel : isRestDay ? 'Mañana libre en casa' : workLabel,
+      destinoTipo: isHospitalized ? 'hospital' : worksMorning && workParcel ? 'trabajo' : homeParcel ? 'casa' : 'zona',
+      zona: morningZone,
+      parcelaId: morningParcel?.id,
+      wx: morningWx,
+      wy: morningWy,
     },
     {
       franja: 'mediodia',
@@ -932,7 +1769,7 @@ export function getNpcDailyAgenda(
       franja: 'tarde',
       horario: AGENDA_CONSTANTS.franjas[3].horario,
       actividad: tardeActividad,
-      destinoTipo: isHospitalized ? 'hospital' : afternoonUsesLeisure ? 'parcela' : 'trabajo',
+      destinoTipo: isHospitalized ? 'hospital' : afternoonUsesWork ? 'trabajo' : tardeParcel ? 'parcela' : 'casa',
       zona: tardeZone,
       parcelaId: tardeParcel?.id,
       wx: tardeWx,
@@ -943,16 +1780,26 @@ export function getNpcDailyAgenda(
       horario: AGENDA_CONSTANTS.franjas[4].horario,
       actividad: isHospitalized
         ? 'Internado en hospital'
-        : nightPatrol
-        ? 'Patrulla nocturna'
+        : worksEvening
+        ? workLabel
+        : eveningAtLeisure && eveningParcel
+        ? `Salida nocturna (${eveningParcel.nombre})`
         : homeParcel
         ? 'Regreso al hogar'
         : 'Regreso a su zona',
-      destinoTipo: isHospitalized ? 'hospital' : nightPatrol ? 'trabajo' : homeParcel ? 'casa' : 'zona',
-      zona: isHospitalized || nightPatrol ? workZone : homeZone,
-      parcelaId: isHospitalized || nightPatrol ? workParcel?.id : homeParcel?.id,
-      wx: isHospitalized || nightPatrol ? workWx : homeWx,
-      wy: isHospitalized || nightPatrol ? workWy : homeWy,
+      destinoTipo: isHospitalized
+        ? 'hospital'
+        : worksEvening
+        ? 'trabajo'
+        : eveningAtLeisure
+        ? 'parcela'
+        : homeParcel
+        ? 'casa'
+        : 'zona',
+      zona: eveningZone,
+      parcelaId: eveningParcel?.id,
+      wx: eveningWx,
+      wy: eveningWy,
     },
   ];
 }
@@ -1138,7 +1985,8 @@ export interface HospitalFacilityInfo {
 export function computeHospitalFacilities(
   parcelas: Parcela[],
   npcs: Npc[],
-  zonas?: GameState['zonas']
+  zonas?: GameState['zonas'],
+  distanciasZonas?: GameState['distanciasZonas']
 ): HospitalFacilityInfo[] {
   const active = getActiveBuildings(parcelas).filter(
     (b) => b.tipo === 'hospital' || b.tipo === 'hospital_campana'
@@ -1146,27 +1994,46 @@ export function computeHospitalFacilities(
   if (active.length === 0) return [];
 
   const vivos = npcs.filter((n) => n.vivo);
-  const medicosPorZona: Record<string, number> = {};
-  for (const n of vivos) {
-    if (n.rol === 'medico' && !n.hospital.internado && !n.accionIa?.fueraDePuesto) {
-      medicosPorZona[n.zona] = (medicosPorZona[n.zona] || 0) + 1;
-    }
-  }
+  const activeMedicos = vivos.filter(
+    (n) => n.rol === 'medico' && !n.hospital.internado && !n.accionIa?.fueraDePuesto && !n.capacitacion
+  );
 
-  const hospitalesPermanentesPorZona: Record<string, BuildingInstance[]> = {};
-  for (const b of active) {
-    if (b.tipo === 'hospital') {
-      if (!hospitalesPermanentesPorZona[b.zona]) hospitalesPermanentesPorZona[b.zona] = [];
-      hospitalesPermanentesPorZona[b.zona].push(b);
+  const permHosp = active.filter((b) => b.tipo === 'hospital');
+  const assignedByHospId = new Map<string, number>();
+  for (const h of permHosp) assignedByHospId.set(h.id, 0);
+
+  if (permHosp.length > 0) {
+    const zoneSteps = zonas ? buildZoneStepMap(zonas) : null;
+    for (const m of activeMedicos) {
+      let bestHosp: BuildingInstance | undefined;
+      let bestCost = Infinity;
+      for (const h of permHosp) {
+        let cost = h.zona === m.zona ? VIAL_CONSTANTS.costoInternoZona : Infinity;
+        if (h.zona !== m.zona) {
+          const roadCost = distanciasZonas?.[m.zona]?.[h.zona];
+          if (typeof roadCost === 'number') {
+            cost = roadCost;
+          } else if (zoneSteps) {
+            const st = zoneSteps[m.zona]?.[h.zona];
+            if (typeof st === 'number') cost = st * 10 + VIAL_CONSTANTS.costoInternoZona;
+          }
+        }
+        if (!Number.isFinite(cost)) continue;
+        // Tie-break toward hospitals with fewer assigned doctors so doctors distribute evenly
+        const loadBias = (assignedByHospId.get(h.id) ?? 0) * 0.25;
+        if (cost + loadBias < bestCost) {
+          bestCost = cost + loadBias;
+          bestHosp = h;
+        }
+      }
+      if (bestHosp) {
+        assignedByHospId.set(bestHosp.id, (assignedByHospId.get(bestHosp.id) ?? 0) + 1);
+      }
     }
   }
 
   const parcelNameById = new Map<string, string>();
   for (const p of parcelas) parcelNameById.set(p.id, p.nombre);
-
-  const zoneSteps = zonas ? buildZoneStepMap(zonas) : null;
-  const totalMedicos = Object.values(medicosPorZona).reduce((s, c) => s + c, 0);
-  const totalPerm = active.filter((b) => b.tipo === 'hospital').length;
 
   const facilities: HospitalFacilityInfo[] = active.map((b) => {
     const def = BUILDING_CATALOG[b.tipo];
@@ -1175,19 +2042,7 @@ export function computeHospitalFacilities(
     let camasEfectivas = camasFisicas;
 
     if (b.tipo === 'hospital') {
-      const sameZoneHosp = hospitalesPermanentesPorZona[b.zona]?.length ?? 1;
-      const medsLocal = medicosPorZona[b.zona] || 0;
-      medicosAsignados =
-        medsLocal > 0
-          ? Math.round(medsLocal / sameZoneHosp)
-          : totalPerm > 0
-          ? Math.round(totalMedicos / totalPerm)
-          : 0;
-      // Fallback: count all active medicos across reachable zones if local has none
-      if (medicosAsignados === 0 && totalMedicos > 0 && zoneSteps) {
-        const anyMeds = Object.values(medicosPorZona).reduce((a, c) => a + c, 0);
-        medicosAsignados = Math.max(1, Math.round(anyMeds / totalPerm));
-      }
+      medicosAsignados = assignedByHospId.get(b.id) ?? 0;
       camasEfectivas = Math.min(camasFisicas, medicosAsignados * ECON_CONSTANTS.pacientesPorMedico);
     }
 
@@ -1296,7 +2151,12 @@ export function computeNpcVariableTargets(
       if (n.hospital.internado) internadosCount++;
     }
     vivosCount = Math.max(1, alive);
-    const hospitalCap = computeHospitalFacilities(state.parcelas, state.npcs, state.zonas).reduce(
+    const hospitalCap = computeHospitalFacilities(
+      state.parcelas,
+      state.npcs,
+      state.zonas,
+      state.distanciasZonas
+    ).reduce(
       (s, f) => s + f.camasEfectivas,
       0
     );
@@ -1386,18 +2246,20 @@ export function getNpcProductivity(
   state: GameState,
   ctx?: { hogarById?: Map<string, Hogar>; firmaById?: Map<string, Firma> }
 ): number {
-  if (!npc.vivo || npc.hospital.internado || npc.accionIa?.fueraDePuesto) return 0;
+  if (!npc.vivo || npc.hospital.internado || npc.accionIa?.fueraDePuesto || npc.capacitacion) return 0;
   const hogar = ctx?.hogarById
     ? ctx.hogarById.get(npc.hogarId)
     : state.hogares.find((h) => h.id === npc.hogarId);
   const isActuallyStreet = hogar?.estado === 'calle' && !hogar?.ocupandoCasaId;
   const streetFactor = isActuallyStreet ? HOUSING_CONSTANTS.calleProdFactor : 1;
   const commuteFactor = getCommuteProductivityFactor(state, npc, ctx?.firmaById);
+  const faltazgoFactor = npc.ritmo?.faltandoHoy ? RITMO_CONSTANTS.faltazgoPenaltyFactor : 1;
   const modProd = getModifierDelta(npc, 'productividad');
   const base = clamp(
     (45 + npc.variables.salud * 0.4 + npc.personalidad.laboriosidad * 0.15 - npc.variables.hambre * 0.35) *
       streetFactor *
-      commuteFactor +
+      commuteFactor *
+      faltazgoFactor +
       modProd,
     15,
     125
@@ -1511,7 +2373,12 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     despensaSum += h.despensa / miembros;
   }
 
-  const hospFacilities = computeHospitalFacilities(state.parcelas, state.npcs, state.zonas);
+  const hospFacilities = computeHospitalFacilities(
+    state.parcelas,
+    state.npcs,
+    state.zonas,
+    state.distanciasZonas
+  );
   const camasHospital = hospFacilities.reduce((s, f) => s + f.camasEfectivas, 0);
   const capacidadHospitalTotal = hospFacilities.reduce((s, f) => s + f.camasFisicas, 0);
   const hospitalesLlenos = hospFacilities.filter(

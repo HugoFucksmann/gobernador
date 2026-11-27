@@ -4,6 +4,7 @@ import {
   DEFAULT_ZONAS,
   ECON_CONSTANTS,
   FIRM_CONSTANTS,
+  HOUSING_CONSTANTS,
   LOT_CLASS_RANK,
   MEDIA_TEMPLATES,
   ROLE_CATALOG,
@@ -42,15 +43,19 @@ import {
 import { getBuildingJobCaps, getBuildingRoleCapacity, getObrasTargetJobs } from './policies';
 import { initSubsystemRng, nextRand, normalizeSeed, randInt, randRange } from './rng';
 import {
+  buildSeededNpcRitmo,
   buildTileGridAndSyncMap,
   canBuildTypeInParcela,
   clamp,
   computeDemandaSuelo,
   computeTotalWorldMoney,
+  deriveCommunityStats,
   getWorldZones,
   inferLotClassFromParcel,
   recomputeRoadDistances,
+  updateDailyNpcRitmoAndHabits,
 } from './worldHelpers';
+import { initLecturaState } from './lecturaV2';
 
 interface RngHolder {
   rngState: number;
@@ -502,6 +507,68 @@ function buildScaledParcelas(
         },
       });
     }
+
+    const extraEdu = Math.max(0, Math.floor((pop - 120) / 180));
+    for (let i = 0; i < extraEdu; i++) {
+      const z = pubZones[(i + 1) % pubZones.length] ?? 'norte';
+      const rect = zonas[z].rect;
+      const pidE = `p_esc_ext_${i + 1}`;
+      base.push({
+        id: pidE,
+        nombre: `Escuela Zonal ${z}`,
+        zona: z,
+        distrito: 'civico',
+        tipoParcela: 'publica',
+        clase: 'L',
+        orden: 450 + i * 2,
+        wx: rect.wx + 210,
+        wy: rect.wy + 32,
+        ww: 48,
+        wh: 38,
+        estado: 'ocupada',
+        edificio: {
+          id: `ed_esc_ext_${i + 1}`,
+          tipo: 'escuela',
+          parcelaId: pidE,
+          dueno: 'estado',
+          estado: 'ocupada',
+          activo: true,
+          estadoSalud: 100,
+          diasObraRestantes: 0,
+          diasObraTotal: 0,
+          zona: z,
+        },
+      });
+      if (i % 2 === 0) {
+        const pidU = `p_univ_ext_${i + 1}`;
+        base.push({
+          id: pidU,
+          nombre: `Universidad Zonal ${z}`,
+          zona: z,
+          distrito: 'civico',
+          tipoParcela: 'publica',
+          clase: 'L',
+          orden: 451 + i * 2,
+          wx: rect.wx + 158,
+          wy: rect.wy + 32,
+          ww: 48,
+          wh: 38,
+          estado: 'ocupada',
+          edificio: {
+            id: `ed_univ_ext_${i + 1}`,
+            tipo: 'universidad',
+            parcelaId: pidU,
+            dueno: 'estado',
+            estado: 'ocupada',
+            activo: true,
+            estadoSalud: 100,
+            diasObraRestantes: 0,
+            diasObraTotal: 0,
+            zona: z,
+          },
+        });
+      }
+    }
   }
 
   return base;
@@ -588,6 +655,24 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   }
 
   // Generate NPCs
+  const habitPoolIds = parcelas
+    .filter(
+      (p) =>
+        p.edificio?.activo &&
+        (p.edificio.tipo === 'almacen' ||
+          p.edificio.tipo === 'supermercado' ||
+          p.edificio.tipo === 'tienda' ||
+          p.edificio.tipo === 'kiosco' ||
+          p.edificio.tipo === 'restoran' ||
+          p.edificio.tipo === 'bar_cafe' ||
+          p.edificio.tipo === 'cine_teatro' ||
+          p.edificio.tipo === 'club' ||
+          p.edificio.tipo === 'gimnasio' ||
+          p.edificio.tipo === 'peluqueria' ||
+          p.edificio.tipo === 'taller')
+    )
+    .map((p) => p.id);
+
   const npcs: Npc[] = [];
   let npcSeq = 0;
   for (const item of roleDistribution) {
@@ -621,6 +706,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         codicia: clamp(Math.round(randRange(rng, 20, 78) + (def.afinidad === 'codicia' ? 16 : 0)), 8, 96),
         rebeldia: clamp(Math.round(randRange(rng, 14, 62) + (def.afinidad === 'rebeldia' ? 16 : 0)), 5, 92),
         resiliencia: clamp(Math.round(randRange(rng, 34, 86)), 15, 96),
+        sociabilidad: clamp(Math.round(randRange(rng, 24, 86)), 8, 96),
       };
 
       const zPos = getZoneCanvasPosition(zona, rng, zonas);
@@ -650,6 +736,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
           estudiando: item.rol === 'estudiante',
         },
         personalidad,
+        ritmo: buildSeededNpcRitmo(id, edad, semilla, habitPoolIds),
+        capacitacion: null,
         variables: {
           salud: item.rol === 'jubilado' ? randInt(rng, 70, 88) : randInt(rng, 84, 98),
           hambre: randInt(rng, 8, 22),
@@ -1076,14 +1164,21 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     }
 
     const zIdx = zonas[parcel.zona]?.demandaAlquilerIndice ?? 1.0;
-    const rent = Number(((def.alquilerBase ?? 12) * zIdx).toFixed(2));
+    const casaEstado = randInt(rng, 84, 100);
+    const baseAlq = def.alquilerBase ?? 12;
+    const rent = Number(
+      Math.max(
+        baseAlq * HOUSING_CONSTANTS.alquilerPisoFactor,
+        baseAlq * (casaEstado / 100) * zIdx
+      ).toFixed(2)
+    );
     const casa: Casa = {
       id: casaId,
       tipo: houseType,
       parcelaId: parcel.id,
       zona: parcel.zona,
       capacidad: def.capacidadCasa ?? 4,
-      estado: randInt(rng, 84, 100),
+      estado: casaEstado,
       dueno,
       alquiler: rent,
       hogarId: null,
@@ -1209,6 +1304,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     distanciasLotes: {},
     demandaSuelo: {},
     demandaSueloRachas: {},
+    vacantesCriticasRachas: {},
     npcs,
     hogares,
     casas,
@@ -1425,10 +1521,14 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
   };
 
-  state.mapaGrid = buildTileGridAndSyncMap(state.zonas, state.parcelas, state.tramos, pop);
+  state.mapaGrid = buildTileGridAndSyncMap(state.zonas, state.parcelas, state.tramos, pop, semilla);
   recomputeRoadDistances(state);
+  updateDailyNpcRitmoAndHabits(state);
   state.demandaSuelo = computeDemandaSuelo(state);
   state.ultimoDineroTotal = computeTotalWorldMoney(state);
+  if (state.config.lecturaActiva !== false) {
+    state.lectura = initLecturaState(state, deriveCommunityStats(state));
+  }
   void getWorldZones;
   return state;
 }

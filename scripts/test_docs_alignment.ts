@@ -1,4 +1,14 @@
-import { BUILDING_CATALOG, SCENARIO_PRESETS } from '../src/data/catalogs';
+import { BUILDING_CATALOG, LECTURA_CONSTANTS, SCENARIO_PRESETS } from '../src/data/catalogs';
+import {
+  alertas,
+  causas,
+  historial,
+  indicador,
+  indicadores_resumen,
+  informe,
+  notables,
+  serie,
+} from '../src/engine/lecturaV2';
 import { DEFAULT_WORLD_CONFIG } from '../src/engine/policies';
 import {
   buildCausalChain,
@@ -12,6 +22,7 @@ import {
   checkEngineInvariants,
   getLotTravelCost,
   getNpcDailyAgenda,
+  getParcelLandPrice,
   getZoneTravelCost,
   recomputeRoadDistances,
 } from '../src/engine/worldHelpers';
@@ -265,6 +276,126 @@ function runDays(state: GameState, days: number): { maxDrift: number; invariantE
       statsA.vivos === statsB.vivos &&
       a.eventos.length === loaded.eventos.length,
     `rng=${a.rngState}==${loaded.rngState}, reserva=${a.gobierno.reserva.toFixed(2)}==${loaded.gobierno.reserva.toFixed(2)}`
+  );
+}
+
+// 9. LECTURA_V2 §9: read-only, deterministic, off=on equivalence, save/load, reports, notables & alerts
+{
+  const cfgOn: WorldConfig = {
+    ...structuredClone(DEFAULT_WORLD_CONFIG),
+    poblacionInicial: 100,
+    semilla: 29,
+    lecturaActiva: true,
+  };
+  const cfgOff: WorldConfig = { ...structuredClone(cfgOn), lecturaActiva: false };
+
+  const sOn1 = createInitialGameState(cfgOn);
+  runDays(sOn1, 28);
+  const sOn2 = createInitialGameState(cfgOn);
+  runDays(sOn2, 14);
+  const sOn2Loaded = JSON.parse(JSON.stringify(sOn2)) as GameState;
+  runDays(sOn2Loaded, 14);
+
+  const sOff = createInitialGameState(cfgOff);
+  runDays(sOff, 28);
+
+  const sameLectura =
+    JSON.stringify(sOn1.lectura?.alertas) === JSON.stringify(sOn2Loaded.lectura?.alertas) &&
+    JSON.stringify(sOn1.lectura?.informes) === JSON.stringify(sOn2Loaded.lectura?.informes) &&
+    JSON.stringify(sOn1.lectura?.notables) === JSON.stringify(sOn2Loaded.lectura?.notables);
+
+  const sameSimulationOff =
+    sOn1.rngState === sOff.rngState &&
+    Math.abs(sOn1.gobierno.reserva - sOff.gobierno.reserva) < 1e-6 &&
+    sOn1.npcs.filter((n) => n.vivo).length === sOff.npcs.filter((n) => n.vivo).length &&
+    sOn1.eventos.length === sOff.eventos.length;
+
+  const summary = indicadores_resumen(sOn1);
+  const rep0 = informe(sOn1, 0);
+  const histRes = historial(sOn1, {}, 0, 10);
+  const firstCauseId = histRes.items[0]?.id;
+  const causeList = firstCauseId ? causas(sOn1, firstCauseId) : [];
+  const cap = Math.min(
+    LECTURA_CONSTANTS.notablesMax,
+    Math.max(1, Math.floor(LECTURA_CONSTANTS.notablesPct * deriveCommunityStats(sOn1).vivos))
+  );
+  const notList = notables(sOn1);
+  const popSerie = serie(sOn1, 'poblacion', undefined, undefined, undefined, 'dia');
+  const pobInd = indicador(sOn1, 'poblacion');
+
+  // Stable M0+G0 world alert cap
+  const sStable = createInitialGameState({
+    ...structuredClone(DEFAULT_WORLD_CONFIG),
+    nivelMundo: 'M0',
+    nivelGobernador: 'G0',
+    estadoAutomatico: true,
+    poblacionInicial: 100,
+    semilla: 31,
+  });
+  sStable.clima.proximoEventoDia = 999999;
+  sStable.clima.fenomenos = [];
+  runDays(sStable, 21);
+  const stableActiveAlerts = alertas(sStable, { soloActivas: true }).length;
+
+  assertCheck(
+    'LECTURA_V2 §9: determinista, idéntica al apagar/cargar, informes, notables acotados y sin parpadeo',
+    sameLectura &&
+      sameSimulationOff &&
+      summary.length === 7 &&
+      Boolean(rep0 && rep0.cambios.length <= 3) &&
+      notList.length <= cap &&
+      popSerie.length >= 20 &&
+      Boolean(pobInd) &&
+      (firstCauseId ? causeList.length >= 1 : true) &&
+      stableActiveAlerts <= 3,
+    `sameLect=${sameLectura}, offEq=${sameSimulationOff}, ind=${summary.length}, repCambios=${rep0?.cambios.length ?? 0}, notables=${notList.length}/${cap}, stableAlerts=${stableActiveAlerts}`
+  );
+}
+
+// 10. MAPA_V2-1 & MUNDO_V2-1 & ECONOMIA_V2-1: terrain, scale sizing, oficina_publica, lot sales, street despensa=0, sociabilidad & ritmo
+{
+  const s100 = createInitialGameState({
+    ...structuredClone(DEFAULT_WORLD_CONFIG),
+    poblacionInicial: 100,
+    semilla: 37,
+  });
+  const s500 = createInitialGameState({
+    ...structuredClone(DEFAULT_WORLD_CONFIG),
+    poblacionInicial: 500,
+    semilla: 37,
+  });
+  const g100 = s100.mapaGrid!;
+  const g500 = s500.mapaGrid!;
+  const hasTerrainMix =
+    g100.terreno.some((row) => row.includes('.')) &&
+    g100.altura?.length === g100.alto;
+  const noBloqueada = s100.parcelas.every((p) => (p.estado as string) !== 'bloqueada');
+  const allHaveRitmoAndSoc = s100.npcs
+    .filter((n) => n.vivo)
+    .every(
+      (n) =>
+        typeof n.personalidad.sociabilidad === 'number' &&
+        Boolean(n.ritmo) &&
+        typeof n.ritmo!.cronotipo === 'number'
+    );
+  const oficinaPresetOnly = BUILDING_CATALOG.oficina_publica.construibleGobernador === false;
+  const freePrivateLot = s100.parcelas.find((p) => p.estado === 'libre' && p.tipoParcela === 'residencial');
+  const landPrice = freePrivateLot ? getParcelLandPrice(s100, freePrivateLot) : { precioLote: 0, accesibilidad: 0 };
+
+  runDays(s100, 15);
+  const streetHogares = s100.hogares.filter((h) => h.estado === 'calle');
+  const streetDespensaZero = streetHogares.every((h) => h.despensa === 0);
+
+  assertCheck(
+    'MAPA/MUNDO/ECONOMIA V2-1: terreno, escala, sin bloqueada, oficina preset, precio lote, despensa calle=0, sociabilidad y ritmo',
+    hasTerrainMix &&
+      g500.ancho > g100.ancho &&
+      noBloqueada &&
+      allHaveRitmoAndSoc &&
+      oficinaPresetOnly &&
+      landPrice.precioLote > 0 &&
+      streetDespensaZero,
+    `grid100=${g100.ancho}x${g100.alto}, grid500=${g500.ancho}x${g500.alto}, landPrice=$${landPrice.precioLote}, street=${streetHogares.length}`
   );
 }
 
