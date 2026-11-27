@@ -903,53 +903,22 @@ export class GameController {
       }
     }
 
-    const emp = loaded.npcs.find((n) => n.vivo && n.rol === 'empresario') || null;
-    const liveComerciantes = loaded.npcs.filter((n) => n.vivo && n.rol === 'comerciante').map((c) => c.id);
-    const rawFood = (loaded.empresas?.alimento ?? {}) as unknown as Record<string, unknown>;
-    const rawCom = (loaded.empresas?.comercio ?? {}) as unknown as Record<string, unknown>;
-    const legacyFoodResp = rawFood.respuesta as { factorSueldo?: number; causa?: string } | null | undefined;
-    const legacyComResp = rawCom.respuesta as { factorSueldo?: number; causa?: string } | null | undefined;
-
-    loaded.empresas = {
-      alimento: {
-        id: 'alimento',
-        nombre: (rawFood.nombre as string | undefined) ?? 'Sector Agroalimentario',
-        dueno: (rawFood.dueno as string | null | undefined) ?? (emp ? emp.id : null),
-        socios: (rawFood.socios as string[] | undefined) ?? [],
-        stock: Number(rawFood.stock ?? loaded.alimento.stock),
-        siloDias: Number(rawFood.siloDias ?? loaded.alimento.siloDias),
-        ventasAcum: Number(rawFood.ventasAcum ?? rawFood.ingresosAcum ?? 0),
-        parteSueldos: Number(rawFood.parteSueldos ?? 0.78),
-        factor: Number(rawFood.factor ?? legacyFoodResp?.factorSueldo ?? 1),
-        periodosFactorAlto: Number(rawFood.periodosFactorAlto ?? 0),
-        periodosFactorBajo: Number(rawFood.periodosFactorBajo ?? 0),
-        ultimoTramo: (rawFood.ultimoTramo as GameState['empresas']['alimento']['ultimoTramo']) ?? 'normal',
-        despidosPendientes: Number(rawFood.despidosPendientes ?? 0),
-        refPorEmpleado: (rawFood.refPorEmpleado as Record<string, number>) ?? {},
-        ultimaGanancia: Number(rawFood.ultimaGanancia ?? 0),
-        ultimoIngresoPeriodo: Number(rawFood.ultimoIngresoPeriodo ?? 0),
-        ultimoSueldosPeriodo: Number(rawFood.ultimoSueldosPeriodo ?? 0),
-        ultimaCausa: (rawFood.ultimaCausa as string | undefined) ?? legacyFoodResp?.causa,
-      },
-      comercio: {
-        id: 'comercio',
-        nombre: (rawCom.nombre as string | undefined) ?? 'Red Comercial',
-        dueno: null,
-        socios: liveComerciantes,
-        ventasAcum: Number(rawCom.ventasAcum ?? rawCom.ingresosAcum ?? 0),
-        parteSueldos: Number(rawCom.parteSueldos ?? 0.78),
-        factor: Number(rawCom.factor ?? legacyComResp?.factorSueldo ?? 1),
-        periodosFactorAlto: Number(rawCom.periodosFactorAlto ?? 0),
-        periodosFactorBajo: Number(rawCom.periodosFactorBajo ?? 0),
-        ultimoTramo: (rawCom.ultimoTramo as GameState['empresas']['comercio']['ultimoTramo']) ?? 'normal',
-        despidosPendientes: Number(rawCom.despidosPendientes ?? 0),
-        refPorEmpleado: (rawCom.refPorEmpleado as Record<string, number>) ?? {},
-        ultimaGanancia: Number(rawCom.ultimaGanancia ?? 0),
-        ultimoIngresoPeriodo: Number(rawCom.ultimoIngresoPeriodo ?? 0),
-        ultimoSueldosPeriodo: Number(rawCom.ultimoSueldosPeriodo ?? 0),
-        ultimaCausa: (rawCom.ultimaCausa as string | undefined) ?? legacyComResp?.causa,
-      },
-    };
+    delete (loaded as unknown as Record<string, unknown>).empresas;
+    if (Array.isArray(loaded.firmas)) {
+      loaded.firmas = loaded.firmas.filter((f) => (f as { rubro?: string }).rubro !== 'banco');
+    }
+    if (Array.isArray(loaded.parcelas)) {
+      for (const p of loaded.parcelas) {
+        if (p.edificio && (p.edificio as { tipo?: string }).tipo === 'oficina_banco') {
+          p.edificio = null;
+          p.estado = 'libre';
+        }
+      }
+    }
+    if (loaded.gobierno?.extras) {
+      loaded.gobierno.extras.vigentes.nivelEducacion = 0;
+      loaded.gobierno.extras.objetivo.nivelEducacion = 0;
+    }
 
     if (!Array.isArray(loaded.parcelas) || loaded.parcelas.length === 0) {
       loaded.parcelas = buildInitialParcelas(preset.id, resolvedComplexity.nivelMundo);
@@ -1245,6 +1214,7 @@ export class GameController {
     if (this.destroyed) return;
     const current = this.state;
     if (current.resultado.estado !== 'jugando') return;
+    if (!current.config.usarIaGemini) return;
 
     const jobEpoch = this.sessionEpoch;
     const signal = this.ensureAiSignal();

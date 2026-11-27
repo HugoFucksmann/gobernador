@@ -196,14 +196,26 @@ function runDays(state: GameState, days: number): { maxDrift: number; invariantE
     poblacionInicial: 120,
     semilla: 19,
   });
-  // Cut a secondary bridge/road and recompute distances
-  const targetTramo = sChain.tramos.find((t) => t.construida && t.zonaB && t.zonaB !== 'centro');
-  const beforeCost = targetTramo?.zonaB ? getZoneTravelCost(sChain, 'centro', targetTramo.zonaB) : 0;
+  // Cut an active inter-zone tramo connected to 'centro' and verify strict cost increase on zone and lot routes
+  const targetTramo = sChain.tramos.find(
+    (t) => t.construida && t.estado > 0 && t.zonaB && (t.zonaA === 'centro' || t.zonaB === 'centro')
+  );
+  const destZone = targetTramo
+    ? targetTramo.zonaA === 'centro'
+      ? targetTramo.zonaB!
+      : targetTramo.zonaA
+    : 'norte';
+  const beforeZoneCost = getZoneTravelCost(sChain, 'centro', destZone);
+  const lotCentro = sChain.parcelas.find((p) => p.zona === 'centro' && (p.estado === 'ocupada' || p.estado === 'libre'));
+  const lotDest = sChain.parcelas.find((p) => p.zona === destZone && (p.estado === 'ocupada' || p.estado === 'libre'));
+  const beforeLotCost = lotCentro && lotDest ? getLotTravelCost(sChain, lotCentro, lotDest) : 0;
+
   if (targetTramo) {
     targetTramo.estado = 0;
     recomputeRoadDistances(sChain);
   }
-  const afterCost = targetTramo?.zonaB ? getZoneTravelCost(sChain, 'centro', targetTramo.zonaB) : 0;
+  const afterZoneCost = getZoneTravelCost(sChain, 'centro', destZone);
+  const afterLotCost = lotCentro && lotDest ? getLotTravelCost(sChain, lotCentro, lotDest) : 0;
 
   // High land demand + healthy reserve triggers autopilot road build
   sChain.gobierno.reserva = 25000;
@@ -220,8 +232,12 @@ function runDays(state: GameState, days: number): { maxDrift: number; invariantE
 
   assertCheck(
     'ECONOMIA_V2 §13 + MUNDO_V2 §9: vía cortada sube costo, piloto automático abre vías',
-    afterCost >= beforeCost && (viaBuilt || sChain.tramos.some((t) => t.enObra || t.construida)) && (deathOrBankrupt ? chain.length >= 1 : true),
-    `costo=${beforeCost.toFixed(1)}->${Number.isFinite(afterCost) ? afterCost.toFixed(1) : 'Inf'}, viaAutopilot=${viaBuilt}`
+    Boolean(targetTramo) &&
+      afterZoneCost > beforeZoneCost &&
+      afterLotCost > beforeLotCost &&
+      (viaBuilt || sChain.tramos.some((t) => t.enObra || t.construida)) &&
+      (deathOrBankrupt ? chain.length >= 1 : true),
+    `zona(${destZone})=${beforeZoneCost.toFixed(1)}->${Number.isFinite(afterZoneCost) ? afterZoneCost.toFixed(1) : 'Inf'}, lote=${beforeLotCost.toFixed(1)}->${Number.isFinite(afterLotCost) ? afterLotCost.toFixed(1) : 'Inf'}, viaAutopilot=${viaBuilt}`
   );
 }
 

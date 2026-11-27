@@ -25,6 +25,7 @@ import {
   Firma,
   GameState,
   Hogar,
+  MapaV2Grid,
   Npc,
   Parcela,
   RoleId,
@@ -142,14 +143,6 @@ interface SmokeParticle {
   alpha: number;
   vz: number;
   vx: number;
-}
-
-interface AmbientVehicle {
-  axis: 'h' | 'v';
-  pos: number;
-  lane: number;
-  speed: number;
-  color: string;
 }
 
 interface WorldSpeechBubble {
@@ -389,10 +382,19 @@ function drawIsoPitchedRoof(
 }
 
 // --- Offscreen Static Terrain Builder ---
+function tileCoordHash(gx: number, gy: number, seed: number): number {
+  let h = (Math.imul(gx + 17, 73856093) ^ Math.imul(gy + 31, 19349663) ^ Math.imul(seed | 1, 83492791)) >>> 0;
+  h ^= h >>> 13;
+  h = Math.imul(h, 1274126177) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
 function buildStaticTerrainCanvas(
+  mapaGrid: MapaV2Grid | undefined,
   zonas: ZoneDefinition[],
   hasDrought: boolean,
-  hasPlague: boolean
+  hasPlague: boolean,
+  seed: number
 ): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = TERRAIN_W;
@@ -406,34 +408,72 @@ function buildStaticTerrainCanvas(
   ctx.fillStyle = hasDrought ? '#cabf95' : '#6fa350';
   ctx.fillRect(-TERRAIN_CX, -TERRAIN_CY, TERRAIN_W, TERRAIN_H);
 
-  // Checkerboard valley grass tiles across -220..1780 x -220..1200
-  const tile = 50;
   const grassA = hasDrought ? '#d5ca9e' : '#74aa54';
   const grassB = hasDrought ? '#cbbd8f' : '#699f4b';
-  for (let wx = -220; wx < 1780; wx += tile) {
-    for (let wy = -220; wy < 1200; wy += tile) {
-      const even = ((Math.floor(wx / tile) + Math.floor(wy / tile)) & 1) === 0;
-      ctx.fillStyle = even ? grassA : grassB;
-      isoQuadPath(ctx, wx, wy, tile, tile);
-      ctx.fill();
+  const waterCol = hasDrought ? '#38bdf8' : '#0284c7';
+  const rockCol = hasDrought ? '#948870' : '#64748b';
+  const rockHiCol = hasDrought ? '#b0a386' : '#94a3b8';
+
+  if (mapaGrid && mapaGrid.ancho > 0 && mapaGrid.alto > 0) {
+    const ancho = mapaGrid.ancho;
+    const alto = mapaGrid.alto;
+    const tw = WORLD_W / ancho;
+    const th = WORLD_H / alto;
+
+    // Extended surrounding grass apron outside 0..WORLD_W x 0..WORLD_H
+    const apron = 50;
+    for (let wx = -200; wx < WORLD_W + 200; wx += apron) {
+      for (let wy = -200; wy < WORLD_H + 200; wy += apron) {
+        if (wx >= 0 && wx < WORLD_W && wy >= 0 && wy < WORLD_H) continue;
+        const even = ((Math.floor(wx / apron) + Math.floor(wy / apron)) & 1) === 0;
+        ctx.fillStyle = even ? grassA : grassB;
+        isoQuadPath(ctx, wx, wy, apron, apron);
+        ctx.fill();
+      }
+    }
+
+    // Terrain tiles strictly from state.mapaGrid.terreno
+    for (let gy = 0; gy < alto; gy++) {
+      const row = mapaGrid.terreno[gy] ?? '';
+      for (let gx = 0; gx < ancho; gx++) {
+        const ch = row[gx] ?? '.';
+        const wx = gx * tw;
+        const wy = gy * th;
+        if (ch === '~') {
+          ctx.fillStyle = waterCol;
+          isoQuadPath(ctx, wx, wy, tw + 0.4, th + 0.4);
+          ctx.fill();
+          if (((gx + gy) & 1) === 0) {
+            ctx.fillStyle = 'rgba(255,255,255,0.16)';
+            isoQuadPath(ctx, wx + tw * 0.2, wy + th * 0.25, tw * 0.55, th * 0.22);
+            ctx.fill();
+          }
+        } else if (ch === '^') {
+          ctx.fillStyle = rockCol;
+          isoQuadPath(ctx, wx, wy, tw + 0.4, th + 0.4);
+          ctx.fill();
+          ctx.fillStyle = rockHiCol;
+          isoQuadPath(ctx, wx + tw * 0.15, wy + th * 0.15, tw * 0.5, th * 0.5);
+          ctx.fill();
+        } else {
+          const even = ((gx + gy) & 1) === 0;
+          ctx.fillStyle = even ? grassA : grassB;
+          isoQuadPath(ctx, wx, wy, tw + 0.35, th + 0.35);
+          ctx.fill();
+        }
+      }
+    }
+  } else {
+    const tile = 50;
+    for (let wx = -220; wx < 1780; wx += tile) {
+      for (let wy = -220; wy < 1200; wy += tile) {
+        const even = ((Math.floor(wx / tile) + Math.floor(wy / tile)) & 1) === 0;
+        ctx.fillStyle = even ? grassA : grassB;
+        isoQuadPath(ctx, wx, wy, tile, tile);
+        ctx.fill();
+      }
     }
   }
-
-  // East River (wx: 1188..1234) separating the valley from Ribera del Este
-  ctx.fillStyle = '#d6c69c';
-  isoQuadPath(ctx, 1182, -220, 60, 1420);
-  ctx.fill();
-  ctx.fillStyle = hasDrought ? '#38bdf8' : '#0284c7';
-  isoQuadPath(ctx, 1188, -220, 48, 1420);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  isoQuadPath(ctx, 1200, -220, 12, 1420);
-  ctx.fill();
-
-  // Subtle decorative irrigation creek along the far west border (wx: -62..-28)
-  ctx.fillStyle = hasDrought ? '#7dd3fc' : '#0ea5e9';
-  isoQuadPath(ctx, -60, -220, 26, 1420);
-  ctx.fill();
 
   // Zone terrain pads from V2 state.zonas
   for (const z of zonas) {
@@ -455,7 +495,6 @@ function buildStaticTerrainCanvas(
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Subtle agricultural furrows in agricola zones
       if (z.caracter === 'agricola') {
         ctx.strokeStyle = 'rgba(255,255,255,0.18)';
         ctx.lineWidth = 1.2;
@@ -468,7 +507,6 @@ function buildStaticTerrainCanvas(
           ctx.stroke();
         }
       } else if (z.caracter === 'centro') {
-        // Central civic cobblestone accent
         ctx.strokeStyle = 'rgba(71, 85, 105, 0.16)';
         ctx.lineWidth = 1;
         for (let px = r.wx + 24; px < r.wx + r.ww - 12; px += 28) {
@@ -497,10 +535,52 @@ function buildStaticTerrainCanvas(
     ctx.restore();
   }
 
+  // Deterministic static flora strictly from mapaGrid soil tiles & seed (outside zone pads & roads)
+  if (mapaGrid && mapaGrid.ancho > 0 && mapaGrid.alto > 0) {
+    const ancho = mapaGrid.ancho;
+    const alto = mapaGrid.alto;
+    const tw = WORLD_W / ancho;
+    const th = WORLD_H / alto;
+    const zoneRects = zonas.map((z) => z.rect).filter((r): r is NonNullable<typeof r> => Boolean(r));
+    const step = Math.max(1, Math.floor(ancho / 40));
+    for (let gy = 1; gy < alto - 1; gy += step) {
+      const row = mapaGrid.terreno[gy] ?? '';
+      const viaRow = mapaGrid.vias[gy] ?? '';
+      for (let gx = 1; gx < ancho - 1; gx += step) {
+        if ((row[gx] ?? '.') !== '.' || (viaRow[gx] ?? '.') !== '.') continue;
+        if ((tileCoordHash(gx, gy, seed) % 100) >= 6) continue;
+        const wx = (gx + 0.5) * tw;
+        const wy = (gy + 0.5) * th;
+        const insideZone = zoneRects.some(
+          (r) => wx >= r.wx - 8 && wx <= r.wx + r.ww + 8 && wy >= r.wy - 8 && wy <= r.wy + r.wh + 8
+        );
+        if (insideZone) continue;
+        const p = worldToIso(wx, wy);
+        ctx.fillStyle = 'rgba(15,23,42,0.16)';
+        ctx.beginPath();
+        ctx.ellipse(p.ix + 4, p.iy + 2, 8, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(p.ix - 1.5, p.iy - 8, 3, 8);
+        ctx.fillStyle = hasDrought ? '#84a955' : '#15803d';
+        ctx.beginPath();
+        ctx.arc(p.ix, p.iy - 12, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = hasDrought ? '#a3be6e' : '#22c55e';
+        ctx.beginPath();
+        ctx.arc(p.ix - 2, p.iy - 14.5, 4.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
   return canvas;
 }
 
-function buildMinimapBgCanvas(zonas: ZoneDefinition[]): HTMLCanvasElement {
+function buildMinimapBgCanvas(
+  mapaGrid: MapaV2Grid | undefined,
+  zonas: ZoneDefinition[]
+): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = MINIMAP_W;
   c.height = MINIMAP_H;
@@ -518,19 +598,22 @@ function buildMinimapBgCanvas(zonas: ZoneDefinition[]): HTMLCanvasElement {
     };
   };
 
-  // East river
-  ctx.fillStyle = '#0284c7';
-  const r1 = mapPoint(1185, -80);
-  const r2 = mapPoint(1235, -80);
-  const r3 = mapPoint(1235, 1020);
-  const r4 = mapPoint(1185, 1020);
-  ctx.beginPath();
-  ctx.moveTo(r1.mx, r1.my);
-  ctx.lineTo(r2.mx, r2.my);
-  ctx.lineTo(r3.mx, r3.my);
-  ctx.lineTo(r4.mx, r4.my);
-  ctx.closePath();
-  ctx.fill();
+  // Water & mountain tiles from state.mapaGrid.terreno
+  if (mapaGrid && mapaGrid.ancho > 0 && mapaGrid.alto > 0) {
+    const tw = WORLD_W / mapaGrid.ancho;
+    const th = WORLD_H / mapaGrid.alto;
+    for (let gy = 0; gy < mapaGrid.alto; gy++) {
+      const row = mapaGrid.terreno[gy] ?? '';
+      for (let gx = 0; gx < mapaGrid.ancho; gx++) {
+        const ch = row[gx] ?? '.';
+        if (ch !== '~' && ch !== '^') continue;
+        ctx.fillStyle = ch === '~' ? '#0284c7' : '#64748b';
+        const pt = mapPoint((gx + 0.5) * tw, (gy + 0.5) * th);
+        const sz = Math.max(1.8, tw * MINIMAP_SCALE * 1.4);
+        ctx.fillRect(pt.mx - sz / 2, pt.my - sz / 2, sz, sz);
+      }
+    }
+  }
 
   for (const z of zonas) {
     const d = z.rect;
@@ -984,11 +1067,6 @@ function drawParcelBuilding(
       labelRoof('PRENSA', 22, '#fdf2f8');
       break;
     }
-    case 'oficina_banco': {
-      drawIsoBox(c, bx, by, bw, bh, 24, '#0f172a', '#1e293b', '#334155', '#f59e0b', duskAmount);
-      labelRoof('BANCO', 25, '#fde68a');
-      break;
-    }
     case 'muralla': {
       drawIsoBox(c, bx, by, bw, 10, 20, '#cbd5e1', '#475569', '#64748b');
       drawIsoBox(c, bx, by + bh - 10, bw, 10, 20, '#cbd5e1', '#475569', '#64748b');
@@ -1096,14 +1174,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   const bubblesRef = useRef<WorldSpeechBubble[]>([]);
   const seenContagionEventIdsRef = useRef<Set<string>>(new Set());
   const nextBubbleAtRef = useRef<number>(0);
-  const vehiclesRef = useRef<AmbientVehicle[]>([
-    { axis: 'h', pos: 260, lane: 130, speed: 34, color: '#d97706' },
-    { axis: 'h', pos: 720, lane: 382, speed: 38, color: '#0284c7' },
-    { axis: 'h', pos: 520, lane: 632, speed: -30, color: '#16a34a' },
-    { axis: 'v', pos: 200, lane: 205, speed: 28, color: '#dc2626' },
-    { axis: 'v', pos: 320, lane: 600, speed: -32, color: '#0f766e' },
-    { axis: 'v', pos: 450, lane: 995, speed: 26, color: '#475569' },
-  ]);
 
   const dragRef = useRef({
     dragging: false,
@@ -1273,7 +1343,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
       if (!minimapBgRef.current || minimapBgRef.current.key !== zoneKey) {
         minimapBgRef.current = {
-          canvas: buildMinimapBgCanvas(Object.values(st.zonas)),
+          canvas: buildMinimapBgCanvas(st.mapaGrid, Object.values(st.zonas)),
           key: zoneKey,
         };
       }
@@ -1436,18 +1506,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           cam.y += (cam.targetY - cam.y) * Math.min(1, dt * 9);
           cam.zoom += (cam.targetZoom - cam.zoom) * Math.min(1, dt * 9);
 
-          // 3. Ambient vehicles, factory chimney smoke, and speech bubbles
+          // 3. Factory chimney smoke and speech bubbles
           if (!pausedRef.current) {
-            for (const v of vehiclesRef.current) {
-              v.pos += v.speed * dt;
-              if (v.axis === 'v') {
-                if (v.pos > 730) v.pos = 40;
-                if (v.pos < 40) v.pos = 730;
-              } else {
-                if (v.pos > 1160) v.pos = 40;
-                if (v.pos < 40) v.pos = 1160;
-              }
-            }
 
             if (Math.random() < 0.16 && smokeRef.current.length < 24) {
               const chimneys = st.parcelas
@@ -1545,10 +1605,11 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
 
           const zoneList = Object.values(st.zonas);
           const zoneStateKey = zoneList.map((z) => `${z.id}:${z.estado}`).join('|');
-          const terrainKey = `${hasDrought ? 1 : 0}_${hasPlague ? 1 : 0}_${zoneStateKey}`;
+          const gridKey = st.mapaGrid ? `${st.mapaGrid.ancho}x${st.mapaGrid.alto}` : 'nogrid';
+          const terrainKey = `${st.semilla}_${gridKey}_${hasDrought ? 1 : 0}_${hasPlague ? 1 : 0}_${zoneStateKey}`;
           if (!terrainCacheRef.current || terrainCacheRef.current.key !== terrainKey) {
             terrainCacheRef.current = {
-              canvas: buildStaticTerrainCanvas(zoneList, hasDrought, hasPlague),
+              canvas: buildStaticTerrainCanvas(st.mapaGrid, zoneList, hasDrought, hasPlague, st.semilla),
               key: terrainKey,
             };
           }
@@ -1883,25 +1944,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             renderQueue.push({ kind: 'fn', depth: wx + wy, draw });
           };
 
-          // Rotating Agricultural Windmill in Noroeste
-          pushItem(336, 156, (c) => {
-            drawIsoBox(c, 328, 148, 16, 16, 26, '#92400e', '#78350f', '#b45309');
-            const top = worldToIso(336, 156);
-            c.save();
-            c.translate(top.ix, top.iy - 28);
-            c.rotate(pausedRef.current ? 0.3 : nowSec * 1.1);
-            c.strokeStyle = '#f8fafc';
-            c.lineWidth = 2.4;
-            for (let b = 0; b < 4; b++) {
-              c.rotate(Math.PI / 2);
-              c.beginPath();
-              c.moveTo(0, 0);
-              c.lineTo(0, -18);
-              c.stroke();
-            }
-            c.restore();
-          });
-
           // Active Role & Hospital Lookup for Status Badges
           const activeRoleCounts: Partial<Record<RoleId, number>> = Object.create(null);
           for (const n of st.npcs) {
@@ -2095,68 +2137,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 c.fillText(`${fac.occupied}/${fac.beds} camas`, center.ix, badgeY + 10.5);
                 c.textAlign = 'start';
               }
-            });
-          }
-
-          // Isometric Trees along avenues, riverbanks & rural borders
-          const trees = [
-            { x: 376, y: 80 },
-            { x: 376, y: 224 },
-            { x: 772, y: 80 },
-            { x: 772, y: 224 },
-            { x: 772, y: 492 },
-            { x: 376, y: 580 },
-            { x: 772, y: 690 },
-            { x: 1140, y: 120 },
-            { x: 1140, y: 220 },
-            { x: 1140, y: 580 },
-            { x: 1140, y: 700 },
-            { x: 1265, y: 180 },
-            { x: 1280, y: 590 },
-            { x: 1410, y: 310 },
-            { x: 1430, y: 640 },
-            { x: 290, y: 710 },
-            { x: 960, y: 710 },
-            // Outer countryside ring
-            { x: 140, y: -55 },
-            { x: 520, y: -62 },
-            { x: 940, y: -55 },
-            { x: 1320, y: 90 },
-            { x: 1480, y: 450 },
-            { x: 640, y: 860 },
-            { x: 980, y: 860 },
-            { x: -95, y: 150 },
-            { x: -100, y: 460 },
-            { x: -90, y: 740 },
-          ];
-          for (const t of trees) {
-            pushItem(t.x, t.y, (c) => {
-              const p = worldToIso(t.x, t.y);
-              c.fillStyle = 'rgba(15,23,42,0.2)';
-              c.beginPath();
-              c.ellipse(p.ix + 5, p.iy + 2, 10, 5, 0, 0, Math.PI * 2);
-              c.fill();
-              c.fillStyle = '#78350f';
-              c.fillRect(p.ix - 2, p.iy - 10, 4, 10);
-              c.fillStyle = hasDrought ? '#84a955' : '#15803d';
-              c.beginPath();
-              c.arc(p.ix, p.iy - 15, 10, 0, Math.PI * 2);
-              c.fill();
-              c.fillStyle = hasDrought ? '#a3be6e' : '#22c55e';
-              c.beginPath();
-              c.arc(p.ix - 2.5, p.iy - 18, 6, 0, Math.PI * 2);
-              c.fill();
-            });
-          }
-
-          // Ambient Vehicles along V2 arterial avenues
-          for (const v of vehiclesRef.current) {
-            const wx = v.axis === 'v' ? v.lane : v.pos;
-            const wy = v.axis === 'v' ? v.pos : v.lane;
-            pushItem(wx, wy, (c) => {
-              const ww = v.axis === 'v' ? 8 : 13;
-              const wh = v.axis === 'v' ? 13 : 8;
-              drawIsoBox(c, wx - ww / 2, wy - wh / 2, ww, wh, 6, v.color, '#1e293b', '#334155');
             });
           }
 

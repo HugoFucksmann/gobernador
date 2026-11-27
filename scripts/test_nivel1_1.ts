@@ -132,15 +132,11 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Acceso: sube el alcance de los medios', avg(a, (m) => m.alcancePct) > avg(base, (m) => m.alcancePct), `${avg(a, (m) => m.alcancePct).toFixed(1)} vs ${avg(base, (m) => m.alcancePct).toFixed(1)}`);
 }
 
-// ───── 6. Educación como servicio con nivel
+// ───── 6. Educación como servicio queda apagada en el mundo base
 {
-  const educ = (s: GameState) => s.npcs.filter((n) => n.vivo).reduce((x, n) => x + n.educacion.nivel, 0);
-  const base = days(mk({ g: 'G3', seed: 11 }), 250);
-  let e = mk({ g: 'G3', seed: 11 });
-  setExtraLever(e, 'nivelEducacion', 5);
-  e = days(e, 250);
-  check('Educación: con nivel alto sube el nivel educativo de la comunidad', educ(e) > educ(base), `${educ(e)} vs ${educ(base)}`);
-  check('Educación: tiene un costo por período', e.gobierno.reserva < base.gobierno.reserva, `${e.gobierno.reserva.toFixed(0)} vs ${base.gobierno.reserva.toFixed(0)}`);
+  const e = mk({ g: 'G3', seed: 11 });
+  const r = setExtraLever(e, 'nivelEducacion', 5);
+  check('Educación: nivelEducacion permanece apagada incluso en G3', !r.ok && (e.gobierno.extras?.vigentes.nivelEducacion ?? 0) === 0, r.error ?? '');
 }
 
 // ───── 7. Contraofertas
@@ -185,7 +181,9 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   v.gobierno.palancasVigentes.garantiaAlimentaria = 0; v.gobierno.palancasObjetivo.garantiaAlimentaria = 0;
   for (const n of v.npcs) if (n.zona === 'este') n.variables.hambre = 95;
   for (const h of v.hogares) if (h.zona === 'este') { h.despensa = 0; h.dinero = 0; }
-  v.demandasActivas = []; v.cooldownActorDemanda = { empresarios: 9999, medio_1: 9999, medio_2: 9999, medio_3: 9999 };
+  v.demandasActivas = [];
+  v.cooldownActorDemanda = { empresarios: 9999 };
+  for (const m of v.medios) v.cooldownActorDemanda[m.id] = 9999;
   v = days(v, 4);
   const vec = v.eventos.find((e) => e.tipo === 'demanda' && String((e as { actorId?: string }).actorId).startsWith('vecinos_'));
   check('Actores: los vecinos de una zona demandan por hambre crítica', !!vec, vec ? String((vec as { actorId?: string }).actorId) : '');
@@ -194,7 +192,7 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
 // ───── 9. Guardado: extensible sin romperse; migración de guardados anteriores
 {
   let s = mk({ g: 'G3', seed: 2 });
-  setExtraLever(s, 'nivelEducacion', 3);
+  setExtraLever(s, 'subsidioAlimento', 15);
   s = days(s, 30);
   const json = JSON.stringify(s);
   const back = JSON.parse(json) as GameState;
@@ -211,7 +209,7 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
 {
   const run = () => {
     let s = mk({ g: 'G3', seed: 13 });
-    setExtraLever(s, 'subsidioAlimento', 10); setExtraLever(s, 'presion', 40); setExtraLever(s, 'nivelEducacion', 2);
+    setExtraLever(s, 'subsidioAlimento', 10); setExtraLever(s, 'presion', 40); setExtraLever(s, 'acceso', 60);
     s = days(s, 60);
     return JSON.stringify([s.gobierno.reserva, deriveCommunityStats(s).apoyoPct, s.rngState, s.eventos.length]);
   };

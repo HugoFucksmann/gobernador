@@ -48,7 +48,6 @@ import {
   isLotIsolated,
   isViaConnectableToNetwork,
   recomputeRoadDistances,
-  syncLegacyEnterprisesView,
 } from './worldHelpers';
 
 export function runDailyEconomyV2(state: GameState): void {
@@ -695,11 +694,6 @@ export function runDailyEconomyV2(state: GameState): void {
   };
   state.ultimaSalidaEconomica.bienesImportadosDia = Number(bienesImportadosDia.toFixed(2));
   state.ultimaSalidaEconomica.industriaExportDia = Number(industriaExportDia.toFixed(2));
-
-  if (!isM1Plus) {
-    // Keep legacy view synced in M0 too
-    syncLegacyEnterprisesView(state);
-  }
 }
 
 export function runPaydayEconomyV2(state: GameState): void {
@@ -750,7 +744,8 @@ export function runPaydayEconomyV2(state: GameState): void {
     creditNetAmountToHogarOrNpc(npc, gross, taxable);
 
   // ====================================================================
-  // 1. FIRMS SETTLEMENT: ads -> payroll -> hiring -> manager -> profit
+  // 1. FIRMS SETTLEMENT HELPER (settle non-constructora/non-medio first,
+  //    then credit maintenance & public works, then settle constructora & medio)
   // ====================================================================
   const activeMedios = state.medios.filter((m) => m.activa !== false);
   const medioFirmaPairs = activeMedios
@@ -762,300 +757,243 @@ export function runPaydayEconomyV2(state: GameState): void {
     m.ingresos.fondosEstado = 0;
   }
 
-  // Advertising outflow from all active non-medio firms into medio firms (ECONOMIA_V2 §5)
-  if (isM1Plus && medioFirmaPairs.length > 0) {
-    const totalWeight = medioFirmaPairs.reduce(
-      (s, { m }) => s + Math.max(1, m.alcancePct * m.credibilidad),
-      0
-    );
-    for (const f of state.firmas) {
-      if (!f.activa || f.rubro === 'medio' || f.ventas <= 0) continue;
-      const adBudget = f.ventas * FIRM_CONSTANTS.pctPublicidad;
-      f.ventas -= adBudget;
-      let distributed = 0;
-      for (let i = 0; i < medioFirmaPairs.length; i++) {
-        const { m, f: mf } = medioFirmaPairs[i];
-        const w = Math.max(1, m.alcancePct * m.credibilidad) / totalWeight;
-        const share = i === medioFirmaPairs.length - 1 ? adBudget - distributed : adBudget * w;
-        distributed += share;
-        mf.ventas += share;
-        m.ingresos.publicidad += share;
-      }
-    }
-  }
-
   // Pre-bucket unemployed adults once (O(N) instead of O(F*N) for 5.000 pop)
   const unempPool = state.npcs.filter(
     (n) => n.vivo && n.rol === 'desempleado' && n.edad >= 18 && n.edad < 65
   );
 
-  // Settlement for all active firms
-  for (const f of state.firmas) {
-    if (!f.activa) continue;
-    const grossRevenue = f.ventas;
-    f.ventas = 0;
-    f.ultimoIngresoPeriodo = Number(grossRevenue.toFixed(2));
-
-    // Prune dead/invalid employees
-    f.empleados = f.empleados.filter((id) => {
-      const emp = npcById.get(id);
-      return Boolean(emp && emp.vivo && emp.empleadorId === f.id);
-    });
-
-    const activeWorkers = f.empleados
-      .map((id) => npcById.get(id)!)
-      .filter((emp) => !emp.accionIa?.fueraDePuesto);
-
-    // Reference payroll for period
-    const refs = new Map<string, number>();
-    let totalRef = 0;
-    for (const emp of activeWorkers) {
-      const def = ROLE_CATALOG[emp.rol];
-      const range = def.ingreso ?? [7.5, 9.5];
-      const baseDaily = range[0] + (emp.economia.ingresoPos / 100) * (range[1] - range[0]);
-      const dailyRef = baseDaily * (getNpcProductivity(emp, state) / 100);
-      const periodRef = dailyRef * PERIOD_DAYS * 0.65;
-      refs.set(emp.id, periodRef);
-      f.refPorEmpleado[emp.id] = Number(periodRef.toFixed(2));
-      totalRef += periodRef;
+  const applyAdOutflowForFirm = (f: Firma) => {
+    if (!isM1Plus || medioFirmaPairs.length === 0) return;
+    if (!f.activa || f.rubro === 'medio' || f.ventas <= 0) return;
+    const totalWeight = medioFirmaPairs.reduce(
+      (s, { m }) => s + Math.max(1, m.alcancePct * m.credibilidad),
+      0
+    );
+    const adBudget = f.ventas * FIRM_CONSTANTS.pctPublicidad;
+    f.ventas -= adBudget;
+    let distributed = 0;
+    for (let i = 0; i < medioFirmaPairs.length; i++) {
+      const { m, f: mf } = medioFirmaPairs[i];
+      const w = Math.max(1, m.alcancePct * m.credibilidad) / totalWeight;
+      const share = i === medioFirmaPairs.length - 1 ? adBudget - distributed : adBudget * w;
+      distributed += share;
+      mf.ventas += share;
+      m.ingresos.publicidad += share;
     }
+  };
 
-    // Manager salary if gerente has 0 shares
-    const gerente = f.gerenteId ? npcById.get(f.gerenteId) : undefined;
-    const gerenteNeedsSalary =
-      Boolean(gerente && gerente.vivo) &&
-      !f.partes.some((p) => p.tipo === 'npc' && p.id === f.gerenteId) &&
-      !activeWorkers.some((w) => w.id === f.gerenteId);
-    const gerenteRef = gerenteNeedsSalary ? 8.5 * PERIOD_DAYS * 0.65 * FIRM_CONSTANTS.sueldoGerenteFactor : 0;
-    totalRef += gerenteRef;
+  const settleFirmList = (firmList: Firma[]) => {
+    for (const f of firmList) {
+      if (!f.activa) continue;
+      applyAdOutflowForFirm(f);
+      const grossRevenue = f.ventas;
+      f.ventas = 0;
+      f.ultimoIngresoPeriodo = Number(grossRevenue.toFixed(2));
 
-    let wageFund = grossRevenue * f.parteSueldos;
-    const minWageFund = totalRef * (ECON_CONSTANTS.pisoSueldoPct / 100);
-    if (wageFund < minWageFund && f.caja > 0) {
-      wageFund += Math.min(f.caja, minWageFund - wageFund);
-    }
+      // Prune dead/invalid employees
+      f.empleados = f.empleados.filter((id) => {
+        const emp = npcById.get(id);
+        return Boolean(emp && emp.vivo && emp.empleadorId === f.id);
+      });
 
-    // Hiring if wageFund > totalRef and firm has vacancies
-    const roleCaps = getFirmaRoleCaps(state, f);
-    if (totalRef > 0 && wageFund > totalRef && f.locales.length > 0 && unempPool.length > 0) {
-      let hired = 0;
-      for (const [rStr, cap] of Object.entries(roleCaps)) {
-        if (hired >= ECON_CONSTANTS.maxContratacionesPorPeriodo) break;
-        const role = rStr as RoleId;
-        if (typeof cap !== 'number') continue;
-        const curCount = f.empleados.filter((id) => npcById.get(id)?.rol === role).length;
-        let vac = cap - curCount;
-        const def = ROLE_CATALOG[role];
-        const estCost = ((def.ingreso?.[0] ?? 8) + (def.ingreso?.[1] ?? 10)) * 0.5 * PERIOD_DAYS * 0.65;
-        while (vac > 0 && hired < ECON_CONSTANTS.maxContratacionesPorPeriodo && wageFund >= totalRef + estCost) {
-          let cand: Npc | undefined;
-          let bestTravel = Infinity;
-          for (const u of unempPool) {
-            if (u.rol !== 'desempleado' || u.educacion.nivel < def.educMin) continue;
-            const d = getZoneTravelCost(state, u.zona, f.zona);
-            if (Number.isFinite(d) && d <= VIAL_CONSTANTS.rutaMaxTrabajo && d < bestTravel) {
-              bestTravel = d;
-              cand = u;
-              if (d <= VIAL_CONSTANTS.costoInternoZona) break;
+      const activeWorkers = f.empleados
+        .map((id) => npcById.get(id)!)
+        .filter((emp) => !emp.accionIa?.fueraDePuesto);
+
+      // Reference payroll for period
+      const refs = new Map<string, number>();
+      let totalRef = 0;
+      for (const emp of activeWorkers) {
+        const def = ROLE_CATALOG[emp.rol];
+        const range = def.ingreso ?? [7.5, 9.5];
+        const baseDaily = range[0] + (emp.economia.ingresoPos / 100) * (range[1] - range[0]);
+        const dailyRef = baseDaily * (getNpcProductivity(emp, state) / 100);
+        const periodRef = dailyRef * PERIOD_DAYS * 0.65;
+        refs.set(emp.id, periodRef);
+        f.refPorEmpleado[emp.id] = Number(periodRef.toFixed(2));
+        totalRef += periodRef;
+      }
+
+      // Manager salary if gerente has 0 shares
+      const gerente = f.gerenteId ? npcById.get(f.gerenteId) : undefined;
+      const gerenteNeedsSalary =
+        Boolean(gerente && gerente.vivo) &&
+        !f.partes.some((p) => p.tipo === 'npc' && p.id === f.gerenteId) &&
+        !activeWorkers.some((w) => w.id === f.gerenteId);
+      const gerenteRef = gerenteNeedsSalary ? 8.5 * PERIOD_DAYS * 0.65 * FIRM_CONSTANTS.sueldoGerenteFactor : 0;
+      totalRef += gerenteRef;
+
+      let wageFund = grossRevenue * f.parteSueldos;
+      const minWageFund = totalRef * (ECON_CONSTANTS.pisoSueldoPct / 100);
+      if (wageFund < minWageFund && f.caja > 0) {
+        wageFund += Math.min(f.caja, minWageFund - wageFund);
+      }
+
+      // Hiring if wageFund > totalRef and firm has vacancies
+      const roleCaps = getFirmaRoleCaps(state, f);
+      if (totalRef > 0 && wageFund > totalRef && f.locales.length > 0 && unempPool.length > 0) {
+        let hired = 0;
+        for (const [rStr, cap] of Object.entries(roleCaps)) {
+          if (hired >= ECON_CONSTANTS.maxContratacionesPorPeriodo) break;
+          const role = rStr as RoleId;
+          if (typeof cap !== 'number') continue;
+          const curCount = f.empleados.filter((id) => npcById.get(id)?.rol === role).length;
+          let vac = cap - curCount;
+          const def = ROLE_CATALOG[role];
+          const estCost = ((def.ingreso?.[0] ?? 8) + (def.ingreso?.[1] ?? 10)) * 0.5 * PERIOD_DAYS * 0.65;
+          while (vac > 0 && hired < ECON_CONSTANTS.maxContratacionesPorPeriodo && wageFund >= totalRef + estCost) {
+            let cand: Npc | undefined;
+            let bestTravel = Infinity;
+            for (const u of unempPool) {
+              if (u.rol !== 'desempleado' || u.educacion.nivel < def.educMin) continue;
+              const d = getZoneTravelCost(state, u.zona, f.zona);
+              if (Number.isFinite(d) && d <= VIAL_CONSTANTS.rutaMaxTrabajo && d < bestTravel) {
+                bestTravel = d;
+                cand = u;
+                if (d <= VIAL_CONSTANTS.costoInternoZona) break;
+              }
             }
+            if (!cand) break;
+            cand.rol = role;
+            cand.empleadorId = f.id;
+            f.empleados.push(cand.id);
+            activeWorkers.push(cand);
+            refs.set(cand.id, estCost);
+            f.refPorEmpleado[cand.id] = Number(estCost.toFixed(2));
+            totalRef += estCost;
+            vac--;
+            hired++;
           }
-          if (!cand) break;
-          cand.rol = role;
-          cand.empleadorId = f.id;
-          f.empleados.push(cand.id);
-          activeWorkers.push(cand);
-          refs.set(cand.id, estCost);
-          f.refPorEmpleado[cand.id] = Number(estCost.toFixed(2));
-          totalRef += estCost;
-          vac--;
-          hired++;
         }
       }
-    }
 
-    const factor =
-      totalRef > 0
-        ? clamp(wageFund / totalRef, 0, ECON_CONSTANTS.factorMax)
-        : grossRevenue > 0
-        ? 1.05
-        : 1.0;
-    f.factor = Number(factor.toFixed(3));
+      const factor =
+        totalRef > 0
+          ? clamp(wageFund / totalRef, 0, ECON_CONSTANTS.factorMax)
+          : grossRevenue > 0
+          ? 1.05
+          : 1.0;
+      f.factor = Number(factor.toFixed(3));
 
-    let paidWages = 0;
-    const maxPayablePool = grossRevenue + Math.max(0, f.caja);
-    for (const emp of activeWorkers) {
-      const pay = (refs.get(emp.id) ?? 0) * factor;
-      const remainingPool = Math.max(0, maxPayablePool - paidWages);
-      const actualPay = Math.min(remainingPool, pay);
-      creditNetToNpc(emp, actualPay, true);
-      paidWages += actualPay;
-    }
-    if (gerenteNeedsSalary && gerente) {
-      const gPay = gerenteRef * factor;
-      const remainingPool = Math.max(0, maxPayablePool - paidWages);
-      const actualGPay = Math.min(remainingPool, gPay);
-      creditNetToNpc(gerente, actualGPay, true);
-      paidWages += actualGPay;
-    }
-    f.ultimoSueldosPeriodo = Number(paidWages.toFixed(2));
+      let paidWages = 0;
+      const maxPayablePool = grossRevenue + Math.max(0, f.caja);
+      for (const emp of activeWorkers) {
+        const pay = (refs.get(emp.id) ?? 0) * factor;
+        const remainingPool = Math.max(0, maxPayablePool - paidWages);
+        const actualPay = Math.min(remainingPool, pay);
+        creditNetToNpc(emp, actualPay, true);
+        paidWages += actualPay;
+      }
+      if (gerenteNeedsSalary && gerente) {
+        const gPay = gerenteRef * factor;
+        const remainingPool = Math.max(0, maxPayablePool - paidWages);
+        const actualGPay = Math.min(remainingPool, gPay);
+        creditNetToNpc(gerente, actualGPay, true);
+        paidWages += actualGPay;
+      }
+      f.ultimoSueldosPeriodo = Number(paidWages.toFixed(2));
 
-    // Remaining money after wages: grossRevenue - paidWages goes to profit or deficit in caja
-    const netSurplus = grossRevenue - paidWages;
-    f.ultimaGanancia = Number(netSurplus.toFixed(2));
-    f.historialGanancias = [...f.historialGanancias.slice(-7), f.ultimaGanancia];
+      // Remaining money after wages: grossRevenue - paidWages goes to profit or deficit in caja
+      const netSurplus = grossRevenue - paidWages;
+      f.ultimaGanancia = Number(netSurplus.toFixed(2));
+      f.historialGanancias = [...f.historialGanancias.slice(-7), f.ultimaGanancia];
 
-    if (netSurplus >= 0) {
-      const reinv = f.partes.length > 0 ? netSurplus * FIRM_CONSTANTS.pctReinversion : netSurplus;
-      f.caja += reinv;
-      const distPool = netSurplus - reinv;
+      if (netSurplus >= 0) {
+        const reinv = f.partes.length > 0 ? netSurplus * FIRM_CONSTANTS.pctReinversion : netSurplus;
+        f.caja += reinv;
+        const distPool = netSurplus - reinv;
 
-      if (distPool > 0 && f.partes.length > 0) {
-        let distUsed = 0;
-        for (let i = 0; i < f.partes.length; i++) {
-          const part = f.partes[i];
-          const cut =
-            i === f.partes.length - 1
-              ? distPool - distUsed
-              : distPool * (part.pct / 100);
-          distUsed += cut;
-          if (part.tipo === 'npc') {
-            const owner = npcById.get(part.id);
-            if (owner && owner.vivo) creditNetToNpc(owner, cut, true);
-            else state.gobierno.reserva += cut;
-          } else if (part.tipo === 'hogar') {
-            const oh = hogarById.get(part.id);
-            if (oh) {
-              const tax = cut * taxRate;
-              state.gobierno.reserva += tax;
-              taxCollectedTotal += tax;
-              oh.dinero += cut - tax;
+        if (distPool > 0 && f.partes.length > 0) {
+          let distUsed = 0;
+          for (let i = 0; i < f.partes.length; i++) {
+            const part = f.partes[i];
+            const cut =
+              i === f.partes.length - 1
+                ? distPool - distUsed
+                : distPool * (part.pct / 100);
+            distUsed += cut;
+            if (part.tipo === 'npc') {
+              const owner = npcById.get(part.id);
+              if (owner && owner.vivo) creditNetToNpc(owner, cut, true);
+              else state.gobierno.reserva += cut;
+            } else if (part.tipo === 'hogar') {
+              const oh = hogarById.get(part.id);
+              if (oh) {
+                const tax = cut * taxRate;
+                state.gobierno.reserva += tax;
+                taxCollectedTotal += tax;
+                oh.dinero += cut - tax;
+              } else {
+                state.gobierno.reserva += cut;
+              }
+            } else if (part.tipo === 'firma') {
+              const parent = firmaById.get(part.id);
+              if (parent && parent.activa) parent.caja += cut;
+              else state.gobierno.reserva += cut;
             } else {
               state.gobierno.reserva += cut;
             }
-          } else if (part.tipo === 'firma') {
-            const parent = firmaById.get(part.id);
-            if (parent && parent.activa) parent.caja += cut;
-            else state.gobierno.reserva += cut;
-          } else {
-            state.gobierno.reserva += cut;
           }
         }
+
+        if (f.partes.length === 0 && f.caja > FIRM_CONSTANTS.cajaMaxSinDueno) {
+          const excess = f.caja - FIRM_CONSTANTS.cajaMaxSinDueno;
+          f.caja -= excess;
+          state.gobierno.reserva += excess;
+        }
+        f.periodosEnPerdida = f.caja <= 2 && netSurplus <= 0.1 ? f.periodosEnPerdida + 1 : 0;
+      } else {
+        f.caja += netSurplus; // subtracts deficit cleanly from caja (total money conserved!)
+        f.periodosEnPerdida += 1;
       }
 
-      if (f.partes.length === 0 && f.caja > FIRM_CONSTANTS.cajaMaxSinDueno) {
-        const excess = f.caja - FIRM_CONSTANTS.cajaMaxSinDueno;
-        f.caja -= excess;
-        state.gobierno.reserva += excess;
-      }
-      f.periodosEnPerdida = f.caja <= 2 && netSurplus <= 0.1 ? f.periodosEnPerdida + 1 : 0;
-    } else {
-      f.caja += netSurplus; // subtracts deficit cleanly from caja (total money conserved!)
-      f.periodosEnPerdida += 1;
-    }
-
-    // Track factor tramos and layoffs
-    if (factor > 1.01) {
-      f.ultimoTramo = 'aumento';
-      f.periodosFactorAlto += 1;
-      f.periodosFactorBajo = 0;
-    } else if (factor < ECON_CONSTANTS.pisoSueldoPct / 100) {
-      f.ultimoTramo = 'despido';
-      f.periodosFactorAlto = 0;
-      f.periodosFactorBajo += 1;
-      if (isM1Plus && f.empleados.length > 1) {
-        const layoffs = Math.min(ECON_CONSTANTS.maxPaseDesempleoPorDia, f.empleados.length - 1);
-        for (let i = 0; i < layoffs; i++) {
-          const firedId = f.empleados.pop();
-          if (firedId) {
-            const fired = npcById.get(firedId);
-            if (fired) {
-              fired.rol = 'desempleado';
-              fired.empleadorId = null;
+      // Track factor tramos and layoffs
+      if (factor > 1.01) {
+        f.ultimoTramo = 'aumento';
+        f.periodosFactorAlto += 1;
+        f.periodosFactorBajo = 0;
+      } else if (factor < ECON_CONSTANTS.pisoSueldoPct / 100) {
+        f.ultimoTramo = 'despido';
+        f.periodosFactorAlto = 0;
+        f.periodosFactorBajo += 1;
+        if (isM1Plus && f.empleados.length > 1) {
+          const layoffs = Math.min(ECON_CONSTANTS.maxPaseDesempleoPorDia, f.empleados.length - 1);
+          for (let i = 0; i < layoffs; i++) {
+            const firedId = f.empleados.pop();
+            if (firedId) {
+              const fired = npcById.get(firedId);
+              if (fired) {
+                fired.rol = 'desempleado';
+                fired.empleadorId = null;
+              }
             }
           }
+          emitSimEvent(state, {
+            id: nextSeqId(state, 'ev_emp_desp'),
+            dia: state.reloj.dia,
+            tipo: 'empresa_despido',
+            zona: f.zona,
+            empresaId: f.id,
+            cantidad: layoffs,
+            factor: f.factor,
+            origen: `firma:${f.id}/respuesta`,
+            causa: f.ultimaCausa,
+          });
         }
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_emp_desp'),
-          dia: state.reloj.dia,
-          tipo: 'empresa_despido',
-          zona: f.zona,
-          empresaId: f.id,
-          cantidad: layoffs,
-          factor: f.factor,
-          origen: `firma:${f.id}/respuesta`,
-          causa: f.ultimaCausa,
-        });
+      } else if (factor < 0.99) {
+        f.ultimoTramo = 'recorte';
+        f.periodosFactorAlto = 0;
+        f.periodosFactorBajo += 1;
+      } else {
+        f.ultimoTramo = 'normal';
+        f.periodosFactorAlto = 0;
+        f.periodosFactorBajo = 0;
       }
-    } else if (factor < 0.99) {
-      f.ultimoTramo = 'recorte';
-      f.periodosFactorAlto = 0;
-      f.periodosFactorBajo += 1;
-    } else {
-      f.ultimoTramo = 'normal';
-      f.periodosFactorAlto = 0;
-      f.periodosFactorBajo = 0;
     }
-  }
+  };
 
-  // Update market share cuotaZona & monopoly pricing power (all 10 rubros)
-  const rubros: FirmRubro[] = [
-    'agro',
-    'industria',
-    'comercio',
-    'gastronomia',
-    'servicios',
-    'entretenimiento',
-    'construccion',
-    'inmobiliaria',
-    'medio',
-    'banco',
-  ];
-  const cuotaMercadoSalida: EconomyOutput['cuotaMercado'] = {};
-  const activeFirmByRubroZone = new Map<string, Firma[]>();
-  for (const f of state.firmas) {
-    if (!f.activa) continue;
-    const key = `${f.rubro}:${f.zona}`;
-    const list = activeFirmByRubroZone.get(key);
-    if (list) list.push(f);
-    else activeFirmByRubroZone.set(key, [f]);
-  }
-  for (const rubro of rubros) {
-    for (const z of zones) {
-      const fZone = activeFirmByRubroZone.get(`${rubro}:${z}`) ?? [];
-      if (fZone.length === 0) continue;
-      const sumRev = fZone.reduce((s, f) => s + Math.max(0.01, f.ultimoIngresoPeriodo), 0);
-      let leader: { firma: string; cuota: number } = { firma: '-', cuota: 0 };
-      for (const f of fZone) {
-        const share = fZone.length === 1 ? 1 : Math.max(0.01, f.ultimoIngresoPeriodo) / Math.max(0.01, sumRev);
-        const prevShare = f.cuotaZona[z] ?? 0;
-        f.cuotaZona[z] = Number(share.toFixed(3));
-        if (share > leader.cuota) {
-          leader = { firma: f.id, cuota: Number((share * 100).toFixed(1)) };
-        }
-        if (isM1Plus && share >= FIRM_CONSTANTS.umbralPoderPrecio) {
-          const excess = (share - FIRM_CONSTANTS.umbralPoderPrecio) / (1 - FIRM_CONSTANTS.umbralPoderPrecio);
-          f.margenPoder = Number(clamp(excess * FIRM_CONSTANTS.margenPoderMax, 0, FIRM_CONSTANTS.margenPoderMax).toFixed(3));
-          if (prevShare < FIRM_CONSTANTS.umbralPoderPrecio && fZone.length > 1) {
-            emitSimEvent(state, {
-              id: nextSeqId(state, 'ev_mono'),
-              dia: state.reloj.dia,
-              tipo: 'monopolio',
-              zona: z,
-              rubro,
-              firmaId: f.id,
-              cuota: Number((share * 100).toFixed(1)),
-              causa: `firma:${f.id}/mercado`,
-            });
-          }
-        } else {
-          f.margenPoder = 0;
-        }
-      }
-      if (leader.firma !== '-') {
-        cuotaMercadoSalida[`${rubro}:${z}`] = leader;
-      }
-    }
-  }
+  // Phase 1A: Settle operating consumer/producer firms (excluding construccion & medio)
+  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro !== 'construccion' && f.rubro !== 'medio'));
 
   // ====================================================================
   // 2. RENT & MAINTENANCE (casas y locales -> firmas de construcción)
@@ -1590,6 +1528,74 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   }
 
+  // Phase 1B: Settle constructora & medio firms AFTER maintenance, public works & press budgets were credited!
+  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro === 'construccion'));
+  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro === 'medio'));
+
+  // Refresh fiscal tax receipts ledger including Phase 1B constructora & medio taxes
+  fin.ingresos = Number(taxCollectedTotal.toFixed(2));
+  fin.saldo = Number((fin.ingresos - totalOut).toFixed(2));
+  state.ultimoSaldoCierre = fin.saldo;
+
+  // Update market share cuotaZona & monopoly pricing power across all active rubros
+  const rubros: FirmRubro[] = [
+    'agro',
+    'industria',
+    'comercio',
+    'gastronomia',
+    'servicios',
+    'entretenimiento',
+    'construccion',
+    'inmobiliaria',
+    'medio',
+  ];
+  const cuotaMercadoSalida: EconomyOutput['cuotaMercado'] = {};
+  const activeFirmByRubroZone = new Map<string, Firma[]>();
+  for (const f of state.firmas) {
+    if (!f.activa) continue;
+    const key = `${f.rubro}:${f.zona}`;
+    const list = activeFirmByRubroZone.get(key);
+    if (list) list.push(f);
+    else activeFirmByRubroZone.set(key, [f]);
+  }
+  for (const rubro of rubros) {
+    for (const z of zones) {
+      const fZone = activeFirmByRubroZone.get(`${rubro}:${z}`) ?? [];
+      if (fZone.length === 0) continue;
+      const sumRev = fZone.reduce((s, f) => s + Math.max(0.01, f.ultimoIngresoPeriodo), 0);
+      let leader: { firma: string; cuota: number } = { firma: '-', cuota: 0 };
+      for (const f of fZone) {
+        const share = fZone.length === 1 ? 1 : Math.max(0.01, f.ultimoIngresoPeriodo) / Math.max(0.01, sumRev);
+        const prevShare = f.cuotaZona[z] ?? 0;
+        f.cuotaZona[z] = Number(share.toFixed(3));
+        if (share > leader.cuota) {
+          leader = { firma: f.id, cuota: Number((share * 100).toFixed(1)) };
+        }
+        if (isM1Plus && share >= FIRM_CONSTANTS.umbralPoderPrecio) {
+          const excess = (share - FIRM_CONSTANTS.umbralPoderPrecio) / (1 - FIRM_CONSTANTS.umbralPoderPrecio);
+          f.margenPoder = Number(clamp(excess * FIRM_CONSTANTS.margenPoderMax, 0, FIRM_CONSTANTS.margenPoderMax).toFixed(3));
+          if (prevShare < FIRM_CONSTANTS.umbralPoderPrecio && fZone.length > 1) {
+            emitSimEvent(state, {
+              id: nextSeqId(state, 'ev_mono'),
+              dia: state.reloj.dia,
+              tipo: 'monopolio',
+              zona: z,
+              rubro,
+              firmaId: f.id,
+              cuota: Number((share * 100).toFixed(1)),
+              causa: `firma:${f.id}/mercado`,
+            });
+          }
+        } else {
+          f.margenPoder = 0;
+        }
+      }
+      if (leader.firma !== '-') {
+        cuotaMercadoSalida[`${rubro}:${z}`] = leader;
+      }
+    }
+  }
+
   // ====================================================================
   // 4. HOUSING MARKET (evictions, applications, price drops, home purchase)
   // ====================================================================
@@ -2097,16 +2103,79 @@ export function runPaydayEconomyV2(state: GameState): void {
       break;
     }
 
-    // 7b. Demand-driven entrepreneurship (ECONOMIA_V2 §6b & §8)
-    const activeCatFirmsCount: Record<SpendCategory, number> = {
-      bienes: state.firmas.filter((f) => f.activa && f.rubro === 'comercio').length,
-      gastronomia: state.firmas.filter((f) => f.activa && f.rubro === 'gastronomia').length,
-      servicios: state.firmas.filter((f) => f.activa && f.rubro === 'servicios').length,
-      entretenimiento: state.firmas.filter((f) => f.activa && f.rubro === 'entretenimiento').length,
+    // 7b. Demand-driven entrepreneurship across all rubros & building types (ECONOMIA_V2 §6b & §8)
+    const popNow = Math.max(1, state.npcs.filter((n) => n.vivo).length);
+    const activeByRubro: Record<FirmRubro, number> = {
+      agro: 0,
+      industria: 0,
+      comercio: 0,
+      gastronomia: 0,
+      servicios: 0,
+      entretenimiento: 0,
+      construccion: 0,
+      inmobiliaria: 0,
+      medio: 0,
     };
-    const neediestCategory = (Object.entries(activeCatFirmsCount) as Array<[SpendCategory, number]>).sort(
-      (a, b) => a[1] - b[1]
-    )[0][0];
+    for (const f of state.firmas) {
+      if (f.activa) activeByRubro[f.rubro] = (activeByRubro[f.rubro] ?? 0) + 1;
+    }
+
+    const totalCalleHog = state.hogares.filter((h) => h.estado === 'calle').length;
+    const calleRatioNow = totalCalleHog / Math.max(1, state.hogares.length);
+    const foodDeficitScore =
+      activeByRubro.agro === 0
+        ? 100
+        : state.alimento.diasStock < 6 || state.alimento.produccionDiaria < state.alimento.consumoDiario * 1.05
+        ? 60 / Math.max(1, activeByRubro.agro)
+        : 2 / Math.max(1, activeByRubro.agro);
+    const indImportScore =
+      activeByRubro.industria === 0
+        ? 85
+        : (state.ultimaSalidaEconomica.bienesImportadosDia ?? 0) > 4
+        ? 45 / Math.max(1, activeByRubro.industria)
+        : 6 / Math.max(1, activeByRubro.industria);
+
+    const demandRanking: Array<{ rubro: FirmRubro; score: number; buildings: BuildingType[]; cause: string }> = [
+      { rubro: 'agro', score: foodDeficitScore, buildings: ['campo'], cause: 'mercado:demanda_alimento' },
+      { rubro: 'industria', score: indImportScore, buildings: ['fabrica'], cause: 'mercado:demanda_industria' },
+      {
+        rubro: 'comercio',
+        score: (SPEND_CATEGORY_WEIGHTS.bienes * popNow) / Math.max(0.3, activeByRubro.comercio),
+        buildings: ['supermercado', 'almacen', 'tienda', 'kiosco'],
+        cause: 'mercado:demanda_comercio',
+      },
+      {
+        rubro: 'gastronomia',
+        score: (SPEND_CATEGORY_WEIGHTS.gastronomia * popNow) / Math.max(0.3, activeByRubro.gastronomia),
+        buildings: ['restoran', 'bar_cafe'],
+        cause: 'mercado:demanda_gastronomia',
+      },
+      {
+        rubro: 'servicios',
+        score: (SPEND_CATEGORY_WEIGHTS.servicios * popNow) / Math.max(0.3, activeByRubro.servicios),
+        buildings: ['taller', 'peluqueria'],
+        cause: 'mercado:demanda_servicios',
+      },
+      {
+        rubro: 'entretenimiento',
+        score: (SPEND_CATEGORY_WEIGHTS.entretenimiento * popNow) / Math.max(0.3, activeByRubro.entretenimiento),
+        buildings: ['cine_teatro', 'gimnasio', 'club'],
+        cause: 'mercado:demanda_entretenimiento',
+      },
+      {
+        rubro: 'construccion',
+        score: (activeByRubro.construccion === 0 ? 70 : 12 + state.mercadoStats.construccionesPeriodo * 6) / Math.max(0.4, activeByRubro.construccion),
+        buildings: ['oficina_constructora'],
+        cause: 'mercado:demanda_construccion',
+      },
+      {
+        rubro: 'inmobiliaria',
+        score: (activeByRubro.inmobiliaria === 0 ? 60 : 8 + calleRatioNow * 50) / Math.max(0.4, activeByRubro.inmobiliaria),
+        buildings: ['oficina_inmobiliaria'],
+        cause: 'mercado:demanda_inmobiliaria',
+      },
+    ];
+    demandRanking.sort((a, b) => b.score - a.score);
 
     let founded = 0;
     const candidates = state.npcs.filter(
@@ -2122,48 +2191,50 @@ export function runPaydayEconomyV2(state: GameState): void {
       if (!h || h.dinero < FIRM_CONSTANTS.ahorroMinEmprender) continue;
       if (nextSubRand(state, 'mercado') >= DEMOG_CONSTANTS.probEmprenderBase) continue;
 
-      let buildingType: BuildingType;
-      let founderCause = 'mercado:emprendimiento';
-      if (cand.rol === 'periodista') {
-        buildingType = 'oficina_medio';
-      } else if (
-        !state.firmas.some((f) => f.activa && f.rubro === 'industria') &&
-        state.parcelas.some(
-          (p) =>
-            p.tipoParcela === 'industrial' &&
-            p.estado === 'libre' &&
-            !isLotIsolated(state, p) &&
-            canBuildTypeInParcela(p, 'fabrica')
-        )
-      ) {
-        buildingType = 'fabrica';
-        founderCause = 'mercado:demanda_industria';
-      } else if (neediestCategory === 'gastronomia') {
-        buildingType = 'bar_cafe';
-        founderCause = 'mercado:demanda_gastronomia';
-      } else if (neediestCategory === 'servicios') {
-        buildingType = 'peluqueria';
-        founderCause = 'mercado:demanda_servicios';
-      } else if (neediestCategory === 'entretenimiento') {
-        buildingType = 'club';
-        founderCause = 'mercado:demanda_entretenimiento';
-      } else {
-        buildingType = 'kiosco';
+      let chosenPlan: { buildingType: BuildingType; rubro: FirmRubro; freeP: Parcela; cause: string } | null = null;
+
+      if (cand.rol === 'periodista' && state.config.cantidadMedios > 0) {
+        const mDef = BUILDING_CATALOG.oficina_medio;
+        if (h.dinero >= mDef.costoObra + 40) {
+          const freeP = state.parcelas.find(
+            (p) =>
+              p.tipoParcela === mDef.parcelTipo &&
+              p.estado === 'libre' &&
+              !isLotIsolated(state, p) &&
+              canBuildTypeInParcela(p, 'oficina_medio') &&
+              Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
+          );
+          if (freeP) {
+            chosenPlan = { buildingType: 'oficina_medio', rubro: 'medio', freeP, cause: 'mercado:emprendimiento_medio' };
+          }
+        }
       }
 
-      const def = BUILDING_CATALOG[buildingType];
-      const rubro = def.rubro ?? 'comercio';
-      if (h.dinero < def.costoObra + 40) continue;
+      if (!chosenPlan) {
+        for (const item of demandRanking) {
+          for (const bType of item.buildings) {
+            const bDef = BUILDING_CATALOG[bType];
+            if (h.dinero < bDef.costoObra + 40) continue;
+            const freeP = state.parcelas.find(
+              (p) =>
+                p.tipoParcela === bDef.parcelTipo &&
+                p.estado === 'libre' &&
+                !isLotIsolated(state, p) &&
+                canBuildTypeInParcela(p, bType) &&
+                Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
+            );
+            if (freeP) {
+              chosenPlan = { buildingType: bType, rubro: item.rubro, freeP, cause: item.cause };
+              break;
+            }
+          }
+          if (chosenPlan) break;
+        }
+      }
 
-      const freeP = state.parcelas.find(
-        (p) =>
-          p.tipoParcela === def.parcelTipo &&
-          p.estado === 'libre' &&
-          !isLotIsolated(state, p) &&
-          canBuildTypeInParcela(p, buildingType) &&
-          Number.isFinite(getZoneTravelCost(state, cand.zona, p.zona))
-      );
-      if (!freeP) continue;
+      if (!chosenPlan) continue;
+      const { buildingType, rubro, freeP, cause: founderCause } = chosenPlan;
+      const def = BUILDING_CATALOG[buildingType];
 
       h.dinero -= def.costoObra + 35;
       if (constr) constr.ventas += def.costoObra;
@@ -2200,13 +2271,20 @@ export function runPaydayEconomyV2(state: GameState): void {
         ultimaCausa: founderCause,
       };
       state.firmas.push(newFirm);
+      activeByRubro[rubro] = (activeByRubro[rubro] ?? 0) + 1;
       cand.partes.push({ firmaId: newFirmId, pct: 100 });
       if (cand.rol === 'desempleado') {
         cand.rol =
           rubro === 'medio'
             ? 'periodista'
+            : rubro === 'agro'
+            ? 'agricultor'
             : rubro === 'industria'
             ? 'obrero'
+            : rubro === 'construccion'
+            ? 'constructor'
+            : rubro === 'inmobiliaria'
+            ? 'inmobiliario'
             : 'comerciante';
         cand.empleadorId = newFirmId;
         newFirm.empleados.push(cand.id);
@@ -2490,8 +2568,6 @@ export function runPaydayEconomyV2(state: GameState): void {
   state.ultimaSalidaEconomica.cuotaMercado = cuotaMercadoSalida;
   state.ultimaSalidaEconomica.saldoDiarioEstimado = Number((fin.saldo / PERIOD_DAYS).toFixed(2));
   state.ultimaSalidaEconomica.inflacion = state.gobierno.inflacion;
-
-  syncLegacyEnterprisesView(state);
 }
 
 export function pickRandomZoneSub(

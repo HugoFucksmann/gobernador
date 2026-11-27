@@ -208,8 +208,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
     isG3 &&
     (Math.abs(extrasObj.subsidioAlimento - extrasVig.subsidioAlimento) >= 0.01 ||
       Math.abs(extrasObj.presion - extrasVig.presion) >= 0.01 ||
-      Math.abs(extrasObj.acceso - extrasVig.acceso) >= 0.01 ||
-      Math.abs(extrasObj.nivelEducacion - extrasVig.nivelEducacion) >= 0.01);
+      Math.abs(extrasObj.acceso - extrasVig.acceso) >= 0.01);
 
   const hasPendingChanges = !isG0 && (hasPendingCore || hasPendingExtras);
 
@@ -220,7 +219,6 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
       onSetExtraLever('subsidioAlimento', extrasVig.subsidioAlimento);
       onSetExtraLever('presion', extrasVig.presion);
       onSetExtraLever('acceso', extrasVig.acceso);
-      onSetExtraLever('nivelEducacion', extrasVig.nivelEducacion);
     }
   };
 
@@ -655,23 +653,6 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                 disabled={isG0}
                 onChange={(val) => {
                   onSetExtraLever('subsidioAlimento', val);
-                }}
-              />
-
-              <NumericSlider
-                label="Nivel de educación"
-                tooltip={`Acelera progreso escolar (N0–N5). Costo est.: $${(extrasObj.nivelEducacion * derived.poblacion * LEVEL11_CONSTANTS.educCostoPorNpcPeriodo).toFixed(0)}/per.`}
-                vigente={extrasVig.nivelEducacion}
-                objetivo={extrasObj.nivelEducacion}
-                min={0}
-                max={5}
-                step={1}
-                unit=""
-                valueLabel={`N${extrasObj.nivelEducacion}`}
-                vigenteLabel={`N${extrasVig.nivelEducacion}`}
-                disabled={isG0}
-                onChange={(val) => {
-                  onSetExtraLever('nivelEducacion', val);
                 }}
               />
 

@@ -485,50 +485,118 @@ export function isLotIsolated(state: Pick<GameState, 'zonas' | 'tramos' | 'dista
   return false;
 }
 
+function getRoadNodeCoordsMap(state: Pick<GameState, 'zonas' | 'tramos'>): Map<string, { wx: number; wy: number }> {
+  const coords = new Map<string, { wx: number; wy: number }>();
+  for (const [zId, z] of Object.entries(state.zonas || {})) {
+    const nId = z.nodoPrincipal ?? `n_${zId}`;
+    if (z.rect) {
+      coords.set(nId, { wx: z.rect.wx + z.rect.ww / 2, wy: z.rect.wy + z.rect.wh / 2 });
+    }
+  }
+  for (const t of state.tramos || []) {
+    if (t.puntos && t.puntos.length >= 2) {
+      if (!coords.has(t.nodoA)) coords.set(t.nodoA, { wx: t.puntos[0].wx, wy: t.puntos[0].wy });
+      const last = t.puntos[t.puntos.length - 1];
+      if (!coords.has(t.nodoB)) coords.set(t.nodoB, { wx: last.wx, wy: last.wy });
+    }
+  }
+  return coords;
+}
+
+function getParcelRoadNode(state: Pick<GameState, 'zonas' | 'tramos'>, parcel: Parcela): string {
+  if (parcel.nodoAcceso) return parcel.nodoAcceso;
+  if (parcel.tramoAperturaId) {
+    const t = (state.tramos || []).find((x) => x.id === parcel.tramoAperturaId && x.construida && x.estado > 0);
+    if (t) return t.nodoB;
+  }
+  return state.zonas[parcel.zona]?.nodoPrincipal ?? `n_${parcel.zona}`;
+}
+
+function getParcelFrontAccessCost(
+  state: Pick<GameState, 'zonas' | 'tramos' | 'mapaGrid'>,
+  parcel: Parcela,
+  nodeId: string,
+  nodeCoords?: Map<string, { wx: number; wy: number }>
+): number {
+  const ancho = state.mapaGrid?.ancho ?? 48;
+  const alto = state.mapaGrid?.alto ?? 48;
+  const fx = parcel.frente?.[0] ?? parcel.x ?? Math.round(((parcel.wx + parcel.ww / 2) / WORLD_CANVAS_W) * ancho);
+  const fy = parcel.frente?.[1] ?? parcel.y ?? Math.round(((parcel.wy + parcel.wh / 2) / WORLD_CANVAS_H) * alto);
+  const coords = nodeCoords ?? getRoadNodeCoordsMap(state);
+  const nPos = coords.get(nodeId);
+  if (!nPos) return 1;
+  const nx = (nPos.wx / WORLD_CANVAS_W) * ancho;
+  const ny = (nPos.wy / WORLD_CANVAS_H) * alto;
+  return Number(Math.max(0.5, (Math.abs(fx - nx) + Math.abs(fy - ny)) * 0.35).toFixed(2));
+}
+
+function runNodeDijkstra(
+  adj: Record<string, Array<{ to: string; cost: number; tramo?: ViaTramo }>>,
+  startNode: string
+): {
+  dist: Record<string, number>;
+  prev: Record<string, { node: string; tramo?: ViaTramo }>;
+} {
+  const dist: Record<string, number> = { [startNode]: 0 };
+  const prev: Record<string, { node: string; tramo?: ViaTramo }> = {};
+  const visited = new Set<string>();
+  const queue: string[] = [startNode];
+
+  while (queue.length > 0) {
+    let bestIdx = 0;
+    for (let i = 1; i < queue.length; i++) {
+      if ((dist[queue[i]] ?? Infinity) < (dist[queue[bestIdx]] ?? Infinity)) {
+        bestIdx = i;
+      }
+    }
+    const u = queue.splice(bestIdx, 1)[0];
+    if (visited.has(u)) continue;
+    visited.add(u);
+    const du = dist[u] ?? Infinity;
+    for (const edge of adj[u] ?? []) {
+      const nd = du + edge.cost;
+      if (nd < (dist[edge.to] ?? Infinity)) {
+        dist[edge.to] = nd;
+        prev[edge.to] = { node: u, tramo: edge.tramo };
+        queue.push(edge.to);
+      }
+    }
+  }
+  return { dist, prev };
+}
+
 export function recomputeRoadDistances(state: GameState): void {
-  const adj: Record<string, Array<{ to: string; cost: number }>> = {};
-  const addEdge = (a: string, b: string, cost: number) => {
+  const adj: Record<string, Array<{ to: string; cost: number; tramo: ViaTramo }>> = {};
+  const addEdge = (a: string, b: string, cost: number, tramo: ViaTramo) => {
     if (!adj[a]) adj[a] = [];
-    adj[a].push({ to: b, cost });
+    adj[a].push({ to: b, cost, tramo });
   };
 
-  for (const t of state.tramos || []) {
-    const cost = getViaTramoCost(t);
-    if (!Number.isFinite(cost)) continue;
-    addEdge(t.nodoA, t.nodoB, cost);
-    addEdge(t.nodoB, t.nodoA, cost);
+  const allNodes = new Set<string>();
+  const zoneIds = Object.keys(state.zonas || {});
+  for (const zId of zoneIds) {
+    allNodes.add(state.zonas[zId]?.nodoPrincipal ?? `n_${zId}`);
   }
 
-  const zoneIds = Object.keys(state.zonas || {});
-  const matrix: Record<ZoneId, Record<ZoneId, number>> = {};
+  for (const t of state.tramos || []) {
+    allNodes.add(t.nodoA);
+    allNodes.add(t.nodoB);
+    const cost = getViaTramoCost(t);
+    if (!Number.isFinite(cost)) continue;
+    addEdge(t.nodoA, t.nodoB, cost, t);
+    addEdge(t.nodoB, t.nodoA, cost, t);
+  }
 
+  const nodeDistMatrix: Record<string, Record<string, number>> = {};
+  for (const n of allNodes) {
+    nodeDistMatrix[n] = runNodeDijkstra(adj, n).dist;
+  }
+
+  const matrix: Record<ZoneId, Record<ZoneId, number>> = {};
   for (const zA of zoneIds) {
     matrix[zA] = {};
     const startNode = state.zonas[zA]?.nodoPrincipal ?? `n_${zA}`;
-    const distNode: Record<string, number> = { [startNode]: 0 };
-    const visited = new Set<string>();
-    const queue: string[] = [startNode];
-
-    while (queue.length > 0) {
-      let bestIdx = 0;
-      for (let i = 1; i < queue.length; i++) {
-        if ((distNode[queue[i]] ?? Infinity) < (distNode[queue[bestIdx]] ?? Infinity)) {
-          bestIdx = i;
-        }
-      }
-      const u = queue.splice(bestIdx, 1)[0];
-      if (visited.has(u)) continue;
-      visited.add(u);
-      const du = distNode[u] ?? Infinity;
-      for (const edge of adj[u] ?? []) {
-        const nd = du + edge.cost;
-        if (nd < (distNode[edge.to] ?? Infinity)) {
-          distNode[edge.to] = nd;
-          queue.push(edge.to);
-        }
-      }
-    }
-
+    const distNode = nodeDistMatrix[startNode] ?? {};
     for (const zB of zoneIds) {
       if (zA === zB) {
         matrix[zA][zB] = VIAL_CONSTANTS.costoInternoZona;
@@ -545,8 +613,16 @@ export function recomputeRoadDistances(state: GameState): void {
 
   state.distanciasZonas = matrix;
 
-  // Cache node-to-node / zone-to-zone travel cost map for O(1) lot queries
+  // Cache node-to-node & zone-to-zone Dijkstra shortest distances for O(1) lot-front queries
   const lotDistCache: Record<string, number> = {};
+  for (const nA of allNodes) {
+    const dMap = nodeDistMatrix[nA] ?? {};
+    for (const nB of allNodes) {
+      const d = nA === nB ? 0 : dMap[nB];
+      lotDistCache[`node:${nA}:${nB}`] =
+        typeof d === 'number' && Number.isFinite(d) ? Number(d.toFixed(2)) : Infinity;
+    }
+  }
   for (const zA of zoneIds) {
     for (const zB of zoneIds) {
       lotDistCache[`${zA}:${zB}`] = matrix[zA]?.[zB] ?? Infinity;
@@ -573,7 +649,11 @@ export function getZoneTravelCost(state: GameState, from: ZoneId, to: ZoneId): n
 export function getLotTravelCost(state: GameState, fromParcel: Parcela, toParcel: Parcela): number {
   if (isLotIsolated(state, fromParcel) || isLotIsolated(state, toParcel)) return Infinity;
   if (fromParcel.id === toParcel.id) return 0;
-  if (fromParcel.zona === toParcel.zona) {
+
+  const nodeA = getParcelRoadNode(state, fromParcel);
+  const nodeB = getParcelRoadNode(state, toParcel);
+
+  if (nodeA === nodeB) {
     const fx = fromParcel.frente?.[0] ?? fromParcel.x ?? 0;
     const fy = fromParcel.frente?.[1] ?? fromParcel.y ?? 0;
     const tx = toParcel.frente?.[0] ?? toParcel.x ?? 0;
@@ -581,7 +661,26 @@ export function getLotTravelCost(state: GameState, fromParcel: Parcela, toParcel
     const manhattan = Math.abs(tx - fx) + Math.abs(ty - fy);
     return Number(Math.max(1, manhattan * 0.4).toFixed(2));
   }
-  return getZoneTravelCost(state, fromParcel.zona, toParcel.zona);
+
+  let netDist = state.distanciasLotes?.[`node:${nodeA}:${nodeB}`];
+  if (typeof netDist !== 'number') {
+    const adj: Record<string, Array<{ to: string; cost: number }>> = {};
+    for (const t of state.tramos || []) {
+      const cost = getViaTramoCost(t);
+      if (!Number.isFinite(cost)) continue;
+      if (!adj[t.nodoA]) adj[t.nodoA] = [];
+      if (!adj[t.nodoB]) adj[t.nodoB] = [];
+      adj[t.nodoA].push({ to: t.nodoB, cost });
+      adj[t.nodoB].push({ to: t.nodoA, cost });
+    }
+    netDist = runNodeDijkstra(adj, nodeA).dist[nodeB] ?? Infinity;
+  }
+  if (!Number.isFinite(netDist)) return Infinity;
+
+  const nodeCoords = getRoadNodeCoordsMap(state);
+  const accessA = getParcelFrontAccessCost(state, fromParcel, nodeA, nodeCoords);
+  const accessB = getParcelFrontAccessCost(state, toParcel, nodeB, nodeCoords);
+  return Number((accessA + netDist + accessB).toFixed(2));
 }
 
 export function getRouteWaypointsBetween(
@@ -596,31 +695,70 @@ export function getRouteWaypointsBetween(
   if (fromZona === toZona) {
     return [{ wx: toWx, wy: toWy }];
   }
-  const path = shortestZonePath(state.zonas, fromZona, toZona);
-  const waypoints: Array<{ wx: number; wy: number }> = [];
-  for (let i = 0; i < path.length - 1; i++) {
-    const zA = path[i];
-    const zB = path[i + 1];
-    const tramo = state.tramos.find(
-      (t) =>
-        t.construida &&
-        t.estado > 0 &&
-        ((t.zonaA === zA && t.zonaB === zB) || (t.zonaA === zB && t.zonaB === zA))
-    );
-    if (tramo?.puntos && tramo.puntos.length >= 2) {
-      const pts = tramo.zonaA === zA ? tramo.puntos : [...tramo.puntos].reverse();
-      for (const pt of pts) {
-        waypoints.push({ wx: pt.wx, wy: pt.wy });
+
+  const nodeCoords = getRoadNodeCoordsMap(state);
+  const findClosestNode = (wx: number, wy: number, fallbackZona: ZoneId): string => {
+    const fallbackNode = state.zonas[fallbackZona]?.nodoPrincipal ?? `n_${fallbackZona}`;
+    let bestNode = fallbackNode;
+    let bestDist = Infinity;
+    for (const [nodeId, pos] of nodeCoords.entries()) {
+      const d = Math.hypot(pos.wx - wx, pos.wy - wy);
+      if (d < bestDist) {
+        bestDist = d;
+        bestNode = nodeId;
       }
-    } else {
-      const zRect = state.zonas[zB]?.rect;
-      if (zRect) {
-        waypoints.push({ wx: zRect.wx + zRect.ww / 2, wy: zRect.wy + zRect.wh / 2 });
+    }
+    const zNodePos = nodeCoords.get(fallbackNode);
+    if (zNodePos && Math.hypot(zNodePos.wx - wx, zNodePos.wy - wy) <= bestDist + 60) {
+      return fallbackNode;
+    }
+    return bestNode;
+  };
+
+  const startNode = findClosestNode(fromWx, fromWy, fromZona);
+  const endNode = findClosestNode(toWx, toWy, toZona);
+  if (startNode === endNode) {
+    return [{ wx: toWx, wy: toWy }];
+  }
+
+  const adj: Record<string, Array<{ to: string; cost: number; tramo: ViaTramo }>> = {};
+  for (const t of state.tramos || []) {
+    const cost = getViaTramoCost(t);
+    if (!Number.isFinite(cost)) continue;
+    if (!adj[t.nodoA]) adj[t.nodoA] = [];
+    if (!adj[t.nodoB]) adj[t.nodoB] = [];
+    adj[t.nodoA].push({ to: t.nodoB, cost, tramo: t });
+    adj[t.nodoB].push({ to: t.nodoA, cost, tramo: t });
+  }
+
+  const { dist, prev } = runNodeDijkstra(adj, startNode);
+  const waypoints: Array<{ wx: number; wy: number }> = [];
+
+  if (Number.isFinite(dist[endNode] ?? Infinity)) {
+    const edgeSteps: Array<{ from: string; to: string; tramo: ViaTramo }> = [];
+    let cur = endNode;
+    while (cur !== startNode && prev[cur]) {
+      const step = prev[cur];
+      if (step.tramo) {
+        edgeSteps.unshift({ from: step.node, to: cur, tramo: step.tramo });
+      }
+      cur = step.node;
+    }
+
+    for (const step of edgeSteps) {
+      const t = step.tramo;
+      if (t.puntos && t.puntos.length >= 2) {
+        const pts = t.nodoA === step.from ? t.puntos : [...t.puntos].reverse();
+        for (const pt of pts) {
+          waypoints.push({ wx: pt.wx, wy: pt.wy });
+        }
+      } else {
+        const pEnd = nodeCoords.get(step.to);
+        if (pEnd) waypoints.push({ wx: pEnd.wx, wy: pEnd.wy });
       }
     }
   }
-  void fromWx;
-  void fromWy;
+
   waypoints.push({ wx: toWx, wy: toWy });
   return waypoints;
 }
@@ -1267,53 +1405,6 @@ export function getNpcProductivity(
   return Number(base.toFixed(1));
 }
 
-export function syncLegacyEnterprisesView(state: GameState): void {
-  const agroFirms = state.firmas.filter((f) => f.activa && f.rubro === 'agro');
-  const comFirms = state.firmas.filter((f) => f.activa && f.rubro === 'comercio');
-
-  const agg = (
-    list: Firma[],
-    target: GameState['empresas']['alimento'],
-    isAgro: boolean
-  ) => {
-    if (list.length === 0) {
-      target.ventasAcum = 0;
-      target.factor = 1;
-      target.ultimoIngresoPeriodo = 0;
-      target.ultimoSueldosPeriodo = 0;
-      target.ultimaGanancia = 0;
-      if (isAgro) target.stock = state.alimento.stock;
-      return;
-    }
-    const lead = list[0];
-    const owners = new Set<string>();
-    for (const f of list) {
-      for (const p of f.partes) {
-        if (p.tipo === 'npc') owners.add(p.id);
-      }
-    }
-    target.dueno = lead.gerenteId ?? ([...owners][0] || null);
-    target.socios = [...owners];
-    target.ventasAcum = list.reduce((s, f) => s + f.ventas, 0);
-    target.factor = Number((list.reduce((s, f) => s + f.factor, 0) / list.length).toFixed(3));
-    target.ultimoIngresoPeriodo = list.reduce((s, f) => s + f.ultimoIngresoPeriodo, 0);
-    target.ultimoSueldosPeriodo = list.reduce((s, f) => s + f.ultimoSueldosPeriodo, 0);
-    target.ultimaGanancia = list.reduce((s, f) => s + f.ultimaGanancia, 0);
-    target.periodosFactorAlto = lead.periodosFactorAlto;
-    target.periodosFactorBajo = lead.periodosFactorBajo;
-    target.ultimoTramo = lead.ultimoTramo;
-    target.despidosPendientes = list.reduce((s, f) => s + f.despidosPendientes, 0);
-    target.ultimaCausa = lead.ultimaCausa;
-    if (isAgro) {
-      target.stock = list.reduce((s, f) => s + (f.stock ?? 0), 0);
-      target.siloDias = state.alimento.siloDias;
-    }
-  };
-
-  agg(agroFirms, state.empresas.alimento, true);
-  agg(comFirms, state.empresas.comercio, false);
-}
-
 export function deriveCommunityStats(state: GameState): CommunityDerived {
   const total = Math.max(1, state.config.poblacionInicial);
   const vivos = state.npcs.filter((n) => n.vivo);
@@ -1598,9 +1689,6 @@ export const ROOT_EVENT_TYPES = new Set<string>([
 export function compactEvents(state: GameState): void {
   const cutoff = state.reloj.dia - ECON_CONSTANTS.ventanaEventosDias;
   if (cutoff <= 1 && state.eventos.length <= 1500) return;
-  const kept: SimEvent[] = [];
-  const aggByDayZone: Record<string, { dia: number; zona: ZoneId; conteos: Record<string, number> }> = {};
-
   const byId = new Map<string, SimEvent>();
   for (const e of state.eventos) byId.set(e.id, e);
   const pinned = new Set<string>();
@@ -1615,6 +1703,21 @@ export function compactEvents(state: GameState): void {
     }
   }
 
+  let hasUncompactedOld = false;
+  for (const ev of state.eventos) {
+    if (ev.dia < cutoff && ev.tipo !== 'agregado' && !ROOT_EVENT_TYPES.has(ev.tipo) && !pinned.has(ev.id)) {
+      hasUncompactedOld = true;
+      break;
+    }
+  }
+  if (!hasUncompactedOld && state.eventos.length <= 1500) return;
+
+  const kept: SimEvent[] = [];
+  const aggByDayZone: Record<
+    string,
+    { dia: number; zona: ZoneId; conteos: Record<string, number>; existing?: SimEvent; dirty: boolean }
+  > = {};
+
   for (const ev of state.eventos) {
     if (ev.dia >= cutoff || ROOT_EVENT_TYPES.has(ev.tipo) || pinned.has(ev.id)) {
       kept.push(ev);
@@ -1623,26 +1726,33 @@ export function compactEvents(state: GameState): void {
       const cur = aggByDayZone[key];
       if (cur) {
         for (const [k, v] of Object.entries(ev.conteos)) cur.conteos[k] = (cur.conteos[k] ?? 0) + v;
+        cur.dirty = true;
       } else {
-        aggByDayZone[key] = { dia: ev.dia, zona: ev.zona, conteos: { ...ev.conteos } };
+        aggByDayZone[key] = { dia: ev.dia, zona: ev.zona, conteos: { ...ev.conteos }, existing: ev, dirty: false };
       }
     } else {
       const key = `${ev.dia}:${ev.zona}`;
       if (!aggByDayZone[key]) {
-        aggByDayZone[key] = { dia: ev.dia, zona: ev.zona, conteos: {} };
+        aggByDayZone[key] = { dia: ev.dia, zona: ev.zona, conteos: {}, dirty: true };
+      } else {
+        aggByDayZone[key].dirty = true;
       }
       aggByDayZone[key].conteos[ev.tipo] = (aggByDayZone[key].conteos[ev.tipo] ?? 0) + 1;
     }
   }
 
   for (const bucket of Object.values(aggByDayZone)) {
-    kept.push({
-      id: nextSeqId(state, 'ev_agg'),
-      dia: bucket.dia,
-      tipo: 'agregado',
-      zona: bucket.zona,
-      conteos: bucket.conteos,
-    });
+    if (bucket.existing && !bucket.dirty) {
+      kept.push(bucket.existing);
+    } else {
+      kept.push({
+        id: nextSeqId(state, 'ev_agg'),
+        dia: bucket.dia,
+        tipo: 'agregado',
+        zona: bucket.zona,
+        conteos: bucket.conteos,
+      });
+    }
   }
 
   const pinnedRoots: SimEvent[] = [];
@@ -1699,8 +1809,7 @@ export function checkEngineInvariants(
   opts?: { checkMoney?: boolean }
 ): string[] {
   const errors: string[] = [];
-  const isM4 = state.config.nivelMundo === 'M4' || state.config.economiaModulo === 'fiscal';
-  if ((opts?.checkMoney ?? true) && !isM4) {
+  if (opts?.checkMoney ?? true) {
     const actualMoney = computeTotalWorldMoney(state);
     const expectedMoney =
       state.ultimoDineroTotal + state.auditEntradasDia - state.auditSalidasDia;
@@ -1792,7 +1901,5 @@ export function getRubroDisplayName(rubro: FirmRubro): string {
       return 'Inmobiliaria';
     case 'medio':
       return 'Medio de Prensa';
-    case 'banco':
-      return 'Banca y Crédito';
   }
 }

@@ -425,11 +425,6 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       consumoDiario: round1(state.alimento.consumoDiario),
       siloDias: state.alimento.siloDias,
     },
-    empresas: [state.empresas.alimento, state.empresas.comercio].map((e) => ({
-      id: e.id, factor: e.factor, tramo: e.ultimoTramo, ganancia: e.ultimaGanancia, ventasAcum: e.ventasAcum,
-      periodosFactorAlto: e.periodosFactorAlto, periodosFactorBajo: e.periodosFactorBajo, despidosPendientes: e.despidosPendientes,
-      empleados: e.id === 'alimento' ? derived.roles.agricultor + derived.roles.tecnico : derived.roles.obrero + derived.roles.comerciante,
-    })),
     firmas: state.firmas.filter((f) => f.activa).map((f) => ({
       id: f.id,
       nombre: f.nombre,

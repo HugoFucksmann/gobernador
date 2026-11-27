@@ -50,7 +50,6 @@ import {
   getWorldZones,
   inferLotClassFromParcel,
   recomputeRoadDistances,
-  syncLegacyEnterprisesView,
 } from './worldHelpers';
 
 interface RngHolder {
@@ -175,8 +174,7 @@ function buildScaledParcelas(
       def.edificioInicial &&
       (def.edificioInicial === 'fabrica' ||
         def.edificioInicial === 'oficina_constructora' ||
-        def.edificioInicial === 'oficina_inmobiliaria' ||
-        def.edificioInicial === 'oficina_banco');
+        def.edificioInicial === 'oficina_inmobiliaria');
     const isDisabledMedio = cantidadMedios === 0 && def.edificioInicial === 'oficina_medio';
 
     if (isM0NonBasePrivate || isDisabledMedio) {
@@ -375,6 +373,70 @@ function buildScaledParcelas(
             diasObraRestantes: 0,
             diasObraTotal: 0,
             zona: z,
+          },
+        });
+      }
+
+      const extraOffices = Math.max(0, Math.floor((pop - 120) / 160));
+      const officeZones = ['centro', 'norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'];
+      for (let i = 0; i < extraOffices; i++) {
+        const zC = officeZones[i % officeZones.length] ?? 'centro';
+        const rectC = zonas[zC]?.rect ?? zonas.centro.rect;
+        const pidC = `p_constr_ext_${i + 1}`;
+        base.push({
+          id: pidC,
+          nombre: `Constructora Zonal ${zC} ${i + 1}`,
+          zona: zC,
+          distrito: 'taller',
+          tipoParcela: 'comercial',
+          clase: 'M',
+          orden: 370 + i * 2,
+          wx: rectC.wx + 190 + (i % 3) * 42,
+          wy: rectC.wy + 150,
+          ww: 36,
+          wh: 28,
+          estado: 'ocupada',
+          edificio: {
+            id: `ed_constr_ext_${i + 1}`,
+            tipo: 'oficina_constructora',
+            parcelaId: pidC,
+            dueno: 'construccion',
+            estado: 'ocupada',
+            activo: true,
+            estadoSalud: 100,
+            diasObraRestantes: 0,
+            diasObraTotal: 0,
+            zona: zC,
+          },
+        });
+
+        const zI = officeZones[(i + 1) % officeZones.length] ?? 'norte';
+        const rectI = zonas[zI]?.rect ?? zonas.norte.rect;
+        const pidI = `p_inmob_ext_${i + 1}`;
+        base.push({
+          id: pidI,
+          nombre: `Inmobiliaria Zonal ${zI} ${i + 1}`,
+          zona: zI,
+          distrito: 'mercado',
+          tipoParcela: 'comercial',
+          clase: 'M',
+          orden: 371 + i * 2,
+          wx: rectI.wx + 190 + (i % 3) * 42,
+          wy: rectI.wy + 185,
+          ww: 36,
+          wh: 28,
+          estado: 'ocupada',
+          edificio: {
+            id: `ed_inmob_ext_${i + 1}`,
+            tipo: 'oficina_inmobiliaria',
+            parcelaId: pidI,
+            dueno: 'inmobiliaria',
+            estado: 'ocupada',
+            activo: true,
+            estadoSalud: 100,
+            diasObraRestantes: 0,
+            diasObraTotal: 0,
+            zona: zI,
           },
         });
       }
@@ -866,36 +928,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     } else {
       createFirma('inmobiliaria', 'Inmobiliaria del Valle', 'centro', [], inmobiliarios.slice(0, 1), 320, Math.round(130 * scale));
     }
-
-    // 10. Banco in M4
-    if (config.nivelMundo === 'M4' || config.economiaModulo === 'fiscal') {
-      const bankParcels = privateParcels.filter((p) => p.edificio?.tipo === 'oficina_banco');
-      if (bankParcels.length > 0) {
-        bankParcels.forEach((p, idx) => {
-          const owner = empresarios[idx % Math.max(1, empresarios.length)];
-          createFirma('banco', p.nombre, p.zona, [p.id], owner ? [owner] : [], 420, Math.round(110 * scale));
-        });
-      } else {
-        const freeCom = parcelas.find((p) => p.tipoParcela === 'comercial' && p.estado === 'libre' && p.zona === 'centro');
-        const locs = freeCom ? [freeCom.id] : [];
-        if (freeCom) {
-          freeCom.estado = 'ocupada';
-          freeCom.edificio = {
-            id: 'ed_banco_init',
-            tipo: 'oficina_banco',
-            parcelaId: freeCom.id,
-            dueno: 'banco',
-            estado: 'ocupada',
-            activo: true,
-            estadoSalud: 100,
-            diasObraRestantes: 0,
-            diasObraTotal: 0,
-            zona: freeCom.zona,
-          };
-        }
-        createFirma('banco', 'Banco del Valle', 'centro', locs, empresarios.slice(0, 1), 420, Math.round(110 * scale));
-      }
-    }
   }
 
   // 9. Media outlets (as rubro 'medio' firms)
@@ -1190,44 +1222,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       precio: ECON_CONSTANTS.precioBaseAlimento,
       precioMercado: ECON_CONSTANTS.precioBaseAlimento,
     },
-    empresas: {
-      alimento: {
-        id: 'alimento',
-        nombre: 'Agroalimentaria',
-        dueno: empresarios[0]?.id ?? null,
-        socios: [],
-        ventasAcum: 0,
-        parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
-        factor: 1,
-        stock: totalStockInicial,
-        siloDias: ECON_CONSTANTS.siloDias,
-        periodosFactorAlto: 0,
-        periodosFactorBajo: 0,
-        ultimoTramo: 'normal',
-        despidosPendientes: 0,
-        refPorEmpleado: {},
-        ultimoIngresoPeriodo: 0,
-        ultimoSueldosPeriodo: 0,
-        ultimaGanancia: 0,
-      },
-      comercio: {
-        id: 'comercio',
-        nombre: 'Comercio y Servicios',
-        dueno: null,
-        socios: comerciantes.map((c) => c.id),
-        ventasAcum: 0,
-        parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
-        factor: 1,
-        periodosFactorAlto: 0,
-        periodosFactorBajo: 0,
-        ultimoTramo: 'normal',
-        despidosPendientes: 0,
-        refPorEmpleado: {},
-        ultimoIngresoPeriodo: 0,
-        ultimoSueldosPeriodo: 0,
-        ultimaGanancia: 0,
-      },
-    },
     gobierno: {
       reserva: initialReserva,
       inflacion: preset.inflacionInicial,
@@ -1434,7 +1428,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   state.mapaGrid = buildTileGridAndSyncMap(state.zonas, state.parcelas, state.tramos, pop);
   recomputeRoadDistances(state);
   state.demandaSuelo = computeDemandaSuelo(state);
-  syncLegacyEnterprisesView(state);
   state.ultimoDineroTotal = computeTotalWorldMoney(state);
   void getWorldZones;
   return state;

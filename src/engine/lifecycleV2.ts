@@ -1,6 +1,7 @@
 import {
   DEMOG_CONSTANTS,
   ECON_CONSTANTS,
+  FIRM_CONSTANTS,
   HOUSING_CONSTANTS,
   PERIOD_DAYS,
   PERIOD_DAYS_DEMOG,
@@ -410,12 +411,12 @@ export function runDailyLifecycleV2(state: GameState): void {
         const aptScore =
           (npc.personalidad.laboriosidad * 0.6 + npc.personalidad.resiliencia * 0.4) / 100;
         const schoolBonus = (escuelasPorZona.get(npc.zona) ?? 0) > 0 ? 0.12 : 0;
-        const extraEduc = state.gobierno.extras?.vigentes?.nivelEducacion ?? 0;
+        const extraEduc = 0; // En el mundo base no hay educación como servicio
         const score =
           aptScore * 0.55 +
           incomeScore * 0.35 +
           schoolBonus +
-          extraEduc * 0.03 +
+          extraEduc +
           nextSubRand(state, 'vida') * 0.15;
         npc.educacion.nivel = score >= 0.72 ? 3 : score >= 0.42 ? 2 : 1;
         npc.rol = 'desempleado';
@@ -1048,7 +1049,9 @@ export function assignRolesAndJobsV2(state: GameState): void {
   let remainingUnempCount = remainingUnemp.length;
 
   if (remainingUnempCount > 0) {
-    const activeFirms = state.firmas.filter((f) => f.activa && f.factor >= 0.85 && f.locales.length > 0);
+    const activeFirms = state.firmas.filter(
+      (f) => f.activa && f.factor >= FIRM_CONSTANTS.factorMinContratacion && f.locales.length > 0
+    );
     for (const f of activeFirms) {
       if (remainingUnempCount <= 0) break;
       const roleCaps = getFirmaRoleCaps(state, f);

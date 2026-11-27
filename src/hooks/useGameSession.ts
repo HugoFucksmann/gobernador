@@ -155,7 +155,7 @@ export function useGameSession() {
       prevDiaRef.current = st.reloj.dia;
     }
 
-    if (hasStarted) {
+    if (hasStarted && (!isG0 || st.devMode)) {
       if (!isG0 && st.demandasActivas.length > prevDemandsRef.current) {
         playDemandSfx();
       }
@@ -424,66 +424,74 @@ export function useGameSession() {
     return ok;
   }, [controller, resetUiAfterLoad]);
 
+  const canPlayDecisionSfx = useCallback(() => {
+    const st = controller.getState();
+    const g0 =
+      (st.config.nivelGobernador ?? (st.config.economiaModulo === 'fiscal' ? 'G3' : 'G2')) === 'G0' ||
+      Boolean(st.config.estadoAutomatico);
+    return !g0 || Boolean(st.devMode);
+  }, [controller]);
+
   const updateLevers = useCallback(
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
       controller.updateLevers(updater);
-      playDecisionSfx();
+      if (canPlayDecisionSfx()) playDecisionSfx();
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const setExtraLever = useCallback(
     (key: ExtraLeverKey, value: number) => {
       const res = controller.setExtraLever(key, value);
-      if (res.ok) playDecisionSfx();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
       return res;
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const buildInParcela = useCallback(
     (parcelaId: string, tipo: BuildingType) => {
       const res = controller.buildInParcela(parcelaId, tipo);
-      if (res.ok) playDecisionSfx();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
       return res;
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const buildVia = useCallback(
     (tramoId: string) => {
       const res = controller.buildVia(tramoId);
-      if (res.ok) playDecisionSfx();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
       return res;
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const demolishParcela = useCallback(
     (parcelaId: string) => {
       const res = controller.demolishParcela(parcelaId);
-      if (res.ok) playDecisionSfx();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
       return res;
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const respondDemand = useCallback(
     (demandId: string, accept: boolean) => {
       const res = controller.respondDemand(demandId, accept);
-      if (res.ok) playDecisionSfx();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
       return res;
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const counterOffer = useCallback(
     (demandId: string) => {
       const res = controller.counterOffer(demandId);
-      if (res.ok) playDecisionSfx();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
       return res;
     },
-    [controller]
+    [controller, canPlayDecisionSfx]
   );
 
   const triggerPressManual = useCallback(() => {

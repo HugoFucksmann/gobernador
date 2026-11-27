@@ -137,13 +137,13 @@ export function getBuildingJobCaps(
   let constructor = 0;
   let inmobiliario = 0;
   let periodista = 0;
-  let hasEscuela = false;
-  let hasOficina = false;
+  let oficinaCount = 0;
+  let escuelaCount = 0;
 
   for (const b of getActiveBuildings(parcelas)) {
     const caps = getBuildingRoleCapacity(b);
-    if (b.tipo === 'oficina_publica') hasOficina = true;
-    if (b.tipo === 'escuela') hasEscuela = true;
+    if (b.tipo === 'oficina_publica') oficinaCount++;
+    if (b.tipo === 'escuela') escuelaCount++;
 
     policia += caps.policia ?? 0;
     medico += caps.medico ?? 0;
@@ -158,12 +158,27 @@ export function getBuildingJobCaps(
     periodista += caps.periodista ?? 0;
   }
 
+  const baseOficinaCap = BUILDING_CATALOG.oficina_publica.puestos.estatal ?? 4;
+  const baseEscuelaCap = BUILDING_CATALOG.escuela.puestos.docente ?? 4;
+  const estatalTotal =
+    oficinaCount === 0
+      ? 0
+      : cuposFijosBase?.estatal !== undefined
+      ? Math.max(0, cuposFijosBase.estatal + Math.max(0, estatal - baseOficinaCap))
+      : estatal;
+  const docenteTotal =
+    escuelaCount === 0
+      ? 0
+      : cuposFijosBase?.docente !== undefined
+      ? Math.max(0, cuposFijosBase.docente + Math.max(0, docente - baseEscuelaCap))
+      : docente;
+
   return {
     policia,
     medico,
     ingeniero: getObrasTargetJobs(population, nivelObras),
-    estatal: hasOficina ? Math.max(cuposFijosBase?.estatal ?? estatal, 0) : 0,
-    docente: hasEscuela ? Math.max(cuposFijosBase?.docente ?? docente, 0) : 0,
+    estatal: estatalTotal,
+    docente: docenteTotal,
     agricultor,
     tecnico,
     obrero,

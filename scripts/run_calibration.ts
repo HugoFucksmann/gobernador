@@ -144,7 +144,7 @@ function buildOnFreeParcels(state: GameState, tipos: BuildingType[]): number {
 }
 
 function runRandomDirectorDay(state: GameState): void {
-  if (state.config.nivelMundo === 'M0') return;
+  if (state.config.nivelMundo === 'M0' || !state.config.usarIaGemini) return;
 
   for (const win of state.ventanasCondicion) {
     if (win.estado === 'pendiente') {
@@ -484,8 +484,12 @@ function runBatch(label: string, opts: BatchOpts) {
       });
     }
     if (opts.mutator) opts.mutator(s);
-    initFoodProfit.push(s.empresas.alimento.ultimaGanancia);
-    initComProfit.push(s.empresas.comercio.ultimaGanancia);
+    initFoodProfit.push(
+      s.firmas.filter((f) => f.activa && f.rubro === 'agro').reduce((a, f) => a + f.ultimaGanancia, 0)
+    );
+    initComProfit.push(
+      s.firmas.filter((f) => f.activa && f.rubro === 'comercio').reduce((a, f) => a + f.ultimaGanancia, 0)
+    );
     const d0 = deriveCommunityStats(s);
     sat0.push(d0.satisfaccionMedia);
 
@@ -934,7 +938,9 @@ function runAllLeversAndBuildingsSensitivity(n: number) {
       medAlc.push(s.medios[0]?.alcancePct ?? 0);
       medCred.push(s.medios[0]?.credibilidad ?? 0);
       medDep.push(s.medios[0]?.finanzas.dependenciaPct ?? 0);
-      foodProf.push(s.empresas.alimento.ultimaGanancia);
+      foodProf.push(
+        s.firmas.filter((f) => f.activa && f.rubro === 'agro').reduce((a, f) => a + f.ultimaGanancia, 0)
+      );
     }
     return {
       apoyo: summarize(apoyos).mean,
@@ -1368,7 +1374,9 @@ function verifyNewSystems() {
   });
   dReject.gobierno.palancasObjetivo.precioMaximo = 'estricto';
   dReject.gobierno.palancasVigentes.precioMaximo = 'estricto';
-  dReject.empresas.alimento.factor = 0.85;
+  for (const f of dReject.firmas) {
+    if (f.activa && f.rubro === 'agro') f.factor = 0.85;
+  }
   dReject.gobierno.palancasObjetivo.impuesto = 50;
   dReject.gobierno.palancasVigentes.impuesto = 50;
   for (let i = 0; i < 3; i++) stepHeadlessDay(dReject);

@@ -303,7 +303,6 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                     { id: 'servicios', label: 'Serv.' },
                     { id: 'entretenimiento', label: 'Ocio' },
                     { id: 'medio', label: 'Prensa' },
-                    { id: 'banco', label: 'Banco' },
                   ] as const
                 ).map((r) => (
                   <button
@@ -474,10 +473,13 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
           {tab === 'curvas' && (
             <div className="grid grid-cols-2 gap-3">
               <SparklineCard data={state.historial} getVal={(p) => p.reserva} title="Reserva" color="#10b981" />
+              <SparklineCard data={state.historial} getVal={(p) => p.satisfaccion} title="Satisfacción" unit="%" color="#34d399" />
               <SparklineCard data={state.historial} getVal={(p) => p.apoyo} title="Apoyo" unit="%" color="#10b981" />
               <SparklineCard data={state.historial} getVal={(p) => p.hambreCritica} title="Hambre" unit="%" color="#f43f5e" />
+              <SparklineCard data={state.historial} getVal={(p) => p.stockDias} title="Stock alimento" unit="d" color="#a3e635" />
               <SparklineCard data={state.historial} getVal={(p) => p.callePct} title="Hogares en calle" unit="%" color="#f59e0b" />
               <SparklineCard data={state.historial} getVal={(p) => p.cuotaMayorPct} title="Concentración máx." unit="%" color="#38bdf8" />
+              <SparklineCard data={state.historial} getVal={(p) => p.edadMedia} title="Edad media" unit="a" color="#c084fc" />
               <SparklineCard data={state.historial} getVal={(p) => p.poblacion} title="Población" color="#e4e4e7" />
               {state.config.economiaModulo === 'fiscal' && (
                 <SparklineCard data={state.historial} getVal={(p) => p.inflacion} title="Inflación" unit="%" color="#f59e0b" />

@@ -187,8 +187,7 @@ export type PrivateLocalBuildingType =
   | 'club'
   | 'oficina_constructora'
   | 'oficina_inmobiliaria'
-  | 'oficina_medio'
-  | 'oficina_banco';
+  | 'oficina_medio';
 
 export type PublicBuildingType =
   | 'hospital'
@@ -436,8 +435,7 @@ export type FirmRubro =
   | 'entretenimiento'
   | 'construccion'
   | 'inmobiliaria'
-  | 'medio'
-  | 'banco';
+  | 'medio';
 
 export interface FirmPart {
   tipo: 'npc' | 'hogar' | 'firma' | 'estado';
@@ -669,27 +667,6 @@ export interface ActorMeasure {
   tema?: NewsTopic;
   tono?: NewsTone;
   causaId?: string;
-}
-
-export interface EnterpriseState {
-  id: 'alimento' | 'comercio';
-  nombre: string;
-  dueno: string | null;
-  socios: string[];
-  ventasAcum: number;
-  parteSueldos: number;
-  factor: number;
-  stock?: number;
-  siloDias?: number;
-  periodosFactorAlto: number;
-  periodosFactorBajo: number;
-  ultimoTramo: EnterpriseTramo;
-  despidosPendientes: number;
-  refPorEmpleado: Record<string, number>;
-  ultimoIngresoPeriodo: number;
-  ultimoSueldosPeriodo: number;
-  ultimaGanancia: number;
-  ultimaCausa?: string;
 }
 
 export interface GovernmentState {
@@ -1511,10 +1488,6 @@ export interface GameState {
     siloDias: number;
     precio: number;
     precioMercado: number;
-  };
-  empresas: {
-    alimento: EnterpriseState;
-    comercio: EnterpriseState;
   };
   gobierno: GovernmentState;
   parcelas: Parcela[];

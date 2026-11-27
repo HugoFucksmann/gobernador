@@ -143,10 +143,12 @@ function runCorridaA() {
     const prod1 = s.alimento.produccionDiaria;
     const cons1 = s.alimento.consumoDiario;
 
-    let minFFood = s.empresas.alimento.factor;
-    let maxFFood = s.empresas.alimento.factor;
-    let minFCom = s.empresas.comercio.factor;
-    let maxFCom = s.empresas.comercio.factor;
+    const getAgroFactor = () => s.firmas.find((f) => f.activa && f.rubro === 'agro')?.factor ?? 1;
+    const getComFactor = () => s.firmas.find((f) => f.activa && f.rubro === 'comercio')?.factor ?? 1;
+    let minFFood = getAgroFactor();
+    let maxFFood = getAgroFactor();
+    let minFCom = getComFactor();
+    let maxFCom = getComFactor();
     let minStockRatio = 1;
     let maxStockRatio = 1;
     let maxHambreCritica = deriveCommunityStats(s).hambreCriticaPct;
@@ -171,10 +173,10 @@ function runCorridaA() {
         }
       }
 
-      minFFood = Math.min(minFFood, s.empresas.alimento.factor);
-      maxFFood = Math.max(maxFFood, s.empresas.alimento.factor);
-      minFCom = Math.min(minFCom, s.empresas.comercio.factor);
-      maxFCom = Math.max(maxFCom, s.empresas.comercio.factor);
+      minFFood = Math.min(minFFood, getAgroFactor());
+      maxFFood = Math.max(maxFFood, getAgroFactor());
+      minFCom = Math.min(minFCom, getComFactor());
+      maxFCom = Math.max(maxFCom, getComFactor());
       const sr = s.alimento.stock / stock0;
       minStockRatio = Math.min(minStockRatio, sr);
       maxStockRatio = Math.max(maxStockRatio, sr);

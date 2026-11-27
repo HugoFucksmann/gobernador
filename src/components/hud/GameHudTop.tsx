@@ -562,16 +562,18 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
             </UiTooltip>
           )}
 
-          <UiTooltip text={soundMuted ? 'Activar audio' : 'Silenciar audio'}>
-            <button
-              type="button"
-              onClick={onToggleSoundMute}
-              aria-label={soundMuted ? 'Activar audio' : 'Silenciar audio'}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
-            >
-              {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
-          </UiTooltip>
+          {(!isG0 || devMode) && (
+            <UiTooltip text={soundMuted ? 'Activar audio' : 'Silenciar audio'}>
+              <button
+                type="button"
+                onClick={onToggleSoundMute}
+                aria-label={soundMuted ? 'Activar audio' : 'Silenciar audio'}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
+              >
+                {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+            </UiTooltip>
+          )}
         </div>
       </div>
 

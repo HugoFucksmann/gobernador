@@ -462,21 +462,6 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     capacidadVentasDiaria: 120,
     puestos: puestos({ periodista: 2 }),
   },
-  oficina_banco: {
-    tipo: 'oficina_banco',
-    nombre: 'Banco Local',
-    parcelTipo: 'comercial',
-    claseMinima: 'M',
-    categoria: 'privado',
-    rubro: 'banco',
-    construibleGobernador: false,
-    requiereG2: false,
-    costoObra: 280,
-    mantenimientoPeriodo: 8.0,
-    diasObra: 4,
-    capacidadVentasDiaria: 200,
-    puestos: puestos({ empresario: 1 }),
-  },
 
   // === Públicos (EDIFICIOS_V2 §3) ===
   hospital: {
@@ -824,6 +809,7 @@ export const FIRM_CONSTANTS = {
   maxPctHogaresBoicot: 35,
   umbralParoFirmaFactor: 0.82,
   umbralRecorteFuerteFactor: 0.85,
+  factorMinContratacion: 0,
   tasaInteresCreditoPeriodo: 0.04,
 } as const;
 
