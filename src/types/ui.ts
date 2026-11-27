@@ -64,6 +64,14 @@ export interface PaydaySummary {
   gastos: number;
   saldo: number;
   reserva: number;
+  apoyoDelta: number;
+  hechos: string[];
+}
+
+export interface DecisionFloatingDelta {
+  apoyoDelta?: number;
+  cajaDelta?: number;
+  seq: number;
 }
 
 export interface MonthlySummary {

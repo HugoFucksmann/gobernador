@@ -43,7 +43,7 @@ import {
   WorldComplexityLevel,
   ZoneId,
 } from '../../types/game';
-import { AiStatus, DespachoTab, MonthlySummary, PaydaySummary } from '../../types/ui';
+import { AiStatus, DecisionFloatingDelta, DespachoTab, MonthlySummary, PaydaySummary } from '../../types/ui';
 import { INDICATOR_LABELS, SparklineSvg, stateStrokeColor } from './TemaDrawer';
 import { UiTooltip } from './UiTooltip';
 
@@ -61,6 +61,7 @@ interface GameHudTopProps {
   activeTemaId: LecturaIndicadorId | null;
   paydaySummary: PaydaySummary | null;
   monthlySummary: MonthlySummary | null;
+  decisionDelta?: DecisionFloatingDelta | null;
   onTogglePause: () => void;
   onSetSpeed: (speed: number) => void;
   onStepDay: () => void;
@@ -74,6 +75,7 @@ interface GameHudTopProps {
   onSetEstadoAutomatico: (enabled: boolean) => void;
   onSetNoRender: (enabled: boolean) => void;
   onForceClimate: (tipo: PhenomenonType, zona: ZoneId) => void;
+  onForceDemand?: (demandaId: string) => { ok: boolean; error?: string };
   onExportSaveJson: () => string;
   onImportSaveJson: (raw: string) => { ok: boolean; error?: string };
   onExportMetricsJson: () => string;
@@ -113,6 +115,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   activeTemaId,
   paydaySummary,
   monthlySummary,
+  decisionDelta = null,
   onTogglePause,
   onSetSpeed,
   onStepDay,
@@ -126,6 +129,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   onSetEstadoAutomatico,
   onSetNoRender,
   onForceClimate,
+  onForceDemand,
   onExportSaveJson,
   onImportSaveJson,
   onExportMetricsJson,
@@ -138,6 +142,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
   const zoneIds = Object.keys(state.zonas);
   const [devFenom, setDevFenom] = useState<PhenomenonType>('sequia');
   const [devZona, setDevZona] = useState<ZoneId>(zoneIds[0] ?? 'centro');
+  const [devDemandId, setDevDemandId] = useState<string>('bajen_impuestos');
   const [devPopInput, setDevPopInput] = useState<number>(state.config.poblacionInicial);
   const [devSeedInput, setDevSeedInput] = useState<number>(state.semilla);
   const [devImportFeedback, setDevImportFeedback] = useState<string | null>(null);
@@ -368,62 +373,75 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
             <>
               <div className="h-5 w-px bg-zinc-700/70" aria-hidden="true" />
 
-              <UiTooltip
-                text={`${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
-              >
-                <button
-                  type="button"
-                  onClick={onOpenObjetivo}
-                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors text-sm font-mono tabular-nums whitespace-nowrap shrink-0 ${
-                    objetivoPerdido || defeatDanger
-                      ? 'border-rose-500/50 bg-rose-950/35 hover:bg-rose-950/55'
-                      : 'border-transparent hover:bg-zinc-800/90'
-                  }`}
-                >
-                  {victoryCumplida || (!objetivoPerdido && objectiveHealthy && !defeatDanger) ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : (
-                    <AlertTriangle
-                      className={`w-4 h-4 shrink-0 ${
-                        objetivoPerdido || defeatDanger ? 'text-rose-400' : 'text-amber-400'
-                      }`}
-                    />
-                  )}
+              <div className="relative">
+                {decisionDelta?.apoyoDelta !== undefined && (
                   <span
-                    className={
-                      objetivoPerdido || defeatDanger
-                        ? 'text-rose-400 font-bold'
-                        : objectiveHealthy || victoryCumplida
-                        ? 'text-emerald-400 font-bold'
-                        : 'text-amber-300 font-bold'
-                    }
-                  >
-                    {vicIsPct ? `${vicCurrent}%` : vicCurrent}
-                  </span>
-                  <span
-                    className={`text-xs font-bold ${vicTrendColor}`}
-                    aria-label={`Tendencia ${vicTrendSymbol}`}
-                  >
-                    {vicTrendSymbol}
-                  </span>
-                  <span className="text-zinc-500 text-xs">
-                    /{preset.victoria.umbral}
-                    {vicIsPct ? '%' : ''}
-                  </span>
-                  <span className="text-zinc-600">·</span>
-                  <span
-                    className={`text-xs font-sans font-semibold ${
-                      victoryCumplida
-                        ? 'text-emerald-300'
-                        : objetivoPerdido || defeatDanger
-                        ? 'text-rose-300'
-                        : 'text-zinc-300'
+                    key={`ap_${decisionDelta.seq}`}
+                    className={`pointer-events-none absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-md bg-zinc-950/90 border border-zinc-700 font-mono text-[11px] font-bold shadow-md whitespace-nowrap ${
+                      decisionDelta.apoyoDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'
                     }`}
                   >
-                    {goalStateLabel}
+                    {decisionDelta.apoyoDelta >= 0 ? '+' : ''}
+                    {decisionDelta.apoyoDelta}% {decisionDelta.apoyoDelta >= 0 ? '↑' : '↓'}
                   </span>
-                </button>
-              </UiTooltip>
+                )}
+                <UiTooltip
+                  text={`${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
+                >
+                  <button
+                    type="button"
+                    onClick={onOpenObjetivo}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors text-sm font-mono tabular-nums whitespace-nowrap shrink-0 ${
+                      objetivoPerdido || defeatDanger
+                        ? 'border-rose-500/50 bg-rose-950/35 hover:bg-rose-950/55'
+                        : 'border-transparent hover:bg-zinc-800/90'
+                    }`}
+                  >
+                    {victoryCumplida || (!objetivoPerdido && objectiveHealthy && !defeatDanger) ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle
+                        className={`w-4 h-4 shrink-0 ${
+                          objetivoPerdido || defeatDanger ? 'text-rose-400' : 'text-amber-400'
+                        }`}
+                      />
+                    )}
+                    <span
+                      className={
+                        objetivoPerdido || defeatDanger
+                          ? 'text-rose-400 font-bold'
+                          : objectiveHealthy || victoryCumplida
+                          ? 'text-emerald-400 font-bold'
+                          : 'text-amber-300 font-bold'
+                      }
+                    >
+                      {vicIsPct ? `${vicCurrent}%` : vicCurrent}
+                    </span>
+                    <span
+                      className={`text-xs font-bold ${vicTrendColor}`}
+                      aria-label={`Tendencia ${vicTrendSymbol}`}
+                    >
+                      {vicTrendSymbol}
+                    </span>
+                    <span className="text-zinc-500 text-xs">
+                      /{preset.victoria.umbral}
+                      {vicIsPct ? '%' : ''}
+                    </span>
+                    <span className="text-zinc-600">·</span>
+                    <span
+                      className={`text-xs font-sans font-semibold ${
+                        victoryCumplida
+                          ? 'text-emerald-300'
+                          : objetivoPerdido || defeatDanger
+                          ? 'text-rose-300'
+                          : 'text-zinc-300'
+                      }`}
+                    >
+                      {goalStateLabel}
+                    </span>
+                  </button>
+                </UiTooltip>
+              </div>
 
               <div className="h-5 w-px bg-zinc-700/70 hidden lg:block" aria-hidden="true" />
 
@@ -585,18 +603,36 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
           {!isG0 && (
             <>
               <div className="h-4 w-px bg-zinc-700/70" aria-hidden="true" />
-              <UiTooltip
-                text={`Caja: $${Math.round(state.gobierno.reserva)} (${reserveWeeks.toFixed(1)} sem.) · Flujo ${estDiario >= 0 ? '+' : ''}$${estDiario.toFixed(0)}/d${fin.impago ? ' (IMPAGO)' : ''}`}
-              >
-                <button
-                  type="button"
-                  onClick={onOpenEconomia}
-                  className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
+              <div className="relative">
+                {decisionDelta?.cajaDelta !== undefined && (
+                  <span
+                    key={`cj_${decisionDelta.seq}`}
+                    className={`pointer-events-none absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-md bg-zinc-950/90 border border-zinc-700 font-mono text-[11px] font-bold shadow-md whitespace-nowrap ${
+                      decisionDelta.cajaDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {decisionDelta.cajaDelta >= 0 ? '+' : '-'}${Math.abs(decisionDelta.cajaDelta)}{' '}
+                    {decisionDelta.cajaDelta >= 0 ? '↑' : '↓'}
+                  </span>
+                )}
+                <UiTooltip
+                  text={`Caja: $${Math.round(state.gobierno.reserva)} (${reserveWeeks.toFixed(1)} sem.) · Flujo ${estDiario >= 0 ? '+' : ''}$${estDiario.toFixed(0)}/d${fin.impago ? ' (IMPAGO)' : ''}`}
                 >
-                  <Coins className={`w-4 h-4 shrink-0 ${reserveColor}`} />
-                  <span className={`font-bold ${reserveColor}`}>${Math.round(state.gobierno.reserva)}</span>
-                </button>
-              </UiTooltip>
+                  <button
+                    type="button"
+                    onClick={onOpenEconomia}
+                    className="flex items-center gap-1.5 hover:opacity-85 whitespace-nowrap shrink-0"
+                  >
+                    <Coins className={`w-4 h-4 shrink-0 ${reserveColor}`} />
+                    <span className={`font-bold ${reserveColor}`}>
+                      ${Math.round(state.gobierno.reserva)}
+                    </span>
+                    <span className={`text-[11px] font-semibold opacity-90 ${reserveColor}`}>
+                      ({reserveWeeks.toFixed(1)}sem)
+                    </span>
+                  </button>
+                </UiTooltip>
+              </div>
 
               <UiTooltip
                 text={`Alimento: ${Math.round(state.alimento.stock)} u. (${state.alimento.diasStock.toFixed(0)}d) · Precio $${state.alimento.precio.toFixed(2)}`}
@@ -690,31 +726,48 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
 
       {/* Non-pausing Weekly Payday Summary Strip (only in Governor mode) */}
       {paydaySummary && !isG0 && (
-        <div className="pointer-events-auto self-end bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-4 py-2.5 flex items-center gap-4 text-xs shadow-xl">
-          <span className="font-semibold text-zinc-200">
-            Cierre P{paydaySummary.periodo} (D{paydaySummary.dia})
-          </span>
-          <span className="font-mono tabular-nums text-emerald-400">
-            +${paydaySummary.ingresos.toFixed(0)}
-          </span>
-          <span className="font-mono tabular-nums text-zinc-300">
-            -${paydaySummary.gastos.toFixed(0)}
-          </span>
-          <span
-            className={`font-mono font-bold tabular-nums ${
-              paydaySummary.saldo >= 0 ? 'text-emerald-400' : 'text-rose-400'
-            }`}
-          >
-            {paydaySummary.saldo >= 0 ? '+' : ''}${paydaySummary.saldo.toFixed(0)}
-          </span>
-          <button
-            type="button"
-            onClick={onDismissPayday}
-            aria-label="Cerrar resumen semanal"
-            className="text-zinc-400 hover:text-white p-0.5 rounded-lg"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+        <div className="pointer-events-auto self-end w-[340px] max-w-[calc(100vw-32px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl px-4 py-2.5 text-xs shadow-xl space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-zinc-200">
+              Cierre P{paydaySummary.periodo} (D{paydaySummary.dia})
+            </span>
+            <div className="flex items-center gap-2 font-mono tabular-nums">
+              <span className="text-emerald-400">+${paydaySummary.ingresos.toFixed(0)}</span>
+              <span className="text-zinc-300">-${paydaySummary.gastos.toFixed(0)}</span>
+              <span
+                className={`font-bold ${
+                  paydaySummary.saldo >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {paydaySummary.saldo >= 0 ? '+' : ''}${paydaySummary.saldo.toFixed(0)}
+              </span>
+              <span
+                className={`font-bold ${
+                  paydaySummary.apoyoDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                Apoyo {paydaySummary.apoyoDelta >= 0 ? '+' : ''}
+                {paydaySummary.apoyoDelta}%
+              </span>
+              <button
+                type="button"
+                onClick={onDismissPayday}
+                aria-label="Cerrar resumen semanal"
+                className="text-zinc-400 hover:text-white p-0.5 rounded-lg"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+          {paydaySummary.hechos.length > 0 && (
+            <div className="text-[11px] text-zinc-300 border-t border-zinc-800 pt-1 space-y-0.5">
+              {paydaySummary.hechos.slice(0, 3).map((h, i) => (
+                <div key={`${i}_${h}`} className="truncate">
+                  · {h}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -924,6 +977,36 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               Lanzar
             </button>
           </div>
+
+          {onForceDemand && (
+            <div className="flex items-center gap-1.5">
+              <select
+                aria-label="Demanda dev"
+                value={devDemandId}
+                onChange={(e) => setDevDemandId(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-zinc-100"
+              >
+                <option value="bajen_impuestos">Bajar impuestos</option>
+                <option value="via_a_mi_zona">Vía a zona</option>
+                <option value="seguridad_en_mi_zona">Comisaría</option>
+                <option value="liberen_precio">Liberar precio</option>
+                <option value="abran_exportacion">Abrir export.</option>
+                <option value="mas_pauta">Más pauta</option>
+                <option value="silencio_pagado">Acuerdo prensa</option>
+              </select>
+              <button
+                type="button"
+                disabled={state.resultado.estado !== 'jugando'}
+                onClick={() => {
+                  const res = onForceDemand(devDemandId);
+                  setDevImportFeedback(res.ok ? 'Demanda lanzada.' : res.error ?? 'No se pudo lanzar demanda.');
+                }}
+                className="px-2.5 py-1 font-semibold bg-sky-500 hover:bg-sky-400 text-zinc-950 rounded-lg disabled:opacity-40 whitespace-nowrap shrink-0"
+              >
+                Demanda
+              </button>
+            </div>
+          )}
 
           <div className="flex items-center gap-1.5">
             <input

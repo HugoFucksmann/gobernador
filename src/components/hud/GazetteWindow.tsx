@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { GitBranch, Newspaper, SlidersHorizontal } from 'lucide-react';
+import { Compass, GitBranch, Newspaper, SlidersHorizontal } from 'lucide-react';
 import { isObserverMode } from '../../engine/policies';
-import { GameState } from '../../types/game';
+import { GameState, ZoneId } from '../../types/game';
+import { focusSimEventCamera } from '../../utils/eventFocus';
 import { RctWindow } from './RctWindow';
 import { UiTooltip } from './UiTooltip';
 
@@ -14,6 +15,11 @@ interface GazetteWindowProps {
   onTriggerPress: () => void;
   onOpenPalancas: () => void;
   onSelectMedio?: (medioId: string) => void;
+  onJumpZone?: (zone: ZoneId | 'all') => void;
+  onSelectNpc?: (npcId: string) => void;
+  onFollowNpc?: (npcId: string) => void;
+  onSelectParcela?: (parcelaId: string) => void;
+  onSelectZona?: (zona: ZoneId) => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
@@ -60,6 +66,11 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
   onTriggerPress,
   onOpenPalancas,
   onSelectMedio,
+  onJumpZone,
+  onSelectNpc,
+  onFollowNpc,
+  onSelectParcela,
+  onSelectZona,
   onInspectCausal,
 }) => {
   const [pressView, setPressView] = useState<'edicion' | 'medios'>('edicion');
@@ -161,7 +172,37 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
                         {article.titulo}
                       </h3>
                       <p className="text-sm text-zinc-700 leading-relaxed">{article.texto}</p>
-                      <div className="flex justify-end pt-1">
+                      <div className="flex items-center justify-end gap-3 pt-1">
+                        {(() => {
+                          const simEv = article.causa
+                            ? state.eventos.find((ev) => ev.id === article.causa)
+                            : undefined;
+                          const targetZone = article.zonaOrigen ?? article.zona ?? simEv?.zona;
+                          if (!simEv && !targetZone) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (simEv) {
+                                  focusSimEventCamera(simEv, state, {
+                                    onFollowNpc,
+                                    onSelectNpc,
+                                    onSelectParcela,
+                                    onSelectZona,
+                                    onJumpZone,
+                                  });
+                                } else if (targetZone) {
+                                  onSelectZona?.(targetZone);
+                                  onJumpZone?.(targetZone);
+                                }
+                              }}
+                              className="flex items-center gap-1 text-xs font-semibold text-zinc-700 hover:text-zinc-950 hover:underline"
+                            >
+                              <Compass className="w-3.5 h-3.5" />
+                              {simEv ? 'Ver foco' : `Ir (${state.zonas[targetZone!]?.nombre ?? targetZone})`}
+                            </button>
+                          );
+                        })()}
                         <button
                           type="button"
                           onClick={() =>

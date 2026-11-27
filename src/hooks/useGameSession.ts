@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { UI_CONSTANTS } from '../data/catalogs';
+import { PERIOD_DAYS, UI_CONSTANTS } from '../data/catalogs';
 import { ExtraLeverKey, GameController } from '../engine/gameController';
-import { DEFAULT_WORLD_CONFIG, getGovernorLevel, hasActiveCrisisAlert, isObserverMode, sumPeriodExpenses } from '../engine/policies';
+import {
+  DEFAULT_WORLD_CONFIG,
+  estimatePeriodBudget,
+  getGovernorLevel,
+  hasActiveCrisisAlert,
+  isObserverMode,
+  sumPeriodExpenses,
+} from '../engine/policies';
 import { getActivePhenomena } from '../engine/simulation';
 import { browserAiDirector } from '../services/aiDirector';
 import {
@@ -19,6 +26,7 @@ import {
   CameraTarget,
   CityTab,
   CoverageServiceFilter,
+  DecisionFloatingDelta,
   DespachoTab,
   MapFilter,
   MapHoverPreview,
@@ -84,11 +92,14 @@ export function useGameSession() {
   const [causalInspect, setCausalInspect] = useState<CausalInspectTarget | null>(null);
   const [paydaySummary, setPaydaySummary] = useState<PaydaySummary | null>(null);
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary | null>(null);
+  const [decisionDelta, setDecisionDelta] = useState<DecisionFloatingDelta | null>(null);
   const [soundMutedState, setSoundMutedState] = useState<boolean>(() => isSoundMuted());
   const uiSeqRef = useRef(0);
+  const decisionDeltaTimerRef = useRef<number | null>(null);
 
   const prevPeriodoRef = useRef(snapshot.state.reloj.periodo);
   const prevDiaRef = useRef(snapshot.state.reloj.dia);
+  const lastPeriodCloseApoyoRef = useRef(snapshot.derived.apoyoPct);
   const prevDemandsRef = useRef(snapshot.state.demandasActivas.length);
   const prevActiveFenRef = useRef(getActivePhenomena(snapshot.state).length);
   const prevBuiltCountRef = useRef(
@@ -96,11 +107,35 @@ export function useGameSession() {
       snapshot.state.tramos.filter((t) => t.construida).length
   );
 
+  const emitDecisionDelta = useCallback((apoyoDelta?: number, cajaDelta?: number) => {
+    const cleanApoyo = apoyoDelta !== undefined && Math.abs(apoyoDelta) >= 0.1 ? Number(apoyoDelta.toFixed(1)) : undefined;
+    const cleanCaja = cajaDelta !== undefined && Math.abs(cajaDelta) >= 1 ? Math.round(cajaDelta) : undefined;
+    if (cleanApoyo === undefined && cleanCaja === undefined) return;
+    uiSeqRef.current += 1;
+    setDecisionDelta({
+      apoyoDelta: cleanApoyo,
+      cajaDelta: cleanCaja,
+      seq: uiSeqRef.current,
+    });
+    if (typeof window !== 'undefined') {
+      if (decisionDeltaTimerRef.current !== null) {
+        window.clearTimeout(decisionDeltaTimerRef.current);
+      }
+      decisionDeltaTimerRef.current = window.setTimeout(() => {
+        setDecisionDelta(null);
+        decisionDeltaTimerRef.current = null;
+      }, 3200);
+    }
+  }, []);
+
   // Start controller paused on Day 1 until player confirms scenario briefing
   useEffect(() => {
     controller.setPaused(true);
     controller.start();
     return () => {
+      if (typeof window !== 'undefined' && decisionDeltaTimerRef.current !== null) {
+        window.clearTimeout(decisionDeltaTimerRef.current);
+      }
       controller.destroy();
     };
   }, [controller]);
@@ -119,10 +154,26 @@ export function useGameSession() {
       if (st.reloj.dia < prevDiaRef.current) {
         setPaydaySummary(null);
         setMonthlySummary(null);
+        setDecisionDelta(null);
+        lastPeriodCloseApoyoRef.current = derived.apoyoPct;
       } else if (hasStarted && st.resultado.estado === 'jugando' && !isG0) {
         if (st.reloj.periodo > prevPeriodoRef.current) {
           const settledPeriod = prevPeriodoRef.current;
           const gastos = sumPeriodExpenses(st.gobierno.finanzas);
+          const apoyoDelta = Number(
+            (derived.apoyoPct - lastPeriodCloseApoyoRef.current).toFixed(1)
+          );
+          lastPeriodCloseApoyoRef.current = derived.apoyoPct;
+          const periodStartDia = Math.max(1, st.reloj.dia - PERIOD_DAYS);
+          const hechos: string[] = [];
+          const seenTitles = new Set<string>();
+          for (const b of st.bitacora) {
+            if (b.dia < periodStartDia) break;
+            if (seenTitles.has(b.titulo)) continue;
+            seenTitles.add(b.titulo);
+            hechos.push(b.titulo);
+            if (hechos.length >= 3) break;
+          }
           setPaydaySummary({
             periodo: settledPeriod,
             dia: st.reloj.dia,
@@ -130,7 +181,10 @@ export function useGameSession() {
             gastos,
             saldo: st.gobierno.finanzas.saldo,
             reserva: st.gobierno.reserva,
+            apoyoDelta,
+            hechos,
           });
+          emitDecisionDelta(apoyoDelta, st.gobierno.finanzas.saldo);
           if (settledPeriod > 0 && settledPeriod % UI_CONSTANTS.periodosBalance === 0) {
             const positives: string[] = [];
             const negatives: string[] = [];
@@ -183,7 +237,7 @@ export function useGameSession() {
     prevDemandsRef.current = st.demandasActivas.length;
     prevActiveFenRef.current = getActivePhenomena(st).length;
     prevBuiltCountRef.current = builtCount;
-  }, [snapshot.state, snapshot.derived, hasStarted]);
+  }, [snapshot.state, snapshot.derived, hasStarted, emitDecisionDelta]);
 
   const clearSideEntities = useCallback(() => {
     setSelectedNpcId(null);
@@ -396,6 +450,11 @@ export function useGameSession() {
     [controller]
   );
 
+  const forceDemand = useCallback(
+    (demandaId: string) => controller.forceDemand(demandaId),
+    [controller]
+  );
+
   const saveManual = useCallback(() => controller.saveManual(), [controller]);
   const exportSaveJson = useCallback(() => controller.exportSaveJson(), [controller]);
   const exportMetricsJson = useCallback(() => controller.exportMetricsJson(), [controller]);
@@ -408,7 +467,9 @@ export function useGameSession() {
     setCausalInspect(null);
     setPaydaySummary(null);
     setMonthlySummary(null);
-  }, [clearSideSelectionIds]);
+    setDecisionDelta(null);
+    lastPeriodCloseApoyoRef.current = controller.getSnapshot().derived.apoyoPct;
+  }, [clearSideSelectionIds, controller]);
 
   const importSaveJson = useCallback(
     (raw: string) => {
@@ -438,19 +499,47 @@ export function useGameSession() {
 
   const withDecisionSfx = useCallback(
     <R extends { ok: boolean }>(fn: () => R): R => {
+      const before = controller.getSnapshot();
+      const beforeReserva = before.state.gobierno.reserva;
+      const beforeApoyo = before.derived.apoyoPct;
+      const beforeBudget = estimatePeriodBudget(before.state, before.state.gobierno.palancasObjetivo);
       const res = fn();
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
+      if (res.ok) {
+        if (canPlayDecisionSfx()) playDecisionSfx();
+        const after = controller.getSnapshot();
+        const dReserva = after.state.gobierno.reserva - beforeReserva;
+        const dApoyo = after.derived.apoyoPct - beforeApoyo;
+        const afterBudget = estimatePeriodBudget(after.state, after.state.gobierno.palancasObjetivo);
+        const dBudget = afterBudget.saldoEst - beforeBudget.saldoEst;
+        emitDecisionDelta(
+          Math.abs(dApoyo) >= 0.1 ? dApoyo : undefined,
+          Math.abs(dReserva) >= 1 ? dReserva : Math.abs(dBudget) >= 1 ? dBudget : undefined
+        );
+      }
       return res;
     },
-    [canPlayDecisionSfx]
+    [controller, canPlayDecisionSfx, emitDecisionDelta]
   );
 
   const updateLevers = useCallback(
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
+      const before = controller.getSnapshot();
+      const beforeBudget = estimatePeriodBudget(before.state, before.state.gobierno.palancasObjetivo);
+      const beforeReserva = before.state.gobierno.reserva;
+      const beforeApoyo = before.derived.apoyoPct;
       controller.updateLevers(updater);
       if (canPlayDecisionSfx()) playDecisionSfx();
+      const after = controller.getSnapshot();
+      const afterBudget = estimatePeriodBudget(after.state, after.state.gobierno.palancasObjetivo);
+      const dReserva = after.state.gobierno.reserva - beforeReserva;
+      const dApoyo = after.derived.apoyoPct - beforeApoyo;
+      const dBudget = afterBudget.saldoEst - beforeBudget.saldoEst;
+      emitDecisionDelta(
+        Math.abs(dApoyo) >= 0.1 ? dApoyo : undefined,
+        Math.abs(dReserva) >= 1 ? dReserva : Math.abs(dBudget) >= 1 ? dBudget : undefined
+      );
     },
-    [controller, canPlayDecisionSfx]
+    [controller, canPlayDecisionSfx, emitDecisionDelta]
   );
 
   const setExtraLever = useCallback(
@@ -498,6 +587,7 @@ export function useGameSession() {
     setCausalInspect(null);
     setPaydaySummary(null);
     setMonthlySummary(null);
+    setDecisionDelta(null);
     setHasStarted(true);
   }, [clearSideSelectionIds]);
 
@@ -668,6 +758,7 @@ export function useGameSession() {
     causalInspect,
     paydaySummary,
     monthlySummary,
+    decisionDelta,
     soundMuted: soundMutedState,
 
     // UI setters
@@ -721,6 +812,7 @@ export function useGameSession() {
     setEstadoAutomatico,
     setDevComplexity,
     forceClimatePhenomenon,
+    forceDemand,
     saveManual,
     loadManual,
     loadAutoSave,

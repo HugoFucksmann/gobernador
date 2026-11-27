@@ -31,6 +31,7 @@ import {
   ExtraLeverKey,
   setExtraLever as setExtraLeverState,
   emitSimEvent,
+  forceDemandForDev,
   MAX_BITACORA_ENTRIES,
   orderBuildInParcela,
   orderBuildVia,
@@ -1090,6 +1091,10 @@ export class GameController {
   mutateForDev(fn: (s: GameState) => { ok: boolean; error?: string }): { ok: boolean; error?: string } {
     if (!this.devMode) return { ok: false, error: 'Requiere modo desarrollador.' };
     return this.applyStateCommand(fn);
+  }
+
+  forceDemand(demandaId: string): { ok: boolean; error?: string } {
+    return this.mutateForDev((s) => forceDemandForDev(s, demandaId));
   }
 
   startNewGame(newConfig: WorldConfig): void {

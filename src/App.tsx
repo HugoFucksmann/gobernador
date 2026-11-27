@@ -67,6 +67,7 @@ export default function App() {
         activeTemaId={session.activeTemaId}
         paydaySummary={session.paydaySummary}
         monthlySummary={session.monthlySummary}
+        decisionDelta={session.decisionDelta}
         onTogglePause={session.togglePause}
         onSetSpeed={session.setSpeed}
         onStepDay={session.stepDay}
@@ -80,6 +81,7 @@ export default function App() {
         onSetDevComplexity={session.setDevComplexity}
         onSetEstadoAutomatico={session.setEstadoAutomatico}
         onForceClimate={session.forceClimatePhenomenon}
+        onForceDemand={session.forceDemand}
         onExportSaveJson={session.exportSaveJson}
         onImportSaveJson={session.importSaveJson}
         onExportMetricsJson={session.exportMetricsJson}
@@ -206,6 +208,11 @@ export default function App() {
           onTriggerPress={session.triggerPressManual}
           onOpenPalancas={() => session.openWindow('palancas')}
           onSelectMedio={session.selectMedio}
+          onJumpZone={session.jumpToZone}
+          onSelectNpc={session.selectNpc}
+          onFollowNpc={session.followNpcById}
+          onSelectParcela={session.selectParcela}
+          onSelectZona={session.selectZona}
           onInspectCausal={(title, ref, fallbackText) =>
             session.openCausalInspect({ title, ref, fallbackText })
           }

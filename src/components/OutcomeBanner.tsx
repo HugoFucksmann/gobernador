@@ -123,7 +123,9 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
     state.resultado.razon
   );
   const keyTimeline = state.bitacora
-    .filter((b) => ['economia', 'clima', 'condicion', 'sistema'].includes(b.categoria))
+    .filter((b) =>
+      ['economia', 'clima', 'condicion', 'caos', 'gobernador', 'sistema'].includes(b.categoria)
+    )
     .slice(0, 5);
 
   return (
@@ -191,7 +193,7 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
 
         {keyTimeline.length > 0 && (
           <div className="space-y-2">
-            <div className="text-xs font-semibold text-zinc-300">Hitos</div>
+            <div className="text-xs font-semibold text-zinc-300">Hechos principales</div>
             <div className="divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl max-h-32 overflow-y-auto">
               {keyTimeline.map((item) => (
                 <div key={item.id} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
