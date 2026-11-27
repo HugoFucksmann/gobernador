@@ -62,7 +62,9 @@ import {
 } from '../types/game';
 import {
   getActiveBuildings,
+  getGovernorLevel,
   getObrasTargetJobs,
+  isObserverMode,
 } from './policies';
 import {
   nextRand,
@@ -623,9 +625,8 @@ export function orderBuildInParcela(
   if (state.resultado.estado !== 'jugando') {
     return { ok: false, error: 'La partida ya finalizó.' };
   }
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  if (govLevel === 'G0' || state.config.estadoAutomatico) {
+  const govLevel = getGovernorLevel(state.config);
+  if (isObserverMode(state.config)) {
     return { ok: false, error: 'En modo sin gobernador o Estado automático no hay órdenes manuales.' };
   }
   const def = BUILDING_CATALOG[tipo];
@@ -729,10 +730,8 @@ export function orderBuildVia(
   if (state.resultado.estado !== 'jugando') {
     return { ok: false, error: 'La partida ya finalizó.' };
   }
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  if (govLevel === 'G0') {
-    return { ok: false, error: 'En G0 no hay órdenes del gobernador.' };
+  if (isObserverMode(state.config)) {
+    return { ok: false, error: 'En modo sin gobernador o Estado automático no hay órdenes manuales.' };
   }
   const tramo = (state.tramos ?? []).find((t) => t.id === tramoId);
   if (!tramo) {
@@ -821,10 +820,8 @@ export function orderDemolishParcela(
   if (state.resultado.estado !== 'jugando') {
     return { ok: false, error: 'La partida ya finalizó.' };
   }
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  if (govLevel === 'G0') {
-    return { ok: false, error: 'En G0 no hay órdenes del gobernador.' };
+  if (isObserverMode(state.config)) {
+    return { ok: false, error: 'En modo sin gobernador o Estado automático no hay órdenes manuales.' };
   }
   const parcela = state.parcelas.find((p) => p.id === parcelaId);
   if (!parcela || !parcela.edificio) {
@@ -852,6 +849,7 @@ export function orderDemolishParcela(
           h.casaId = null;
           if (h.estado === 'con_casa') {
             h.estado = 'calle';
+            h.despensa = 0;
           }
         }
       }
@@ -2923,11 +2921,9 @@ function stepNpcPositions(state: GameState, dtTicks: number): void {
         npc.accionIa.zonaDestino && state.zonas[npc.accionIa.zonaDestino]
           ? npc.accionIa.zonaDestino
           : npc.accionIa.id === 'huelga' || npc.accionIa.id === 'protesta'
-          ? state.zonas.civico
-            ? 'civico'
+          ? state.zonas.centro
+            ? 'centro'
             : npc.zona
-          : state.zonas.mercado
-          ? 'mercado'
           : npc.zona;
       const plazaP = state.parcelas.find((p) => p.zona === actZone && p.edificio?.tipo === 'plaza');
       if (plazaP) {
@@ -4172,12 +4168,11 @@ function checkConditionTriggers(state: GameState, preDerived?: CommunityDerived)
       if (!f.activa) return false;
       const entries = Object.entries(f.cuotaZona);
       return entries.some(([z, share]) => {
-        if (share < FIRM_CONSTANTS.umbralBoicotCuota) return false;
-        const markupAbusive =
-          1 + (f.margenPoder ?? 0) >= FIRM_CONSTANTS.umbralBoicotPrecioFactor;
+        if (share <= FIRM_CONSTANTS.umbralPoderPrecio) return false;
+        const markupAbusive = (f.margenPoder ?? 0) > FIRM_CONSTANTS.umbralBoicotMargen;
         const foodPrice = state.ultimaSalidaEconomica.precioAlimento[z] ?? state.alimento.precio;
         const foodAbusive =
-          (f.rubro === 'comercio' || f.rubro === 'agro') && foodPrice >= umbralPrecio;
+          (f.rubro === 'comercio' || f.rubro === 'agro') && foodPrice > umbralPrecio;
         return markupAbusive || foodAbusive;
       });
     });
@@ -4244,8 +4239,7 @@ function evaluateObjective(state: GameState, preDerived?: CommunityDerived): voi
     return val <= threshold;
   };
 
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const govLevel = getGovernorLevel(state.config);
   const defeatConds: ObjectiveCondition[] = [preset.derrota, ...(preset.derrotasExtra ?? [])];
   const crossed =
     govLevel === 'G0'
@@ -4392,8 +4386,7 @@ function advanceDay(state: GameState): void {
 
   const zonesCount = getWorldZones(state).length;
   const isM0 = state.config.nivelMundo === 'M0';
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const govLevel = getGovernorLevel(state.config);
   const allowGovernorComplex = govLevel === 'G2' || govLevel === 'G3';
 
   // 1. Controls take effect, buildings & roads advance/activate, daily NPC ritmo/habits update
@@ -4584,7 +4577,7 @@ function advanceDay(state: GameState): void {
     }
     if (!isM0) {
       evaluateActorDemands(state, derived);
-      evaluateExtraActors(state, derived);
+      evaluateExtraActors(state);
     }
   }
   evaluateObjective(state, derived);
@@ -6270,7 +6263,7 @@ export function forceDemandForDev(state: GameState, demandaId: string): { ok: bo
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 export type ExtraLeverKey = 'subsidioAlimento' | 'presion' | 'acceso' | 'nivelEducacion';
-export const EXTRA_LEVER_KEYS: ExtraLeverKey[] = ['subsidioAlimento', 'presion', 'acceso', 'nivelEducacion'];
+const EXTRA_LEVER_KEYS: ExtraLeverKey[] = ['subsidioAlimento', 'presion', 'acceso', 'nivelEducacion'];
 export const EXTRA_LEVER_BOUNDS: Record<ExtraLeverKey, { min: number; max: number; step: number }> = {
   subsidioAlimento: { min: 0, max: 30, step: 1 },
   presion: { min: 0, max: 100, step: 5 },
@@ -6296,7 +6289,7 @@ export function ensureExtras(state: GameState): NonNullable<GovernmentState['ext
 }
 
 function governorLevel(state: GameState): GovernorComplexityLevel {
-  return state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  return getGovernorLevel(state.config);
 }
 
 /** Fija el objetivo de una palanca de nivel 1.1; entra en vigencia al día siguiente y emite `control` (CONTROLES §1). */
@@ -6446,7 +6439,7 @@ function pickOutletId(state: GameState): string | undefined {
   return sorted[0]?.id;
 }
 
-function evaluateExtraActors(state: GameState, derived: CommunityDerived): void {
+function evaluateExtraActors(state: GameState): void {
   if (governorLevel(state) !== 'G3') return;
   const dia = state.reloj.dia;
   if (state.demandasActivas.length >= ACTOR_CONSTANTS.maxDemandasSimultaneas) return;
@@ -6510,7 +6503,6 @@ function evaluateExtraActors(state: GameState, derived: CommunityDerived): void 
         'nivelObras', nuevo, `Subir nivel de obras a ${nuevo}`, state.ultimoEventoClimaId || state.ultimaCausaPalanca);
     }
   }
-  void derived;
 }
 
 /** Medida por rechazo para los actores nuevos: usan una campaña de prensa con el medio más crítico. */

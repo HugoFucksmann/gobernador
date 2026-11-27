@@ -32,7 +32,7 @@ import {
   formatLecturaTexto,
   indicadores_resumen,
 } from '../../engine/lecturaV2';
-import { estimatePeriodBudget, sumPeriodExpenses } from '../../engine/policies';
+import { estimatePeriodBudget, getGovernorLevel, isObserverMode, sumPeriodExpenses } from '../../engine/policies';
 import { getActivePhenomena, getAnnouncedPhenomena } from '../../engine/simulation';
 import {
   CommunityDerived,
@@ -191,10 +191,9 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
 
   const worldLevel: WorldComplexityLevel =
     state.config.nivelMundo ?? (state.config.economiaModulo === 'fiscal' ? 'M4' : 'M3');
-  const govLevel: GovernorComplexityLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+  const govLevel: GovernorComplexityLevel = getGovernorLevel(state.config);
   const estadoAuto = Boolean(state.config.estadoAutomatico);
-  const isG0 = govLevel === 'G0' || estadoAuto;
+  const isG0 = isObserverMode(state.config);
 
   const basePop = Math.max(1, state.config.poblacionInicial || state.npcs.length);
   const vicIsPct =

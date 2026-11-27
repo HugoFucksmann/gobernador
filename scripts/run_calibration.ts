@@ -1272,7 +1272,6 @@ function verifyNewSystems() {
       g1.parcelas,
       g1.npcs.filter((n) => n.vivo).length,
       g1.gobierno.palancasVigentes.nivelObras,
-      g1.config.poblacionInicial,
       g1.gobierno.cuposFijos
     );
     assert(capsAfterBuild.medico >= 8, `Expected >= 8 doctor slots after 2nd hospital, got ${capsAfterBuild.medico}`);

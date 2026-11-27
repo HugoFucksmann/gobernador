@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertOctagon, GitBranch, Play, Trophy } from 'lucide-react';
+import { isObserverMode } from '../engine/policies';
 import { buildCausalChain } from '../engine/simulation';
 import { CommunityDerived, GameState } from '../types/game';
 
@@ -18,9 +19,7 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
   onDismissMilestone,
   onOpenNewGame,
 }) => {
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const isG0 = isObserverMode(state.config);
   const missedEvent = state.eventos.find((e) => e.tipo === 'objetivo_perdido');
   const victoryCumplida = Boolean(state.resultado.victoriaCumplida);
   const showMilestone =

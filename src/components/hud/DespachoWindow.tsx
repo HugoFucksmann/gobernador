@@ -35,7 +35,6 @@ import { INDICATOR_LABELS, SparklineSvg, stateBadgeTone } from './TemaDrawer';
 interface DespachoWindowProps {
   state: GameState;
   zIndex: number;
-  initialTab?: DespachoTab;
   tabRequest?: { tab: DespachoTab; seq: number } | null;
   heatmapIndicatorId?: LecturaIndicadorId | null;
   onFocus: () => void;
@@ -61,14 +60,14 @@ const EVENT_TYPE_LABELS: Partial<Record<SimEvent['tipo'], string>> = {
   ruta_cortada: 'Ruta cortada',
   fenomeno_inicio: 'Fenómeno climático',
   noticia: 'Noticia',
-  golpe: 'Ataque',
+  ataque: 'Ataque en zona',
+  golpe: 'Golpe a vecino',
   capacitacion_fin: 'Capacitación',
 };
 
 export const DespachoWindow: React.FC<DespachoWindowProps> = ({
   state,
   zIndex,
-  initialTab = 'resumen',
   tabRequest = null,
   heatmapIndicatorId = null,
   onFocus,
@@ -80,7 +79,7 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
   onFollowNpc,
   onInspectCausal,
 }) => {
-  const [tab, setTab] = useState<DespachoTab>(tabRequest?.tab ?? initialTab);
+  const [tab, setTab] = useState<DespachoTab>(tabRequest?.tab ?? 'resumen');
 
   useEffect(() => {
     if (tabRequest?.tab) {

@@ -31,6 +31,7 @@ import {
 import {
   computeMaintenanceBreakdown,
   getBuildingJobCaps,
+  isObserverMode,
 } from './policies';
 import { nextSeqId, nextSubRand, subRandInt } from './rng';
 import {
@@ -1201,7 +1202,6 @@ export function runPaydayEconomyV2(state: GameState): void {
     state.parcelas,
     state.gobierno.palancasVigentes.nivelObras,
     Math.max(1, state.npcs.filter((n) => n.vivo).length),
-    state.config.poblacionInicial,
     state.tramos ?? []
   );
 
@@ -1430,7 +1430,7 @@ export function runPaydayEconomyV2(state: GameState): void {
 
   // Autopilot public service & road builds when estadoAutomatico is enabled (MUNDO_V2 §9, EDIFICIOS_V2 §3)
   // oficina_publica is preset-only and never built by autopilot.
-  const autoState = state.config.estadoAutomatico ?? state.config.nivelGobernador === 'G0';
+  const autoState = isObserverMode(state.config);
   if (isM2Plus && autoState) {
     const vivosList = state.npcs.filter((n) => n.vivo);
     const vivosCount = vivosList.length;
@@ -1438,7 +1438,6 @@ export function runPaydayEconomyV2(state: GameState): void {
       state.parcelas,
       vivosCount,
       state.gobierno.palancasVigentes.nivelObras,
-      state.config.poblacionInicial,
       state.gobierno.cuposFijos
     );
     const targetMed = Math.max(1, Math.round(vivosCount * ECON_CONSTANTS.objetivoCobertura.medico));
@@ -1641,11 +1640,13 @@ export function runPaydayEconomyV2(state: GameState): void {
       if (fZone.length === 0) continue;
       const sumRev = fZone.reduce((s, f) => s + Math.max(0.01, f.ultimoIngresoPeriodo), 0);
       let leader: { firma: string; cuota: number } = { firma: '-', cuota: 0 };
+      let bestShare = -1;
       for (const f of fZone) {
         const share = fZone.length === 1 ? 1 : Math.max(0.01, f.ultimoIngresoPeriodo) / Math.max(0.01, sumRev);
         const prevShare = f.cuotaZona[z] ?? 0;
         f.cuotaZona[z] = Number(share.toFixed(3));
-        if (share > leader.cuota) {
+        if (share > bestShare) {
+          bestShare = share;
           leader = { firma: f.id, cuota: Number((share * 100).toFixed(1)) };
         }
         if (isM1Plus && share >= FIRM_CONSTANTS.umbralPoderPrecio) {
@@ -1690,6 +1691,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       const oldCasaId = h.casaId;
       h.casaId = null;
       h.estado = 'calle';
+      h.despensa = 0;
       h.periodosSinPagar = 0;
       h.periodosHacinado = 0;
 

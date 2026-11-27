@@ -3,17 +3,14 @@ import {
   BuildingDefinition,
   BuildingType,
   ChaosSettings,
-  DistrictId,
   ForeignTradeStep,
   FranjaDiaId,
   HitoDefinition,
   LotClass,
-  MapaV2Grid,
   NewsTone,
   NewsTopic,
   PressValence,
   PriceCapMode,
-  PublicRoleId,
   RoleDefinition,
   RoleId,
   ScenarioParcelDef,
@@ -80,10 +77,6 @@ export const DEFAULT_TRAMOS: ViaTramo[] = (
   ...(t.baldosas ? { baldosas: t.baldosas.map(([x, y]) => [x, y] as [number, number]) } : {}),
 }));
 
-export const DEFAULT_MAPA_GRID: MapaV2Grid | undefined = (
-  MAPA_ELECCIONES as unknown as { mapaGrid?: MapaV2Grid }
-).mapaGrid;
-
 export const LOT_CLASS_RANK: Record<LotClass, number> = {
   S: 1,
   M: 2,
@@ -98,15 +91,6 @@ export const LOT_CLASS_MIN_TILES: Record<LotClass, { w: number; h: number }> = {
   XL: { w: 6, h: 6 },
 };
 
-export const PERSONALITY_TRAITS = [
-  'valentia',
-  'laboriosidad',
-  'codicia',
-  'rebeldia',
-  'resiliencia',
-  'sociabilidad',
-] as const;
-
 export const AGENDA_CONSTANTS = {
   baldosasPorHora: 18,
   franjas: [
@@ -119,20 +103,6 @@ export const AGENDA_CONSTANTS = {
 } as const;
 
 export const ZONE_IDS: ZoneId[] = Object.keys(DEFAULT_ZONAS);
-
-export const ZONE_TO_DISTRICT: Record<string, DistrictId | 'all'> = {
-  centro: 'civico',
-  norte: 'residencial',
-  noreste: 'residencial',
-  este: 'mercado',
-  sureste: 'campos',
-  sur: 'residencial',
-  suroeste: 'campos',
-  oeste: 'campos',
-  noroeste: 'campos',
-  poligono: 'taller',
-  ribera: 'residencial',
-};
 
 const DEFAULT_ZONA_POR_ROL: Record<RoleId, ZoneId[]> = {
   agricultor: ['noroeste', 'oeste', 'suroeste', 'sureste'],
@@ -700,7 +670,7 @@ export const LEVER_BOUNDS = {
 
 export const ECON_CONSTANTS = {
   salarioBasePublico: 4.25,
-  pensionBase: 2.65,
+  pensionBase: 3.95,
   maxPaseDesempleoPorDia: 2,
   maxContratacionesPorPeriodo: 3,
   precioBaseAlimento: 2.55,
@@ -810,6 +780,7 @@ export const HOUSING_CONSTANTS = {
   costoAcogidaMenorDia: 1.6,
   maxOcupacionesPorPeriodo: 4,
   umbralCalleOcupacionPct: 8,
+  margenLotesResidenciales: 0.25,
 } as const;
 
 export const FIRM_CONSTANTS = {
@@ -831,12 +802,12 @@ export const FIRM_CONSTANTS = {
   maxConstruccionesPrivadasPeriodo: 2,
   kLineaEditorial: 0.22,
   umbralBoicotCuota: 0.38,
+  umbralBoicotMargen: 0.231,
   umbralBoicotPrecioFactor: 1.35,
   maxPctHogaresBoicot: 35,
   umbralParoFirmaFactor: 0.82,
   umbralRecorteFuerteFactor: 0.85,
   factorMinContratacion: 0,
-  tasaInteresCreditoPeriodo: 0.04,
 } as const;
 
 export const DEMOG_CONSTANTS = {
@@ -1018,20 +989,7 @@ export const EFFECT_CATALOG = {
   },
 } as const;
 
-export const DISTRICTS = [
-  { id: 'campos' as DistrictId, nombre: 'Periferia Agraria', subtitulo: 'Campos productivos', x: 20, y: 20, w: 370, h: 725, color: '#ecfdf5' },
-  { id: 'taller' as DistrictId, nombre: 'Talleres y Obra', subtitulo: 'Construcción y servicios', x: 415, y: 270, w: 370, h: 225, color: '#f1f5f9' },
-  { id: 'mercado' as DistrictId, nombre: 'Puerto y Comercios', subtitulo: 'Comercio, firmas y prensa', x: 810, y: 270, w: 370, h: 225, color: '#fefce8' },
-  { id: 'civico' as DistrictId, nombre: 'Centro Cívico', subtitulo: 'Estado, salud y orden', x: 415, y: 270, w: 370, h: 225, color: '#eff6ff' },
-  { id: 'residencial' as DistrictId, nombre: 'Anillo Residencial', subtitulo: 'Hogares, casas y escuelas', x: 415, y: 20, w: 765, h: 725, color: '#f8fafc' },
-];
-
-export const DISTRICT_BY_ID = Object.fromEntries(DISTRICTS.map((d) => [d.id, d])) as Record<
-  DistrictId,
-  (typeof DISTRICTS)[number]
->;
-
-export const ROLE_COLORS: Record<RoleId, string> = {
+const ROLE_COLORS: Record<RoleId, string> = {
   estudiante: '#6366f1',
   agricultor: '#16a34a',
   tecnico: '#15803d',
@@ -1048,25 +1006,6 @@ export const ROLE_COLORS: Record<RoleId, string> = {
   docente: '#0284c7',
   desempleado: '#dc2626',
   jubilado: '#94a3b8',
-};
-
-export const ROLE_DISTRICTS: Record<RoleId, DistrictId> = {
-  estudiante: 'residencial',
-  agricultor: 'campos',
-  tecnico: 'campos',
-  obrero: 'taller',
-  comerciante: 'mercado',
-  constructor: 'taller',
-  inmobiliario: 'mercado',
-  empresario: 'mercado',
-  periodista: 'mercado',
-  policia: 'civico',
-  medico: 'civico',
-  ingeniero: 'civico',
-  estatal: 'civico',
-  docente: 'residencial',
-  desempleado: 'residencial',
-  jubilado: 'residencial',
 };
 
 export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
@@ -1288,9 +1227,6 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     produce: null,
   },
 };
-
-export const PUBLIC_ROLES: PublicRoleId[] = ['policia', 'estatal', 'docente', 'medico', 'ingeniero'];
-export const SERVICE_PUBLIC_ROLES: ServicePublicRoleId[] = ['policia', 'medico', 'ingeniero'];
 
 export const ACTION_TABLE: ActionDefinition[] = [
   // === 19 Acciones espontáneas (ACCIONES_V1) ===
@@ -2058,7 +1994,6 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     zonas: structuredClone(DEFAULT_ZONAS),
     tramos: structuredClone(DEFAULT_TRAMOS),
-    ...(DEFAULT_MAPA_GRID ? { mapaGrid: structuredClone(DEFAULT_MAPA_GRID) } : {}),
     mediosCatalog: structuredClone(MEDIA_TEMPLATES),
     caosDefault: { ...DEFAULT_CHAOS_LIMITS },
     initialLevers: {
@@ -2128,7 +2063,6 @@ export const SCENARIO_PRESETS: Record<'elecciones' | 'zombies', ScenarioPreset> 
     zonaPorRol: structuredClone(DEFAULT_ZONA_POR_ROL),
     zonas: structuredClone(DEFAULT_ZONAS),
     tramos: structuredClone(DEFAULT_TRAMOS),
-    ...(DEFAULT_MAPA_GRID ? { mapaGrid: structuredClone(DEFAULT_MAPA_GRID) } : {}),
     mediosCatalog: structuredClone(MEDIA_TEMPLATES),
     caosDefault: { ...DEFAULT_CHAOS_LIMITS },
     initialLevers: {

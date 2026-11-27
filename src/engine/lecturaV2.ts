@@ -105,6 +105,8 @@ function getEventIndicators(ev: SimEvent): LecturaIndicadorId[] {
     case 'fenomeno_fin':
     case 'aviso':
       return ['comida', 'animo'];
+    case 'ataque':
+      return ev.resultado === 'golpe' ? ['orden', 'animo'] : ['orden'];
     case 'golpe':
     case 'ruta_cortada':
     case 'accion_inicio':
@@ -266,6 +268,14 @@ function computeZoneMetrics(
     hogaresByZone.get(h.zona)?.push(h);
   }
 
+  const popTotal = Math.max(1, state.npcs.filter((n) => n.vivo).length);
+  const lastPeriodSpend = sumPeriodExpenses(state.gobierno.finanzas);
+  const dailyOutflowEstimate = Math.max(
+    12,
+    lastPeriodSpend > 0 ? lastPeriodSpend / PERIOD_DAYS : popTotal * 1.35
+  );
+  const baseReserveDays = clamp(state.gobierno.reserva / dailyOutflowEstimate, 0, 999);
+
   for (const z of zones) {
     const zNpcs = npcsByZone.get(z) ?? [];
     const zHog = hogaresByZone.get(z) ?? [];
@@ -283,11 +293,18 @@ function computeZoneMetrics(
     const zPrice = state.ultimaSalidaEconomica.precioAlimento[z] ?? state.alimento.precio;
     const priceRatio = state.alimento.precio > 0 ? state.alimento.precio / Math.max(0.5, zPrice) : 1;
     const zComida = clamp(state.alimento.diasStock * priceRatio, 0, 99);
-    const zFirms = state.firmas.filter((f) => f.activa && f.zona === z);
-    const zEstado =
-      zFirms.length > 0
-        ? (zFirms.reduce((s, f) => s + f.factor, 0) / zFirms.length) * 20
-        : 20;
+    const zPublicBlds = state.parcelas.filter(
+      (p) => p.zona === z && p.edificio?.dueno === 'estado' && p.edificio.activo
+    );
+    const zPublicHealth =
+      zPublicBlds.length > 0
+        ? zPublicBlds.reduce((s, p) => s + (p.edificio?.estadoSalud ?? 100), 0) / (zPublicBlds.length * 100)
+        : 0.85;
+    const zPendingWorks = state.parcelas.filter(
+      (p) => p.zona === z && p.estado === 'en_obra' && p.edificio?.dueno === 'estado'
+    ).length;
+    const zEstadoPenalty = state.gobierno.finanzas.impago ? 0.5 : Math.max(0.65, zPublicHealth - zPendingWorks * 0.05);
+    const zEstado = clamp(baseReserveDays * zEstadoPenalty, 0, 999);
 
     result[z] = {
       poblacion: zPop,
@@ -585,6 +602,47 @@ export function updateLecturaDaily(state: GameState, derived: CommunityDerived):
         ev.causa ?? ev.id,
         { clave: 'alerta.impago_estado', params: { faltante: Math.round(ev.faltante) } }
       );
+    } else if (ev.tipo === 'ataque' && ev.resultado === 'golpe') {
+      addAlertIfReady(
+        lectura,
+        dia,
+        'orden',
+        ev.zona,
+        3,
+        ev.causa ?? ev.id,
+        {
+          clave: 'alerta.ataque',
+          params: ev.zonaOrigen ? { zona: ev.zona, origen: ev.zonaOrigen } : { zona: ev.zona },
+        }
+      );
+    } else if (ev.tipo === 'golpe') {
+      addAlertIfReady(
+        lectura,
+        dia,
+        'orden',
+        ev.zona,
+        3,
+        ev.causa ?? ev.id,
+        { clave: 'alerta.golpe', params: { zona: ev.zona } }
+      );
+    }
+  }
+
+  // Full 365-day year compaction when year advances
+  const prevAnio = Math.floor((Math.max(1, lectura.ultimoDiaActualizado) - 1) / 365) + 1;
+  if (state.reloj.anio > prevAnio) {
+    const periodsPerYear = Math.max(1, Math.round(365 / PERIOD_DAYS));
+    for (const id of ALL_INDICATOR_IDS) {
+      const ind = lectura.indicadores[id];
+      ind.serieAnios = ind.serieAnios ?? [];
+      if (ind.serieAnios.some((a) => a.anio === prevAnio)) continue;
+      const periodSlice = (ind.seriePeriodos ?? []).slice(-periodsPerYear);
+      const sourceVals =
+        periodSlice.length > 0 ? periodSlice.map((p) => p.valor) : ind.serie;
+      const avgAnio =
+        sourceVals.reduce((s, v) => s + v, 0) / Math.max(1, sourceVals.length);
+      ind.serieAnios.push({ anio: prevAnio, valor: Number(avgAnio.toFixed(1)) });
+      if (ind.serieAnios.length > 50) ind.serieAnios.shift();
     }
   }
 
@@ -680,19 +738,12 @@ export function updateLecturaPayday(state: GameState, derived: CommunityDerived)
   // 1. Update notables with hysteresis
   lectura.notables = deriveNotablesPayday(state, lectura.notables);
 
-  // 2. Append period/year compaction on indicator series
+  // 2. Append period compaction on indicator series
   for (const id of ALL_INDICATOR_IDS) {
     const ind = lectura.indicadores[id];
     ind.seriePeriodos = ind.seriePeriodos ?? [];
     ind.seriePeriodos.push({ periodo, valor: ind.valor });
-    if (ind.seriePeriodos.length > 80) ind.seriePeriodos.shift();
-    if (periodo % 26 === 0) {
-      ind.serieAnios = ind.serieAnios ?? [];
-      const slice = ind.seriePeriodos.slice(-26);
-      const avgAnio = slice.reduce((s, p) => s + p.valor, 0) / Math.max(1, slice.length);
-      ind.serieAnios.push({ anio: state.reloj.anio, valor: Number(avgAnio.toFixed(1)) });
-      if (ind.serieAnios.length > 50) ind.serieAnios.shift();
-    }
+    if (ind.seriePeriodos.length > 104) ind.seriePeriodos.shift();
   }
 
   // 3. Build period report (top 3 indicator shifts + notable events)
@@ -815,13 +866,14 @@ export function serie(
 ): number[] {
   const ind = state.lectura?.indicadores[id];
   if (!ind) return [];
-  if (resolucion === 'periodo') {
-    return (ind.seriePeriodos ?? []).map((p) => p.valor);
-  }
-  if (resolucion === 'anio') {
-    return (ind.serieAnios ?? []).map((a) => a.valor);
-  }
-  const raw = zona ? ind.seriesPorZona[zona] ?? ind.serie : ind.serie;
+  const raw =
+    resolucion === 'periodo'
+      ? (ind.seriePeriodos ?? []).map((p) => p.valor)
+      : resolucion === 'anio'
+      ? (ind.serieAnios ?? []).map((a) => a.valor)
+      : zona
+      ? ind.seriesPorZona[zona] ?? ind.serie
+      : ind.serie;
   if (desde === undefined && hasta === undefined) return [...raw];
   const start = Math.max(0, desde ?? 0);
   const end = hasta !== undefined ? Math.min(raw.length, hasta) : raw.length;
@@ -958,6 +1010,10 @@ export function formatLecturaTexto(texto: LecturaTexto): string {
       return `Zona ${p.zona} quedó incomunicada`;
     case 'alerta.impago_estado':
       return `Impago fiscal por $${p.faltante}`;
+    case 'alerta.ataque':
+      return p.origen ? `Ataque en zona ${p.zona} (desde ${p.origen})` : `Ataque en zona ${p.zona}`;
+    case 'alerta.golpe':
+      return `Golpe a la población en zona ${p.zona}`;
     default:
       if (texto.clave.startsWith('informe.')) {
         const indName = texto.clave.replace('informe.', '');

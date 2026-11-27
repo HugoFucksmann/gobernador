@@ -24,6 +24,7 @@ import {
 } from '../engine/simulation';
 import {
   ActionDefinition,
+  AiStatus,
   ClassifierRecord,
   GameState,
   NewsArticle,
@@ -31,14 +32,7 @@ import {
   PressFact,
   SubsystemRngState,
 } from '../types/game';
-import { AiStatus } from '../types/ui';
-
-interface AiDirectorResult {
-  type: 'press' | 'action' | 'condition';
-  apply: (state: GameState) => boolean | void;
-  source: 'ia' | 'plantilla';
-  status: AiStatus;
-}
+import type { AiDirectorPort, AiDirectorResult } from '../engine/gameController';
 
 interface NeutralCandidate {
   id: string;
@@ -548,6 +542,66 @@ export async function dispatchPressJob(
   };
 }
 
+async function requestClassifierWeights(
+  endpoint: string,
+  payload: unknown,
+  neutralCandidates: NeutralCandidate[],
+  signal?: AbortSignal
+): Promise<{ probs: Map<string, number> | null; source: 'ia' | 'plantilla'; status: AiStatus; latencyMs: number; rejected: boolean } | null> {
+  const startedAt = Date.now();
+  try {
+    const res = await fetchWithTimeout(
+      endpoint,
+      payload,
+      DIRECTOR_CONSTANTS.plazoClasificadorMs,
+      signal
+    );
+    if (signal?.aborted) return null;
+
+    const latencyMs = Math.max(0, Date.now() - startedAt);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ error: '' }));
+      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
+      return {
+        probs: null,
+        source: 'plantilla',
+        status: recordAiCallOutcome('plantilla', startedAt),
+        latencyMs,
+        rejected: false,
+      };
+    }
+
+    const data = await res.json();
+    const parsedProbs = parseClassifierWeights(data, neutralCandidates);
+    if (!parsedProbs) {
+      return {
+        probs: null,
+        source: 'plantilla',
+        status: recordAiCallOutcome('plantilla', startedAt),
+        latencyMs,
+        rejected: true,
+      };
+    }
+
+    return {
+      probs: parsedProbs,
+      source: 'ia',
+      status: recordAiCallOutcome('ia', startedAt),
+      latencyMs,
+      rejected: false,
+    };
+  } catch {
+    if (signal?.aborted) return null;
+    return {
+      probs: null,
+      source: 'plantilla',
+      status: recordAiCallOutcome('plantilla', startedAt),
+      latencyMs: Math.max(0, Date.now() - startedAt),
+      rejected: false,
+    };
+  }
+}
+
 export async function dispatchSpontaneousActionJob(
   state: GameState,
   options?: { signal?: AbortSignal }
@@ -638,93 +692,38 @@ export async function dispatchSpontaneousActionJob(
   }));
   const situacion = buildSituationFacts(state, npc);
 
-  const startedAt = Date.now();
-  try {
-    const res = await fetchWithTimeout(
-      '/api/ai/action',
-      {
-        npc: {
-          rasgos: npc.personalidad,
-          variables: npc.variables,
-          rol: npc.rol,
-          zona: npc.zona,
-        },
-        situacion,
-        candidatas: neutralCandidates.map((c) => ({
-          id: c.id,
-          descripcion: c.descripcion,
-        })),
+  const outcome = await requestClassifierWeights(
+    '/api/ai/action',
+    {
+      npc: {
+        rasgos: npc.personalidad,
+        variables: npc.variables,
+        rol: npc.rol,
+        zona: npc.zona,
       },
-      DIRECTOR_CONSTANTS.plazoClasificadorMs,
-      options?.signal
-    );
+      situacion,
+      candidatas: neutralCandidates.map((c) => ({
+        id: c.id,
+        descripcion: c.descripcion,
+      })),
+    },
+    neutralCandidates,
+    options?.signal
+  );
+  if (!outcome) return null;
 
-    if (options?.signal?.aborted) return null;
-
-    const latencyMs = Math.max(0, Date.now() - startedAt);
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: '' }));
-      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
-      const status = recordAiCallOutcome('plantilla', startedAt);
-      const chosen = pickWeightedCandidate(candidatas, npc, rng);
-      return {
-        type: 'action',
-        source: 'plantilla',
-        status,
-        apply: (s) => {
-          s.rngState = rng.rngState;
-          if (rng.rng) s.rng = rng.rng;
-          return applySelectedAction(s, chosen, 'motor', latencyMs, false);
-        },
-      };
-    }
-
-    const data = await res.json();
-    const parsedProbs = parseClassifierWeights(data, neutralCandidates);
-    if (!parsedProbs) {
-      const status = recordAiCallOutcome('plantilla', startedAt);
-      const chosen = pickWeightedCandidate(candidatas, npc, rng);
-      return {
-        type: 'action',
-        source: 'plantilla',
-        status,
-        apply: (s) => {
-          s.rngState = rng.rngState;
-          if (rng.rng) s.rng = rng.rng;
-          return applySelectedAction(s, chosen, 'motor', latencyMs, true);
-        },
-      };
-    }
-
-    const status = recordAiCallOutcome('ia', startedAt);
-    const chosen = pickWeightedCandidate(candidatas, npc, rng, parsedProbs);
-
-    return {
-      type: 'action',
-      source: 'ia',
-      status,
-      apply: (s) => {
-        s.rngState = rng.rngState;
-        if (rng.rng) s.rng = rng.rng;
-        return applySelectedAction(s, chosen, 'clasificador', latencyMs, false);
-      },
-    };
-  } catch {
-    if (options?.signal?.aborted) return null;
-    const latencyMs = Math.max(0, Date.now() - startedAt);
-    const status = recordAiCallOutcome('plantilla', startedAt);
-    const chosen = pickWeightedCandidate(candidatas, npc, rng);
-    return {
-      type: 'action',
-      source: 'plantilla',
-      status,
-      apply: (s) => {
-        s.rngState = rng.rngState;
-        if (rng.rng) s.rng = rng.rng;
-        return applySelectedAction(s, chosen, 'motor', latencyMs, false);
-      },
-    };
-  }
+  const chosen = pickWeightedCandidate(candidatas, npc, rng, outcome.probs ?? undefined);
+  const fuente: 'clasificador' | 'motor' = outcome.source === 'ia' ? 'clasificador' : 'motor';
+  return {
+    type: 'action',
+    source: outcome.source,
+    status: outcome.status,
+    apply: (s) => {
+      s.rngState = rng.rngState;
+      if (rng.rng) s.rng = rng.rng;
+      return applySelectedAction(s, chosen, fuente, outcome.latencyMs, outcome.rejected);
+    },
+  };
 }
 
 export async function dispatchConditionJob(
@@ -791,94 +790,54 @@ export async function dispatchConditionJob(
     action,
   }));
   const situacion = buildSituationFacts(state);
-  const startedAt = Date.now();
 
-  try {
-    const res = await fetchWithTimeout(
-      '/api/ai/condition',
-      {
-        disparador: pending.disparador,
-        afectados: {
-          cantidad: pending.intensidadCantidad,
-          muestra,
-        },
-        situacion,
-        candidatas: neutralCandidates.map((c) => ({
-          id: c.id,
-          descripcion: c.descripcion,
-        })),
+  const outcome = await requestClassifierWeights(
+    '/api/ai/condition',
+    {
+      disparador: pending.disparador,
+      afectados: {
+        cantidad: pending.intensidadCantidad,
+        muestra,
       },
-      DIRECTOR_CONSTANTS.plazoClasificadorMs,
-      options?.signal
-    );
+      situacion,
+      candidatas: neutralCandidates.map((c) => ({
+        id: c.id,
+        descripcion: c.descripcion,
+      })),
+    },
+    neutralCandidates,
+    options?.signal
+  );
+  if (!outcome) return null;
 
-    if (options?.signal?.aborted) return null;
-
-    const latencyMs = Math.max(0, Date.now() - startedAt);
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({ error: '' }));
-      if (shouldDisableAi(res.status, errData.error)) aiDisabledForSession = true;
-      const status = recordAiCallOutcome('plantilla', startedAt);
-      const chosen = pickWeightedCandidate(candidatas, null, rng);
-      return {
-        type: 'condition',
-        source: 'plantilla',
-        status,
-        apply: (s) => {
-          s.rngState = rng.rngState;
-          if (rng.rng) s.rng = rng.rng;
-          resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
-          recordCond(s, chosen.id, 'motor', latencyMs, false);
-        },
-      };
-    }
-
-    const data = await res.json();
-    const parsedProbs = parseClassifierWeights(data, neutralCandidates);
-    if (!parsedProbs) {
-      const status = recordAiCallOutcome('plantilla', startedAt);
-      const chosen = pickWeightedCandidate(candidatas, null, rng);
-      return {
-        type: 'condition',
-        source: 'plantilla',
-        status,
-        apply: (s) => {
-          s.rngState = rng.rngState;
-          if (rng.rng) s.rng = rng.rng;
-          resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
-          recordCond(s, chosen.id, 'motor', latencyMs, true);
-        },
-      };
-    }
-
-    const status = recordAiCallOutcome('ia', startedAt);
-    const chosen = pickWeightedCandidate(candidatas, null, rng, parsedProbs);
-    return {
-      type: 'condition',
-      source: 'ia',
-      status,
-      apply: (s) => {
-        s.rngState = rng.rngState;
-        if (rng.rng) s.rng = rng.rng;
-        resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'clasificador');
-        recordCond(s, chosen.id, 'clasificador', latencyMs, false);
-      },
-    };
-  } catch {
-    if (options?.signal?.aborted) return null;
-    const latencyMs = Math.max(0, Date.now() - startedAt);
-    const status = recordAiCallOutcome('plantilla', startedAt);
-    const chosen = pickWeightedCandidate(candidatas, null, rng);
-    return {
-      type: 'condition',
-      source: 'plantilla',
-      status,
-      apply: (s) => {
-        s.rngState = rng.rngState;
-        if (rng.rng) s.rng = rng.rng;
-        resolveConditionWindowWithFallback(s, pending.id, chosen.id, 'motor');
-        recordCond(s, chosen.id, 'motor', latencyMs, false);
-      },
-    };
-  }
+  const chosen = pickWeightedCandidate(candidatas, null, rng, outcome.probs ?? undefined);
+  const fuente: 'clasificador' | 'motor' = outcome.source === 'ia' ? 'clasificador' : 'motor';
+  return {
+    type: 'condition',
+    source: outcome.source,
+    status: outcome.status,
+    apply: (s) => {
+      s.rngState = rng.rngState;
+      if (rng.rng) s.rng = rng.rng;
+      resolveConditionWindowWithFallback(s, pending.id, chosen.id, fuente);
+      recordCond(s, chosen.id, fuente, outcome.latencyMs, outcome.rejected);
+    },
+  };
 }
+
+export async function checkAiHealth(signal?: AbortSignal): Promise<boolean> {
+  if (typeof fetch !== 'function') return false;
+  const res = await fetch('/api/health', { signal });
+  if (!res.ok) return false;
+  const data = (await res.json()) as { aiAvailable?: boolean };
+  return Boolean(data.aiAvailable);
+}
+
+export const browserAiDirector: AiDirectorPort = {
+  checkHealth: checkAiHealth,
+  getRuntimeStatus: getAiRuntimeStatus,
+  resetSessionError: resetAiSessionError,
+  dispatchPressJob,
+  dispatchSpontaneousActionJob,
+  dispatchConditionJob,
+};

@@ -2,15 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ACTION_TABLE,
   BUILDING_CATALOG,
-  DISTRICT_BY_ID,
   ROLE_CATALOG,
-  ZONE_TO_DISTRICT,
 } from '../data/catalogs';
 import {
   evaluateNpcBubbleText,
   evaluateNpcLensColor,
   evaluateZoneMetricColor,
-} from '../engine/npcInsights';
+} from '../utils/npcInsights';
 import {
   computeHospitalFacilities,
   getWorldZones,
@@ -664,21 +662,6 @@ function buildMinimapBgCanvas(
   return c;
 }
 
-function buildLampGlowSprite(): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = 96;
-  c.height = 96;
-  const ctx = c.getContext('2d');
-  if (!ctx) return c;
-  const g = ctx.createRadialGradient(48, 48, 4, 48, 48, 48);
-  g.addColorStop(0, 'rgba(253, 224, 71, 0.55)');
-  g.addColorStop(0.5, 'rgba(253, 224, 71, 0.2)');
-  g.addColorStop(1, 'rgba(253, 224, 71, 0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 96, 96);
-  return c;
-}
-
 type DrawableItem =
   | {
       kind: 'fn';
@@ -956,6 +939,12 @@ function drawParcelBuilding(
       drawIsoBox(c, bx, by, bw, bh, 22, '#e0e7ff', '#a5b4fc', '#c7d2fe', undefined, duskAmount);
       drawIsoPitchedRoof(c, bx - 2, by - 2, bw + 4, bh + 4, 22, 11, '#4f46e5', '#3730a3');
       labelRoof('ESCUELA', 22, '#ffffff');
+      break;
+    }
+    case 'universidad': {
+      drawIsoBox(c, bx, by, bw, bh, 25, '#c7d2fe', '#6366f1', '#818cf8', undefined, duskAmount);
+      drawIsoPitchedRoof(c, bx - 2, by - 2, bw + 4, bh + 4, 25, 13, '#312e81', '#1e1b4b');
+      labelRoof('UNIV.', 26, '#eef2ff');
       break;
     }
     case 'oficina_publica': {
@@ -1239,7 +1228,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     canvas: HTMLCanvasElement;
     key: string;
   } | null>(null);
-  const lampSpriteRef = useRef<HTMLCanvasElement | null>(null);
 
   // Keyboard panning (WASD / Arrows)
   useEffect(() => {
@@ -1273,7 +1261,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     };
   }, [onCancelFollow]);
 
-  // Handle external zone / district / coord jump requests
+  // Handle external zone / coord jump requests
   useEffect(() => {
     if (!cameraTarget) return;
     if (cameraTarget.wx !== undefined && cameraTarget.wy !== undefined) {
@@ -1283,7 +1271,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
       if (camRef.current.targetZoom < 1.15) camRef.current.targetZoom = 1.24;
       return;
     }
-    if (cameraTarget.zone === 'all' || cameraTarget.district === 'all') {
+    if (cameraTarget.zone === 'all') {
       const center = worldToIso(780, 490);
       camRef.current.targetX = center.ix;
       camRef.current.targetY = center.iy;
@@ -1298,28 +1286,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         camRef.current.targetY = p.iy;
         camRef.current.targetZoom = 1.14;
         return;
-      }
-    }
-    if (cameraTarget.district) {
-      const matchingZone = Object.values(stateRef.current.zonas).find(
-        (z) => ZONE_TO_DISTRICT[z.id] === cameraTarget.district
-      );
-      if (matchingZone?.rect) {
-        const p = worldToIso(
-          matchingZone.rect.wx + matchingZone.rect.ww / 2,
-          matchingZone.rect.wy + matchingZone.rect.wh / 2
-        );
-        camRef.current.targetX = p.ix;
-        camRef.current.targetY = p.iy;
-        camRef.current.targetZoom = 1.12;
-        return;
-      }
-      const d = DISTRICT_BY_ID[cameraTarget.district];
-      if (d) {
-        const p = worldToIso(d.x + d.w / 2, d.y + d.h / 2);
-        camRef.current.targetX = p.ix;
-        camRef.current.targetY = p.iy;
-        camRef.current.targetZoom = 1.12;
       }
     }
   }, [cameraTarget]);
@@ -1658,9 +1624,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               canvas: buildStaticTerrainCanvas(st.mapaGrid, zoneList, hasDrought, hasPlague, st.semilla),
               key: terrainKey,
             };
-          }
-          if (!lampSpriteRef.current) {
-            lampSpriteRef.current = buildLampGlowSprite();
           }
 
           // 5. Render Frame
@@ -2153,7 +2116,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 }
               } else if (bld.tipo === 'comisaria' && (activeRoleCounts.policia ?? 0) === 0) {
                 statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
-              } else if (bld.tipo === 'escuela' && (activeRoleCounts.docente ?? 0) === 0) {
+              } else if (
+                (bld.tipo === 'escuela' || bld.tipo === 'universidad') &&
+                (activeRoleCounts.docente ?? 0) === 0
+              ) {
                 statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
               } else if (bld.tipo === 'oficina_publica' && (activeRoleCounts.estatal ?? 0) === 0) {
                 statusTag = { text: 'SIN PERSONAL', bg: '#991b1b', fg: '#fee2e2' };
@@ -2182,28 +2148,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
                 c.font = '700 7px "Plus Jakarta Sans", sans-serif';
                 c.textAlign = 'center';
                 c.fillText(statusTag.text, center.ix, tagY + 9);
-                c.textAlign = 'start';
-              }
-
-              if (
-                activeLens === 'hospital' &&
-                fac &&
-                (bld.tipo === 'hospital' || bld.tipo === 'hospital_campana')
-              ) {
-                const occPct = fac.beds > 0 ? (fac.occupied / fac.beds) * 100 : 120;
-                const barCol = evaluateZoneMetricColor('hospital', occPct);
-                const badgeY = center.iy - (statusTag ? 60 : 44);
-                c.fillStyle = 'rgba(15, 23, 42, 0.9)';
-                c.beginPath();
-                c.roundRect(center.ix - 34, badgeY, 68, 16, 4);
-                c.fill();
-                c.strokeStyle = barCol;
-                c.lineWidth = 1.2;
-                c.stroke();
-                c.fillStyle = '#f8fafc';
-                c.font = '700 8px "Plus Jakarta Sans", sans-serif';
-                c.textAlign = 'center';
-                c.fillText(`${fac.occupied}/${fac.beds} camas`, center.ix, badgeY + 10.5);
                 c.textAlign = 'start';
               }
             });
@@ -2323,26 +2267,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             }
           }
 
-          // Streetlight glow at dusk
-          if (duskAmount > 0.1 && lampSpriteRef.current) {
-            ctx.save();
-            ctx.globalAlpha = Math.min(0.85, duskAmount * 1.4);
-            const lamps = [
-              { x: 205, y: 132 },
-              { x: 600, y: 132 },
-              { x: 995, y: 132 },
-              { x: 205, y: 382 },
-              { x: 600, y: 382 },
-              { x: 995, y: 382 },
-              { x: 600, y: 632 },
-            ];
-            for (const lp of lamps) {
-              const p = worldToIso(lp.x, lp.y);
-              ctx.drawImage(lampSpriteRef.current, p.ix - 48, p.iy - 48);
-            }
-            ctx.restore();
-          }
-
           // Climate / Zombie edge aura & origin indicator
           if (hasZombie) {
             const zombieFen = activeFens.find((f) => f.tipo === 'plaga_zombie');
@@ -2413,11 +2337,6 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
         minimapBgRef.current.canvas.width = 0;
         minimapBgRef.current.canvas.height = 0;
         minimapBgRef.current = null;
-      }
-      if (lampSpriteRef.current) {
-        lampSpriteRef.current.width = 0;
-        lampSpriteRef.current.height = 0;
-        lampSpriteRef.current = null;
       }
     };
   }, []);

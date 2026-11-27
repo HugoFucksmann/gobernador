@@ -7,7 +7,6 @@ import {
   LOT_CLASS_MIN_TILES,
   LOT_CLASS_RANK,
   RITMO_CONSTANTS,
-  ROLE_CATALOG,
   TERRAIN_CONSTANTS,
   VIAL_CONSTANTS,
 } from '../data/catalogs';
@@ -25,7 +24,6 @@ import {
   LotClass,
   MapaV2Grid,
   ModifiableKey,
-  Modifier,
   Npc,
   NpcAgendaSlot,
   NpcRitmo,
@@ -140,7 +138,7 @@ export function shortestZonePath(
   return [from];
 }
 
-export function buildZoneStepMap(
+function buildZoneStepMap(
   zonas: GameState['zonas']
 ): Record<ZoneId, Record<ZoneId, number>> {
   const zoneIds = Object.keys(zonas);
@@ -477,7 +475,7 @@ function generateValidatedTerrain(
   return fallback!;
 }
 
-export function getGridDimensionsForPopulation(
+function getGridDimensionsForPopulation(
   pop: number,
   semilla = 1,
   hasRibera = true
@@ -716,7 +714,7 @@ function rasterizeLineTiles(
   return pts;
 }
 
-export function syncMapaGridVias(
+function syncMapaGridVias(
   grid: MapaV2Grid,
   tramos: ViaTramo[]
 ): void {
@@ -926,12 +924,12 @@ export function buildTileGridAndSyncMap(
   return grid;
 }
 
-export function getViaTramoCost(tramo: ViaTramo): number {
+function getViaTramoCost(tramo: ViaTramo): number {
   if (!tramo.construida || tramo.estado <= 0) return Infinity;
   return tramo.longitud * (1 + VIAL_CONSTANTS.kVial * (1 - clamp(tramo.estado, 0, 100) / 100));
 }
 
-export function getBuiltNetworkNodes(state: Pick<GameState, 'zonas' | 'tramos'>): Set<string> {
+function getBuiltNetworkNodes(state: Pick<GameState, 'zonas' | 'tramos'>): Set<string> {
   const nodes = new Set<string>();
   for (const [zId, z] of Object.entries(state.zonas || {})) {
     if (z.estado !== 'no_urbanizada') {
@@ -1270,7 +1268,7 @@ function hashFloat(seed: number): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-export function getShiftScheduleForNpc(
+function getShiftScheduleForNpc(
   npc: Pick<Npc, 'rol' | 'ritmo'>,
   firmRubro?: FirmRubro
 ): { startH: number; endH: number } {
@@ -1804,7 +1802,7 @@ export function getNpcDailyAgenda(
   ];
 }
 
-export function getCommuteProductivityFactor(
+function getCommuteProductivityFactor(
   state: GameState,
   npc: Npc,
   firmaById?: Map<string, Firma>
@@ -1937,7 +1935,7 @@ export function computeDailyFoodPriceForZone(state: GameState, zona: ZoneId): nu
   return Number(rawPrice.toFixed(3));
 }
 
-export function getFirmaLocales(state: GameState, firma: Firma): Parcela[] {
+function getFirmaLocales(state: GameState, firma: Firma): Parcela[] {
   if (!firma.locales || firma.locales.length === 0) return [];
   const set = new Set(firma.locales);
   return state.parcelas.filter((p) => set.has(p.id) && p.edificio && p.edificio.activo);
@@ -1957,12 +1955,12 @@ export function getFirmaRoleCaps(state: GameState, firma: Firma): Partial<Record
   return total;
 }
 
-export function getHouseEffectiveCapacity(casa: Casa): number {
+function getHouseEffectiveCapacity(casa: Casa): number {
   const stateFactor = clamp(casa.estado / 100, 0.4, 1);
   return Math.max(1, Math.round(casa.capacidad * stateFactor));
 }
 
-export function isHogarHacinado(hogar: Hogar, casa: Casa | undefined): boolean {
+function isHogarHacinado(hogar: Hogar, casa: Casa | undefined): boolean {
   if (!casa) return false;
   return hogar.miembros.length > getHouseEffectiveCapacity(casa);
 }
@@ -2128,117 +2126,6 @@ export function computeAmenazaPercibida(state: GameState): Record<ZoneId, number
   }
 
   return result;
-}
-
-export function computeNpcVariableTargets(
-  npc: Npc,
-  hogar: Hogar | undefined,
-  casa: Casa | undefined,
-  state: GameState,
-  ctx?: { vivosCount?: number; hospitalFull?: boolean }
-): {
-  satisfaccion: number;
-  lealtad: number;
-} {
-  let vivosCount = ctx?.vivosCount;
-  let hospitalFull = ctx?.hospitalFull;
-  if (vivosCount === undefined || hospitalFull === undefined) {
-    let alive = 0;
-    let internadosCount = 0;
-    for (const n of state.npcs) {
-      if (!n.vivo) continue;
-      alive++;
-      if (n.hospital.internado) internadosCount++;
-    }
-    vivosCount = Math.max(1, alive);
-    const hospitalCap = computeHospitalFacilities(
-      state.parcelas,
-      state.npcs,
-      state.zonas,
-      state.distanciasZonas
-    ).reduce(
-      (s, f) => s + f.camasEfectivas,
-      0
-    );
-    hospitalFull = hospitalCap > 0 && internadosCount >= hospitalCap;
-  }
-
-  const isStreet = hogar?.estado === 'calle' && !hogar?.ocupandoCasaId;
-  const isOwner =
-    Boolean(casa && hogar) &&
-    ((casa!.dueno.tipo === 'hogar' && casa!.dueno.id === hogar!.id) ||
-      (casa!.dueno.tipo === 'npc' && hogar!.miembros.includes(casa!.dueno.id)));
-  const isCrowded = isHogarHacinado(hogar ?? ({ miembros: [] } as unknown as Hogar), casa);
-  const houseBadState = casa ? casa.estado < HOUSING_CONSTANTS.umbralEstadoCasaMalo : false;
-  const rentBurden =
-    hogar && casa && !isOwner && hogar.ultimoIngresoNeto > 0
-      ? casa.alquiler / Math.max(1, hogar.ultimoIngresoNeto)
-      : 0;
-
-  const powerAdq = state.ultimaSalidaEconomica?.poderAdquisitivo?.[npc.hogarId] ?? 65;
-  const empBonus = npc.rol === 'desempleado' ? -12 : 4;
-  const healthBonus = (npc.variables.salud - 70) * 0.28;
-  const hungerPenalty = npc.variables.hambre * 0.42;
-  const fearPenalty = npc.variables.miedo * 0.2;
-  const housingDelta =
-    (isOwner ? 6 : 0) +
-    (isStreet ? -22 : 0) +
-    (isCrowded ? -8 : 0) +
-    (houseBadState ? -6 : 0) +
-    (rentBurden > 0.4 ? -clamp((rentBurden - 0.4) * 28, 0, 14) : 0);
-
-  const familySize = hogar?.miembros.length ?? 1;
-  const familyBonus = (npc.parejaId ? 3 : 0) + (familySize >= 3 ? 2.5 : 0);
-  const recentLossPenalty =
-    npc.ultimaPerdidaFamiliarDia && state.reloj.dia - npc.ultimaPerdidaFamiliarDia <= 14
-      ? -clamp(14 - (state.reloj.dia - npc.ultimaPerdidaFamiliarDia), 2, 12)
-      : 0;
-
-  const hungryKidsPenalty =
-    hogar && hogar.noPudoPagarComida ? -8 : 0;
-
-  const resilFactor = (getEffectiveTrait(npc, 'resiliencia') - 50) * 0.14;
-  const modSat = getModifierDelta(npc, 'satisfaccion');
-
-  const satisfaccion = clamp(
-    46 +
-      (powerAdq - 50) * 0.3 +
-      empBonus +
-      healthBonus -
-      hungerPenalty -
-      fearPenalty +
-      housingDelta +
-      familyBonus +
-      recentLossPenalty +
-      hungryKidsPenalty +
-      resilFactor +
-      modSat,
-    0,
-    100
-  );
-
-  const pubBonus = ROLE_CATALOG[npc.rol].publico ? 8 : 0;
-  const taxDrag = (state.gobierno.palancasVigentes.impuesto - 36) * -0.25;
-  const servQuality =
-    (state.gobierno.indicadores.salud +
-      state.gobierno.indicadores.seguridad +
-      state.gobierno.indicadores.infraestructura) /
-      3 -
-    55;
-  const modLealtad = getModifierDelta(npc, 'lealtad');
-  const lealtad = clamp(
-    52 +
-      (satisfaccion - 50) * 0.55 +
-      pubBonus +
-      taxDrag +
-      servQuality * 0.25 -
-      (hospitalFull && vivosCount > 0 ? 4 : 0) +
-      modLealtad,
-    0,
-    100
-  );
-
-  return { satisfaccion, lealtad };
 }
 
 export function getNpcProductivity(
@@ -2463,7 +2350,6 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     state.parcelas,
     state.gobierno.palancasVigentes.nivelObras,
     vivosCount,
-    state.config.poblacionInicial,
     tramos
   );
   const constrFirms = activeFirmas.filter((f) => f.rubro === 'construccion');
@@ -2531,7 +2417,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   };
 }
 
-export const ROOT_EVENT_TYPES = new Set<string>([
+const ROOT_EVENT_TYPES = new Set<string>([
   'control',
   'obra_inicio',
   'demolicion',
@@ -2662,15 +2548,6 @@ export function emitSimEvent(state: GameState, event: SimEvent): void {
   }
 }
 
-export function addNpcModifier(npc: Npc, mod: Modifier): void {
-  const existingIdx = npc.modificadores.findIndex((m) => m.id === mod.id);
-  if (existingIdx >= 0) {
-    npc.modificadores[existingIdx] = mod;
-  } else {
-    npc.modificadores.push(mod);
-  }
-}
-
 export function checkEngineInvariants(
   state: GameState,
   opts?: { checkMoney?: boolean }
@@ -2689,7 +2566,6 @@ export function checkEngineInvariants(
 
   const npcById = new Map(state.npcs.map((n) => [n.id, n]));
   const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
-  const casaById = new Map(state.casas.map((c) => [c.id, c]));
   const firmaById = new Map(state.firmas.map((f) => [f.id, f]));
 
   for (const h of state.hogares) {
@@ -2744,7 +2620,6 @@ export function checkEngineInvariants(
     }
   }
 
-  void casaById;
   return errors;
 }
 

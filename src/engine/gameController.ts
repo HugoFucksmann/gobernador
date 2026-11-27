@@ -1,11 +1,4 @@
 import {
-  dispatchConditionJob,
-  dispatchPressJob,
-  dispatchSpontaneousActionJob,
-  getAiRuntimeStatus,
-  resetAiSessionError,
-} from '../services/aiDirector';
-import {
   ACTION_TABLE,
   DEFAULT_TRAMOS,
   DEFAULT_ZONAS,
@@ -15,7 +8,7 @@ import {
   SCENARIO_PRESETS,
 } from '../data/catalogs';
 import {
-  ActionEffectSpec,
+  AiStatus,
   BuildingType,
   ClimatePhenomenon,
   CommunityDerived,
@@ -25,13 +18,11 @@ import {
   LeverKey,
   PhenomenonType,
   ServiceLevel,
-  SimEvent,
   WorldComplexityLevel,
   WorldConfig,
   ZoneId,
 } from '../types/game';
-import { AiStatus } from '../types/ui';
-import { DEFAULT_WORLD_CONFIG } from './policies';
+import { DEFAULT_WORLD_CONFIG, getGovernorLevel } from './policies';
 import { initSubsystemRng, nextSeqId, normalizeSeed } from './rng';
 import {
   computeTotalWorldMoney,
@@ -62,6 +53,59 @@ import {
 import { initLecturaState } from './lecturaV2';
 
 export type { ExtraLeverKey };
+
+export interface StorageAdapter {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export interface AiDirectorResult {
+  type: 'press' | 'action' | 'condition';
+  apply: (state: GameState) => boolean | void;
+  source: 'ia' | 'plantilla';
+  status: AiStatus;
+}
+
+export interface AiDirectorPort {
+  checkHealth(signal?: AbortSignal): Promise<boolean>;
+  getRuntimeStatus(usarIaGemini: boolean, serverAvailable: boolean): AiStatus;
+  resetSessionError(): void;
+  dispatchPressJob(
+    state: GameState,
+    options?: { allowManualFallback?: boolean; signal?: AbortSignal }
+  ): Promise<AiDirectorResult | null>;
+  dispatchSpontaneousActionJob(
+    state: GameState,
+    options?: { signal?: AbortSignal }
+  ): Promise<AiDirectorResult | null>;
+  dispatchConditionJob(
+    state: GameState,
+    options?: { signal?: AbortSignal }
+  ): Promise<AiDirectorResult | null>;
+}
+
+export interface GameControllerOptions {
+  storage?: StorageAdapter;
+  aiDirector?: AiDirectorPort;
+}
+
+const NULL_AI_DIRECTOR: AiDirectorPort = {
+  checkHealth: async () => false,
+  getRuntimeStatus: () => 'plantilla',
+  resetSessionError: () => {},
+  dispatchPressJob: async () => null,
+  dispatchSpontaneousActionJob: async () => null,
+  dispatchConditionJob: async () => null,
+};
+
+function getDefaultStorage(): StorageAdapter | null {
+  try {
+    const ls = (globalThis as { localStorage?: StorageAdapter }).localStorage;
+    return ls && typeof ls.getItem === 'function' && typeof ls.setItem === 'function' ? ls : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface SaveSlotMeta {
   dia: number;
@@ -113,10 +157,10 @@ function isValidSavedGameState(raw: unknown): raw is GameState {
   return true;
 }
 
-function readSaveMeta(key: string): SaveSlotMeta | null {
+function readSaveMeta(storage: StorageAdapter | null, key: string): SaveSlotMeta | null {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(key);
+    if (!storage) return null;
+    const raw = storage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredSavePayload>;
     if (!parsed?.meta || typeof parsed.meta.dia !== 'number' || !isValidSavedGameState(parsed.state)) {
@@ -128,9 +172,9 @@ function readSaveMeta(key: string): SaveSlotMeta | null {
   }
 }
 
-function writeSave(key: string, state: GameState): SaveSlotMeta | null {
+function writeSave(storage: StorageAdapter | null, key: string, state: GameState): SaveSlotMeta | null {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
+    if (!storage) return null;
     const meta: SaveSlotMeta = {
       dia: state.reloj.dia,
       escenarioNombre:
@@ -138,17 +182,17 @@ function writeSave(key: string, state: GameState): SaveSlotMeta | null {
       savedAt: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
     };
     const payload: StoredSavePayload = { meta, state };
-    window.localStorage.setItem(key, JSON.stringify(payload));
+    storage.setItem(key, JSON.stringify(payload));
     return meta;
   } catch {
     return null;
   }
 }
 
-function readSavedState(key: string): GameState | null {
+function readSavedState(storage: StorageAdapter | null, key: string): GameState | null {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(key);
+    if (!storage) return null;
+    const raw = storage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredSavePayload>;
     if (!isValidSavedGameState(parsed?.state)) {
@@ -160,56 +204,30 @@ function readSavedState(key: string): GameState | null {
   }
 }
 
-function migrateLegacyLevers(rawLevers: unknown, scenarioId: 'elecciones' | 'zombies'): GovernorLevers {
+function normalizeLevers(rawLevers: unknown, scenarioId: 'elecciones' | 'zombies'): GovernorLevers {
   const fallback = structuredClone(SCENARIO_PRESETS[scenarioId].initialLevers);
   if (!rawLevers || typeof rawLevers !== 'object') return fallback;
-  const obj = rawLevers as Record<string, unknown>;
-  if (typeof obj.impuesto === 'number' && typeof obj.salarioPublico === 'number' && typeof obj.ayudaSocial === 'number') {
-    const legacyServ = obj.servicios as { obras?: number } | undefined;
-    const nivelRaw = typeof obj.nivelObras === 'number' ? obj.nivelObras : legacyServ?.obras ?? fallback.nivelObras;
-    const clampedNivel = Math.min(5, Math.max(0, Math.round(nivelRaw))) as ServiceLevel;
-    return {
-      impuesto: Number(obj.impuesto),
-      salarioPublico: Number(obj.salarioPublico),
-      nivelObras: clampedNivel,
-      ayudaSocial: Number(obj.ayudaSocial),
-      garantiaAlimentaria: Number(obj.garantiaAlimentaria ?? fallback.garantiaAlimentaria),
-      precioMaximo: (obj.precioMaximo as GovernorLevers['precioMaximo']) ?? fallback.precioMaximo,
-      comercioExterior: (obj.comercioExterior as GovernorLevers['comercioExterior']) ?? fallback.comercioExterior,
-      prensa: Number(obj.prensa ?? fallback.prensa),
-      topeEmision: Number(obj.topeEmision ?? fallback.topeEmision),
-    };
-  }
-  const legacyRec = obj.recaudacion as { impuestoGrupo?: Record<string, number> } | undefined;
-  const legacyGasto = obj.gasto as { salarioPublico?: number } | undefined;
-  const legacyAlim = obj.alimento as { garantiaAlimentaria?: number; intercambio?: number } | undefined;
-  const legacyFin = obj.finanzas as { topeEmision?: number } | undefined;
-
-  if (legacyRec?.impuestoGrupo) {
-    const vals = Object.values(legacyRec.impuestoGrupo).filter((v) => typeof v === 'number');
-    if (vals.length > 0) {
-      fallback.impuesto = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
-    }
-  }
-  if (typeof legacyGasto?.salarioPublico === 'number') {
-    fallback.salarioPublico = legacyGasto.salarioPublico;
-  }
-  if (typeof legacyAlim?.garantiaAlimentaria === 'number') {
-    fallback.garantiaAlimentaria = legacyAlim.garantiaAlimentaria;
-  }
-  if (typeof legacyAlim?.intercambio === 'number') {
-    const x = legacyAlim.intercambio;
-    fallback.comercioExterior = x <= -75 ? -100 : x <= -25 ? -50 : x >= 75 ? 100 : x >= 25 ? 50 : 0;
-  }
-  if (typeof legacyFin?.topeEmision === 'number') {
-    fallback.topeEmision = legacyFin.topeEmision;
-  }
-  return fallback;
+  const obj = rawLevers as Partial<GovernorLevers>;
+  const nivelRaw = typeof obj.nivelObras === 'number' ? obj.nivelObras : fallback.nivelObras;
+  const clampedNivel = Math.min(5, Math.max(0, Math.round(nivelRaw))) as ServiceLevel;
+  return {
+    impuesto: Number(obj.impuesto ?? fallback.impuesto),
+    salarioPublico: Number(obj.salarioPublico ?? fallback.salarioPublico),
+    nivelObras: clampedNivel,
+    ayudaSocial: Number(obj.ayudaSocial ?? fallback.ayudaSocial),
+    garantiaAlimentaria: Number(obj.garantiaAlimentaria ?? fallback.garantiaAlimentaria),
+    precioMaximo: obj.precioMaximo ?? fallback.precioMaximo,
+    comercioExterior: obj.comercioExterior ?? fallback.comercioExterior,
+    prensa: Number(obj.prensa ?? fallback.prensa),
+    topeEmision: Number(obj.topeEmision ?? fallback.topeEmision),
+  };
 }
 
 export class GameController {
   private state: GameState;
   private derived: CommunityDerived;
+  private readonly storage: StorageAdapter | null;
+  private readonly aiDirector: AiDirectorPort;
   private paused = false;
   private speed = 1;
   private aiAvailable = false;
@@ -233,12 +251,17 @@ export class GameController {
   private sessionEpoch = 0;
   private aiAbortController: AbortController | null = null;
 
-  constructor(initialConfig: WorldConfig = DEFAULT_WORLD_CONFIG) {
+  constructor(
+    initialConfig: WorldConfig = DEFAULT_WORLD_CONFIG,
+    options?: GameControllerOptions
+  ) {
+    this.storage = options?.storage ?? getDefaultStorage();
+    this.aiDirector = options?.aiDirector ?? NULL_AI_DIRECTOR;
     this.state = createInitialGameState(initialConfig);
     this.derived = deriveCommunityStats(this.state);
     this.lastDerivedKey = this.computeDerivedKey(this.state);
-    this.manualSaveMeta = readSaveMeta(MANUAL_SAVE_KEY);
-    this.autoSaveMeta = readSaveMeta(AUTO_SAVE_KEY);
+    this.manualSaveMeta = readSaveMeta(this.storage, MANUAL_SAVE_KEY);
+    this.autoSaveMeta = readSaveMeta(this.storage, AUTO_SAVE_KEY);
     this.snapshot = this.buildSnapshot();
   }
 
@@ -257,7 +280,7 @@ export class GameController {
       speed: this.speed,
       aiAvailable: this.aiAvailable,
       aiBusy: this.aiBusy,
-      aiStatus: getAiRuntimeStatus(this.state.config.usarIaGemini, this.aiAvailable),
+      aiStatus: this.aiDirector.getRuntimeStatus(this.state.config.usarIaGemini, this.aiAvailable),
       devMode: this.devMode,
       noRender: this.noRender,
       simStepMs: this.simStepMs,
@@ -319,7 +342,7 @@ export class GameController {
     this.inFlightConditions.clear();
     this.aiInFlight = false;
     this.aiBusy = false;
-    resetAiSessionError();
+    this.aiDirector.resetSessionError();
   }
 
   private ensureAiSignal(): AbortSignal | undefined {
@@ -331,13 +354,11 @@ export class GameController {
   }
 
   private checkAiHealth(): void {
-    if (typeof fetch !== 'function') return;
     const epoch = this.sessionEpoch;
-    fetch('/api/health', { signal: this.ensureAiSignal() })
-      .then((r) => r.json())
-      .then((data) => {
+    this.aiDirector
+      .checkHealth(this.ensureAiSignal())
+      .then((available) => {
         if (this.destroyed || epoch !== this.sessionEpoch) return;
-        const available = Boolean(data.aiAvailable);
         if (available !== this.aiAvailable) {
           this.aiAvailable = available;
           this.commit();
@@ -388,7 +409,7 @@ export class GameController {
     this.syncDerivedAndGovCheck(next, prevGov);
 
     if (next.reloj.periodo !== prevPeriodo) {
-      const saved = writeSave(AUTO_SAVE_KEY, next);
+      const saved = writeSave(this.storage, AUTO_SAVE_KEY, next);
       if (saved) this.autoSaveMeta = saved;
     }
 
@@ -575,7 +596,7 @@ export class GameController {
   }
 
   saveManual(): boolean {
-    const meta = writeSave(MANUAL_SAVE_KEY, this.state);
+    const meta = writeSave(this.storage, MANUAL_SAVE_KEY, this.state);
     if (!meta) return false;
     this.manualSaveMeta = meta;
     this.commit();
@@ -583,7 +604,7 @@ export class GameController {
   }
 
   loadManual(): boolean {
-    const loaded = readSavedState(MANUAL_SAVE_KEY);
+    const loaded = readSavedState(this.storage, MANUAL_SAVE_KEY);
     if (!loaded) return false;
     try {
       this.applyLoadedState(loaded);
@@ -594,7 +615,7 @@ export class GameController {
   }
 
   loadAutoSave(): boolean {
-    const loaded = readSavedState(AUTO_SAVE_KEY);
+    const loaded = readSavedState(this.storage, AUTO_SAVE_KEY);
     if (!loaded) return false;
     try {
       this.applyLoadedState(loaded);
@@ -611,14 +632,10 @@ export class GameController {
     this.paused = false;
     this.resetAiLifecycle();
 
-    // Migrate saves cleanly to v2 schema
+    // Normalize loaded saves to current V2 schema defaults
     const preset = SCENARIO_PRESETS[loaded.config.escenarioId] || SCENARIO_PRESETS.elecciones;
     loaded.config.escenarioId = preset.id;
     loaded.versionFormato = SAVE_FORMAT_VERSION;
-    const legacyEcon = loaded.config.economiaModulo as string;
-    if (legacyEcon === 'simple' || legacyEcon === 'individual') {
-      loaded.config.economiaModulo = 'base';
-    }
     const resolvedComplexity = resolveComplexityConfig(loaded.config);
     loaded.config.nivelMundo = resolvedComplexity.nivelMundo;
     loaded.config.nivelGobernador = resolvedComplexity.nivelGobernador;
@@ -626,9 +643,6 @@ export class GameController {
     loaded.config.estadoAutomatico = Boolean(
       loaded.config.estadoAutomatico ?? resolvedComplexity.estadoAutomatico
     );
-    if ('disturbiosActivos' in (loaded.config as unknown as Record<string, unknown>)) {
-      delete (loaded.config as unknown as Record<string, unknown>).disturbiosActivos;
-    }
     loaded.semilla = normalizeSeed(loaded.semilla ?? loaded.config.semilla ?? 1);
     loaded.config.semilla = loaded.semilla;
     loaded.rngState = normalizeSeed(loaded.rngState ?? loaded.semilla);
@@ -645,15 +659,15 @@ export class GameController {
       loaded.idSeq = 0;
     }
 
-    const rawClock = loaded.reloj as unknown as Record<string, unknown>;
+    const rawClock = loaded.reloj;
     loaded.reloj = {
       tick: Number(rawClock.tick ?? 0),
       dia: Number(rawClock.dia ?? 1),
       anio: Number(rawClock.anio ?? 1),
-      periodo: Number(rawClock.periodo ?? rawClock.periodoFiscal ?? 1),
-      diasEnPeriodo: Number(rawClock.diasEnPeriodo ?? rawClock.diasEnPeriodoFiscal ?? 0),
+      periodo: Number(rawClock.periodo ?? 1),
+      diasEnPeriodo: Number(rawClock.diasEnPeriodo ?? 0),
       ticksPorDia: Number(rawClock.ticksPorDia ?? TICKS_PER_DAY),
-      velocidad: ((rawClock.velocidad as 1 | 2 | 4 | 8) ?? 1),
+      velocidad: rawClock.velocidad ?? 1,
       pausado: Boolean(rawClock.pausado ?? false),
     };
 
@@ -710,22 +724,10 @@ export class GameController {
       loaded.vacantesCriticasRachas = {};
     }
 
-    loaded.gobierno.palancasVigentes = migrateLegacyLevers(loaded.gobierno.palancasVigentes, preset.id);
-    loaded.gobierno.palancasObjetivo = migrateLegacyLevers(loaded.gobierno.palancasObjetivo, preset.id);
-    if ('palancasInicioPeriodo' in (loaded.gobierno as unknown as Record<string, unknown>)) {
-      delete (loaded.gobierno as unknown as Record<string, unknown>).palancasInicioPeriodo;
-    }
-    if ('prensaObjetivo' in (loaded.gobierno as unknown as Record<string, unknown>)) {
-      delete (loaded.gobierno as unknown as Record<string, unknown>).prensaObjetivo;
-    }
-    if ('prensaInicioPeriodo' in (loaded.gobierno as unknown as Record<string, unknown>)) {
-      delete (loaded.gobierno as unknown as Record<string, unknown>).prensaInicioPeriodo;
-    }
+    loaded.gobierno.palancasVigentes = normalizeLevers(loaded.gobierno.palancasVigentes, preset.id);
+    loaded.gobierno.palancasObjetivo = normalizeLevers(loaded.gobierno.palancasObjetivo, preset.id);
     if (!loaded.gobierno.cuposFijos) {
       loaded.gobierno.cuposFijos = { ...preset.cuposFijos };
-    }
-    if ('educacion' in (loaded.gobierno.indicadores as unknown as Record<string, unknown>)) {
-      delete (loaded.gobierno.indicadores as unknown as Record<string, unknown>).educacion;
     }
     loaded.gobierno.coberturas = {
       policia: loaded.gobierno.coberturas?.policia ?? 1,
@@ -737,67 +739,66 @@ export class GameController {
       for (const z of Object.keys(loaded.zonas)) loaded.gobierno.integridad[z] = 100;
     }
 
-    const legacyFin = loaded.gobierno.finanzas as unknown as Record<string, unknown>;
+    const fin = loaded.gobierno.finanzas;
     loaded.gobierno.finanzas = {
-      ingresos: Number(legacyFin.ingresos ?? 0),
-      nomina: Number(legacyFin.nomina ?? 0),
-      pensiones: Number(legacyFin.pensiones ?? 0),
-      garantiaAlimentaria: Number(legacyFin.garantiaAlimentaria ?? 0),
-      garantiaImpaga: Number(legacyFin.garantiaImpaga ?? 0),
-      comidaMenores: Number(legacyFin.comidaMenores ?? 0),
-      acogidaMenores: Number(legacyFin.acogidaMenores ?? 0),
-      ayudaSocial: Number(legacyFin.ayudaSocial ?? 0),
-      mantenimiento: Number(legacyFin.mantenimiento ?? 0),
-      mantenimientoVias: Number(legacyFin.mantenimientoVias ?? 0),
-      mantenimientoEdificios: Number(legacyFin.mantenimientoEdificios ?? 0),
-      operacionObras: Number(legacyFin.operacionObras ?? 0),
-      operacion: Number(legacyFin.operacion ?? legacyFin.presupuestoAsignado ?? 0),
-      obras: Number(legacyFin.obras ?? 0),
-      prensa: Number(legacyFin.prensa ?? legacyFin.prensaAsignada ?? 0),
-      subsidios: Number(legacyFin.subsidios ?? 0),
-      saldo: Number(legacyFin.saldo ?? legacyFin.disponible ?? 0),
-      emision: Number(legacyFin.emision ?? 0),
-      importaciones: Number(legacyFin.importaciones ?? legacyFin.comprasAlimento ?? 0),
-      exportaciones: Number(legacyFin.exportaciones ?? legacyFin.ventasAlimento ?? 0),
-      impago: Boolean(legacyFin.impago),
-      alcanzaNomina: Boolean(legacyFin.alcanzaNomina ?? legacyFin.impago),
-      prorrateoDiscrecional: Number(legacyFin.prorrateoDiscrecional ?? 1),
-      prorrateoNomina: Number(legacyFin.prorrateoNomina ?? (legacyFin.impago ? 0 : 1)),
-      prorrateoPensionGarantia: Number(legacyFin.prorrateoPensionGarantia ?? 1),
+      ingresos: Number(fin.ingresos ?? 0),
+      nomina: Number(fin.nomina ?? 0),
+      pensiones: Number(fin.pensiones ?? 0),
+      garantiaAlimentaria: Number(fin.garantiaAlimentaria ?? 0),
+      garantiaImpaga: Number(fin.garantiaImpaga ?? 0),
+      comidaMenores: Number(fin.comidaMenores ?? 0),
+      acogidaMenores: Number(fin.acogidaMenores ?? 0),
+      ayudaSocial: Number(fin.ayudaSocial ?? 0),
+      mantenimiento: Number(fin.mantenimiento ?? 0),
+      mantenimientoVias: Number(fin.mantenimientoVias ?? 0),
+      mantenimientoEdificios: Number(fin.mantenimientoEdificios ?? 0),
+      operacionObras: Number(fin.operacionObras ?? 0),
+      operacion: Number(fin.operacion ?? 0),
+      obras: Number(fin.obras ?? 0),
+      prensa: Number(fin.prensa ?? 0),
+      subsidios: Number(fin.subsidios ?? 0),
+      saldo: Number(fin.saldo ?? 0),
+      emision: Number(fin.emision ?? 0),
+      importaciones: Number(fin.importaciones ?? 0),
+      exportaciones: Number(fin.exportaciones ?? 0),
+      impago: Boolean(fin.impago),
+      alcanzaNomina: Boolean(fin.alcanzaNomina ?? !fin.impago),
+      prorrateoDiscrecional: Number(fin.prorrateoDiscrecional ?? 1),
+      prorrateoNomina: Number(fin.prorrateoNomina ?? (fin.impago ? 0 : 1)),
+      prorrateoPensionGarantia: Number(fin.prorrateoPensionGarantia ?? 1),
     };
 
-    const legacyAcum = (loaded.gobierno.acumuladoPeriodo ?? {}) as unknown as Record<string, unknown>;
+    const acum = loaded.gobierno.acumuladoPeriodo;
     loaded.gobierno.acumuladoPeriodo = {
-      dias: Number(legacyAcum.dias ?? 0),
-      impuestos: Number(legacyAcum.impuestos ?? 0),
-      nominaPorNpc: (legacyAcum.nominaPorNpc as Record<string, number>) ?? {},
-      pensionesPorNpc: (legacyAcum.pensionesPorNpc as Record<string, number>) ?? {},
-      ayudaPorNpc: (legacyAcum.ayudaPorNpc as Record<string, number>) ?? {},
-      periodistasPorNpc: (legacyAcum.periodistasPorNpc as Record<string, number>) ?? {},
-      nominaDevengada: Number(legacyAcum.nominaDevengada ?? legacyAcum.nomina ?? 0),
-      pensionesDevengadas: Number(legacyAcum.pensionesDevengadas ?? legacyAcum.pensiones ?? 0),
-      ayudaDevengada: Number(legacyAcum.ayudaDevengada ?? legacyAcum.ayudaSocial ?? 0),
-      garantiaAlimentaria: Number(legacyAcum.garantiaAlimentaria ?? 0),
-      garantiaImpaga: Number(legacyAcum.garantiaImpaga ?? 0),
-      comidaMenores: Number(legacyAcum.comidaMenores ?? 0),
-      acogidaMenores: Number(legacyAcum.acogidaMenores ?? 0),
-      mantenimiento: Number(legacyAcum.mantenimiento ?? 0),
-      mantenimientoVias: Number(legacyAcum.mantenimientoVias ?? 0),
-      operacionObras: Number(legacyAcum.operacionObras ?? 0),
-      operacion: Number(legacyAcum.operacion ?? 0),
-      obras: Number(legacyAcum.obras ?? 0),
-      operacionPorArea: (legacyAcum.operacionPorArea as GameState['gobierno']['acumuladoPeriodo']['operacionPorArea']) ?? {
+      dias: Number(acum?.dias ?? 0),
+      impuestos: Number(acum?.impuestos ?? 0),
+      nominaPorNpc: acum?.nominaPorNpc ?? {},
+      pensionesPorNpc: acum?.pensionesPorNpc ?? {},
+      ayudaPorNpc: acum?.ayudaPorNpc ?? {},
+      periodistasPorNpc: acum?.periodistasPorNpc ?? {},
+      nominaDevengada: Number(acum?.nominaDevengada ?? 0),
+      pensionesDevengadas: Number(acum?.pensionesDevengadas ?? 0),
+      ayudaDevengada: Number(acum?.ayudaDevengada ?? 0),
+      garantiaAlimentaria: Number(acum?.garantiaAlimentaria ?? 0),
+      garantiaImpaga: Number(acum?.garantiaImpaga ?? 0),
+      comidaMenores: Number(acum?.comidaMenores ?? 0),
+      acogidaMenores: Number(acum?.acogidaMenores ?? 0),
+      mantenimiento: Number(acum?.mantenimiento ?? 0),
+      mantenimientoVias: Number(acum?.mantenimientoVias ?? 0),
+      operacionObras: Number(acum?.operacionObras ?? 0),
+      operacion: Number(acum?.operacion ?? 0),
+      obras: Number(acum?.obras ?? 0),
+      operacionPorArea: acum?.operacionPorArea ?? {
         seguridad: 0,
         salud: 0,
         infraestructura: 0,
       },
-      prensa: Number(legacyAcum.prensa ?? 0),
-      subsidios: Number(legacyAcum.subsidios ?? 0),
-      importaciones: Number(legacyAcum.importaciones ?? legacyAcum.comprasAlimento ?? 0),
-      exportaciones: Number(legacyAcum.exportaciones ?? legacyAcum.ventasAlimento ?? 0),
+      prensa: Number(acum?.prensa ?? 0),
+      subsidios: Number(acum?.subsidios ?? 0),
+      importaciones: Number(acum?.importaciones ?? 0),
+      exportaciones: Number(acum?.exportaciones ?? 0),
     };
 
-    const legacyOut = (loaded.ultimaSalidaEconomica ?? {}) as unknown as Record<string, unknown>;
     const fallbackPrices: Record<ZoneId, number> = {};
     const fallbackRent: Record<ZoneId, number> = {};
     for (const z of Object.keys(loaded.zonas)) {
@@ -818,16 +819,8 @@ export class GameController {
         industriaExportDia: 0,
       };
     } else {
-      if (typeof legacyOut.saldoDiarioEstimado !== 'number') {
-        loaded.ultimaSalidaEconomica.saldoDiarioEstimado = Number(legacyOut.disponibleDiarioEstimado ?? 0);
-        delete legacyOut.disponibleDiarioEstimado;
-      }
-      if (typeof loaded.ultimaSalidaEconomica.precioAlimento === 'number') {
-        const pNum = loaded.ultimaSalidaEconomica.precioAlimento as unknown as number;
-        const map: Record<ZoneId, number> = {};
-        for (const z of Object.keys(loaded.zonas)) map[z] = pNum;
-        loaded.ultimaSalidaEconomica.precioAlimento = map;
-      }
+      loaded.ultimaSalidaEconomica.saldoDiarioEstimado ??= 0;
+      loaded.ultimaSalidaEconomica.precioAlimento ??= fallbackPrices;
       loaded.ultimaSalidaEconomica.alquilerMedio ??= fallbackRent;
       loaded.ultimaSalidaEconomica.cuotaMercado ??= {};
       loaded.ultimaSalidaEconomica.precioGlobal ??= loaded.alimento.precio;
@@ -888,15 +881,11 @@ export class GameController {
       if (typeof medio.afinidadBase !== 'number') {
         medio.afinidadBase = medio.lineaEditorial.afinidadGobierno;
       }
-      if ('intervencion' in (medio as unknown as Record<string, unknown>)) {
-        delete (medio as unknown as Record<string, unknown>).intervencion;
-      }
     }
 
     for (const art of loaded.noticias) {
       if (!art.textoOrigen) {
-        const legacyFuente = (art as unknown as { fuente?: string }).fuente;
-        art.textoOrigen = legacyFuente === 'ia' ? 'generativo' : 'plantilla';
+        art.textoOrigen = 'plantilla';
       }
       if (!art.zona) {
         art.zona = art.zonaOrigen ?? 'centro';
@@ -914,53 +903,26 @@ export class GameController {
       if (npc.capacitacion === undefined) {
         npc.capacitacion = null;
       }
-      if ('progreso' in (npc.educacion as unknown as Record<string, unknown>)) {
-        delete (npc.educacion as unknown as Record<string, unknown>).progreso;
-      }
-      if ('despensa' in (npc.economia as unknown as Record<string, unknown>)) {
-        delete (npc.economia as unknown as Record<string, unknown>).despensa;
-      }
       if (typeof npc.economia.propensionGasto !== 'number') {
         npc.economia.propensionGasto = ECON_CONSTANTS.propensionGastoBase;
       }
       if (npc.accionIa) {
-        const legacy = npc.accionIa as unknown as {
-          reemplazaTrabajo?: boolean;
-          fueraDePuesto?: boolean;
-          efectos?: ActionEffectSpec[];
-          esFoco?: boolean;
-        };
-        const def = ACTION_TABLE.find((a) => a.id === npc.accionIa!.id);
-        if (legacy.fueraDePuesto === undefined) {
-          legacy.fueraDePuesto = def
+        const action = npc.accionIa;
+        const def = ACTION_TABLE.find((a) => a.id === action.id);
+        if (action.fueraDePuesto === undefined) {
+          action.fueraDePuesto = def
             ? def.efectos.some((e) => e.id === 'fuera_de_puesto')
-            : Boolean(legacy.reemplazaTrabajo);
+            : false;
         }
-        if (!Array.isArray(legacy.efectos)) {
-          legacy.efectos = def
+        if (!Array.isArray(action.efectos)) {
+          action.efectos = def
             ? def.efectos
-            : legacy.fueraDePuesto
+            : action.fueraDePuesto
             ? [{ id: 'fuera_de_puesto' }]
             : [{ id: 'decorativa' }];
         }
-        if (legacy.esFoco === undefined) {
-          legacy.esFoco = !npc.accionIa.origen?.endsWith('/contagio');
-        }
-      }
-    }
-
-    delete (loaded as unknown as Record<string, unknown>).empresas;
-    if (Array.isArray(loaded.firmas)) {
-      loaded.firmas = loaded.firmas.filter((f) => (f as { rubro?: string }).rubro !== 'banco');
-    }
-    if (Array.isArray(loaded.parcelas)) {
-      for (const p of loaded.parcelas) {
-        if ((p.estado as string) === 'bloqueada') {
-          p.estado = 'sin_calle';
-        }
-        if (p.edificio && (p.edificio as { tipo?: string }).tipo === 'oficina_banco') {
-          p.edificio = null;
-          p.estado = 'libre';
+        if (action.esFoco === undefined) {
+          action.esFoco = !action.origen?.endsWith('/contagio');
         }
       }
     }
@@ -1007,34 +969,6 @@ export class GameController {
     }
     if (!Array.isArray(loaded.eventos)) {
       loaded.eventos = [];
-    } else {
-      type LegacyPalancaEvent = {
-        id: string;
-        dia: number;
-        tipo: 'palanca';
-        zona: ZoneId;
-        palanca: string;
-        valorAnterior: number | string;
-        valorNuevo: number | string;
-        causa?: string;
-      };
-      loaded.eventos = (loaded.eventos as Array<SimEvent | LegacyPalancaEvent>)
-        .filter((ev) => (ev as { tipo?: string }).tipo !== 'parcela_habilitada')
-        .map((ev) =>
-          ev.tipo === 'palanca'
-            ? {
-                id: ev.id,
-                dia: ev.dia,
-                tipo: 'control' as const,
-                zona: ev.zona,
-                control: ev.palanca,
-                palanca: ev.palanca,
-                valorAnterior: ev.valorAnterior,
-                valorNuevo: ev.valorNuevo,
-                causa: ev.causa,
-              }
-            : ev
-        );
     }
 
     const tempDerived = deriveCommunityStats(loaded);
@@ -1140,9 +1074,7 @@ export class GameController {
   }
 
   updateLevers(updater: (prev: GovernorLevers) => GovernorLevers): void {
-    const govLevel =
-      this.state.config.nivelGobernador ??
-      (this.state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
+    const govLevel = getGovernorLevel(this.state.config);
     if (govLevel === 'G0') return;
     const prev = this.state.gobierno.palancasObjetivo;
     const updated = updater({ ...prev });
@@ -1277,7 +1209,7 @@ export class GameController {
       this.inFlightConditions.add(pendingWin.id);
       this.aiBusy = true;
       this.commit();
-      dispatchConditionJob(current, { signal })
+      this.aiDirector.dispatchConditionJob(current, { signal })
         .then((res) => {
           if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           if (res) {
@@ -1307,7 +1239,7 @@ export class GameController {
       this.aiInFlight = true;
       this.aiBusy = true;
       this.commit();
-      dispatchPressJob(current, { signal })
+      this.aiDirector.dispatchPressJob(current, { signal })
         .then((res) => {
           if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           if (res) {
@@ -1329,7 +1261,7 @@ export class GameController {
       this.aiInFlight = true;
       this.aiBusy = true;
       this.commit();
-      dispatchSpontaneousActionJob(current, { signal })
+      this.aiDirector.dispatchSpontaneousActionJob(current, { signal })
         .then((res) => {
           if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
           if (res) {
@@ -1358,7 +1290,7 @@ export class GameController {
     this.aiBusy = true;
     this.commit();
     try {
-      const res = await dispatchPressJob(this.state, { allowManualFallback: true, signal });
+      const res = await this.aiDirector.dispatchPressJob(this.state, { allowManualFallback: true, signal });
       if (this.destroyed || jobEpoch !== this.sessionEpoch) return;
       if (res) {
         this.applyAiMutation(res.apply);

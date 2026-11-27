@@ -1,4 +1,4 @@
-import { BUILDING_CATALOG, LECTURA_CONSTANTS, SCENARIO_PRESETS } from '../src/data/catalogs';
+import { BUILDING_CATALOG, LECTURA_CONSTANTS } from '../src/data/catalogs';
 import {
   alertas,
   causas,
@@ -401,6 +401,4 @@ function runDays(state: GameState, days: number): { maxDrift: number; invariantE
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} doc-alignment checks passed.`);
-void BUILDING_CATALOG;
-void SCENARIO_PRESETS;
 process.exit(failed.length ? 1 : 0);

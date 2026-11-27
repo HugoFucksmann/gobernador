@@ -8,7 +8,6 @@ import {
   LOT_CLASS_RANK,
   MEDIA_TEMPLATES,
   ROLE_CATALOG,
-  ROLE_DISTRICTS,
   SAVE_FORMAT_VERSION,
   SCENARIO_PRESETS,
   SPANISH_LAST_NAMES,
@@ -50,7 +49,6 @@ import {
   computeDemandaSuelo,
   computeTotalWorldMoney,
   deriveCommunityStats,
-  getWorldZones,
   inferLotClassFromParcel,
   recomputeRoadDistances,
   updateDailyNpcRitmoAndHabits,
@@ -83,39 +81,6 @@ export function getZoneCanvasPosition(
   };
 }
 
-export function getDistrictPosition(role: RoleId, rng?: RngHolder): { x: number; y: number } {
-  const dist = ROLE_DISTRICTS[role] ?? 'residencial';
-  const box =
-    dist === 'campos'
-      ? { x: 35, y: 40, w: 340, h: 680 }
-      : dist === 'mercado'
-      ? { x: 825, y: 285, w: 340, h: 190 }
-      : dist === 'civico'
-      ? { x: 430, y: 285, w: 340, h: 190 }
-      : { x: 430, y: 40, w: 720, h: 680 };
-
-  return {
-    x: box.x + drawRand(rng) * box.w,
-    y: box.y + drawRand(rng) * box.h,
-  };
-}
-
-export function getCityErrandPosition(
-  role: RoleId,
-  zone?: ZoneId,
-  rng?: RngHolder,
-  zonas?: Record<ZoneId, ZoneDefinition>
-): { x: number; y: number; accion: string } {
-  if (zone && zonas?.[zone]) {
-    const zPos = getZoneCanvasPosition(zone, rng, zonas);
-    if (role === 'policia') return { ...zPos, accion: `patrullando ${zonas[zone].nombre}` };
-    if (role === 'periodista') return { ...zPos, accion: `reportando en ${zonas[zone].nombre}` };
-    return { ...zPos, accion: ROLE_CATALOG[role].nombre.toLowerCase() };
-  }
-  const p = getDistrictPosition(role, rng);
-  return { ...p, accion: 'trabajando' };
-}
-
 export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
   nivelMundo: WorldComplexityLevel;
   nivelGobernador: GovernorComplexityLevel;
@@ -126,7 +91,7 @@ export function resolveComplexityConfig(raw: Partial<WorldConfig>): {
     raw.economiaModulo === 'fiscal' ? 'M4' : 'M3';
   const nivelMundo: WorldComplexityLevel = raw.nivelMundo ?? defaultWorld;
   const economiaModulo: EconomyModule = nivelMundo === 'M4' ? 'fiscal' : 'base';
-  const defaultGov: GovernorComplexityLevel = nivelMundo === 'M4' ? 'G3' : 'G2';
+  const defaultGov: GovernorComplexityLevel = 'G0';
   const nivelGobernador: GovernorComplexityLevel = raw.nivelGobernador ?? defaultGov;
   const estadoAutomatico = raw.estadoAutomatico ?? nivelGobernador === 'G0';
   return { nivelMundo, nivelGobernador, economiaModulo, estadoAutomatico };
@@ -136,7 +101,7 @@ export function isTestConfig(config: WorldConfig): boolean {
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const { nivelMundo, nivelGobernador } = resolveComplexityConfig(config);
   if (nivelMundo !== 'M3' && nivelMundo !== 'M4') return true;
-  if (nivelGobernador === 'G0' || nivelGobernador === 'G1') return true;
+  if (nivelGobernador === 'G1') return true;
   if (config.poblacionInicial !== preset.poblacionDefault) return true;
   if (config.cantidadMedios !== preset.mediosDefault) return true;
   return false;
@@ -611,7 +576,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     docente: Math.max(2, Math.round(preset.cuposFijos.docente * scale)),
   };
 
-  const jobCaps = getBuildingJobCaps(parcelas, pop, initialLevers.nivelObras, pop, cuposFijos);
+  const jobCaps = getBuildingJobCaps(parcelas, pop, initialLevers.nivelObras, cuposFijos);
 
   // Build role counts that fit exact initial vacancies + balanced minors/retirees
   const roleDistribution: Array<{ rol: RoleId; count: number }> = [
@@ -619,8 +584,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     { rol: 'tecnico', count: jobCaps.tecnico },
     { rol: 'obrero', count: jobCaps.obrero },
     { rol: 'comerciante', count: jobCaps.comerciante },
-    { rol: 'constructor', count: Math.max(2, jobCaps.constructor) },
-    { rol: 'inmobiliario', count: Math.max(1, jobCaps.inmobiliario) },
+    { rol: 'constructor', count: config.nivelMundo === 'M0' ? 0 : Math.max(2, jobCaps.constructor) },
+    { rol: 'inmobiliario', count: config.nivelMundo === 'M0' ? 0 : Math.max(1, jobCaps.inmobiliario) },
     { rol: 'empresario', count: Math.max(2, Math.round(3 * scale)) },
     { rol: 'periodista', count: mediaCount === 0 ? 0 : Math.max(mediaCount, jobCaps.periodista) },
     { rol: 'policia', count: jobCaps.policia },
@@ -1123,6 +1088,42 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     chosen.empleados.push(n.id);
   }
 
+  // Ensure accessible residential lots satisfy hogares * (1 + margen_lotes_residenciales) (MAPA_V2 §8)
+  const minAccessibleResLots = Math.ceil(
+    hogares.length * (1 + HOUSING_CONSTANTS.margenLotesResidenciales)
+  );
+  const currentLibreRes = parcelas.filter(
+    (p) => p.tipoParcela === 'residencial' && p.estado === 'libre'
+  ).length;
+  if (currentLibreRes < minAccessibleResLots) {
+    const extraNeeded = minAccessibleResLots - currentLibreRes;
+    const resZones = activeZoneIds.filter(
+      (z) => zonas[z].caracter === 'residencial' || zonas[z].caracter === 'centro'
+    );
+    const targetZones = resZones.length > 0 ? resZones : activeZoneIds;
+    for (let i = 0; i < extraNeeded; i++) {
+      const z = targetZones[i % Math.max(1, targetZones.length)] ?? 'centro';
+      const rect = zonas[z].rect;
+      const col = i % 7;
+      const row = Math.floor(i / 7) % 5;
+      parcelas.push({
+        id: `p_res_margin_${i + 1}`,
+        nombre: `Solar Residencial ${z} M${i + 1}`,
+        zona: z,
+        distrito: 'residencial',
+        tipoParcela: 'residencial',
+        clase: i % 4 === 0 ? 'L' : i % 3 === 0 ? 'S' : 'M',
+        orden: 500 + i,
+        wx: rect.wx + 16 + col * 48,
+        wy: rect.wy + 135 + row * 24,
+        ww: 42,
+        wh: 20,
+        estado: 'libre',
+        edificio: null,
+      });
+    }
+  }
+
   // Allocate Houses to accessible Residential Parcels (exclude sin_calle, respect claseMinima!)
   const casas: Casa[] = [];
   let cSeq = 0;
@@ -1132,8 +1133,13 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const inmobFirms = firmas.filter((f) => f.rubro === 'inmobiliaria');
   const sortedHogares = [...hogares].sort((a, b) => b.miembros.length - a.miembros.length);
 
-  // First build houses on residential parcels enough for households + ~12% vacant buffer
-  const targetHouses = Math.min(resParcels.length, Math.ceil(sortedHogares.length * 1.12));
+  // Build houses for all households + vacant house buffer while preserving libre residential lots
+  const minFreeResLots = Math.max(2, Math.ceil(sortedHogares.length * 0.1));
+  const maxBuildable = Math.max(
+    Math.min(resParcels.length, sortedHogares.length),
+    resParcels.length - minFreeResLots
+  );
+  const targetHouses = Math.min(maxBuildable, Math.ceil(sortedHogares.length * 1.1));
   for (let i = 0; i < targetHouses; i++) {
     const parcel = resParcels[i];
     const h = sortedHogares[i];
@@ -1225,14 +1231,14 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
 
   for (const h of hogares) {
     const mCount = Math.max(1, h.miembros.length);
-    const workers = h.miembros.filter((id) => {
+    const earners = h.miembros.filter((id) => {
       const m = npcById.get(id);
-      return m && ROLE_CATALOG[m.rol].grupo !== 'sin_ingreso';
+      return m && (ROLE_CATALOG[m.rol].grupo !== 'sin_ingreso' || m.rol === 'jubilado');
     }).length;
-    const baseNetPerPeriod = Math.max(18, workers * 42 + mCount * 10);
+    const baseNetPerPeriod = Math.max(24, earners * 42 + mCount * 10);
     h.ultimoIngresoNeto = baseNetPerPeriod;
     h.dinero = Math.round(baseNetPerPeriod * 1.45 + mCount * 18);
-    h.despensa = Number((mCount * 3.1).toFixed(2));
+    h.despensa = h.estado === 'calle' ? 0 : Number((mCount * 3.1).toFixed(2));
   }
 
   // Initial service coverage & integrity per zone
@@ -1529,6 +1535,5 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   if (state.config.lecturaActiva !== false) {
     state.lectura = initLecturaState(state, deriveCommunityStats(state));
   }
-  void getWorldZones;
   return state;
 }

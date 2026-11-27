@@ -14,10 +14,10 @@ import {
 } from 'lucide-react';
 import {
   BUILDING_CATALOG,
-  DISTRICT_BY_ID,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
 } from '../../data/catalogs';
+import { getGovernorLevel, isObserverMode } from '../../engine/policies';
 import {
   getActivePhenomena,
   getAnnouncedPhenomena,
@@ -28,7 +28,6 @@ import { isViaConnectableToNetwork } from '../../engine/worldHelpers';
 import {
   BuildingType,
   CommunityDerived,
-  DistrictId,
   GameState,
   RoleId,
   SimEvent,
@@ -161,7 +160,7 @@ function describeSimEvent(ev: SimEvent, state: GameState): { titulo: string; det
     case 'monopolio':
       return {
         titulo: `Concentración (${getFirmaName(ev.firmaId)})`,
-        detalle: `${Math.round(ev.cuota * 100)}% en ${ev.rubro}.`,
+        detalle: `${Math.round(ev.cuota)}% en ${ev.rubro}.`,
       };
     case 'obra_fin':
       return { titulo: `Obra terminada (${ev.edificio})`, detalle: `Habilitada en zona ${ev.zona}.` };
@@ -193,7 +192,6 @@ interface CityWindowProps {
   ciudadTabRequest?: { tab: CityTab; seq: number } | null;
   onFocus: () => void;
   onClose: () => void;
-  onJumpDistrict: (d: DistrictId | 'all') => void;
   onJumpZone: (z: ZoneId | 'all') => void;
   onSelectRoleSample: (role: RoleId) => void;
   onSelectNpc: (npcId: string) => void;
@@ -248,9 +246,8 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   const zonesCount = zoneIds.length;
   const activeFenomenos = getActivePhenomena(state);
   const announcedFenomenos = getAnnouncedPhenomena(state);
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const govLevel = getGovernorLevel(state.config);
+  const isG0 = isObserverMode(state.config);
   const isG1 = govLevel === 'G1';
   const isG3 = govLevel === 'G3';
 
@@ -658,7 +655,6 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 {sortedParcelas.map((p) => {
                   const b = p.edificio;
                   const bDef = b ? BUILDING_CATALOG[b.tipo] : null;
-                  const distName = DISTRICT_BY_ID[p.distrito]?.nombre ?? p.distrito;
                   const zoneName = state.zonas[p.zona]?.nombre ?? p.zona;
                   const openingVia = p.tramoAperturaId
                     ? state.tramos.find((t) => t.id === p.tramoAperturaId)
@@ -672,7 +668,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                       className="bg-zinc-800/55 rounded-xl p-3 flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
-                        <UiTooltip text={`${zoneName} · ${distName}`}>
+                        <UiTooltip text={`${zoneName} · ${p.tipoParcela}`}>
                           <div className="flex items-center gap-2 font-semibold text-white truncate cursor-help">
                             <Building2 className="w-4 h-4 text-emerald-400 shrink-0" />
                             <span className="truncate">{p.nombre}</span>

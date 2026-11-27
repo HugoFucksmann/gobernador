@@ -1,8 +1,7 @@
 import React from 'react';
 import { ArrowDown, Compass, GitBranch, User, X } from 'lucide-react';
-import { ZONE_TO_DISTRICT } from '../../data/catalogs';
 import { buildCausalChain } from '../../engine/simulation';
-import { CausalStep, DistrictId, GameState, ZoneId } from '../../types/game';
+import { CausalStep, GameState, ZoneId } from '../../types/game';
 import { RctWindow } from './RctWindow';
 
 interface CausalChainListProps {
@@ -10,7 +9,6 @@ interface CausalChainListProps {
   startRef?: string;
   fallbackText?: string;
   onSelectNpc?: (npcId: string) => void;
-  onJumpDistrict?: (district: DistrictId | 'all') => void;
   onJumpZone?: (zone: ZoneId) => void;
 }
 
@@ -19,7 +17,6 @@ const CausalChainList: React.FC<CausalChainListProps> = ({
   startRef,
   fallbackText,
   onSelectNpc,
-  onJumpDistrict,
   onJumpZone,
 }) => {
   const steps: CausalStep[] = buildCausalChain(state, startRef, fallbackText);
@@ -46,7 +43,7 @@ const CausalChainList: React.FC<CausalChainListProps> = ({
                 </span>
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">{step.detalle}</p>
-              {(step.npcId || step.zona) && (onSelectNpc || onJumpDistrict || onJumpZone) && (
+              {(step.npcId || step.zona) && (onSelectNpc || onJumpZone) && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {step.npcId && onSelectNpc && (
                     <button
@@ -58,13 +55,10 @@ const CausalChainList: React.FC<CausalChainListProps> = ({
                       Ver vecino
                     </button>
                   )}
-                  {step.zona && (onJumpZone || onJumpDistrict) && (
+                  {step.zona && onJumpZone && (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (onJumpZone) onJumpZone(step.zona!);
-                        else onJumpDistrict?.(ZONE_TO_DISTRICT[step.zona!] || 'all');
-                      }}
+                      onClick={() => onJumpZone(step.zona!)}
                       className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-zinc-900 hover:bg-zinc-700 text-zinc-200 rounded-lg capitalize whitespace-nowrap"
                     >
                       <Compass className="w-3.5 h-3.5" />
@@ -93,7 +87,6 @@ interface CausalInspectModalProps {
   fallbackText?: string;
   onClose: () => void;
   onSelectNpc?: (npcId: string) => void;
-  onJumpDistrict?: (district: DistrictId | 'all') => void;
   onJumpZone?: (zone: ZoneId) => void;
 }
 
@@ -104,7 +97,6 @@ export const CausalInspectModal: React.FC<CausalInspectModalProps> = ({
   fallbackText,
   onClose,
   onSelectNpc,
-  onJumpDistrict,
   onJumpZone,
 }) => {
   return (
@@ -133,10 +125,6 @@ export const CausalInspectModal: React.FC<CausalInspectModalProps> = ({
               fallbackText={fallbackText}
               onSelectNpc={(id) => {
                 onSelectNpc?.(id);
-                onClose();
-              }}
-              onJumpDistrict={(d) => {
-                onJumpDistrict?.(d);
                 onClose();
               }}
               onJumpZone={

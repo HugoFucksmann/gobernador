@@ -26,7 +26,9 @@ import {
   estimatePeriodBudget,
   getActiveBuildings,
   getBuildingJobCaps,
+  getGovernorLevel,
   getObrasTargetJobs,
+  isObserverMode,
 } from '../../engine/policies';
 import {
   CommunityDerived,
@@ -137,8 +139,8 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   onOpenBuildPanel,
 }) => {
   const mod = state.config.economiaModulo;
-  const govLevel = state.config.nivelGobernador ?? (mod === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const govLevel = getGovernorLevel(state.config);
+  const isG0 = isObserverMode(state.config);
   const isG1 = govLevel === 'G1';
   const isG3 = govLevel === 'G3';
   const showTopeEmision = mod === 'fiscal' && isG3;
@@ -184,7 +186,6 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
     state.parcelas,
     derived.poblacion,
     obj.nivelObras,
-    state.config.poblacionInicial,
     state.gobierno.cuposFijos
   );
   const activeBuildings = getActiveBuildings(state.parcelas);

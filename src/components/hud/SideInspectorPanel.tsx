@@ -22,14 +22,18 @@ import {
 } from 'lucide-react';
 import {
   BUILDING_CATALOG,
-  DISTRICT_BY_ID,
   GOVERNOR_BUILDABLE_TYPES,
   OBRAS_LEVEL_TABLE,
   ROLE_CATALOG,
 } from '../../data/catalogs';
 import { interlocutor } from '../../engine/lecturaV2';
-import { evaluateNpcTopMoodFactor, getNpcDistrictName } from '../../engine/npcInsights';
-import { getBuildingJobCaps, sumPeriodExpenses } from '../../engine/policies';
+import { evaluateNpcTopMoodFactor, getNpcZoneName } from '../../utils/npcInsights';
+import {
+  getBuildingJobCaps,
+  getGovernorLevel,
+  isObserverMode,
+  sumPeriodExpenses,
+} from '../../engine/policies';
 import {
   computeHospitalFacilities,
   getEffectiveTrait,
@@ -55,7 +59,6 @@ import {
   BuildingDefinition,
   BuildingType,
   CommunityDerived,
-  DistrictId,
   Firma,
   FirmPart,
   GameState,
@@ -140,7 +143,6 @@ interface SideInspectorPanelProps {
   onSelectZona?: (zonaId: ZoneId) => void;
   onSelectMedio?: (medioId: string) => void;
   onOpenDirectory?: (tab: InspectorDirectoryTab) => void;
-  onJumpDistrict: (d: DistrictId | 'all') => void;
   onJumpZone: (z: ZoneId | 'all') => void;
   onHoverPreview?: (preview: MapHoverPreview | null) => void;
   onBuildInParcela: (parcelaId: string, tipo: BuildingType) => { ok: boolean; error?: string };
@@ -251,9 +253,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   const [parcelError, setParcelError] = useState<string | null>(null);
   const [demandNote, setDemandNote] = useState<string | null>(null);
 
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const govLevel = getGovernorLevel(state.config);
+  const isG0 = isObserverMode(state.config);
   const isG1 = govLevel === 'G1';
   const isG3 = govLevel === 'G3';
 
@@ -374,10 +375,9 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     headerSub = `${selectedHogar.miembros.length} integrante(s) · ${state.zonas[selectedHogar.zona]?.nombre ?? selectedHogar.zona}`;
     HeaderIcon = <Users className="w-4 h-4 text-emerald-400" />;
   } else if (selectedParcela) {
-    const distName = DISTRICT_BY_ID[selectedParcela.distrito]?.nombre ?? selectedParcela.distrito;
     const zName = state.zonas[selectedParcela.zona]?.nombre ?? selectedParcela.zona;
     headerTitle = selectedParcela.nombre;
-    headerSub = `${zName} · ${distName}${selectedParcela.clase ? ` · Lote ${selectedParcela.clase}` : ''}`;
+    headerSub = `${zName} · ${selectedParcela.tipoParcela}${selectedParcela.clase ? ` · Lote ${selectedParcela.clase}` : ''}`;
     HeaderIcon = <Building2 className="w-4 h-4 text-emerald-400" />;
   } else if (selectedFirma) {
     headerTitle = selectedFirma.nombre;
@@ -467,7 +467,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           const def = ROLE_CATALOG[selectedNpc.rol];
           const stage = getStage(selectedNpc.edad);
           const prod = Math.round(getNpcProductivity(selectedNpc, state) * 100);
-          const districtName = getNpcDistrictName(selectedNpc, state);
+          const districtName = getNpcZoneName(selectedNpc, state);
           const zonesCount = getWorldZones(state).length;
           const effZone = getEffectiveZone(selectedNpc, zonesCount);
           const hogar = state.hogares.find((h) => h.id === selectedNpc.hogarId);
@@ -868,7 +868,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     <div className="flex justify-between">
                       <span className="font-sans text-zinc-400">Acceso comida</span>
                       <span className="font-semibold text-zinc-200">
-                        {Math.round((state.ultimaSalidaEconomica.accesoComida[selectedNpc.id] ?? 1) * 100)}%
+                        {Math.round((state.ultimaSalidaEconomica.accesoComida[selectedNpc.hogarId] ?? 1) * 100)}%
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -1116,7 +1116,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     state.parcelas,
                     derived.poblacion,
                     state.gobierno.palancasVigentes.nivelObras,
-                    state.config.poblacionInicial,
                     state.gobierno.cuposFijos
                   );
                   const activeWorkers = state.npcs.filter(
@@ -1402,7 +1401,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
             state.parcelas,
             derived.poblacion,
             state.gobierno.palancasVigentes.nivelObras,
-            state.config.poblacionInicial,
             state.gobierno.cuposFijos
           );
           const empPub =

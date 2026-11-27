@@ -26,7 +26,7 @@ import {
   RoleId,
   ZoneId,
 } from '../types/game';
-import { getBuildingJobCaps } from './policies';
+import { getBuildingJobCaps, getGovernorLevel } from './policies';
 import { nextSeqId, nextSubRand, subRandInt, subRandRange } from './rng';
 import {
   buildSeededNpcRitmo,
@@ -72,7 +72,7 @@ function normalizeFirmPartes(firma: Firma, npcsById: Map<string, Npc>): void {
   }
 }
 
-export function addOrMergeFirmPart(
+function addOrMergeFirmPart(
   firma: Firma,
   tipo: FirmPart['tipo'],
   id: string,
@@ -434,7 +434,7 @@ function getReachableEduLimits(
 export function runDailyLifecycleV2(state: GameState): void {
   const diaAnio = ((state.reloj.dia - 1) % 365) + 1;
   const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
-  const govLevel = state.config.nivelGobernador ?? 'G0';
+  const govLevel = getGovernorLevel(state.config);
   const extraEduLever = govLevel === 'G3' ? (state.gobierno.extras?.vigentes?.nivelEducacion ?? 0) : 0;
 
   const vivosSnapshot = state.npcs.filter((n) => n.vivo);
@@ -553,7 +553,6 @@ export function runTrainingPeriodV2(state: GameState): void {
     state.parcelas,
     pop,
     state.gobierno.palancasVigentes.nivelObras,
-    state.config.poblacionInicial,
     state.gobierno.cuposFijos
   );
 
@@ -1476,7 +1475,6 @@ export function assignRolesAndJobsV2(state: GameState): void {
     state.parcelas,
     pop,
     state.gobierno.palancasVigentes.nivelObras,
-    state.config.poblacionInicial,
     state.gobierno.cuposFijos
   );
 
@@ -1570,8 +1568,4 @@ export function assignRolesAndJobsV2(state: GameState): void {
       }
     }
   }
-}
-
-export function getZoneNamesAvailable(zones: ZoneId[]): ZoneId {
-  return zones[0] ?? 'centro';
 }

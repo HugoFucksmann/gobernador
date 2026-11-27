@@ -16,6 +16,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { ROLE_CATALOG } from '../../data/catalogs';
+import { isObserverMode } from '../../engine/policies';
 import { GameState, ZoneId } from '../../types/game';
 import { MapFilter, MapLens, WindowId } from '../../types/ui';
 import { InspectorDirectoryTab } from '../../hooks/useGameSession';
@@ -117,25 +118,18 @@ function getLensLegend(lens: MapLens): Array<{ color: string; label: string }> {
       { color: '#ef4444', label: 'Condición' },
     ];
   }
-  if (lens === 'satisfaccion' || lens === 'lealtad') {
+  if (lens === 'satisfaccion') {
     return [
       { color: '#10b981', label: 'Alto' },
       { color: '#f59e0b', label: 'Medio' },
       { color: '#ef4444', label: 'Bajo' },
     ];
   }
-  if (lens === 'hambre' || lens === 'amenaza') {
+  if (lens === 'amenaza') {
     return [
       { color: '#10b981', label: 'Bajo' },
       { color: '#f59e0b', label: 'Alerta' },
       { color: '#ef4444', label: 'Crítico' },
-    ];
-  }
-  if (lens === 'hospital') {
-    return [
-      { color: '#10b981', label: 'Atendido' },
-      { color: '#f59e0b', label: 'En riesgo' },
-      { color: '#ef4444', label: 'Sin cama' },
     ];
   }
   return [
@@ -177,9 +171,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, []);
 
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const isG0 = isObserverMode(state.config);
 
   const legendItems = getLensLegend(mapLens);
   const allZones = Object.values(state.zonas);

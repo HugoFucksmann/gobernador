@@ -1,7 +1,7 @@
 import { ROLE_CATALOG } from '../data/catalogs';
 import { CommunityDerived, GameState, Npc, ZoneId } from '../types/game';
 import { MapLens } from '../types/ui';
-import { getEffectiveZone, getWorldZones } from './simulation';
+import { getEffectiveZone, getWorldZones } from '../engine/simulation';
 
 function hashIndex(id: string, len: number): number {
   let h = 0;
@@ -11,7 +11,7 @@ function hashIndex(id: string, len: number): number {
   return Math.abs(h) % len;
 }
 
-export function getNpcDistrictName(npc: Npc, state?: GameState): string {
+export function getNpcZoneName(npc: Npc, state?: GameState): string {
   const zDef = state?.zonas?.[npc.zona];
   if (zDef?.nombre) return zDef.nombre;
   return npc.zona.charAt(0).toUpperCase() + npc.zona.slice(1);
@@ -84,7 +84,7 @@ export function evaluateNpcBubbleText(npc: Npc): string {
 }
 
 export function evaluateZoneMetricColor(
-  lens: 'defensa' | 'orden' | 'integridad' | 'amenaza' | 'hospital',
+  lens: 'defensa' | 'orden' | 'integridad' | 'amenaza',
   value: number
 ): string {
   if (lens === 'defensa' || lens === 'orden') {
@@ -93,10 +93,7 @@ export function evaluateZoneMetricColor(
   if (lens === 'integridad') {
     return value >= 80 ? '#10b981' : value >= 50 ? '#f59e0b' : '#ef4444';
   }
-  if (lens === 'amenaza') {
-    return value >= 50 ? '#ef4444' : value >= 20 ? '#f59e0b' : '#10b981';
-  }
-  return value > 100 ? '#ef4444' : value >= 75 ? '#f59e0b' : '#0ea5e9';
+  return value >= 50 ? '#ef4444' : value >= 20 ? '#f59e0b' : '#10b981';
 }
 
 const NEUTRAL_VILLAGER_PALETTE = ['#e2e8f0', '#cbd5e1', '#d6d3d1', '#bae6fd', '#fde68a'];
@@ -119,30 +116,16 @@ export function evaluateNpcLensColor(
     const v = npc.variables.satisfaccion;
     return v >= 65 ? '#10b981' : v >= 40 ? '#f59e0b' : '#ef4444';
   }
-  if (lens === 'hambre') {
-    const v = npc.variables.hambre;
-    return v > 75 ? '#ef4444' : v > 45 ? '#f59e0b' : '#14b8a6';
-  }
-  if (lens === 'lealtad') {
-    const v = npc.variables.lealtad;
-    return v >= 55 ? '#0ea5e9' : v >= 35 ? '#f59e0b' : '#e11d48';
-  }
-  if (lens === 'hospital') {
-    if (npc.hospital.esperandoCama) return '#ef4444';
-    if (npc.hospital.internado) return '#0ea5e9';
-    if (npc.rol === 'medico') return '#10b981';
-    if (npc.variables.salud < 65) return '#f59e0b';
-    return '#94a3b8';
-  }
   if (lens === 'vivienda') {
     const hogar = state?.hogares.find((h) => h.id === npc.hogarId);
     if (!hogar || hogar.estado === 'calle') return '#ef4444';
     const casa = hogar.casaId ? state?.casas.find((c) => c.id === hogar.casaId) : undefined;
-    const crowded = casa
-      ? state!.hogares
-          .filter((h) => h.casaId === casa.id)
-          .reduce((acc, h) => acc + h.miembros.length, 0) > casa.capacidad
-      : false;
+    const crowded =
+      casa && state
+        ? state.hogares
+            .filter((h) => h.casaId === casa.id)
+            .reduce((acc, h) => acc + h.miembros.length, 0) > casa.capacidad
+        : false;
     if (crowded || (casa && casa.estado < 45) || hogar.periodosSinPagar > 0) return '#f59e0b';
     return hogar.estado === 'con_casa' ? '#10b981' : '#38bdf8';
   }

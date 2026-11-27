@@ -6,7 +6,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
-import { installFileStorage } from './storage';
+import { LEVER_BOUNDS, SCENARIO_PRESETS } from '../src/data/catalogs';
+import { GameController } from '../src/engine/gameController';
+import { DEFAULT_WORLD_CONFIG, estimatePeriodBudget } from '../src/engine/policies';
+import { buildCausalChain, EXTRA_LEVER_BOUNDS, ensureExtras, estimateExtrasCost, forceDemandForDev, TICKS_PER_DAY } from '../src/engine/simulation';
+import * as proj from './project';
+import { createFileStorage } from './storage';
 
 function argOf(name: string, def?: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -16,19 +21,12 @@ const PORT = Number(argOf('puerto', '0'));
 const SAVES_DIR = path.resolve(argOf('guardados', path.join(process.cwd(), 'saves'))!);
 const REC_DIR = path.resolve(argOf('grabaciones', path.join(SAVES_DIR, '..', 'recordings'))!);
 const EXIT_WHEN_EMPTY = process.argv.includes('--salir-sin-clientes');
-installFileStorage(SAVES_DIR);
-
-// Importar el motor después de instalar el almacenamiento (el controlador lee los guardados al crearse).
-const { GameController } = await import('../src/engine/gameController');
-const { buildCausalChain, TICKS_PER_DAY, forceDemandForDev, estimateExtrasCost, ensureExtras, EXTRA_LEVER_BOUNDS } = await import('../src/engine/simulation');
-const { estimatePeriodBudget } = await import('../src/engine/policies');
-const { DEFAULT_WORLD_CONFIG } = await import('../src/engine/policies');
-const { LEVER_BOUNDS, SCENARIO_PRESETS } = await import('../src/data/catalogs');
-const proj = await import('./project');
 
 type Cmd = Record<string, unknown> & { t: 'cmd'; id?: number | string; c: string };
 
-const controller = new GameController(structuredClone(DEFAULT_WORLD_CONFIG));
+const controller = new GameController(structuredClone(DEFAULT_WORLD_CONFIG), {
+  storage: createFileStorage(SAVES_DIR),
+});
 controller.setPaused(true);
 controller.start();
 

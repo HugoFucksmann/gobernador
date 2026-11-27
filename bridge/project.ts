@@ -26,23 +26,23 @@ import {
   TICKS_PER_DAY,
 } from '../src/engine/simulation';
 import { getAllZoneIds } from '../src/engine/worldHelpers';
-import { estimatePeriodBudget, getActiveBuildings, getBuildingJobCaps } from '../src/engine/policies';
+import { estimatePeriodBudget, getActiveBuildings, getBuildingJobCaps, getGovernorLevel } from '../src/engine/policies';
 import type { BuildingDefinition, CommunityDerived, GameState, Npc, Parcela, SimEvent } from '../src/types/game';
 import MAPA_ELECCIONES from '../presets/mapa_elecciones.json';
 
-export const PROTO = 2;
+const PROTO = 2;
 
-export const ROLE_IDS = Object.keys(ROLE_CATALOG);
-export const ACTION_IDS = ACTION_TABLE.map((a) => a.id);
+const ROLE_IDS = Object.keys(ROLE_CATALOG);
+const ACTION_IDS = ACTION_TABLE.map((a) => a.id);
 
 // Orden de las columnas de cada fila de NPC en el mensaje `state`.
-export const NPC_COLS = [
+const NPC_COLS = [
   'idx', 'rol', 'zona', 'edad', 'salud', 'hambre', 'miedo', 'satisfaccion', 'lealtad',
   'flags', 'accion', 'zonaDestino', 'trabajo', 'compras', 'dinero',
 ];
 // flags: 1 vivo · 2 internado · 4 esperando cama · 8 fuera de puesto · 16 accion foco · 32 sin dinero para comida
 
-export function zoneIndex(z: string | undefined, zoneIds: string[] = ZONE_IDS): number {
+function zoneIndex(z: string | undefined, zoneIds: string[] = ZONE_IDS): number {
   const i = zoneIds.indexOf(z as never);
   return i < 0 ? -1 : i;
 }
@@ -106,7 +106,7 @@ export function buildHello(extra: Record<string, unknown> = {}) {
 }
 
 // ───────── Lugares de rutina (CONTROLES §4): solo para la vista ─────────
-export function computeRoutinePlaces(state: GameState): Map<string, { trabajo: number; compras: number }> {
+function computeRoutinePlaces(state: GameState): Map<string, { trabajo: number; compras: number }> {
   const out = new Map<string, { trabajo: number; compras: number }>();
   const byType = (...types: string[]) =>
     state.parcelas.filter(
@@ -115,10 +115,10 @@ export function computeRoutinePlaces(state: GameState): Map<string, { trabajo: n
   const campos = byType('campo');
   const fabricas = byType('fabrica');
   const comercios = byType('almacen', 'supermercado', 'tienda', 'kiosco', 'restoran', 'bar_cafe');
-  const oficinasPriv = byType('oficina_constructora', 'oficina_inmobiliaria', 'oficina_medio', 'oficina_banco', 'peluqueria', 'taller', 'gimnasio', 'cine_teatro', 'club');
+  const oficinasPriv = byType('oficina_constructora', 'oficina_inmobiliaria', 'oficina_medio', 'peluqueria', 'taller', 'gimnasio', 'cine_teatro', 'club');
   const hospitales = byType('hospital', 'hospital_campana');
   const comisarias = byType('comisaria');
-  const escuelas = byType('escuela');
+  const escuelas = byType('escuela', 'universidad');
   const oficinas = byType('oficina_publica');
   const parcelIndex = new Map(state.parcelas.map((p, i) => [p.id, i]));
   const idx = (p: Parcela | undefined) => (p ? parcelIndex.get(p.id) ?? -1 : -1);
@@ -165,17 +165,21 @@ function round1(v: number): number {
 function buildingStaffing(state: GameState, derived: CommunityDerived) {
   const caps = getBuildingJobCaps(
     state.parcelas, derived.vivos, state.gobierno.palancasVigentes.nivelObras,
-    state.config.poblacionInicial, state.gobierno.cuposFijos
+    state.gobierno.cuposFijos
   );
   const hosp = computeHospitalFacilities(state);
   const hospById = new Map(hosp.facilities.map((f) => [f.edificioId, f]));
   return { caps, hospById, roles: derived.roles };
 }
 
-export function projectParcelas(state: GameState, derived: CommunityDerived) {
+function projectParcelas(state: GameState, derived: CommunityDerived) {
   const { caps, hospById, roles } = buildingStaffing(state, derived);
   const activos = getActiveBuildings(state.parcelas);
   const countOf = (t: string) => Math.max(1, activos.filter((b) => b.tipo === t).length);
+  const eduBuildingsCount = Math.max(
+    1,
+    activos.filter((b) => b.tipo === 'escuela' || b.tipo === 'universidad').length
+  );
   return state.parcelas.map((p) => {
     const b = p.edificio;
     let edificio: Record<string, unknown> | null = null;
@@ -199,7 +203,12 @@ export function projectParcelas(state: GameState, derived: CommunityDerived) {
             break;
           }
           case 'comisaria': capacidad = Math.round(caps.policia / countOf('comisaria')); personal = Math.min(capacidad, Math.round(roles.policia / countOf('comisaria'))); sinPersonal = personal <= 0; break;
-          case 'escuela': capacidad = Math.round(caps.docente / countOf('escuela')); personal = Math.min(capacidad, roles.docente); sinPersonal = personal <= 0; break;
+          case 'escuela':
+          case 'universidad':
+            capacidad = Math.round(caps.docente / eduBuildingsCount);
+            personal = Math.min(capacidad, roles.docente);
+            sinPersonal = personal <= 0;
+            break;
           case 'oficina_publica': capacidad = Math.round(caps.estatal / countOf('oficina_publica')); personal = Math.min(capacidad, roles.estatal); sinPersonal = personal <= 0; break;
           case 'campo': capacidad = Math.round((def.puestos.agricultor ?? 0) * Math.max(0.5, state.config.poblacionInicial / 100)); personal = Math.min(capacidad, Math.round(roles.agricultor / countOf('campo'))); sinPersonal = personal <= 0; break;
           default: {
@@ -243,7 +252,7 @@ export function projectParcelas(state: GameState, derived: CommunityDerived) {
   });
 }
 
-export interface ProjectionCtx {
+interface ProjectionCtx {
   seq: number;
   pausado: boolean;
   vel: number;
@@ -386,8 +395,8 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
     escenario: state.config.escenarioId,
     config: {
       escenarioId: state.config.escenarioId,
-      nivelMundo: state.config.nivelMundo ?? 'M2',
-      nivelGobernador: state.config.nivelGobernador ?? 'G2',
+      nivelMundo: state.config.nivelMundo ?? 'M3',
+      nivelGobernador: getGovernorLevel(state.config),
       estadoAutomatico: !!state.config.estadoAutomatico,
       poblacionInicial: state.config.poblacionInicial,
       cantidadMedios: state.config.cantidadMedios,
@@ -473,7 +482,7 @@ export function npcMeta(state: GameState) {
   }));
 }
 
-export function projectNpcFicha(state: GameState, npc: Npc) {
+function projectNpcFicha(state: GameState, npc: Npc) {
   const hogar = state.hogares.find((h) => h.id === npc.hogarId);
   return {
     id: npc.id,

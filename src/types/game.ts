@@ -437,7 +437,6 @@ export interface Hogar {
   ocupandoCasaId?: string | null;
   periodosEnCalle?: number;
   periodosDescontento?: number;
-  creditoDeuda?: number;
 }
 
 export interface Casa {
@@ -505,7 +504,6 @@ export interface Firma {
   historialGanancias: number[];
   ultimaCausa?: string;
   esFilialDe?: string | null;
-  creditoDeuda?: number;
 }
 
 export type ClimatePhenomenonType = 'sequia' | 'plaga' | 'pandemia';
@@ -1784,15 +1782,4 @@ export interface CommunityDerived {
   };
 }
 
-export interface WorldCreationOptions {
-  escenarioId: ScenarioId;
-  economiaModulo: EconomyModule;
-  nivelMundo?: WorldComplexityLevel;
-  nivelGobernador?: GovernorComplexityLevel;
-  estadoAutomatico?: boolean;
-  cantidadMedios: number;
-  poblacionInicial: number;
-  caos: ChaosSettings;
-  semilla: number;
-  usarIaGemini: boolean;
-}
+export type AiStatus = 'activa' | 'lenta' | 'plantilla';

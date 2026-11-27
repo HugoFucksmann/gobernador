@@ -125,7 +125,6 @@ export default function App() {
         onSelectZona={session.selectZona}
         onSelectMedio={session.selectMedio}
         onOpenDirectory={session.openInspectorDirectory}
-        onJumpDistrict={session.jumpToDistrict}
         onJumpZone={session.jumpToZone}
         onHoverPreview={session.setHoveredPreview}
         onBuildInParcela={session.buildInParcela}
@@ -178,7 +177,6 @@ export default function App() {
           ciudadTabRequest={session.ciudadTabRequest}
           onFocus={() => session.focusWindow('ciudad')}
           onClose={() => session.closeWindow('ciudad')}
-          onJumpDistrict={session.jumpToDistrict}
           onJumpZone={session.jumpToZone}
           onSelectRoleSample={session.selectRoleSample}
           onSelectNpc={session.selectNpc}
@@ -297,7 +295,6 @@ export default function App() {
           fallbackText={session.causalInspect.fallbackText}
           onClose={session.closeCausalInspect}
           onSelectNpc={session.selectNpc}
-          onJumpDistrict={session.jumpToDistrict}
           onJumpZone={session.jumpToZone}
         />
       )}

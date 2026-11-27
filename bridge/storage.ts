@@ -1,11 +1,11 @@
-// localStorage mínimo respaldado por archivos (.json.gz, escritura atómica en segundo plano).
-// El motor guarda con window.localStorage; en el proceso local de la fase 1 lo reemplazamos por esto
-// sin tocar el motor (MOTOR §3: un archivo por guardado, JSON versionado y comprimido).
+// Almacenamiento respaldado por archivos (.json.gz, escritura atómica en segundo plano)
+// que implementa StorageAdapter para el controlador sin tocar globalThis.window.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import type { StorageAdapter } from '../src/engine/gameController';
 
-export function installFileStorage(dir: string): void {
+export function createFileStorage(dir: string): StorageAdapter {
   fs.mkdirSync(dir, { recursive: true });
   const cache = new Map<string, string>();
   const file = (key: string) => path.join(dir, `${key}.json.gz`);
@@ -31,7 +31,7 @@ export function installFileStorage(dir: string): void {
     }
   };
 
-  const storage = {
+  return {
     getItem(key: string): string | null {
       if (cache.has(key)) return cache.get(key)!;
       try {
@@ -47,10 +47,5 @@ export function installFileStorage(dir: string): void {
       pending.set(key, value);
       void flush();
     },
-    removeItem(key: string): void {
-      cache.delete(key);
-      try { fs.unlinkSync(file(key)); } catch { /* nada */ }
-    },
   };
-  (globalThis as unknown as { window: unknown }).window = { localStorage: storage };
 }

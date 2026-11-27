@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Home, SlidersHorizontal, Store, TrendingUp } from 'lucide-react';
 import { PERIOD_DAYS } from '../../data/catalogs';
-import { sumPeriodExpenses } from '../../engine/policies';
+import { isObserverMode, sumAcumuladoExpenses, sumPeriodExpenses } from '../../engine/policies';
 import { getRubroDisplayName } from '../../engine/worldHelpers';
 import { CommunityDerived, FirmRubro, GameState, HistoryPoint, ZoneId } from '../../types/game';
 import { RctWindow } from './RctWindow';
@@ -80,9 +80,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
 }) => {
   const [tab, setTab] = useState<'resumen' | 'firmas' | 'vivienda' | 'curvas'>('resumen');
   const [rubroFilter, setRubroFilter] = useState<FirmRubro | 'todos'>('todos');
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const isG0 = isObserverMode(state.config);
 
   const fin = state.gobierno.finanzas;
   const acum = state.gobierno.acumuladoPeriodo;
@@ -90,17 +88,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
   const foodBalance = state.alimento.produccionDiaria - state.alimento.consumoDiario;
   const lastExpenses = sumPeriodExpenses(fin);
   const curIngresos = acum.impuestos;
-  const curGastos =
-    acum.nominaDevengada +
-    acum.pensionesDevengadas +
-    acum.comidaMenores +
-    acum.acogidaMenores +
-    acum.garantiaAlimentaria +
-    acum.ayudaDevengada +
-    acum.operacion +
-    (acum.obras ?? 0) +
-    (acum.subsidios ?? 0) +
-    acum.prensa;
+  const curGastos = sumAcumuladoExpenses(acum);
 
   const activeFirms = state.firmas.filter((f) => f.activa);
   const filteredFirms = activeFirms
@@ -330,9 +318,9 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                     const mKey = `${f.rubro}:${f.zona}`;
                     const leader = state.ultimaSalidaEconomica.cuotaMercado[mKey];
                     const share = Math.round(
-                      (leader?.firma === f.nombre
+                      leader?.firma === f.id
                         ? leader.cuota
-                        : f.cuotaZona?.[f.zona] ?? Math.max(...Object.values(f.cuotaZona), 0)) * 100
+                        : (f.cuotaZona?.[f.zona] ?? Math.max(...Object.values(f.cuotaZona), 0)) * 100
                     );
                     const zoneName = state.zonas[f.zona]?.nombre ?? f.zona;
                     const stockText =

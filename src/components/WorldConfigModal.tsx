@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AlertCircle, FolderOpen, Save, X } from 'lucide-react';
 import { DEFAULT_CHAOS_LIMITS, SCENARIO_PRESETS } from '../data/catalogs';
 import { SaveSlotMeta } from '../engine/gameController';
+import { getGovernorLevel } from '../engine/policies';
 import { isTestConfig, resolveComplexityConfig } from '../engine/worldGenerator';
 import {
   EconomyModule,
@@ -52,14 +53,14 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const testMode = isTestConfig(config);
   const worldLevel: WorldComplexityLevel = config.nivelMundo ?? 'M3';
-  const govLevel: GovernorComplexityLevel = config.nivelGobernador ?? 'G0';
+  const govLevel: GovernorComplexityLevel = getGovernorLevel(config);
   const estadoAuto = Boolean(config.estadoAutomatico ?? govLevel === 'G0');
 
   const handleSelectScenario = (id: 'elecciones' | 'zombies') => {
     const nextPreset = SCENARIO_PRESETS[id];
     const resolved = resolveComplexityConfig({
       nivelMundo: config.nivelMundo ?? 'M3',
-      nivelGobernador: config.nivelGobernador ?? 'G0',
+      nivelGobernador: getGovernorLevel(config),
       estadoAutomatico: config.estadoAutomatico ?? true,
     });
     setConfig({

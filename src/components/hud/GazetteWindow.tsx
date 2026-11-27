@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { GitBranch, Newspaper, SlidersHorizontal } from 'lucide-react';
+import { isObserverMode } from '../../engine/policies';
 import { GameState } from '../../types/game';
 import { RctWindow } from './RctWindow';
 import { UiTooltip } from './UiTooltip';
@@ -28,9 +29,7 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
   onInspectCausal,
 }) => {
   const [pressView, setPressView] = useState<'edicion' | 'medios'>('edicion');
-  const govLevel =
-    state.config.nivelGobernador ?? (state.config.economiaModulo === 'fiscal' ? 'G3' : 'G2');
-  const isG0 = govLevel === 'G0' || Boolean(state.config.estadoAutomatico);
+  const isG0 = isObserverMode(state.config);
 
   return (
     <div className="pointer-events-none fixed top-20 left-4 md:left-[380px]" style={{ zIndex }}>

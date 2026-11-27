@@ -11,6 +11,7 @@ import {
   BuildingInstance,
   CommunityDerived,
   GameState,
+  GovernorComplexityLevel,
   GovernorLevers,
   Parcela,
   RoleId,
@@ -20,6 +21,14 @@ import {
   ViaTramo,
   WorldConfig,
 } from '../types/game';
+
+export function getGovernorLevel(config: Pick<WorldConfig, 'nivelGobernador'>): GovernorComplexityLevel {
+  return config.nivelGobernador ?? 'G0';
+}
+
+export function isObserverMode(config: Pick<WorldConfig, 'nivelGobernador' | 'estadoAutomatico'>): boolean {
+  return getGovernorLevel(config) === 'G0' || Boolean(config.estadoAutomatico);
+}
 
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   escenarioId: 'elecciones',
@@ -70,12 +79,23 @@ export function sumPeriodExpenses(fin: GameState['gobierno']['finanzas']): numbe
   );
 }
 
-export function daysToSettlement(state: GameState): number {
-  return Math.max(1, PERIOD_DAYS - state.reloj.diasEnPeriodo);
+export function sumAcumuladoExpenses(acum: GameState['gobierno']['acumuladoPeriodo']): number {
+  return (
+    acum.nominaDevengada +
+    acum.pensionesDevengadas +
+    acum.comidaMenores +
+    acum.acogidaMenores +
+    acum.garantiaAlimentaria +
+    acum.ayudaDevengada +
+    acum.operacion +
+    (acum.obras ?? 0) +
+    (acum.subsidios ?? 0) +
+    acum.prensa
+  );
 }
 
-export function getDevPopScale(poblacionInicial: number): number {
-  return Math.max(1, poblacionInicial / 100);
+export function daysToSettlement(state: GameState): number {
+  return Math.max(1, PERIOD_DAYS - state.reloj.diasEnPeriodo);
 }
 
 export function getObrasTargetJobs(population: number, level: ServiceLevel): number {
@@ -110,7 +130,6 @@ export function getBuildingJobCaps(
   parcelas: Parcela[],
   population: number,
   nivelObras: ServiceLevel,
-  _poblacionInicial: number,
   cuposFijosBase?: { estatal: number; docente: number }
 ): {
   policia: number;
@@ -193,7 +212,6 @@ export function computeMaintenanceBreakdown(
   parcelas: Parcela[],
   nivelObras: ServiceLevel,
   vivosCount: number,
-  _poblacionInicial: number,
   tramos: ViaTramo[] = []
 ): {
   mantenimientoPorArea: Record<ServiceAreaId, number>;
@@ -314,7 +332,6 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     state.parcelas,
     pop,
     levers.nivelObras,
-    state.config.poblacionInicial,
     state.gobierno.cuposFijos
   );
 
@@ -340,7 +357,6 @@ export function estimatePeriodBudget(state: GameState, levers: GovernorLevers): 
     state.parcelas,
     levers.nivelObras,
     pop,
-    state.config.poblacionInicial,
     state.tramos ?? []
   );
   const mantenimientoEst = opBreakdown.mantenimientoTotal;

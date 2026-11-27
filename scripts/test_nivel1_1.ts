@@ -46,9 +46,7 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   let st = s;
   for (let i = 0; i < n && st.resultado.estado === 'jugando'; i++) {
     if (each) each(st, i);
-    const before = computeTotalWorldMoney(st);
     st = stepSimulation(st, TICKS_PER_DAY);
-    void before;
   }
   return st;
 }
@@ -83,9 +81,8 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   for (const npc of s.npcs) if (n++ < targetDead) npc.vivo = false;
   s = days(s, 1);
   check('Elecciones: derrota si la población cae bajo el 50% de la inicial', s.resultado.estado === 'derrota' && /50%/.test(s.resultado.razon ?? ''), s.resultado.razon ?? '');
-  const z = mk({ esc: 'zombies', seed: 3 });
+  mk({ esc: 'zombies', seed: 3 });
   check('Zombies: sin derrota extra', !SCENARIO_PRESETS.zombies.derrotasExtra);
-  void z;
 }
 
 // ───── 3. Nivel 1.1: palancas solo con G3

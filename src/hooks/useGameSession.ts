@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ExtraLeverKey, GameController } from '../engine/gameController';
-import { hasActiveCrisisAlert, sumPeriodExpenses } from '../engine/policies';
+import { DEFAULT_WORLD_CONFIG, getGovernorLevel, hasActiveCrisisAlert, isObserverMode, sumPeriodExpenses } from '../engine/policies';
 import { getActivePhenomena } from '../engine/simulation';
+import { browserAiDirector } from '../services/aiDirector';
 import {
   BuildingType,
-  DistrictId,
   GovernorComplexityLevel,
   GovernorLevers,
   LecturaIndicadorId,
@@ -46,7 +46,9 @@ export type InspectorDirectoryTab = 'personas' | 'hogares' | 'firmas' | 'notable
 export function useGameSession() {
   const controllerRef = useRef<GameController | null>(null);
   if (!controllerRef.current) {
-    controllerRef.current = new GameController();
+    controllerRef.current = new GameController(DEFAULT_WORLD_CONFIG, {
+      aiDirector: browserAiDirector,
+    });
   }
   const controller = controllerRef.current;
 
@@ -110,9 +112,7 @@ export function useGameSession() {
       st.parcelas.filter((p) => p.estado === 'ocupada' && p.edificio).length +
       st.tramos.filter((t) => t.construida).length;
 
-    const isG0 =
-      (st.config.nivelGobernador ?? (st.config.economiaModulo === 'fiscal' ? 'G3' : 'G2')) === 'G0' ||
-      Boolean(st.config.estadoAutomatico);
+    const isG0 = isObserverMode(st.config);
 
     if (st.reloj.dia !== prevDiaRef.current) {
       if (st.reloj.dia < prevDiaRef.current) {
@@ -445,10 +445,7 @@ export function useGameSession() {
 
   const canPlayDecisionSfx = useCallback(() => {
     const st = controller.getState();
-    const g0 =
-      (st.config.nivelGobernador ?? (st.config.economiaModulo === 'fiscal' ? 'G3' : 'G2')) === 'G0' ||
-      Boolean(st.config.estadoAutomatico);
-    return !g0 || Boolean(st.devMode);
+    return !isObserverMode(st.config) || Boolean(st.devMode);
   }, [controller]);
 
   const updateLevers = useCallback(
@@ -530,7 +527,7 @@ export function useGameSession() {
 
       const sameStartConfig =
         current.escenarioId === escenarioId &&
-        (current.nivelGobernador ?? 'G0') === targetGov &&
+        getGovernorLevel(current) === targetGov &&
         Boolean(current.estadoAutomatico) === targetAuto &&
         current.poblacionInicial === targetPop &&
         controller.getState().reloj.dia === 1;
@@ -573,12 +570,6 @@ export function useGameSession() {
     },
     [controller, clearSideSelectionIds]
   );
-
-  const jumpToDistrict = useCallback((district: DistrictId | 'all') => {
-    setFollowSelected(false);
-    uiSeqRef.current += 1;
-    setCameraTarget({ district, seq: uiSeqRef.current });
-  }, []);
 
   const jumpToZone = useCallback((zone: ZoneId | 'all') => {
     setFollowSelected(false);
@@ -790,7 +781,6 @@ export function useGameSession() {
     counterOffer,
     triggerPressManual,
     startNewGame,
-    jumpToDistrict,
     jumpToZone,
     jumpToCoords,
     requestZoom,

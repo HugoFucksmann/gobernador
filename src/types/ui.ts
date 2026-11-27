@@ -1,4 +1,4 @@
-import { DistrictId, ZoneId } from './game';
+import { ZoneId } from './game';
 
 export type WindowId = 'palancas' | 'economia' | 'ciudad' | 'gaceta' | 'despacho';
 
@@ -8,30 +8,21 @@ export type LandmarkId = 'palacio' | 'prensa' | 'mercado';
 
 export type MapFilter = 'todos' | 'acciones' | 'descontentos' | 'hambre' | 'calle';
 
-export type SimSpeed = 1 | 2 | 5 | 20;
-
 export type MapLens =
   | 'ninguna'
-  | 'roles'
-  | 'acciones'
-  | 'rol'
   | 'satisfaccion'
-  | 'hambre'
-  | 'miedo'
-  | 'salud'
-  | 'accion'
-  | 'lealtad'
+  | 'roles'
   | 'vivienda'
   | 'firmas'
   | 'alquiler'
   | 'vias'
+  | 'acciones'
   | 'defensa'
   | 'orden'
   | 'integridad'
-  | 'amenaza'
-  | 'hospital';
+  | 'amenaza';
 
-export type AiStatus = 'activa' | 'lenta' | 'plantilla';
+export type { AiStatus } from './game';
 
 export type CityTab =
   | 'general'
@@ -49,28 +40,7 @@ export type CityTab =
   | 'vecinos'
   | 'bitacora';
 
-export type EconomyTab =
-  | 'resumen'
-  | 'firmas'
-  | 'mercado'
-  | 'vivienda'
-  | 'presupuesto'
-  | 'alimento'
-  | 'comercio'
-  | 'fiscal';
-
-export type InspectorTarget =
-  | { tipo: 'npc'; id: string }
-  | { tipo: 'hogar'; id: string }
-  | { tipo: 'parcela'; id: string }
-  | { tipo: 'firma'; id: string }
-  | { tipo: 'via'; id: string }
-  | { tipo: 'zona'; id: ZoneId }
-  | { tipo: 'medio'; id: string }
-  | { tipo: 'hecho'; id: string; source: 'log' | 'evento' };
-
 export interface CameraTarget {
-  district?: DistrictId | 'all';
   zone?: ZoneId | 'all';
   wx?: number;
   wy?: number;
