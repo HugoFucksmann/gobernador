@@ -31,6 +31,7 @@ import {
 import { DespachoTab } from '../../types/ui';
 import { RctWindow } from './RctWindow';
 import { INDICATOR_LABELS, SparklineSvg, stateBadgeTone, stateStrokeColor } from './TemaDrawer';
+import { focusSimEventCamera, getEventParticipantIds } from '../../utils/eventFocus';
 
 interface DespachoWindowProps {
   state: GameState;
@@ -104,6 +105,8 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
   const [histPage, setHistPage] = useState<number>(0);
   const [reportIndex, setReportIndex] = useState<number>(0);
   const [notablesFiltro, setNotablesFiltro] = useState<'todos' | 'empresario' | 'medio'>('todos');
+  const [participantCycle, setParticipantCycle] = useState<Record<string, number>>({});
+  const [focusedHistEventId, setFocusedHistEventId] = useState<string | null>(null);
 
   const summaryIndicators = indicadores_resumen(state);
   const visibleAlerts = alertas_visibles(state);
@@ -346,49 +349,82 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
                     Sin eventos para estos filtros.
                   </div>
                 ) : (
-                  histData.items.map((ev) => (
-                    <div key={ev.id} className="p-3 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          {ev.notable && (
-                            <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  histData.items.map((ev) => {
+                    const participants = getEventParticipantIds(ev, state);
+                    const cycleIdx = participantCycle[ev.id] ?? 0;
+                    const isFocused = focusedHistEventId === ev.id;
+                    const evTitle = `${EVENT_TYPE_LABELS[ev.tipo] ?? ev.tipo} (D${ev.dia})`;
+                    const handleFocusEvent = () => {
+                      if (isFocused) {
+                        onInspectCausal(evTitle, ev.id);
+                        return;
+                      }
+                      focusSimEventCamera(ev, state, {
+                        onFollowNpc,
+                        onSelectNpc,
+                        onJumpZone,
+                      });
+                      setFocusedHistEventId(ev.id);
+                    };
+                    const handleCycleParticipants = () => {
+                      if (participants.length === 0) return;
+                      const nextIdx = cycleIdx % participants.length;
+                      onFollowNpc(participants[nextIdx]);
+                      setParticipantCycle((prev) => ({
+                        ...prev,
+                        [ev.id]: (nextIdx + 1) % participants.length,
+                      }));
+                      setFocusedHistEventId(ev.id);
+                    };
+                    return (
+                      <div key={ev.id} className="p-3 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {ev.notable && (
+                              <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            )}
+                            <span className="font-semibold text-zinc-100 truncate">
+                              {EVENT_TYPE_LABELS[ev.tipo] ?? ev.tipo}
+                            </span>
+                            <span className="text-zinc-400 truncate">
+                              · {state.zonas[ev.zona]?.nombre ?? ev.zona}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                            Día {ev.dia}
+                            {'causa' in ev && ev.causa ? ` · causa: ${ev.causa}` : ''}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                          {participants.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={handleCycleParticipants}
+                              className="px-2 py-1 rounded-lg bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 font-semibold whitespace-nowrap"
+                            >
+                              Ver a todos ({participants.length})
+                              {cycleIdx > 0 ? ` · ${cycleIdx}/${participants.length}` : ''}
+                            </button>
                           )}
-                          <span className="font-semibold text-zinc-100 truncate">
-                            {EVENT_TYPE_LABELS[ev.tipo] ?? ev.tipo}
-                          </span>
-                          <span className="text-zinc-400 truncate">
-                            · {state.zonas[ev.zona]?.nombre ?? ev.zona}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
-                          Día {ev.dia}
-                          {'causa' in ev && ev.causa ? ` · causa: ${ev.causa}` : ''}
+                          <button
+                            type="button"
+                            onClick={handleFocusEvent}
+                            className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold whitespace-nowrap"
+                          >
+                            {participants.length > 0 ? (isFocused ? '¿Por qué?' : 'Ver') : 'Ir'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onInspectCausal(evTitle, ev.id)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold whitespace-nowrap"
+                          >
+                            <GitBranch className="w-3 h-3" />
+                            ¿Por qué?
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => onJumpZone(ev.zona)}
-                          className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold"
-                        >
-                          Ir
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onInspectCausal(
-                              `${EVENT_TYPE_LABELS[ev.tipo] ?? ev.tipo} (D${ev.dia})`,
-                              ev.id
-                            )
-                          }
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
-                        >
-                          <GitBranch className="w-3 h-3" />
-                          ¿Por qué?
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 

@@ -462,23 +462,37 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                 <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1 text-xs font-mono tabular-nums">
                   {Object.values(state.zonas).map((z) => {
                     const alq = state.ultimaSalidaEconomica.alquilerMedio[z.id] ?? 0;
-                    const demSuelo = state.demandaSuelo[`${z.id}:residencial`] ?? 1;
+                    const dRes = state.demandaSuelo[`${z.id}:residencial`] ?? 1;
+                    const dCom = state.demandaSuelo[`${z.id}:comercial`] ?? 1;
+                    const dInd = state.demandaSuelo[`${z.id}:industrial`] ?? 1;
+                    const dAgr = state.demandaSuelo[`${z.id}:agricola`] ?? 1;
+                    const dPub = state.demandaSuelo[`${z.id}:publica`] ?? 1;
                     const zCasas = state.casas.filter((c) => c.zona === z.id).length;
+                    const sinCalleLots = state.parcelas.filter(
+                      (p) => p.zona === z.id && p.estado === 'sin_calle'
+                    );
                     const isNoUrb = z.estado === 'no_urbanizada';
                     return (
                       <button
                         key={z.id}
                         type="button"
                         onClick={() => onJumpZone(z.id)}
-                        className="w-full flex items-center justify-between gap-2 bg-zinc-800/55 hover:bg-zinc-800 rounded-xl px-3 py-2 text-left transition-colors"
+                        className="w-full flex flex-col gap-1 bg-zinc-800/55 hover:bg-zinc-800 rounded-xl px-3 py-2 text-left transition-colors"
                       >
-                        <span className="font-sans font-medium text-zinc-100 truncate">
-                          {z.nombre}
-                          {isNoUrb ? ' (sin vía)' : ''}
-                        </span>
-                        <span className="text-zinc-300 shrink-0">
-                          {zCasas} casas · ${alq.toFixed(1)} · Suelo {demSuelo.toFixed(2)}x
-                        </span>
+                        <div className="w-full flex items-center justify-between gap-2">
+                          <span className="font-sans font-medium text-zinc-100 truncate">
+                            {z.nombre}
+                            {isNoUrb ? ' (sin vía)' : ''}
+                          </span>
+                          <span className="text-zinc-300 shrink-0">
+                            {zCasas} casas · ${alq.toFixed(1)} · Sin vía {sinCalleLots.length}
+                          </span>
+                        </div>
+                        <div className="w-full flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+                          <span>
+                            Dem. suelo: Res {dRes.toFixed(2)}x · Com {dCom.toFixed(2)}x · Ind {dInd.toFixed(2)}x · Agr {dAgr.toFixed(2)}x · Púb {dPub.toFixed(2)}x
+                          </span>
+                        </div>
                       </button>
                     );
                   })}

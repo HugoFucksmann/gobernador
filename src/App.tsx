@@ -40,11 +40,16 @@ export default function App() {
         cameraTarget={session.cameraTarget}
         zoomRequest={session.zoomRequest}
         onSelectNpc={session.selectNpc}
+        onFollowNpc={session.followNpcById}
         onSelectParcela={session.selectParcela}
         onSelectTramo={session.selectTramo}
         onSelectZona={session.selectZona}
+        onJumpZone={session.jumpToZone}
         onCancelFollow={session.cancelFollow}
         onHoverInfoChange={session.setHoverInfo}
+        onInspectCausal={(title, ref, fallbackText) =>
+          session.openCausalInspect({ title, ref, fallbackText })
+        }
       />
 
       {/* 2. Floating Top Game HUD */}
@@ -175,9 +180,11 @@ export default function App() {
           onJumpZone={session.jumpToZone}
           onSelectRoleSample={session.selectRoleSample}
           onSelectNpc={session.selectNpc}
+          onFollowNpc={session.followNpcById}
           onSelectHogar={session.selectHogar}
           onSelectParcela={session.selectParcela}
           onSelectTramo={session.selectTramo}
+          onSelectZona={session.selectZona}
           onBuildVia={session.buildVia}
           onDemolishParcela={session.demolishParcela}
           onRespondDemand={session.respondDemand}

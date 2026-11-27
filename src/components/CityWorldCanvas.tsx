@@ -38,6 +38,11 @@ import {
   ZoneId,
 } from '../types/game';
 import { CameraTarget, CoverageServiceFilter, MapFilter, MapHoverPreview, MapLens } from '../types/ui';
+import {
+  describeMapEdgeEvent,
+  focusSimEventCamera,
+  isHighSeverityOrRareEvent,
+} from '../utils/eventFocus';
 
 export type { CameraTarget, MapFilter, MapLens };
 
@@ -59,11 +64,14 @@ interface CityWorldCanvasProps {
   cameraTarget: CameraTarget | null;
   zoomRequest: { delta: number; seq: number } | null;
   onSelectNpc: (npcId: string) => void;
+  onFollowNpc?: (npcId: string) => void;
   onSelectParcela?: (parcelaId: string) => void;
   onSelectTramo?: (tramoId: string) => void;
   onSelectZona?: (zonaId: ZoneId) => void;
+  onJumpZone?: (zonaId: ZoneId) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
+  onInspectCausal?: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
 // Logical simulation bounds V2: 0..1560 x 0..980
@@ -1144,11 +1152,14 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   cameraTarget,
   zoomRequest,
   onSelectNpc,
+  onFollowNpc,
   onSelectParcela,
   onSelectTramo,
   onSelectZona,
+  onJumpZone,
   onCancelFollow,
   onHoverInfoChange,
+  onInspectCausal,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1209,6 +1220,19 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
     subtitle: string;
     detail?: string;
   } | null>(null);
+  const [dismissedEdgeIds, setDismissedEdgeIds] = useState<Record<string, boolean>>({});
+  const [edgeFocusedEventId, setEdgeFocusedEventId] = useState<string | null>(null);
+
+  const edgeAlerts = !noRender
+    ? state.eventos
+        .filter(
+          (ev) =>
+            state.reloj.dia - ev.dia <= 1 &&
+            !dismissedEdgeIds[ev.id] &&
+            isHighSeverityOrRareEvent(ev)
+        )
+        .slice(0, 3)
+    : [];
 
   const renderPositionsRef = useRef<Map<string, RenderNpcState>>(new Map());
   const smokeRef = useRef<SmokeParticle[]>([]);
@@ -2801,6 +2825,75 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           </>
         )}
       </div>
+
+      {/* Non-pausing Map-Edge Alerts for high-severity, condition, or rare events */}
+      {edgeAlerts.length > 0 && (
+        <div
+          aria-live="polite"
+          className="pointer-events-auto fixed bottom-20 left-4 z-20 hidden sm:flex flex-col gap-1.5 max-w-[300px]"
+        >
+          {edgeAlerts.map((ev) => {
+            const info = describeMapEdgeEvent(ev, state);
+            const isSecondClick = edgeFocusedEventId === ev.id;
+            const isFresh = ev.dia === state.reloj.dia;
+            const toneClass =
+              info.severity === 'critica'
+                ? 'border-rose-500/70 bg-rose-950/90 text-rose-100'
+                : info.severity === 'condicion'
+                ? 'border-amber-500/70 bg-amber-950/90 text-amber-100'
+                : 'border-sky-500/70 bg-zinc-900/92 text-sky-100';
+            return (
+              <div
+                key={ev.id}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs shadow-xl backdrop-blur-sm ${toneClass} ${
+                  isFresh ? 'animate-pulse' : ''
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSecondClick && onInspectCausal) {
+                      onInspectCausal(info.title, ev.id, `Día ${ev.dia}`);
+                      return;
+                    }
+                    focusSimEventCamera(ev, state, {
+                      onFollowNpc,
+                      onSelectNpc,
+                      onSelectParcela,
+                      onSelectZona,
+                      onJumpZone,
+                    });
+                    setEdgeFocusedEventId(ev.id);
+                  }}
+                  className="flex-1 min-w-0 text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-bold tracking-wide opacity-90">
+                      {info.badge} · D{ev.dia}
+                    </span>
+                    {isSecondClick && (
+                      <span className="text-[10px] font-semibold text-emerald-300">
+                        2º clic: ¿por qué?
+                      </span>
+                    )}
+                  </div>
+                  <div className="font-semibold truncate mt-0.5">{info.title}</div>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Cerrar aviso"
+                  onClick={() =>
+                    setDismissedEdgeIds((prev) => ({ ...prev, [ev.id]: true }))
+                  }
+                  className="text-zinc-400 hover:text-white px-1 leading-none"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Interactive Valley Minimap (bottom-right) */}
       <div

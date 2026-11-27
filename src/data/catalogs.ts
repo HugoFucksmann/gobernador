@@ -1447,6 +1447,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
       '{nombre} le cuenta anécdotas a las gallinas del corral',
     ],
     requisitos: { etapa: 'adulto' },
+    contexto: { zonaConLotesAgricolas: true },
     afinidad: { valentia: '+' },
     efectos: [
       { id: 'decorativa' },
@@ -1466,6 +1467,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
       '{nombre} anima la tarde del barrio con canciones tradicionales',
     ],
     requisitos: { etapa: 'adulto' },
+    contexto: { zonaOVecinaConPlaza: true },
     afinidad: { resiliencia: '+' },
     efectos: [{ id: 'anima', intensidad: 'baja', signo: 1, alcance: 'zona' }],
     duracionDias: [1, 3],
@@ -1781,7 +1783,7 @@ export const ACTION_TABLE: ActionDefinition[] = [
     descripcion: 'Comparte comida y alivio con un vecino en situación de calle.',
     tipo: 'espontanea',
     textos: [
-      '{nombre} acoge un rato a un vecino sin casa',
+      '{nombre} le da de comer a un vecino sin casa',
       '{nombre} invita a pasar y comparte abrigo con gente en la calle',
       '{nombre} abre la puerta de su hogar a un vecino desamparado',
     ],
@@ -2005,23 +2007,25 @@ const HITOS_ELECCIONES: HitoDefinition[] = [
   {
     id: 'hito_estabilidad',
     nombre: 'Estabilidad Social',
-    descripcion: 'Mantener al menos 52% de satisfacción media.',
+    descripcion: 'Mantener al menos 52% de satisfacción media durante 2 períodos seguidos.',
     parcelaId: 'p_hito_este_1',
     condicion: {
       metrica: 'satisfaccionMedia',
       op: '>=',
       umbral: 52,
+      periodos: 2,
     },
   },
   {
     id: 'hito_prosperidad',
     nombre: 'Impulso Popular',
-    descripcion: 'Mantener al menos 55% de apoyo electoral.',
+    descripcion: 'Mantener al menos 55% de apoyo electoral durante 2 períodos seguidos.',
     parcelaId: 'p_hito_este_2',
     condicion: {
       metrica: 'apoyoPct',
       op: '>=',
       umbral: 55,
+      periodos: 2,
     },
   },
 ];
@@ -2030,23 +2034,25 @@ const HITOS_ZOMBIES: HitoDefinition[] = [
   {
     id: 'hito_estabilidad',
     nombre: 'Orden y Abasto',
-    descripcion: 'Mantener hambre crítica <= 15%.',
+    descripcion: 'Mantener hambre crítica <= 15% durante 2 períodos seguidos.',
     parcelaId: 'p_hito_este_1',
     condicion: {
       metrica: 'hambreCriticaPct',
       op: '<=',
       umbral: 15,
+      periodos: 2,
     },
   },
   {
     id: 'hito_prosperidad',
     nombre: 'Baluarte en Pie',
-    descripcion: 'Sostener al menos 80% de la población viva.',
+    descripcion: 'Sostener al menos 80% de la población viva durante 2 períodos seguidos.',
     parcelaId: 'p_hito_este_2',
     condicion: {
       metrica: 'poblacionPct',
       op: '>=',
       umbral: 80,
+      periodos: 2,
     },
   },
 ];
@@ -2301,7 +2307,7 @@ export const PRESS_CONSTANTS = {
   hambreSubaUmbralPct: 12,
   precioCambioFuertePct: 18,
   calleSubaUmbralPct: 8,
-  noticiasMuevenSatisfaccion: false as boolean,
+  noticiasMuevenSatisfaccion: true as boolean,
 } as const;
 
 export const LEVER_VALENCIA: Record<string, { alSubir: PressValence; alBajar: PressValence }> = {

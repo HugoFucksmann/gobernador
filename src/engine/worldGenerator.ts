@@ -1685,6 +1685,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
     parcelas,
     hitosCumplidos: [],
+    hitoRachas: {},
     demandasActivas: [],
     medidasVigentes: [],
     bloqueosPalanca: [],

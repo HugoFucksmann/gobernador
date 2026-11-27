@@ -843,6 +843,8 @@ export interface ActionDefinition {
     vecinoSaludBaja?: boolean;
     vecinoEnCalle?: boolean;
     firmaEnRecorte?: boolean;
+    zonaConLotesAgricolas?: boolean;
+    zonaOVecinaConPlaza?: boolean;
   };
   afinidad: Partial<Record<PersonalityTrait, '+' | '-'>>;
   efectos: ActionEffectSpec[];
@@ -931,6 +933,7 @@ export interface HitoDefinition {
     metrica: HitoMetric;
     op: '>=' | '<=';
     umbral: number;
+    periodos?: number;
   };
   desbloquea?: BuildingType[];
 }
@@ -1708,6 +1711,7 @@ export interface GameState {
   gobierno: GovernmentState;
   parcelas: Parcela[];
   hitosCumplidos: string[];
+  hitoRachas?: Record<string, number>;
   demandasActivas: ActiveDemand[];
   medidasVigentes: ActorMeasure[];
   bloqueosPalanca: LeverLock[];

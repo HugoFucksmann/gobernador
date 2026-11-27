@@ -1355,12 +1355,20 @@ function onWorkOrderedResolveCommitments(
 function checkHitosAtPayday(state: GameState, derived: CommunityDerived): void {
   const preset = SCENARIO_PRESETS[state.config.escenarioId];
   const dia = state.reloj.dia;
+  if (!state.hitoRachas) state.hitoRachas = {};
   for (const hito of preset.hitos) {
     if (state.hitosCumplidos.includes(hito.id)) continue;
     const val = getHitoMetricValue(hito.condicion.metrica, state, derived);
     const met =
       hito.condicion.op === '>=' ? val >= hito.condicion.umbral : val <= hito.condicion.umbral;
-    if (!met) continue;
+    if (!met) {
+      state.hitoRachas[hito.id] = 0;
+      continue;
+    }
+    const streak = (state.hitoRachas[hito.id] ?? 0) + 1;
+    state.hitoRachas[hito.id] = streak;
+    const needed = Math.max(1, hito.condicion.periodos ?? 1);
+    if (streak < needed) continue;
 
     state.hitosCumplidos.push(hito.id);
     const parcela = state.parcelas.find((p) => p.id === hito.parcelaId);
@@ -2453,6 +2461,8 @@ interface EligibilityContext {
   hogaresById: Map<string, Hogar>;
   casasById: Map<string, Casa>;
   streetZones: Set<ZoneId>;
+  agroLotZones: Set<ZoneId>;
+  plazaAdjacentZones: Set<ZoneId>;
   cuttingFirmIds: Set<string>;
   anyFirmUnderOne: boolean;
   focusCounts: Map<string, number>;
@@ -2472,6 +2482,24 @@ function createEligibilityContext(state: GameState): EligibilityContext {
   for (const h of state.hogares) {
     hogaresById.set(h.id, h);
     if (h.estado === 'calle') streetZones.add(h.zona);
+  }
+  const agroLotZones = new Set<ZoneId>();
+  const plazaAdjacentZones = new Set<ZoneId>();
+  for (const p of state.parcelas) {
+    if (p.tipoParcela === 'agricola' && p.estado !== 'sin_calle') {
+      agroLotZones.add(p.zona);
+    }
+    const isPlaza =
+      p.edificio?.tipo === 'plaza' ||
+      (p.tipoParcela === 'especial' &&
+        p.edificio?.tipo !== 'puerto' &&
+        p.edificio?.tipo !== 'muelle_comercio');
+    if (isPlaza && p.estado !== 'sin_calle') {
+      plazaAdjacentZones.add(p.zona);
+      for (const vz of state.zonas[p.zona]?.vecinas ?? []) {
+        plazaAdjacentZones.add(vz);
+      }
+    }
   }
   const casasById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
   const cuttingFirmIds = new Set<string>();
@@ -2523,6 +2551,8 @@ function createEligibilityContext(state: GameState): EligibilityContext {
     hogaresById,
     casasById,
     streetZones,
+    agroLotZones,
+    plazaAdjacentZones,
     cuttingFirmIds,
     anyFirmUnderOne,
     focusCounts,
@@ -2563,12 +2593,11 @@ function setNpcActionMovement(
     'protesta',
     'saqueo',
     'organizar_fiesta',
-    'cantar_en_plaza',
     'organizar_asamblea',
   ].includes(actionId)
     ? 'centro'
     : npc.zona;
-  if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(actionId)) {
+  if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta'].includes(actionId)) {
     npc.mapa.destino = getZoneCanvasPosition(state.zonas[targetZone] ? targetZone : npc.zona, state, state.zonas);
   }
   npc.mapa.accion = actionName.toLowerCase();
@@ -3194,6 +3223,32 @@ function isNpcEligibleForAction(
         ? eligCtx.anyFirmUnderOne || eligCtx.cuttingFirmIds.size > 0
         : state.firmas.some((f) => f.activa && (f.factor < 1 || f.ultimoTramo === 'despido'));
       if (!anyCut) return false;
+    }
+    if (ctx.zonaConLotesAgricolas) {
+      const hasAgro = eligCtx
+        ? eligCtx.agroLotZones.has(effZone)
+        : state.parcelas.some(
+            (p) => p.zona === effZone && p.tipoParcela === 'agricola' && p.estado !== 'sin_calle'
+          );
+      if (!hasAgro) return false;
+    }
+    if (ctx.zonaOVecinaConPlaza) {
+      const hasPlaza = eligCtx
+        ? eligCtx.plazaAdjacentZones.has(effZone)
+        : state.parcelas.some((p) => {
+            if (p.estado === 'sin_calle') return false;
+            const isPlaza =
+              p.edificio?.tipo === 'plaza' ||
+              (p.tipoParcela === 'especial' &&
+                p.edificio?.tipo !== 'puerto' &&
+                p.edificio?.tipo !== 'muelle_comercio');
+            if (!isPlaza) return false;
+            return (
+              p.zona === effZone ||
+              (state.zonas[p.zona]?.vecinas ?? []).includes(effZone)
+            );
+          });
+      if (!hasPlaza) return false;
     }
 
     if (typeof ctx.zonaIntegridadMenorA === 'number') {

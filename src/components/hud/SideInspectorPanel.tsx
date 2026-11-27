@@ -482,7 +482,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
         {selectedNpc && (() => {
           const def = ROLE_CATALOG[selectedNpc.rol];
           const stage = getStage(selectedNpc.edad);
-          const prod = Math.round(getNpcProductivity(selectedNpc, state) * 100);
+          const prod = Math.round(getNpcProductivity(selectedNpc, state));
           const districtName = getNpcZoneName(selectedNpc, state);
           const zonesCount = getWorldZones(state).length;
           const effZone = getEffectiveZone(selectedNpc, zonesCount);
@@ -1758,6 +1758,14 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           const alq = state.ultimaSalidaEconomica.alquilerMedio[z] ?? 0;
           const defVal = Math.round(derived.defensa[z] ?? 0);
           const ordVal = Math.round(derived.orden[z] ?? 0);
+          const covMap = computeZoneServiceCoverage(state);
+          const zCov = covMap[z] ?? { escuela: 0, universidad: 0, salud: 0, policia: 0 };
+          const minorsInZone = zNpcs.filter((n) => n.edad < 18).length;
+          const minorsNoSchool = Math.round(minorsInZone * Math.max(0, 1 - zCov.escuela));
+          const popNoHospital = Math.round(zNpcs.length * Math.max(0, 1 - zCov.salud));
+          const policePresence = zNpcs.filter(
+            (n) => n.rol === 'policia' && !n.hospital.internado && !n.accionIa?.fueraDePuesto
+          ).length;
 
           let mainNeed = 'Sin urgencias críticas';
           if (selectedZona.estado === 'no_urbanizada') mainNeed = 'Requiere apertura vial';
@@ -1800,6 +1808,45 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                     {defVal}% / {ordVal}%
                   </span>
                 </div>
+              </div>
+
+              <div className="bg-zinc-800/50 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between text-zinc-400">
+                  <span>Cobertura y presencia</span>
+                  <span className="font-mono text-zinc-200">Policías en zona: {policePresence}</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5 font-mono tabular-nums text-center">
+                  <div className="bg-zinc-900/70 rounded-lg py-1.5 px-1">
+                    <span className="font-sans text-[10px] text-zinc-400 block">Salud</span>
+                    <span className={zCov.salud < 0.5 ? 'text-amber-300 font-bold' : 'text-emerald-400 font-bold'}>
+                      {Math.round(zCov.salud * 100)}%
+                    </span>
+                  </div>
+                  <div className="bg-zinc-900/70 rounded-lg py-1.5 px-1">
+                    <span className="font-sans text-[10px] text-zinc-400 block">Escuela</span>
+                    <span className={zCov.escuela < 0.5 ? 'text-amber-300 font-bold' : 'text-emerald-400 font-bold'}>
+                      {Math.round(zCov.escuela * 100)}%
+                    </span>
+                  </div>
+                  <div className="bg-zinc-900/70 rounded-lg py-1.5 px-1">
+                    <span className="font-sans text-[10px] text-zinc-400 block">Univ.</span>
+                    <span className={zCov.universidad < 0.3 ? 'text-amber-300 font-bold' : 'text-emerald-400 font-bold'}>
+                      {Math.round(zCov.universidad * 100)}%
+                    </span>
+                  </div>
+                  <div className="bg-zinc-900/70 rounded-lg py-1.5 px-1">
+                    <span className="font-sans text-[10px] text-zinc-400 block">Policía</span>
+                    <span className={zCov.policia < 0.5 ? 'text-amber-300 font-bold' : 'text-emerald-400 font-bold'}>
+                      {Math.round(zCov.policia * 100)}%
+                    </span>
+                  </div>
+                </div>
+                {(minorsNoSchool > 0 || popNoHospital > 0) && (
+                  <div className="text-[11px] text-amber-300 font-mono tabular-nums flex items-center justify-between pt-1 border-t border-zinc-700/50">
+                    <span>Sin escuela: {minorsNoSchool} men.</span>
+                    <span>Sin hospital: {popNoHospital} vec.</span>
+                  </div>
+                )}
               </div>
 
               <div className="bg-zinc-800/50 rounded-xl p-3.5 space-y-1">

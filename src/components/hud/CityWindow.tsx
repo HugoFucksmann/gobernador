@@ -37,6 +37,7 @@ import {
 import { CityTab, MapHoverPreview } from '../../types/ui';
 import { RctWindow } from './RctWindow';
 import { UiTooltip } from './UiTooltip';
+import { focusSimEventCamera, getEventParticipantIds } from '../../utils/eventFocus';
 
 type FactCategoryFilter =
   | 'todas'
@@ -213,9 +214,11 @@ interface CityWindowProps {
   onJumpZone: (z: ZoneId | 'all') => void;
   onSelectRoleSample: (role: RoleId) => void;
   onSelectNpc: (npcId: string) => void;
+  onFollowNpc?: (npcId: string) => void;
   onSelectHogar?: (hogarId: string) => void;
   onSelectParcela: (parcelaId: string) => void;
   onSelectTramo: (tramoId: string) => void;
+  onSelectZona?: (zona: ZoneId) => void;
   onBuildVia: (tramoId: string) => { ok: boolean; error?: string };
   onDemolishParcela: (parcelaId: string) => { ok: boolean; error?: string };
   onRespondDemand: (demandId: string, accept: boolean) => { ok: boolean; error?: string };
@@ -234,9 +237,11 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   onJumpZone,
   onSelectRoleSample,
   onSelectNpc,
+  onFollowNpc,
   onSelectHogar,
   onSelectParcela,
   onSelectTramo,
+  onSelectZona,
   onBuildVia,
   onDemolishParcela,
   onRespondDemand,
@@ -250,6 +255,8 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   const [vecinosView, setVecinosView] = useState<'personas' | 'hogares'>('personas');
   const [npcQuery, setNpcQuery] = useState<string>('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [participantCycle, setParticipantCycle] = useState<Record<string, number>>({});
+  const [focusedFactId, setFocusedFactId] = useState<string | null>(null);
 
   useEffect(() => {
     if (ciudadTabRequest?.tab) {
@@ -783,8 +790,13 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                   <div className="text-xs font-semibold text-zinc-400">Hitos</div>
                   {preset.hitos.map((h) => {
                     const done = state.hitosCumplidos.includes(h.id);
+                    const needed = Math.max(1, h.condicion.periodos ?? 1);
+                    const streak = state.hitoRachas?.[h.id] ?? 0;
+                    const unlocksText = h.desbloquea?.length
+                      ? ` · Desbloquea: ${h.desbloquea.map((t) => BUILDING_CATALOG[t]?.nombre ?? t).join(', ')}`
+                      : '';
                     return (
-                      <UiTooltip key={h.id} text={h.descripcion} placement="top" className="w-full">
+                      <UiTooltip key={h.id} text={`${h.descripcion}${unlocksText}`} placement="top" className="w-full">
                         <div
                           className={`w-full rounded-xl px-3.5 py-2.5 border text-xs flex items-center justify-between gap-2 ${
                             done
@@ -792,16 +804,27 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                               : 'bg-zinc-800/50 border-zinc-700/60 text-zinc-300'
                           }`}
                         >
-                          <span className="font-semibold flex items-center gap-2">
-                            {done ? (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                            ) : (
-                              <Lock className="w-4 h-4 text-zinc-500 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="font-semibold flex items-center gap-2">
+                              {done ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                              ) : (
+                                <Lock className="w-4 h-4 text-zinc-500 shrink-0" />
+                              )}
+                              <span>{h.nombre}</span>
+                            </span>
+                            {h.desbloquea && h.desbloquea.length > 0 && (
+                              <span className="text-[11px] text-zinc-400 block pl-6 truncate">
+                                Desbloquea: {h.desbloquea.map((t) => BUILDING_CATALOG[t]?.nombre ?? t).join(', ')}
+                              </span>
                             )}
-                            <span>{h.nombre}</span>
-                          </span>
+                          </div>
                           <span className="font-mono shrink-0 tabular-nums">
-                            {done ? 'Cumplido' : 'Pendiente'}
+                            {done
+                              ? 'Cumplido'
+                              : needed > 1
+                              ? `Racha ${streak}/${needed}`
+                              : 'Pendiente'}
                           </span>
                         </div>
                       </UiTooltip>
@@ -1172,6 +1195,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
               titulo: string;
               detalle: string;
               causalRef?: string;
+              simEvent?: SimEvent;
             }
             const facts: FactItem[] = [];
             for (const entry of state.bitacora) {
@@ -1186,6 +1210,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 titulo: entry.titulo,
                 detalle: entry.detalle,
                 causalRef: entry.simEventId || entry.causa,
+                simEvent: simEv,
               });
             }
             for (const ev of state.eventos) {
@@ -1200,6 +1225,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 titulo: desc.titulo,
                 detalle: desc.detalle,
                 causalRef: ev.id,
+                simEvent: ev,
               });
             }
             facts.sort((a, b) => b.dia - a.dia);
@@ -1280,42 +1306,94 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                       Sin hechos registrados para este filtro.
                     </div>
                   ) : (
-                    filteredFacts.map((entry) => (
-                      <div key={entry.id} className="py-2.5 text-sm">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-zinc-100">{entry.titulo}</span>
-                          <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
-                            D{entry.dia}
-                          </span>
-                        </div>
-                        <p className="text-zinc-400 text-xs mt-1">{entry.detalle}</p>
-                        {(entry.zona || entry.causalRef) && (
-                          <div className="flex items-center justify-end gap-3 mt-1.5">
-                            {entry.zona && (
-                              <button
-                                type="button"
-                                onClick={() => onJumpZone(entry.zona!)}
-                                className="text-xs font-semibold text-zinc-300 hover:text-white hover:underline whitespace-nowrap"
-                              >
-                                Ir ({state.zonas[entry.zona]?.nombre ?? entry.zona})
-                              </button>
-                            )}
-                            {entry.causalRef && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onInspectCausal(entry.titulo, entry.causalRef, entry.detalle)
-                                }
-                                className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:underline whitespace-nowrap"
-                              >
-                                <GitBranch className="w-3.5 h-3.5" />
-                                ¿Por qué?
-                              </button>
-                            )}
+                    filteredFacts.map((entry) => {
+                      const participants = entry.simEvent
+                        ? getEventParticipantIds(entry.simEvent, state)
+                        : [];
+                      const cycleIdx = participantCycle[entry.id] ?? 0;
+                      const isFocused = focusedFactId === entry.id;
+                      const handlePrimaryFocus = () => {
+                        if (isFocused && entry.causalRef) {
+                          onInspectCausal(entry.titulo, entry.causalRef, entry.detalle);
+                          return;
+                        }
+                        if (entry.simEvent) {
+                          focusSimEventCamera(entry.simEvent, state, {
+                            onFollowNpc,
+                            onSelectNpc,
+                            onSelectParcela,
+                            onSelectZona,
+                            onJumpZone: (z) => onJumpZone(z),
+                          });
+                        } else if (entry.zona) {
+                          onSelectZona?.(entry.zona);
+                          onJumpZone(entry.zona);
+                        }
+                        setFocusedFactId(entry.id);
+                      };
+                      const handleCycleParticipants = () => {
+                        if (participants.length === 0) return;
+                        const nextIdx = cycleIdx % participants.length;
+                        const targetId = participants[nextIdx];
+                        if (onFollowNpc) onFollowNpc(targetId);
+                        else onSelectNpc(targetId);
+                        setParticipantCycle((prev) => ({
+                          ...prev,
+                          [entry.id]: (nextIdx + 1) % participants.length,
+                        }));
+                        setFocusedFactId(entry.id);
+                      };
+                      return (
+                        <div key={entry.id} className="py-2.5 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-zinc-100">{entry.titulo}</span>
+                            <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
+                              D{entry.dia}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    ))
+                          <p className="text-zinc-400 text-xs mt-1">{entry.detalle}</p>
+                          {(entry.zona || entry.causalRef || participants.length > 0) && (
+                            <div className="flex flex-wrap items-center justify-end gap-3 mt-1.5">
+                              {participants.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={handleCycleParticipants}
+                                  className="text-xs font-semibold text-amber-300 hover:text-amber-200 hover:underline whitespace-nowrap"
+                                >
+                                  Ver a todos ({participants.length})
+                                  {cycleIdx > 0 ? ` · ${cycleIdx}/${participants.length}` : ''}
+                                </button>
+                              )}
+                              {(entry.simEvent || entry.zona) && (
+                                <button
+                                  type="button"
+                                  onClick={handlePrimaryFocus}
+                                  className="text-xs font-semibold text-zinc-300 hover:text-white hover:underline whitespace-nowrap"
+                                >
+                                  {participants.length > 0
+                                    ? isFocused && entry.causalRef
+                                      ? 'Ver ¿por qué?'
+                                      : 'Seguir foco'
+                                    : `Ir (${state.zonas[entry.zona!]?.nombre ?? entry.zona})`}
+                                </button>
+                              )}
+                              {entry.causalRef && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onInspectCausal(entry.titulo, entry.causalRef, entry.detalle)
+                                  }
+                                  className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:underline whitespace-nowrap"
+                                >
+                                  <GitBranch className="w-3.5 h-3.5" />
+                                  ¿Por qué?
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>

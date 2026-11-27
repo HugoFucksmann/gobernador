@@ -27,10 +27,10 @@ interface WorldConfigModalProps {
 }
 
 const WORLD_LEVEL_BUTTONS: Array<{ id: WorldComplexityLevel; label: string }> = [
-  { id: 'M0', label: 'M0 · Base' },
-  { id: 'M1', label: 'M1 · Mundo' },
-  { id: 'M2', label: 'M2 · Hogares' },
-  { id: 'M3', label: 'M3 · Vial' },
+  { id: 'M0', label: 'M0 · Hogares' },
+  { id: 'M1', label: 'M1 · Firmas' },
+  { id: 'M2', label: 'M2 · Clima/Serv.' },
+  { id: 'M3', label: 'M3 · Caos/Prensa' },
   { id: 'M4', label: 'M4 · Fiscal' },
 ];
 
@@ -184,7 +184,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
                 <span>Nivel de mundo (M0–M4)</span>
                 <HintIcon
-                  text="M0: 1 zona sin clima ni caos · M1: 9 zonas, clima, prensa y caos · M2: M1 + hogares y viviendas · M3: M2 + red vial y suelo · M4: M3 + emisión e inflación."
+                  text="M0: hogares, viviendas y calle con economía mínima · M1: + firmas genéricas, emprendimientos y quiebras · M2: + 9 zonas, clima, salud, servicios y estado automático · M3: + caos y prensa como firmas · M4: + emisión e inflación."
                   placement="top"
                 />
               </div>
