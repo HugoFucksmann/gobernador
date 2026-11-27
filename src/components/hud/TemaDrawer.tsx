@@ -34,6 +34,10 @@ export const INDICATOR_LABELS: Record<LecturaIndicadorId, string> = {
   orden: 'Orden y seguridad',
 };
 
+export function stateStrokeColor(estado: LecturaEstado): string {
+  return estado === 'mal' ? '#fb7185' : estado === 'atencion' ? '#fbbf24' : '#10b981';
+}
+
 export function stateBadgeTone(estado: LecturaEstado): {
   text: string;
   bg: string;
@@ -123,8 +127,7 @@ export const TemaDrawer: React.FC<TemaDrawerProps> = ({
   );
   const indAlerts = alertas(state, { soloActivas: true, indicador: indicatorId });
 
-  const strokeColor =
-    ind.estado === 'mal' ? '#fb7185' : ind.estado === 'atencion' ? '#fbbf24' : '#10b981';
+  const strokeColor = stateStrokeColor(ind.estado);
 
   return (
     <div className="pointer-events-auto fixed top-24 left-4 z-35 w-[430px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-180px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden">

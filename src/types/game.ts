@@ -541,11 +541,6 @@ export interface MediaOutlet {
     afinidadGobierno: number;
     sensacionalismo: number;
   };
-  ingresos: {
-    publicidad: number;
-    fondosEstado: number;
-    dependenciaPct: number;
-  };
   finanzas: {
     ingresosPropios: number;
     fondosEstado: number;
@@ -724,7 +719,6 @@ export interface GovernmentState {
     nominaPorNpc: Record<string, number>;
     pensionesPorNpc: Record<string, number>;
     ayudaPorNpc: Record<string, number>;
-    periodistasPorNpc: Record<string, number>;
     nominaDevengada: number;
     pensionesDevengadas: number;
     ayudaDevengada: number;
@@ -737,7 +731,6 @@ export interface GovernmentState {
     operacionObras: number;
     operacion: number;
     obras: number;
-    operacionPorArea: Record<ServiceAreaId, number>;
     prensa: number;
     subsidios?: number;
     importaciones: number;

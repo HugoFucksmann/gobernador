@@ -18,7 +18,6 @@ import {
   CameraTarget,
   CityTab,
   DespachoTab,
-  LandmarkId,
   MapFilter,
   MapHoverPreview,
   MapLens,
@@ -68,7 +67,6 @@ export function useGameSession() {
   const [selectedTramoId, setSelectedTramoId] = useState<string | null>(null);
   const [selectedZonaId, setSelectedZonaId] = useState<ZoneId | null>(null);
   const [selectedMedioId, setSelectedMedioId] = useState<string | null>(null);
-  const [selectedLandmark, setSelectedLandmark] = useState<LandmarkId | null>(null);
   const [inspectorSearchOpen, setInspectorSearchOpen] = useState<InspectorDirectoryTab | null>(null);
   const [sideBuildOpen, setSideBuildOpen] = useState<boolean>(false);
   const [followSelected, setFollowSelected] = useState<boolean>(false);
@@ -178,7 +176,7 @@ export function useGameSession() {
     prevBuiltCountRef.current = builtCount;
   }, [snapshot.state, snapshot.derived, hasStarted]);
 
-  const clearSideSelectionIds = useCallback(() => {
+  const clearSideEntities = useCallback(() => {
     setSelectedNpcId(null);
     setSelectedHogarId(null);
     setSelectedParcelaId(null);
@@ -186,11 +184,14 @@ export function useGameSession() {
     setSelectedTramoId(null);
     setSelectedZonaId(null);
     setSelectedMedioId(null);
-    setSelectedLandmark(null);
     setInspectorSearchOpen(null);
-    setSideBuildOpen(false);
     setFollowSelected(false);
   }, []);
+
+  const clearSideSelectionIds = useCallback(() => {
+    clearSideEntities();
+    setSideBuildOpen(false);
+  }, [clearSideEntities]);
 
   // Global keyboard shortcuts (Escape closes topmost overlay/window, Space toggles pause)
   useEffect(() => {
@@ -212,7 +213,6 @@ export function useGameSession() {
           selectedTramoId ||
           selectedZonaId ||
           selectedMedioId ||
-          selectedLandmark ||
           inspectorSearchOpen ||
           sideBuildOpen
         ) {
@@ -240,7 +240,6 @@ export function useGameSession() {
     selectedTramoId,
     selectedZonaId,
     selectedMedioId,
-    selectedLandmark,
     inspectorSearchOpen,
     sideBuildOpen,
     showConfigModal,
@@ -294,11 +293,6 @@ export function useGameSession() {
     setSelectedNpcId(npcId);
   }, [clearSideSelectionIds]);
 
-  const clearSelectedNpc = useCallback(() => {
-    setSelectedNpcId(null);
-    setFollowSelected(false);
-  }, []);
-
   const selectHogar = useCallback((hogarId: string) => {
     clearSideSelectionIds();
     setSelectedHogarId(hogarId);
@@ -308,10 +302,6 @@ export function useGameSession() {
     clearSideSelectionIds();
     setSelectedParcelaId(parcelaId);
   }, [clearSideSelectionIds]);
-
-  const clearSelectedParcela = useCallback(() => {
-    setSelectedParcelaId(null);
-  }, []);
 
   const selectFirma = useCallback((firmaId: string) => {
     clearSideSelectionIds();
@@ -349,21 +339,10 @@ export function useGameSession() {
   const toggleBuildPanel = useCallback(() => {
     setSideBuildOpen((prev) => {
       const next = !prev;
-      if (next) {
-        setSelectedNpcId(null);
-        setSelectedHogarId(null);
-        setSelectedParcelaId(null);
-        setSelectedFirmaId(null);
-        setSelectedTramoId(null);
-        setSelectedZonaId(null);
-        setSelectedMedioId(null);
-        setSelectedLandmark(null);
-        setInspectorSearchOpen(null);
-        setFollowSelected(false);
-      }
+      if (next) clearSideEntities();
       return next;
     });
-  }, []);
+  }, [clearSideEntities]);
 
   const selectRoleSample = useCallback(
     (role: RoleId) => {
@@ -448,6 +427,15 @@ export function useGameSession() {
     return !isObserverMode(st.config) || Boolean(st.devMode);
   }, [controller]);
 
+  const withDecisionSfx = useCallback(
+    <R extends { ok: boolean }>(fn: () => R): R => {
+      const res = fn();
+      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
+      return res;
+    },
+    [canPlayDecisionSfx]
+  );
+
   const updateLevers = useCallback(
     (updater: (prev: GovernorLevers) => GovernorLevers) => {
       controller.updateLevers(updater);
@@ -457,62 +445,52 @@ export function useGameSession() {
   );
 
   const setExtraLever = useCallback(
-    (key: ExtraLeverKey, value: number) => {
-      const res = controller.setExtraLever(key, value);
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
-      return res;
-    },
-    [controller, canPlayDecisionSfx]
+    (key: ExtraLeverKey, value: number) =>
+      withDecisionSfx(() => controller.setExtraLever(key, value)),
+    [controller, withDecisionSfx]
   );
 
   const buildInParcela = useCallback(
-    (parcelaId: string, tipo: BuildingType) => {
-      const res = controller.buildInParcela(parcelaId, tipo);
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
-      return res;
-    },
-    [controller, canPlayDecisionSfx]
+    (parcelaId: string, tipo: BuildingType) =>
+      withDecisionSfx(() => controller.buildInParcela(parcelaId, tipo)),
+    [controller, withDecisionSfx]
   );
 
   const buildVia = useCallback(
-    (tramoId: string) => {
-      const res = controller.buildVia(tramoId);
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
-      return res;
-    },
-    [controller, canPlayDecisionSfx]
+    (tramoId: string) => withDecisionSfx(() => controller.buildVia(tramoId)),
+    [controller, withDecisionSfx]
   );
 
   const demolishParcela = useCallback(
-    (parcelaId: string) => {
-      const res = controller.demolishParcela(parcelaId);
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
-      return res;
-    },
-    [controller, canPlayDecisionSfx]
+    (parcelaId: string) => withDecisionSfx(() => controller.demolishParcela(parcelaId)),
+    [controller, withDecisionSfx]
   );
 
   const respondDemand = useCallback(
-    (demandId: string, accept: boolean) => {
-      const res = controller.respondDemand(demandId, accept);
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
-      return res;
-    },
-    [controller, canPlayDecisionSfx]
+    (demandId: string, accept: boolean) =>
+      withDecisionSfx(() => controller.respondDemand(demandId, accept)),
+    [controller, withDecisionSfx]
   );
 
   const counterOffer = useCallback(
-    (demandId: string) => {
-      const res = controller.counterOffer(demandId);
-      if (res.ok && canPlayDecisionSfx()) playDecisionSfx();
-      return res;
-    },
-    [controller, canPlayDecisionSfx]
+    (demandId: string) => withDecisionSfx(() => controller.counterOffer(demandId)),
+    [controller, withDecisionSfx]
   );
 
   const triggerPressManual = useCallback(() => {
     void controller.triggerPressManual();
   }, [controller]);
+
+  const resetSessionUi = useCallback(() => {
+    clearSideSelectionIds();
+    setShowConfigModal(false);
+    setOpenWindows([]);
+    setMilestoneBannerDismissed(false);
+    setCausalInspect(null);
+    setPaydaySummary(null);
+    setMonthlySummary(null);
+    setHasStarted(true);
+  }, [clearSideSelectionIds]);
 
   const beginQuickGame = useCallback(
     (
@@ -537,14 +515,7 @@ export function useGameSession() {
         controller.setPaused(false);
         return;
       }
-      clearSideSelectionIds();
-      setShowConfigModal(false);
-      setOpenWindows([]);
-      setMilestoneBannerDismissed(false);
-      setCausalInspect(null);
-      setPaydaySummary(null);
-      setMonthlySummary(null);
-      setHasStarted(true);
+      resetSessionUi();
       controller.startNewGame({
         ...current,
         escenarioId,
@@ -553,34 +524,21 @@ export function useGameSession() {
         poblacionInicial: targetPop,
       });
     },
-    [controller, clearSideSelectionIds]
+    [controller, resetSessionUi]
   );
 
   const startNewGame = useCallback(
     (newConfig: WorldConfig) => {
-      clearSideSelectionIds();
-      setShowConfigModal(false);
-      setOpenWindows([]);
-      setMilestoneBannerDismissed(false);
-      setCausalInspect(null);
-      setPaydaySummary(null);
-      setMonthlySummary(null);
-      setHasStarted(true);
+      resetSessionUi();
       controller.startNewGame(newConfig);
     },
-    [controller, clearSideSelectionIds]
+    [controller, resetSessionUi]
   );
 
   const jumpToZone = useCallback((zone: ZoneId | 'all') => {
     setFollowSelected(false);
     uiSeqRef.current += 1;
     setCameraTarget({ zone, seq: uiSeqRef.current });
-  }, []);
-
-  const jumpToCoords = useCallback((wx: number, wy: number) => {
-    setFollowSelected(false);
-    uiSeqRef.current += 1;
-    setCameraTarget({ wx, wy, seq: uiSeqRef.current });
   }, []);
 
   const focusWindow = useCallback((winId: WindowId) => {
@@ -639,16 +597,6 @@ export function useGameSession() {
     [selectNpc]
   );
 
-  const openLandmarkWindow = useCallback(
-    (winId: WindowId, _tabHint?: CityTab) => {
-      const lm: LandmarkId =
-        winId === 'gaceta' ? 'prensa' : winId === 'economia' ? 'mercado' : 'palacio';
-      clearSideSelectionIds();
-      setSelectedLandmark(lm);
-    },
-    [clearSideSelectionIds]
-  );
-
   const requestZoom = useCallback((delta: number) => {
     uiSeqRef.current += 1;
     setZoomRequest({ delta, seq: uiSeqRef.current });
@@ -687,7 +635,6 @@ export function useGameSession() {
     selectedTramo,
     selectedZona,
     selectedMedio,
-    selectedLandmark,
     inspectorSearchOpen,
     sideBuildOpen,
     hasConditionAlert,
@@ -723,7 +670,6 @@ export function useGameSession() {
     openTema,
     setActiveTemaId,
     toggleLecturaHeatmap,
-    openLandmarkWindow,
     toggleBuildPanel,
     openInspectorDirectory,
     setInspectorSearchOpen,
@@ -746,10 +692,8 @@ export function useGameSession() {
     // Commands
     beginQuickGame,
     selectNpc,
-    clearSelectedNpc,
     selectHogar,
     selectParcela,
-    clearSelectedParcela,
     selectFirma,
     selectTramo,
     selectZona,
@@ -782,7 +726,6 @@ export function useGameSession() {
     triggerPressManual,
     startNewGame,
     jumpToZone,
-    jumpToCoords,
     requestZoom,
   };
 }

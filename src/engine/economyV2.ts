@@ -784,8 +784,8 @@ export function runPaydayEconomyV2(state: GameState): void {
     .filter((p): p is { m: MediaOutlet; f: Firma } => Boolean(p.f && p.f.activa));
 
   for (const m of activeMedios) {
-    m.ingresos.publicidad = 0;
-    m.ingresos.fondosEstado = 0;
+    m.finanzas.ingresosPropios = 0;
+    m.finanzas.fondosEstado = 0;
   }
 
   // Pre-bucket unemployed adults once (O(N) instead of O(F*N) for 5.000 pop)
@@ -809,7 +809,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       const share = i === medioFirmaPairs.length - 1 ? adBudget - distributed : adBudget * w;
       distributed += share;
       mf.ventas += share;
-      m.ingresos.publicidad += share;
+      m.finanzas.ingresosPropios += share;
     }
   };
 
@@ -1045,6 +1045,59 @@ export function runPaydayEconomyV2(state: GameState): void {
   const pickConstructora = (zona: ZoneId): Firma | undefined =>
     constructoras.find((f) => f.zona === zona) ?? constructoras[0];
 
+  const creditAssetProceeds = (
+    dueno: { tipo: 'hogar' | 'npc' | 'firma' | 'estado'; id: string },
+    amount: number
+  ): void => {
+    if (dueno.tipo === 'hogar') {
+      const oh = hogarById.get(dueno.id);
+      if (oh) oh.dinero += amount;
+      else state.gobierno.reserva += amount;
+    } else if (dueno.tipo === 'npc') {
+      const on = npcById.get(dueno.id);
+      const oh = on ? hogarById.get(on.hogarId) : undefined;
+      if (oh) oh.dinero += amount;
+      else state.gobierno.reserva += amount;
+    } else if (dueno.tipo === 'firma') {
+      const ofirm = firmaById.get(dueno.id);
+      if (ofirm) ofirm.caja += amount;
+      else state.gobierno.reserva += amount;
+    } else {
+      state.gobierno.reserva += amount;
+    }
+  };
+
+  const tryChargeOwnerMaintenance = (
+    dueno: Casa['dueno'],
+    mantCost: number,
+    constr: Firma
+  ): boolean => {
+    if (dueno.tipo === 'hogar' || dueno.tipo === 'npc') {
+      const oh =
+        dueno.tipo === 'hogar'
+          ? hogarById.get(dueno.id)
+          : (() => {
+              const on = npcById.get(dueno.id);
+              return on ? hogarById.get(on.hogarId) : undefined;
+            })();
+      if (oh && oh.dinero >= mantCost * 1.5) {
+        oh.dinero -= mantCost;
+        constr.ventas += mantCost;
+        return true;
+      }
+      return false;
+    }
+    if (dueno.tipo === 'firma') {
+      const ofirm = firmaById.get(dueno.id);
+      if (ofirm && ofirm.activa && ofirm.caja >= mantCost) {
+        ofirm.caja -= mantCost;
+        constr.ventas += mantCost;
+        return true;
+      }
+    }
+    return false;
+  };
+
   for (const c of state.casas) {
     c.alquilerCobradoPeriodo = 0;
     const occ = c.hogarId ? hogarById.get(c.hogarId) : undefined;
@@ -1105,29 +1158,7 @@ export function runPaydayEconomyV2(state: GameState): void {
     const constr = pickConstructora(c.zona);
     let paid = false;
     if (c.estado < 96 && constr && mantCost > 0) {
-      if (c.dueno.tipo === 'hogar') {
-        const oh = hogarById.get(c.dueno.id);
-        if (oh && oh.dinero >= mantCost * 1.5) {
-          oh.dinero -= mantCost;
-          constr.ventas += mantCost;
-          paid = true;
-        }
-      } else if (c.dueno.tipo === 'npc') {
-        const on = npcById.get(c.dueno.id);
-        const oh = on ? hogarById.get(on.hogarId) : undefined;
-        if (oh && oh.dinero >= mantCost * 1.5) {
-          oh.dinero -= mantCost;
-          constr.ventas += mantCost;
-          paid = true;
-        }
-      } else if (c.dueno.tipo === 'firma') {
-        const ofirm = firmaById.get(c.dueno.id);
-        if (ofirm && ofirm.activa && ofirm.caja >= mantCost) {
-          ofirm.caja -= mantCost;
-          constr.ventas += mantCost;
-          paid = true;
-        }
-      }
+      paid = tryChargeOwnerMaintenance(c.dueno, mantCost, constr);
       if (paid) c.estado = clamp(c.estado + decay + 2, 0, 100);
     }
 
@@ -1139,20 +1170,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       );
       if (inmoBuyer) {
         inmoBuyer.caja -= forcedPrice;
-        if (c.dueno.tipo === 'hogar') {
-          const oh = hogarById.get(c.dueno.id);
-          if (oh) oh.dinero += forcedPrice;
-          else state.gobierno.reserva += forcedPrice;
-        } else if (c.dueno.tipo === 'npc') {
-          const on = npcById.get(c.dueno.id);
-          const oh = on ? hogarById.get(on.hogarId) : undefined;
-          if (oh) oh.dinero += forcedPrice;
-          else state.gobierno.reserva += forcedPrice;
-        } else if (c.dueno.tipo === 'firma') {
-          const ofirm = firmaById.get(c.dueno.id);
-          if (ofirm) ofirm.caja += forcedPrice;
-          else state.gobierno.reserva += forcedPrice;
-        }
+        creditAssetProceeds(c.dueno, forcedPrice);
         c.dueno = { tipo: 'firma', id: inmoBuyer.id };
       }
     }
@@ -1289,7 +1307,6 @@ export function runPaydayEconomyV2(state: GameState): void {
     const perM = prensaPaid / medioFirmaPairs.length;
     for (const { m, f } of medioFirmaPairs) {
       f.ventas += perM;
-      m.ingresos.fondosEstado += perM;
       m.finanzas.fondosEstado += perM;
     }
   }
@@ -1844,22 +1861,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       const housePrice = c.alquiler * HOUSING_CONSTANTS.multiploCasa;
       if (h.dinero >= housePrice * 1.45) {
         h.dinero -= housePrice;
-        if (c.dueno.tipo === 'firma') {
-          const sellerFirm = firmaById.get(c.dueno.id);
-          if (sellerFirm) sellerFirm.caja += housePrice;
-          else state.gobierno.reserva += housePrice;
-        } else if (c.dueno.tipo === 'hogar') {
-          const sh = hogarById.get(c.dueno.id);
-          if (sh) sh.dinero += housePrice;
-          else state.gobierno.reserva += housePrice;
-        } else if (c.dueno.tipo === 'npc') {
-          const sn = npcById.get(c.dueno.id);
-          const sh = sn ? hogarById.get(sn.hogarId) : undefined;
-          if (sh) sh.dinero += housePrice;
-          else state.gobierno.reserva += housePrice;
-        } else {
-          state.gobierno.reserva += housePrice;
-        }
+        creditAssetProceeds(c.dueno, housePrice);
         c.dueno = { tipo: 'hogar', id: h.id };
         purchasesLeft--;
       }
@@ -1915,22 +1917,10 @@ export function runPaydayEconomyV2(state: GameState): void {
           const p = target.partes[i];
           const cut = i === target.partes.length - 1 ? price - paid : price * (p.pct / 100);
           paid += cut;
+          creditAssetProceeds(p, cut);
           if (p.tipo === 'npc') {
             const o = npcById.get(p.id);
-            const oh = o ? hogarById.get(o.hogarId) : undefined;
-            if (oh) oh.dinero += cut;
-            else state.gobierno.reserva += cut;
             if (o) o.partes = o.partes.filter((x) => x.firmaId !== target.id);
-          } else if (p.tipo === 'hogar') {
-            const oh = hogarById.get(p.id);
-            if (oh) oh.dinero += cut;
-            else state.gobierno.reserva += cut;
-          } else if (p.tipo === 'firma') {
-            const pf = firmaById.get(p.id);
-            if (pf) pf.caja += cut;
-            else state.gobierno.reserva += cut;
-          } else {
-            state.gobierno.reserva += cut;
           }
         }
       } else {
@@ -2450,7 +2440,6 @@ export function runPaydayEconomyV2(state: GameState): void {
             afinidadGobierno: Math.round(cand.variables.lealtad),
             sensacionalismo: Math.round((cand.personalidad.rebeldia + cand.personalidad.codicia) * 0.5),
           },
-          ingresos: { publicidad: 0, fondosEstado: 0, dependenciaPct: 0 },
           finanzas: { ingresosPropios: 0, fondosEstado: 0, dependenciaPct: 0 },
           caja: 35,
           periodosEnPerdida: 0,
@@ -2572,12 +2561,11 @@ export function runPaydayEconomyV2(state: GameState): void {
       m.caja = Number(f.caja.toFixed(2));
       m.periodosEnPerdida = f.periodosEnPerdida;
     }
-    const totalRev = m.ingresos.publicidad + m.ingresos.fondosEstado;
-    const dep = totalRev > 0 ? (m.ingresos.fondosEstado / totalRev) * 100 : 0;
-    m.ingresos.dependenciaPct = Number(dep.toFixed(1));
-    m.finanzas.ingresosPropios = Number(m.ingresos.publicidad.toFixed(1));
-    m.finanzas.fondosEstado = Number(m.ingresos.fondosEstado.toFixed(1));
-    m.finanzas.dependenciaPct = m.ingresos.dependenciaPct;
+    const totalRev = m.finanzas.ingresosPropios + m.finanzas.fondosEstado;
+    const dep = totalRev > 0 ? (m.finanzas.fondosEstado / totalRev) * 100 : 0;
+    m.finanzas.ingresosPropios = Number(m.finanzas.ingresosPropios.toFixed(1));
+    m.finanzas.fondosEstado = Number(m.finanzas.fondosEstado.toFixed(1));
+    m.finanzas.dependenciaPct = Number(dep.toFixed(1));
 
     // Credibility moves with dependency, monopoly penalty, G3 press pressure & press office access
     if (dep > ECON_CONSTANTS.umbralDependenciaPrensaPct) {

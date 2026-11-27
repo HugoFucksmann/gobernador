@@ -42,7 +42,6 @@ export default function App() {
         onSelectParcela={session.selectParcela}
         onSelectTramo={session.selectTramo}
         onSelectZona={session.selectZona}
-        onOpenSection={session.openLandmarkWindow}
         onCancelFollow={session.cancelFollow}
         onHoverInfoChange={session.setHoverInfo}
       />
@@ -99,7 +98,7 @@ export default function App() {
         />
       )}
 
-      {/* 3. Unified Lateral Panel (NPC, Hogar, Parcela, Firma, Vía, Zona, Medio, Landmark, Explorar, Construir) */}
+      {/* 3. Unified Lateral Panel (NPC, Hogar, Parcela, Firma, Vía, Zona, Medio, Explorar, Construir) */}
       <SideInspectorPanel
         state={session.state}
         derived={session.derived}
@@ -110,11 +109,9 @@ export default function App() {
         selectedTramo={session.selectedTramo}
         selectedZona={session.selectedZona}
         selectedMedio={session.selectedMedio}
-        selectedLandmark={session.selectedLandmark}
         inspectorSearchOpen={session.inspectorSearchOpen}
         sideBuildOpen={session.sideBuildOpen}
         followSelected={session.followSelected}
-        aiBusy={session.aiBusy}
         onToggleFollow={() => session.setFollowSelected((f) => !f)}
         onClosePanel={session.clearSidePanel}
         onSelectNpc={session.selectNpc}
@@ -123,7 +120,6 @@ export default function App() {
         onSelectFirma={session.selectFirma}
         onSelectTramo={session.selectTramo}
         onSelectZona={session.selectZona}
-        onSelectMedio={session.selectMedio}
         onOpenDirectory={session.openInspectorDirectory}
         onJumpZone={session.jumpToZone}
         onHoverPreview={session.setHoveredPreview}
@@ -132,8 +128,6 @@ export default function App() {
         onDemolishParcela={session.demolishParcela}
         onRespondDemand={session.respondDemand}
         onCounterOffer={session.counterOffer}
-        onOpenWindow={session.openWindow}
-        onTriggerPress={session.triggerPressManual}
         onInspectCausal={(title, ref, fallbackText) =>
           session.openCausalInspect({ title, ref, fallbackText })
         }
@@ -183,7 +177,6 @@ export default function App() {
           onSelectHogar={session.selectHogar}
           onSelectParcela={session.selectParcela}
           onSelectTramo={session.selectTramo}
-          onBuildInParcela={session.buildInParcela}
           onBuildVia={session.buildVia}
           onDemolishParcela={session.demolishParcela}
           onRespondDemand={session.respondDemand}

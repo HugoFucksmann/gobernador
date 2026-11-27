@@ -122,6 +122,10 @@ function findLivingAdultRelative(
   return candidates.find((c) => c.zona === orphan.zona) ?? candidates[0];
 }
 
+function electReplacementGerente(f: Firma, departingNpcId: string): string | null {
+  return f.partes.find((p) => p.tipo === 'npc' && p.id !== departingNpcId)?.id ?? f.empleados[0] ?? null;
+}
+
 export function handleNpcDeathV2(
   state: GameState,
   npc: Npc,
@@ -146,8 +150,7 @@ export function handleNpcDeathV2(
     if (f) {
       f.empleados = f.empleados.filter((id) => id !== npc.id);
       if (f.gerenteId === npc.id) {
-        const nextMgr = f.partes.find((p) => p.tipo === 'npc' && p.id !== npc.id)?.id ?? f.empleados[0] ?? null;
-        f.gerenteId = nextMgr;
+        f.gerenteId = electReplacementGerente(f, npc.id);
       }
     }
     npc.empleadorId = null;
@@ -523,10 +526,7 @@ export function runDailyLifecycleV2(state: GameState): void {
           if (f) {
             f.empleados = f.empleados.filter((id) => id !== npc.id);
             if (f.gerenteId === npc.id) {
-              f.gerenteId =
-                f.partes.find((p) => p.tipo === 'npc' && p.id !== npc.id)?.id ??
-                f.empleados[0] ??
-                null;
+              f.gerenteId = electReplacementGerente(f, npc.id);
             }
           }
           npc.empleadorId = null;
@@ -732,6 +732,60 @@ export function runDemographicPeriodV2(state: GameState): void {
   const casaById = new Map(state.casas.map((c) => [c.id, c]));
   const freeHousesByZone = getFreeHousesByZone(state);
 
+  const createAndAttachHogar = (opts: {
+    id?: string;
+    miembros: string[];
+    adultoIds: string[];
+    house: Casa | null;
+    fallbackZone: ZoneId;
+    dinero: number;
+    despensa: number;
+    ultimoIngresoNeto: number;
+    syncMemberLocation?: boolean;
+    ensureHouseHogarOwner?: boolean;
+    trackStreaks?: boolean;
+  }): Hogar => {
+    const newHogar: Hogar = {
+      id: opts.id ?? nextSeqId(state, 'h'),
+      miembros: opts.miembros,
+      adultoIds: opts.adultoIds,
+      esAcogida: false,
+      casaId: opts.house ? opts.house.id : null,
+      dinero: opts.dinero,
+      despensa: opts.despensa,
+      estado: opts.house ? 'con_casa' : 'calle',
+      periodosSinPagar: 0,
+      periodosHacinado: 0,
+      ...(opts.trackStreaks ? { periodosEnCalle: 0, periodosDescontento: 0 } : {}),
+      zona: opts.house ? opts.house.zona : opts.fallbackZone,
+      ultimoIngresoNeto: opts.ultimoIngresoNeto,
+      alquilerPagadoPeriodo: 0,
+    };
+    if (opts.house) {
+      opts.house.hogarId = newHogar.id;
+      opts.house.ocupadaPorAccion = false;
+      if (
+        opts.ensureHouseHogarOwner &&
+        opts.house.dueno.tipo === 'hogar' &&
+        !hogarById.has(opts.house.dueno.id)
+      ) {
+        opts.house.dueno = { tipo: 'hogar', id: newHogar.id };
+      }
+    }
+    state.hogares.push(newHogar);
+    hogarById.set(newHogar.id, newHogar);
+    if (opts.syncMemberLocation !== false) {
+      for (const mid of newHogar.miembros) {
+        const m = npcById.get(mid);
+        if (m) {
+          m.hogarId = newHogar.id;
+          m.zona = newHogar.zona;
+        }
+      }
+    }
+    return newHogar;
+  };
+
   // 1. Parejas (by zone, bounded)
   const singlesByZone = new Map<ZoneId, Npc[]>();
   for (const n of vivos) {
@@ -877,39 +931,16 @@ export function runDemographicPeriodV2(state: GameState): void {
         hB.miembros = hB.miembros.filter((id) => id !== best!.id);
       }
 
-      const newHogar: Hogar = {
-        id: nextSeqId(state, 'h'),
+      const newHogar = createAndAttachHogar({
         miembros: [...combinedMembers],
         adultoIds: [...combinedMembers].filter((id) => (npcById.get(id)?.edad ?? 0) >= 18),
-        esAcogida: false,
-        casaId: targetHouse ? targetHouse.id : null,
+        house: targetHouse,
+        fallbackZone: zona,
         dinero: targetMoney,
         despensa: targetFood,
-        estado: targetHouse ? 'con_casa' : 'calle',
-        periodosSinPagar: 0,
-        periodosHacinado: 0,
-        zona: targetHouse ? targetHouse.zona : zona,
         ultimoIngresoNeto: (a.economia.ultimoIngresoNeto + best.economia.ultimoIngresoNeto) * PERIOD_DAYS,
-        alquilerPagadoPeriodo: 0,
-      };
-      if (targetHouse) {
-        targetHouse.hogarId = newHogar.id;
-        targetHouse.ocupadaPorAccion = false;
-        if (targetHouse.dueno.tipo === 'hogar' && !hogarById.has(targetHouse.dueno.id)) {
-          targetHouse.dueno = { tipo: 'hogar', id: newHogar.id };
-        }
-      }
-
-      state.hogares.push(newHogar);
-      hogarById.set(newHogar.id, newHogar);
-
-      for (const mid of newHogar.miembros) {
-        const m = npcById.get(mid);
-        if (m) {
-          m.hogarId = newHogar.id;
-          m.zona = newHogar.zona;
-        }
-      }
+        ensureHouseHogarOwner: true,
+      });
 
       emitSimEvent(state, {
         id: nextSeqId(state, 'ev_pareja'),
@@ -1076,27 +1107,15 @@ export function runDemographicPeriodV2(state: GameState): void {
         h.miembros = h.miembros.filter((id) => id !== indepCandidate.id);
         if (h.adultoIds) h.adultoIds = h.adultoIds.filter((id) => id !== indepCandidate.id);
 
-        const newHogar: Hogar = {
-          id: nextSeqId(state, 'h'),
+        const newHogar = createAndAttachHogar({
           miembros: [indepCandidate.id],
           adultoIds: [indepCandidate.id],
-          esAcogida: false,
-          casaId: freeHouse.id,
+          house: freeHouse,
+          fallbackZone: freeHouse.zona,
           dinero: shareCash,
           despensa: shareFood,
-          estado: 'con_casa',
-          periodosSinPagar: 0,
-          periodosHacinado: 0,
-          zona: freeHouse.zona,
           ultimoIngresoNeto: indepCandidate.economia.ultimoIngresoNeto * PERIOD_DAYS,
-          alquilerPagadoPeriodo: 0,
-        };
-        freeHouse.hogarId = newHogar.id;
-        freeHouse.ocupadaPorAccion = false;
-        indepCandidate.hogarId = newHogar.id;
-        indepCandidate.zona = freeHouse.zona;
-        state.hogares.push(newHogar);
-        hogarById.set(newHogar.id, newHogar);
+        });
 
         emitSimEvent(state, {
           id: nextSeqId(state, 'ev_indep'),
@@ -1135,27 +1154,15 @@ export function runDemographicPeriodV2(state: GameState): void {
           if (h.adultoIds) h.adultoIds = h.adultoIds.filter((id) => id !== mover.id);
           h.periodosHacinado = 0;
 
-          const newHogar: Hogar = {
-            id: nextSeqId(state, 'h'),
+          const newHogar = createAndAttachHogar({
             miembros: [mover.id],
             adultoIds: [mover.id],
-            esAcogida: false,
-            casaId: freeHouse.id,
+            house: freeHouse,
+            fallbackZone: freeHouse.zona,
             dinero: shareCash,
             despensa: shareFood,
-            estado: 'con_casa',
-            periodosSinPagar: 0,
-            periodosHacinado: 0,
-            zona: freeHouse.zona,
             ultimoIngresoNeto: mover.economia.ultimoIngresoNeto * PERIOD_DAYS,
-            alquilerPagadoPeriodo: 0,
-          };
-          freeHouse.hogarId = newHogar.id;
-          freeHouse.ocupadaPorAccion = false;
-          mover.hogarId = newHogar.id;
-          mover.zona = freeHouse.zona;
-          state.hogares.push(newHogar);
-          hogarById.set(newHogar.id, newHogar);
+          });
 
           emitSimEvent(state, {
             id: nextSeqId(state, 'ev_hac'),
@@ -1212,34 +1219,15 @@ export function runDemographicPeriodV2(state: GameState): void {
           }
 
           const newMembers = [b.id, ...moveMinors];
-          const newHogar: Hogar = {
-            id: nextSeqId(state, 'h'),
+          const newHogar = createAndAttachHogar({
             miembros: newMembers,
             adultoIds: [b.id],
-            esAcogida: false,
-            casaId: freeHouse ? freeHouse.id : null,
+            house: freeHouse,
+            fallbackZone: h.zona,
             dinero: halfMoney,
             despensa: halfFood,
-            estado: freeHouse ? 'con_casa' : 'calle',
-            periodosSinPagar: 0,
-            periodosHacinado: 0,
-            zona: freeHouse ? freeHouse.zona : h.zona,
             ultimoIngresoNeto: b.economia.ultimoIngresoNeto * PERIOD_DAYS,
-            alquilerPagadoPeriodo: 0,
-          };
-          if (freeHouse) {
-            freeHouse.hogarId = newHogar.id;
-            freeHouse.ocupadaPorAccion = false;
-          }
-          for (const mid of newMembers) {
-            const m = npcById.get(mid);
-            if (m) {
-              m.hogarId = newHogar.id;
-              m.zona = newHogar.zona;
-            }
-          }
-          state.hogares.push(newHogar);
-          hogarById.set(newHogar.id, newHogar);
+          });
 
           emitSimEvent(state, {
             id: nextSeqId(state, 'ev_sep'),
@@ -1341,27 +1329,18 @@ export function runDemographicPeriodV2(state: GameState): void {
       }
       const migDinero = MIGRATION_CONSTANTS.dineroMigranteBase * memberCount;
       state.auditEntradasDia += migDinero;
-      const migHogar: Hogar = {
+      const migHogar = createAndAttachHogar({
         id: newHId,
         miembros: newMembers,
         adultoIds: newAdults,
-        esAcogida: false,
-        casaId: house.id,
+        house,
+        fallbackZone: z,
         dinero: migDinero,
         despensa: memberCount * 2,
-        estado: 'con_casa',
-        periodosSinPagar: 0,
-        periodosHacinado: 0,
-        periodosEnCalle: 0,
-        periodosDescontento: 0,
-        zona: z,
         ultimoIngresoNeto: 0,
-        alquilerPagadoPeriodo: 0,
-      };
-      house.hogarId = migHogar.id;
-      house.ocupadaPorAccion = false;
-      state.hogares.push(migHogar);
-      hogarById.set(migHogar.id, migHogar);
+        syncMemberLocation: false,
+        trackStreaks: true,
+      });
       arrivals++;
       openVacancies = Math.max(0, openVacancies - memberCount);
 

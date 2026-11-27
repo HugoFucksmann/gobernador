@@ -521,5 +521,3 @@ export function projectEvent(ev: SimEvent, state: GameState) {
   }
   return { ...ev, texto };
 }
-
-export { ECON_CONSTANTS };

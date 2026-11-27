@@ -30,7 +30,7 @@ import {
 } from '../../types/game';
 import { DespachoTab } from '../../types/ui';
 import { RctWindow } from './RctWindow';
-import { INDICATOR_LABELS, SparklineSvg, stateBadgeTone } from './TemaDrawer';
+import { INDICATOR_LABELS, SparklineSvg, stateBadgeTone, stateStrokeColor } from './TemaDrawer';
 
 interface DespachoWindowProps {
   state: GameState;
@@ -162,12 +162,7 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
               <div className="grid grid-cols-2 gap-2.5">
                 {summaryIndicators.map((ind) => {
                   const badge = stateBadgeTone(ind.estado);
-                  const stroke =
-                    ind.estado === 'mal'
-                      ? '#fb7185'
-                      : ind.estado === 'atencion'
-                      ? '#fbbf24'
-                      : '#10b981';
+                  const stroke = stateStrokeColor(ind.estado);
                   const heatOn = heatmapIndicatorId === ind.id;
                   return (
                     <div

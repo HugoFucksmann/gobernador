@@ -32,9 +32,9 @@ import {
   ZoneDefinition,
   ZoneId,
 } from '../types/game';
-import { CameraTarget, CityTab, MapFilter, MapHoverPreview, MapLens, WindowId } from '../types/ui';
+import { CameraTarget, MapFilter, MapHoverPreview, MapLens } from '../types/ui';
 
-export type { CameraTarget, MapFilter, MapLens, WindowId };
+export type { CameraTarget, MapFilter, MapLens };
 
 interface CityWorldCanvasProps {
   state: GameState;
@@ -56,7 +56,6 @@ interface CityWorldCanvasProps {
   onSelectParcela?: (parcelaId: string) => void;
   onSelectTramo?: (tramoId: string) => void;
   onSelectZona?: (zonaId: ZoneId) => void;
-  onOpenSection: (section: WindowId, tabHint?: CityTab) => void;
   onCancelFollow: () => void;
   onHoverInfoChange?: (info: string | null) => void;
 }
@@ -1997,7 +1996,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             }
           }
           const medicosActivosFrame = activeRoleCounts.medico ?? 0;
-          const hospInfoFrame = computeHospitalFacilities(st, medicosActivosFrame);
+          const hospInfoFrame = computeHospitalFacilities(st);
           const hospFacilityById = new Map<string, HospitalFacilityInfo>();
           for (const f of hospInfoFrame.facilities) {
             hospFacilityById.set(f.edificioId, f);

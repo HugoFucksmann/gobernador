@@ -26,7 +26,6 @@ import {
 } from '../../engine/simulation';
 import { isViaConnectableToNetwork } from '../../engine/worldHelpers';
 import {
-  BuildingType,
   CommunityDerived,
   GameState,
   RoleId,
@@ -131,7 +130,7 @@ function classifyFactCategory(
   return 'vida';
 }
 
-function describeSimEvent(ev: SimEvent, state: GameState): { titulo: string; detalle: string } | null {
+function describeSupplementalEvent(ev: SimEvent, state: GameState): { titulo: string; detalle: string } | null {
   const getFirmaName = (id: string) => state.firmas.find((f) => f.id === id)?.nombre ?? id;
   switch (ev.tipo) {
     case 'nacimiento':
@@ -198,7 +197,6 @@ interface CityWindowProps {
   onSelectHogar?: (hogarId: string) => void;
   onSelectParcela: (parcelaId: string) => void;
   onSelectTramo: (tramoId: string) => void;
-  onBuildInParcela: (parcelaId: string, tipo: BuildingType) => { ok: boolean; error?: string };
   onBuildVia: (tramoId: string) => { ok: boolean; error?: string };
   onDemolishParcela: (parcelaId: string) => { ok: boolean; error?: string };
   onRespondDemand: (demandId: string, accept: boolean) => { ok: boolean; error?: string };
@@ -1149,7 +1147,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
             }
             for (const ev of state.eventos) {
               if (seenSimIds.has(ev.id)) continue;
-              const desc = describeSimEvent(ev, state);
+              const desc = describeSupplementalEvent(ev, state);
               if (!desc) continue;
               facts.push({
                 id: `ev_${ev.id}`,

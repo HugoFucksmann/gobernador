@@ -142,8 +142,8 @@ export function evaluateNpcLensColor(
     return '#64748b';
   }
 
-  const zonesCount = state ? getWorldZones(state).length : 9;
-  const zone: ZoneId = getEffectiveZone(npc, zonesCount);
+  const zones = state ? getWorldZones(state) : undefined;
+  const zone: ZoneId = getEffectiveZone(npc, zones?.length ?? 9, zones);
 
   if (lens === 'alquiler') {
     const rent = state?.ultimaSalidaEconomica?.alquilerMedio?.[zone] ?? 12;

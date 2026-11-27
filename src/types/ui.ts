@@ -4,8 +4,6 @@ export type WindowId = 'palancas' | 'economia' | 'ciudad' | 'gaceta' | 'despacho
 
 export type DespachoTab = 'resumen' | 'historial' | 'informe' | 'notables';
 
-export type LandmarkId = 'palacio' | 'prensa' | 'mercado';
-
 export type MapFilter = 'todos' | 'acciones' | 'descontentos' | 'hambre' | 'calle';
 
 export type MapLens =

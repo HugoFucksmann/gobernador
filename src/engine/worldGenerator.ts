@@ -1021,11 +1021,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         afinidadGobierno: tpl.afinidadGobierno,
         sensacionalismo: tpl.sensacionalismo,
       },
-      ingresos: {
-        publicidad: tpl.ingresosPropios,
-        fondosEstado: fondosPorMedio,
-        dependenciaPct: depPct,
-      },
       finanzas: {
         ingresosPropios: tpl.ingresosPropios,
         fondosEstado: fondosPorMedio,
@@ -1343,7 +1338,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         nominaPorNpc: {},
         pensionesPorNpc: {},
         ayudaPorNpc: {},
-        periodistasPorNpc: {},
         nominaDevengada: 0,
         pensionesDevengadas: 0,
         ayudaDevengada: 0,
@@ -1356,7 +1350,6 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         operacionObras: 0,
         operacion: 0,
         obras: 0,
-        operacionPorArea: { seguridad: 0, salud: 0, infraestructura: 0 },
         prensa: 0,
         importaciones: 0,
         exportaciones: 0,

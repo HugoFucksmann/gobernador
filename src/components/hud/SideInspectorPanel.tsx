@@ -9,7 +9,6 @@ import {
   HeartPulse,
   Home,
   IdCard,
-  Landmark,
   MapPin,
   Newspaper,
   Route,
@@ -32,7 +31,6 @@ import {
   getBuildingJobCaps,
   getGovernorLevel,
   isObserverMode,
-  sumPeriodExpenses,
 } from '../../engine/policies';
 import {
   computeHospitalFacilities,
@@ -71,7 +69,7 @@ import {
   ZoneDefinition,
   ZoneId,
 } from '../../types/game';
-import { LandmarkId, MapHoverPreview, WindowId } from '../../types/ui';
+import { MapHoverPreview } from '../../types/ui';
 import { HintIcon, UiTooltip } from './UiTooltip';
 
 const EFFECT_LABELS: Record<ActionEffectId, string> = {
@@ -128,11 +126,9 @@ interface SideInspectorPanelProps {
   selectedTramo: ViaTramo | null;
   selectedZona?: ZoneDefinition | null;
   selectedMedio?: MediaOutlet | null;
-  selectedLandmark: LandmarkId | null;
   inspectorSearchOpen?: InspectorDirectoryTab | null;
   sideBuildOpen: boolean;
   followSelected: boolean;
-  aiBusy: boolean;
   onToggleFollow: () => void;
   onClosePanel: () => void;
   onSelectNpc?: (npcId: string) => void;
@@ -141,7 +137,6 @@ interface SideInspectorPanelProps {
   onSelectFirma?: (firmaId: string) => void;
   onSelectTramo: (tramoId: string) => void;
   onSelectZona?: (zonaId: ZoneId) => void;
-  onSelectMedio?: (medioId: string) => void;
   onOpenDirectory?: (tab: InspectorDirectoryTab) => void;
   onJumpZone: (z: ZoneId | 'all') => void;
   onHoverPreview?: (preview: MapHoverPreview | null) => void;
@@ -150,8 +145,6 @@ interface SideInspectorPanelProps {
   onDemolishParcela: (parcelaId: string) => { ok: boolean; error?: string };
   onRespondDemand: (demandId: string, accept: boolean) => { ok: boolean; error?: string };
   onCounterOffer: (demandId: string) => { ok: boolean; aceptada?: boolean; error?: string; texto?: string };
-  onOpenWindow: (win: WindowId) => void;
-  onTriggerPress: () => void;
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
@@ -220,11 +213,9 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   selectedTramo,
   selectedZona = null,
   selectedMedio = null,
-  selectedLandmark,
   inspectorSearchOpen = null,
   sideBuildOpen,
   followSelected,
-  aiBusy,
   onToggleFollow,
   onClosePanel,
   onSelectNpc,
@@ -233,7 +224,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   onSelectFirma,
   onSelectTramo,
   onSelectZona,
-  onSelectMedio,
   onOpenDirectory,
   onJumpZone,
   onHoverPreview,
@@ -242,8 +232,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
   onDemolishParcela,
   onRespondDemand,
   onCounterOffer,
-  onOpenWindow,
-  onTriggerPress,
   onInspectCausal,
 }) => {
   const [npcTab, setNpcTab] = useState<CitizenTab>('estado');
@@ -266,7 +254,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
       selectedTramo ||
       selectedZona ||
       selectedMedio ||
-      selectedLandmark ||
       inspectorSearchOpen ||
       sideBuildOpen
   );
@@ -400,18 +387,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
     headerTitle = 'Explorar comunidad';
     headerSub = `${derived.poblacion} personas · ${state.hogares.length} hogares · ${derived.mercado.firmas} firmas`;
     HeaderIcon = <Search className="w-4 h-4 text-emerald-400" />;
-  } else if (selectedLandmark === 'palacio') {
-    headerTitle = 'Palacio de Gobierno';
-    headerSub = 'Sede ejecutiva';
-    HeaderIcon = <Landmark className="w-4 h-4 text-emerald-400" />;
-  } else if (selectedLandmark === 'prensa') {
-    headerTitle = 'Redacción de Prensa';
-    headerSub = `${state.medios.length} medio(s)`;
-    HeaderIcon = <Newspaper className="w-4 h-4 text-amber-400" />;
-  } else if (selectedLandmark === 'mercado') {
-    headerTitle = 'Puerto y Mercado';
-    headerSub = 'Abasto, firmas y comercio';
-    HeaderIcon = <Store className="w-4 h-4 text-amber-400" />;
   } else {
     headerTitle = 'Construir';
     headerSub = `${derived.parcelasLibres} parcelas libres`;
@@ -1133,7 +1108,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
 
                   if (b.tipo === 'hospital' || b.tipo === 'hospital_campana') {
                     const medicosActivos = activeByRole('medico');
-                    const { facilities } = computeHospitalFacilities(state, medicosActivos);
+                    const { facilities } = computeHospitalFacilities(state);
                     const fac = facilities.find((f) => f.edificioId === b.id);
                     const bedsTotal = fac?.beds ?? 0;
                     const bedsUsed = fac?.occupied ?? 0;
@@ -1392,171 +1367,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
             </div>
           );
         })()}
-
-        {/* 4. LANDMARK EDIFICIO VIEWS */}
-        {selectedLandmark === 'palacio' && (() => {
-          const fin = state.gobierno.finanzas;
-          const lastGastos = sumPeriodExpenses(fin);
-          const caps = getBuildingJobCaps(
-            state.parcelas,
-            derived.poblacion,
-            state.gobierno.palancasVigentes.nivelObras,
-            state.gobierno.cuposFijos
-          );
-          const empPub =
-            derived.roles.policia +
-            derived.roles.medico +
-            derived.roles.ingeniero +
-            derived.roles.estatal +
-            derived.roles.docente;
-          const totalPubCaps = caps.policia + caps.medico + caps.ingeniero + caps.estatal + caps.docente;
-
-          return (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 bg-zinc-800/60 rounded-xl p-3.5 font-mono tabular-nums">
-                <div>
-                  <span className="font-sans text-xs text-zinc-400 block">Reserva</span>
-                  <span className="text-base font-bold text-white">${Math.round(state.gobierno.reserva)}</span>
-                </div>
-                <div>
-                  <span className="font-sans text-xs text-zinc-400 block">Último cierre</span>
-                  <span className={`text-base font-bold ${fin.saldo >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {fin.saldo >= 0 ? '+' : ''}${fin.saldo.toFixed(0)}
-                  </span>
-                </div>
-                <div>
-                  <span className="font-sans text-xs text-zinc-400 block">Ing. / Gas.</span>
-                  <span className="text-xs text-zinc-200">
-                    +${fin.ingresos.toFixed(0)} / -${lastGastos.toFixed(0)}
-                  </span>
-                </div>
-                <div>
-                  <span className="font-sans text-xs text-zinc-400 block">Personal púb.</span>
-                  <span className="text-xs text-zinc-200">
-                    {empPub}/{totalPubCaps}
-                  </span>
-                </div>
-              </div>
-
-              <div className={`grid ${isG0 ? 'grid-cols-1' : 'grid-cols-2'} gap-2.5`}>
-                {!isG0 && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenWindow('palancas')}
-                    className="py-2.5 px-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors"
-                  >
-                    Palancas
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => onOpenWindow('ciudad')}
-                  className="py-2.5 px-3 text-sm font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-xl transition-colors"
-                >
-                  Ciudad
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-
-        {selectedLandmark === 'prensa' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between text-xs text-zinc-400">
-              <span>Últimos titulares</span>
-              <span className="font-mono text-zinc-300">
-                Pauta ${Math.round(state.gobierno.palancasVigentes.prensa)}/per
-              </span>
-            </div>
-
-            {state.medios.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {state.medios.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => onSelectMedio?.(m.id)}
-                    className="px-2.5 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-amber-200 rounded-lg transition-colors"
-                  >
-                    {m.nombre}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
-              {state.noticias.slice(0, 4).map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => onInspectCausal(`${n.medioNombre}: ${n.titulo}`, n.causa || `noticia:${n.id}`, n.texto)}
-                  className="w-full text-left bg-zinc-800/60 hover:bg-zinc-800 rounded-xl p-3 transition-colors space-y-1"
-                >
-                  <div className="flex items-center justify-between text-xs text-zinc-400">
-                    <span>{n.medioNombre}</span>
-                    <span className="font-mono">D{n.dia}</span>
-                  </div>
-                  <div className="text-sm font-semibold text-zinc-100 leading-snug">{n.titulo}</div>
-                </button>
-              ))}
-            </div>
-
-            <div className={`grid ${isG0 ? 'grid-cols-1' : 'grid-cols-2'} gap-2.5`}>
-              {!isG0 && (
-                <button
-                  type="button"
-                  disabled={aiBusy || state.resultado.estado !== 'jugando'}
-                  onClick={onTriggerPress}
-                  className="py-2.5 px-3 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
-                >
-                  Publicar hoy
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onOpenWindow('gaceta')}
-                className="py-2.5 px-3 text-sm font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-xl transition-colors"
-              >
-                Ver Gaceta
-              </button>
-            </div>
-          </div>
-        )}
-
-        {selectedLandmark === 'mercado' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 bg-zinc-800/60 rounded-xl p-3.5 font-mono tabular-nums">
-              <div>
-                <span className="font-sans text-xs text-zinc-400 block">Stock comida</span>
-                <span className="text-base font-bold text-white">
-                  {state.alimento.diasStock.toFixed(0)}d
-                </span>
-              </div>
-              <div>
-                <span className="font-sans text-xs text-zinc-400 block">Precio venta</span>
-                <span className="text-base font-bold text-amber-300">
-                  ${state.alimento.precio.toFixed(2)}
-                </span>
-              </div>
-              <div>
-                <span className="font-sans text-xs text-zinc-400 block">Firmas activas</span>
-                <span className="text-xs text-zinc-200">{derived.mercado.firmas}</span>
-              </div>
-              <div>
-                <span className="font-sans text-xs text-zinc-400 block">Cuota mayor</span>
-                <span className="text-xs text-zinc-200">{derived.mercado.cuotaMayorPct}%</span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onOpenWindow('economia')}
-              className="w-full py-2.5 px-4 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors"
-            >
-              Abrir Economía
-            </button>
-          </div>
-        )}
 
         {/* 4B. HOGAR VIEW */}
         {selectedHogar && (() => {
@@ -2022,8 +1832,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           !selectedFirma &&
           !selectedTramo &&
           !selectedZona &&
-          !selectedMedio &&
-          !selectedLandmark && (() => {
+          !selectedMedio && (() => {
             const q = directoryQuery.trim().toLowerCase();
             const npcById = new Map(state.npcs.map((n) => [n.id, n]));
             const zonesCount = getWorldZones(state).length;
@@ -2216,7 +2025,6 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           !selectedTramo &&
           !selectedZona &&
           !selectedMedio &&
-          !selectedLandmark &&
           !inspectorSearchOpen && (() => {
           const sorted = [...state.parcelas].sort((a, b) => a.orden - b.orden);
           const filtered =

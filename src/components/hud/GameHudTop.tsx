@@ -44,7 +44,7 @@ import {
   ZoneId,
 } from '../../types/game';
 import { AiStatus, DespachoTab, MonthlySummary, PaydaySummary } from '../../types/ui';
-import { INDICATOR_LABELS, SparklineSvg } from './TemaDrawer';
+import { INDICATOR_LABELS, SparklineSvg, stateStrokeColor } from './TemaDrawer';
 import { UiTooltip } from './UiTooltip';
 
 interface GameHudTopProps {
@@ -500,12 +500,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                     : ind.estado === 'atencion'
                     ? 'text-amber-300'
                     : 'text-emerald-400';
-                const stroke =
-                  ind.estado === 'mal'
-                    ? '#fb7185'
-                    : ind.estado === 'atencion'
-                    ? '#fbbf24'
-                    : '#10b981';
+                const stroke = stateStrokeColor(ind.estado);
                 const trendArrow =
                   ind.tendencia.dir > 0 ? '↑' : ind.tendencia.dir < 0 ? '↓' : '→';
                 const trendColor =

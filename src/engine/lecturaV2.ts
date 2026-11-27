@@ -220,17 +220,20 @@ function buildIndicatorText(
   };
 }
 
+function computeReserveDays(state: GameState, popCount: number): number {
+  const lastPeriodSpend = sumPeriodExpenses(state.gobierno.finanzas);
+  const dailyOutflowEstimate = Math.max(
+    12,
+    lastPeriodSpend > 0 ? lastPeriodSpend / PERIOD_DAYS : Math.max(1, popCount) * 1.35
+  );
+  return clamp(state.gobierno.reserva / dailyOutflowEstimate, 0, 999);
+}
+
 function computePrimaryMetrics(
   state: GameState,
   derived: CommunityDerived
 ): Record<LecturaIndicadorId, number> {
-  const pop = Math.max(1, derived.poblacion);
-  const lastPeriodSpend = sumPeriodExpenses(state.gobierno.finanzas);
-  const dailyOutflowEstimate = Math.max(
-    12,
-    lastPeriodSpend > 0 ? lastPeriodSpend / PERIOD_DAYS : pop * 1.35
-  );
-  const reserveDays = clamp(state.gobierno.reserva / dailyOutflowEstimate, 0, 999);
+  const reserveDays = computeReserveDays(state, derived.poblacion);
   const ordenVals = Object.values(derived.orden);
   const meanOrden =
     ordenVals.length > 0
@@ -269,12 +272,7 @@ function computeZoneMetrics(
   }
 
   const popTotal = Math.max(1, state.npcs.filter((n) => n.vivo).length);
-  const lastPeriodSpend = sumPeriodExpenses(state.gobierno.finanzas);
-  const dailyOutflowEstimate = Math.max(
-    12,
-    lastPeriodSpend > 0 ? lastPeriodSpend / PERIOD_DAYS : popTotal * 1.35
-  );
-  const baseReserveDays = clamp(state.gobierno.reserva / dailyOutflowEstimate, 0, 999);
+  const baseReserveDays = computeReserveDays(state, popTotal);
 
   for (const z of zones) {
     const zNpcs = npcsByZone.get(z) ?? [];

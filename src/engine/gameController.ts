@@ -177,8 +177,7 @@ function writeSave(storage: StorageAdapter | null, key: string, state: GameState
     if (!storage) return null;
     const meta: SaveSlotMeta = {
       dia: state.reloj.dia,
-      escenarioNombre:
-        state.config.escenarioId === 'zombies' ? 'Apocalipsis Zombie' : 'Año Electoral',
+      escenarioNombre: SCENARIO_PRESETS[state.config.escenarioId].nombre,
       savedAt: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
     };
     const payload: StoredSavePayload = { meta, state };
@@ -491,8 +490,7 @@ export class GameController {
       {
         meta: {
           dia: this.state.reloj.dia,
-          escenarioNombre:
-            this.state.config.escenarioId === 'zombies' ? 'Apocalipsis Zombie' : 'Año Electoral',
+          escenarioNombre: SCENARIO_PRESETS[this.state.config.escenarioId].nombre,
           savedAt: new Date().toISOString(),
         },
         state: this.state,
@@ -775,7 +773,6 @@ export class GameController {
       nominaPorNpc: acum?.nominaPorNpc ?? {},
       pensionesPorNpc: acum?.pensionesPorNpc ?? {},
       ayudaPorNpc: acum?.ayudaPorNpc ?? {},
-      periodistasPorNpc: acum?.periodistasPorNpc ?? {},
       nominaDevengada: Number(acum?.nominaDevengada ?? 0),
       pensionesDevengadas: Number(acum?.pensionesDevengadas ?? 0),
       ayudaDevengada: Number(acum?.ayudaDevengada ?? 0),
@@ -788,11 +785,6 @@ export class GameController {
       operacionObras: Number(acum?.operacionObras ?? 0),
       operacion: Number(acum?.operacion ?? 0),
       obras: Number(acum?.obras ?? 0),
-      operacionPorArea: acum?.operacionPorArea ?? {
-        seguridad: 0,
-        salud: 0,
-        infraestructura: 0,
-      },
       prensa: Number(acum?.prensa ?? 0),
       subsidios: Number(acum?.subsidios ?? 0),
       importaciones: Number(acum?.importaciones ?? 0),
@@ -878,6 +870,26 @@ export class GameController {
     }
 
     for (const medio of loaded.medios) {
+      const legacyIngresos = (
+        medio as (typeof loaded.medios)[number] & {
+          ingresos?: { publicidad?: number; fondosEstado?: number; dependenciaPct?: number };
+        }
+      ).ingresos;
+      if (legacyIngresos) {
+        if (
+          !medio.finanzas ||
+          (medio.finanzas.ingresosPropios === 0 &&
+            medio.finanzas.fondosEstado === 0 &&
+            ((legacyIngresos.publicidad ?? 0) > 0 || (legacyIngresos.fondosEstado ?? 0) > 0))
+        ) {
+          medio.finanzas = {
+            ingresosPropios: Number(legacyIngresos.publicidad ?? 0),
+            fondosEstado: Number(legacyIngresos.fondosEstado ?? 0),
+            dependenciaPct: Number(legacyIngresos.dependenciaPct ?? 0),
+          };
+        }
+        delete (medio as { ingresos?: unknown }).ingresos;
+      }
       if (typeof medio.afinidadBase !== 'number') {
         medio.afinidadBase = medio.lineaEditorial.afinidadGobierno;
       }
@@ -1045,17 +1057,26 @@ export class GameController {
     this.commit();
   }
 
-  /** Modo desarrollador: aplica una mutación puntual al estado (forzar demandas, etc.). */
-  mutateForDev(fn: (s: GameState) => { ok: boolean; error?: string }): { ok: boolean; error?: string } {
-    if (!this.devMode) return { ok: false, error: 'Requiere modo desarrollador.' };
+  private applyStateCommand<R extends { ok: boolean }>(
+    fn: (s: GameState) => R,
+    syncDerived = true
+  ): R {
     const prevGov = this.state.gobierno;
     const next = structuredClone(this.state);
     const res = fn(next);
     if (!res.ok) return res;
     this.state = next;
-    this.syncDerivedAndGovCheck(next, prevGov);
+    if (syncDerived) {
+      this.syncDerivedAndGovCheck(next, prevGov);
+    }
     this.commit();
     return res;
+  }
+
+  /** Modo desarrollador: aplica una mutación puntual al estado (forzar demandas, etc.). */
+  mutateForDev(fn: (s: GameState) => { ok: boolean; error?: string }): { ok: boolean; error?: string } {
+    if (!this.devMode) return { ok: false, error: 'Requiere modo desarrollador.' };
+    return this.applyStateCommand(fn);
   }
 
   startNewGame(newConfig: WorldConfig): void {
@@ -1119,68 +1140,28 @@ export class GameController {
   }
 
   buildInParcela(parcelaId: string, tipo: BuildingType): { ok: boolean; error?: string } {
-    const prevGov = this.state.gobierno;
-    const next = structuredClone(this.state);
-    const res = orderBuildInParcela(next, parcelaId, tipo);
-    if (!res.ok) return res;
-    this.state = next;
-    this.syncDerivedAndGovCheck(next, prevGov);
-    this.commit();
-    return res;
+    return this.applyStateCommand((s) => orderBuildInParcela(s, parcelaId, tipo));
   }
 
   buildVia(tramoId: string): { ok: boolean; error?: string } {
-    const prevGov = this.state.gobierno;
-    const next = structuredClone(this.state);
-    const res = orderBuildVia(next, tramoId);
-    if (!res.ok) return res;
-    this.state = next;
-    this.syncDerivedAndGovCheck(next, prevGov);
-    this.commit();
-    return res;
+    return this.applyStateCommand((s) => orderBuildVia(s, tramoId));
   }
 
   demolishParcela(parcelaId: string): { ok: boolean; error?: string } {
-    const prevGov = this.state.gobierno;
-    const next = structuredClone(this.state);
-    const res = orderDemolishParcela(next, parcelaId);
-    if (!res.ok) return res;
-    this.state = next;
-    this.syncDerivedAndGovCheck(next, prevGov);
-    this.commit();
-    return res;
+    return this.applyStateCommand((s) => orderDemolishParcela(s, parcelaId));
   }
 
   respondDemand(demandId: string, accept: boolean): { ok: boolean; error?: string } {
-    const prevGov = this.state.gobierno;
-    const next = structuredClone(this.state);
-    const res = respondToDemand(next, demandId, accept);
-    if (!res.ok) return res;
-    this.state = next;
-    this.syncDerivedAndGovCheck(next, prevGov);
-    this.commit();
-    return res;
+    return this.applyStateCommand((s) => respondToDemand(s, demandId, accept));
   }
 
   /** Palancas del nivel 1.1 (G3): entran en vigencia al día siguiente, como el resto de los controles. */
   setExtraLever(key: ExtraLeverKey, value: number): { ok: boolean; error?: string } {
-    const next = structuredClone(this.state);
-    const res = setExtraLeverState(next, key, value);
-    if (!res.ok) return res;
-    this.state = next;
-    this.commit();
-    return res;
+    return this.applyStateCommand((s) => setExtraLeverState(s, key, value), false);
   }
 
   counterOffer(demandId: string): { ok: boolean; aceptada?: boolean; error?: string; texto?: string } {
-    const prevGov = this.state.gobierno;
-    const next = structuredClone(this.state);
-    const res = counterOfferDemand(next, demandId);
-    if (!res.ok) return res;
-    this.state = next;
-    this.syncDerivedAndGovCheck(next, prevGov);
-    this.commit();
-    return res;
+    return this.applyStateCommand((s) => counterOfferDemand(s, demandId));
   }
 
   private applyAiMutation(applyFn: (s: GameState) => boolean | void): void {

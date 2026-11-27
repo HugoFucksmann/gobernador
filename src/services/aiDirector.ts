@@ -56,14 +56,14 @@ let aiDisabledForSession = false;
 let lastAiLatencyMs = 0;
 let lastAiCallSource: 'ia' | 'plantilla' | null = null;
 
-export function getAiRuntimeStatus(usarIaGemini: boolean, serverAvailable: boolean): AiStatus {
+function getAiRuntimeStatus(usarIaGemini: boolean, serverAvailable: boolean): AiStatus {
   if (!usarIaGemini || !serverAvailable || aiDisabledForSession) return 'plantilla';
   if (lastAiCallSource === 'plantilla') return 'plantilla';
   if (lastAiLatencyMs > DIRECTOR_CONSTANTS.plazoClasificadorMs) return 'lenta';
   return 'activa';
 }
 
-export function resetAiSessionError(): void {
+function resetAiSessionError(): void {
   aiDisabledForSession = false;
   lastAiCallSource = null;
   lastAiLatencyMs = 0;
@@ -411,25 +411,31 @@ export async function dispatchPressJob(
 
   const articleIds = planned.map(() => nextSeqId(rng, `n_${state.reloj.dia}`));
 
+  const buildPressResult = (
+    articles: NewsArticle[],
+    source: 'ia' | 'plantilla',
+    status: AiStatus
+  ): AiDirectorResult => ({
+    type: 'press',
+    source,
+    status,
+    apply: (s) => {
+      s.rngState = rng.rngState;
+      if (rng.rng) s.rng = rng.rng;
+      s.idSeq = Math.max(s.idSeq, rng.idSeq);
+      s.colaHechosDia = [];
+      for (const art of articles) {
+        applyPressArticleEffects(s, art);
+      }
+    },
+  });
+
   if (!state.config.usarIaGemini || aiDisabledForSession) {
     lastAiCallSource = 'plantilla';
     const articles = planned.map((plan, idx) =>
       buildArticleFromPlan(plan, state.reloj.dia, articleIds[idx])
     );
-    return {
-      type: 'press',
-      source: 'plantilla',
-      status: 'plantilla',
-      apply: (s) => {
-        s.rngState = rng.rngState;
-        if (rng.rng) s.rng = rng.rng;
-        s.idSeq = Math.max(s.idSeq, rng.idSeq);
-        s.colaHechosDia = [];
-        for (const art of articles) {
-          applyPressArticleEffects(s, art);
-        }
-      },
-    };
+    return buildPressResult(articles, 'plantilla', 'plantilla');
   }
 
   const baseProperWords = buildBaseProperWords(state);
@@ -526,20 +532,7 @@ export async function dispatchPressJob(
     lastStatus = item.status;
   }
 
-  return {
-    type: 'press',
-    source: anyGenerative ? 'ia' : 'plantilla',
-    status: lastStatus,
-    apply: (s) => {
-      s.rngState = rng.rngState;
-      if (rng.rng) s.rng = rng.rng;
-      s.idSeq = Math.max(s.idSeq, rng.idSeq);
-      s.colaHechosDia = [];
-      for (const art of articles) {
-        applyPressArticleEffects(s, art);
-      }
-    },
-  };
+  return buildPressResult(articles, anyGenerative ? 'ia' : 'plantilla', lastStatus);
 }
 
 async function requestClassifierWeights(
