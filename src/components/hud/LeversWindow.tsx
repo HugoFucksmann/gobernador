@@ -67,6 +67,7 @@ interface NumericSliderProps {
   valueLabel?: string;
   vigenteLabel?: string;
   lockNote?: string;
+  summaryLine?: string;
   disabled?: boolean;
   onChange: (val: number) => void;
 }
@@ -84,6 +85,7 @@ const NumericSlider: React.FC<NumericSliderProps> = ({
   valueLabel,
   vigenteLabel,
   lockNote,
+  summaryLine,
   disabled = false,
   onChange,
 }) => {
@@ -91,7 +93,7 @@ const NumericSlider: React.FC<NumericSliderProps> = ({
   const toneClass = accent === 'amber' ? 'text-amber-300' : 'text-emerald-400';
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2 text-sm">
         <div className="min-w-0 flex items-center gap-2">
           <span className="font-semibold text-zinc-100">{label}</span>
@@ -126,6 +128,9 @@ const NumericSlider: React.FC<NumericSliderProps> = ({
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
       />
+      {summaryLine && (
+        <div className="text-[11px] text-zinc-400 font-mono tabular-nums">{summaryLine}</div>
+      )}
     </div>
   );
 };
@@ -343,6 +348,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
             <NumericSlider
               label="Impuesto"
               tooltip={`Aplica a privados, públicos y firmas. Recaudación est.: +$${budget.ingresosEst.toFixed(0)}/per. Por encima de ${ECON_CONSTANTS.fiscalUmbral}% frena la actividad.`}
+              summaryLine={`Recaudación est. +$${budget.ingresosEst.toFixed(0)}/per · Afecta hogares con ingreso y firmas`}
               vigente={vig.impuesto}
               objetivo={obj.impuesto}
               min={LEVER_BOUNDS.impuesto.min}
@@ -356,6 +362,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
             <NumericSlider
               label="Salario público"
               tooltip={`${publicEmployeesNow}/${budget.totalPublicJobs} puestos · Nómina est.: $${budget.nominaEst.toFixed(0)}/per ($${dailyWagePerEmp.toFixed(2)}/d por empleado).`}
+              summaryLine={`Costo $${budget.nominaEst.toFixed(0)}/per · Afecta ${publicEmployeesNow} empleados públicos`}
               vigente={vig.salarioPublico}
               objetivo={obj.salarioPublico}
               min={LEVER_BOUNDS.salarioPublico.min}
@@ -489,6 +496,9 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                     </UiTooltip>
                   );
                 })}
+              </div>
+              <div className="text-[11px] text-zinc-400 font-mono tabular-nums">
+                Operación ${obrasRow.operacionPeriodo}/per · Afecta {obrasTarget} ing., velocidad de obras y reparación vial
               </div>
             </div>
 

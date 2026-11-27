@@ -594,18 +594,26 @@ export function useGameSession() {
   const beginQuickGame = useCallback(
     (
       escenarioId: 'elecciones' | 'zombies',
-      options?: { mode?: 'observador' | 'gobernador'; poblacion?: number }
+      options?: {
+        mode?: 'observador' | 'gobernador';
+        nivelGobernador?: GovernorComplexityLevel;
+        poblacion?: number;
+      }
     ) => {
       const current = controller.getState().config;
       const mode = options?.mode ?? 'observador';
-      const targetGov: GovernorComplexityLevel = mode === 'gobernador' ? 'G2' : 'G0';
-      const targetAuto = mode === 'observador';
+      const targetGov: GovernorComplexityLevel =
+        options?.nivelGobernador ?? (mode === 'gobernador' ? 'G2' : 'G0');
+      const targetAuto = targetGov === 'G0';
       const targetPop = options?.poblacion ?? current.poblacionInicial;
+      const targetWorld: WorldComplexityLevel =
+        current.nivelMundo === 'M4' ? 'M3' : current.nivelMundo ?? 'M3';
 
       const sameStartConfig =
         current.escenarioId === escenarioId &&
         getGovernorLevel(current) === targetGov &&
         Boolean(current.estadoAutomatico) === targetAuto &&
+        (current.nivelMundo ?? 'M3') === targetWorld &&
         current.poblacionInicial === targetPop &&
         controller.getState().reloj.dia === 1;
 
@@ -618,6 +626,8 @@ export function useGameSession() {
       controller.startNewGame({
         ...current,
         escenarioId,
+        economiaModulo: 'base',
+        nivelMundo: targetWorld,
         nivelGobernador: targetGov,
         estadoAutomatico: targetAuto,
         poblacionInicial: targetPop,

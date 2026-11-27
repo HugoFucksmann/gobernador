@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FolderOpen, Play, Settings2 } from 'lucide-react';
 import { SCENARIO_PRESETS } from '../data/catalogs';
 import { SaveSlotMeta } from '../engine/gameController';
+import { GovernorComplexityLevel } from '../types/game';
 
 interface StartBriefingModalProps {
   initialScenario: 'elecciones' | 'zombies';
@@ -9,7 +10,11 @@ interface StartBriefingModalProps {
   autoSaveMeta: SaveSlotMeta | null;
   onStartScenario: (
     escenarioId: 'elecciones' | 'zombies',
-    options?: { mode?: 'observador' | 'gobernador'; poblacion?: number }
+    options?: {
+      mode?: 'observador' | 'gobernador';
+      nivelGobernador?: GovernorComplexityLevel;
+      poblacion?: number;
+    }
   ) => void;
   onOpenAdvancedConfig: () => void;
   onLoadManual: () => boolean;
@@ -17,6 +22,7 @@ interface StartBriefingModalProps {
 }
 
 const SCALE_PRESETS = [100, 500, 5000] as const;
+type StartPresetId = 'observador_g0' | 'elecciones_g1';
 
 export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
   initialScenario,
@@ -27,7 +33,10 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
   onLoadManual,
   onLoadAutoSave,
 }) => {
+  const [presetId, setPresetId] = useState<StartPresetId>('observador_g0');
   const [poblacion, setPoblacion] = useState<number>(SCENARIO_PRESETS[initialScenario].poblacionDefault);
+
+  const isEleccionesG1 = presetId === 'elecciones_g1';
 
   return (
     <div
@@ -42,7 +51,9 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
             El Gobernador
           </h1>
           <p className="text-sm text-zinc-400">
-            Observador del mundo (v0.1): seguí el clima, los hogares, las firmas y la prensa en tiempo real.
+            {isEleccionesG1
+              ? 'Elecciones (G1): gestioná obra pública, vías, impuestos, salario público y nivel de obras hasta el día 365.'
+              : 'Observador del mundo (G0): seguí el clima, los hogares, las firmas y la prensa con piloto automático.'}
           </p>
         </div>
 
@@ -70,6 +81,30 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
             )}
           </div>
         )}
+
+        <div className="bg-zinc-800/45 border border-zinc-700/70 rounded-2xl p-4 space-y-2.5 text-xs">
+          <span className="text-zinc-400 font-semibold block">Preset de partida</span>
+          <div className="grid grid-cols-2 gap-1.5 bg-zinc-900/70 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setPresetId('observador_g0')}
+              className={`py-2 px-3 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                presetId === 'observador_g0' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Observador (G0)
+            </button>
+            <button
+              type="button"
+              onClick={() => setPresetId('elecciones_g1')}
+              className={`py-2 px-3 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                presetId === 'elecciones_g1' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Elecciones G1
+            </button>
+          </div>
+        </div>
 
         <div className="bg-zinc-800/45 border border-zinc-700/70 rounded-2xl p-4 space-y-2 text-xs">
           <span className="text-zinc-400 font-semibold block">Escala de población</span>
@@ -101,7 +136,19 @@ export const StartBriefingModal: React.FC<StartBriefingModalProps> = ({
 
           <button
             type="button"
-            onClick={() => onStartScenario(initialScenario, { mode: 'observador', poblacion })}
+            onClick={() =>
+              isEleccionesG1
+                ? onStartScenario('elecciones', {
+                    mode: 'gobernador',
+                    nivelGobernador: 'G1',
+                    poblacion,
+                  })
+                : onStartScenario(initialScenario, {
+                    mode: 'observador',
+                    nivelGobernador: 'G0',
+                    poblacion,
+                  })
+            }
             className="flex items-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg transition-colors whitespace-nowrap"
           >
             <Play className="w-4 h-4 fill-current" />

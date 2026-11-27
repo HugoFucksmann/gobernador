@@ -1160,12 +1160,15 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                                   </div>
                                   <div className="font-mono text-xs text-amber-300 tabular-nums">
                                     ${effectiveCost} · {estDays}d · Mant. ${def.mantenimientoPeriodo}/per
-                                    {newlyCoveredPopulation !== undefined && newlyCoveredPopulation > 0 && (
-                                      <span className="text-sky-300 ml-1.5">
-                                        · +{newlyCoveredPopulation} sin cob.
-                                      </span>
-                                    )}
                                   </div>
+                                  {svcInfo && (
+                                    <div className="font-mono text-[11px] text-sky-300 tabular-nums">
+                                      Radio {svcInfo.r} zona(s) ·{' '}
+                                      {newlyCoveredPopulation !== undefined && newlyCoveredPopulation > 0
+                                        ? `+${newlyCoveredPopulation} hab. sin cobertura`
+                                        : '0 hab. sin cobertura'}
+                                    </div>
+                                  )}
                                   {missingHito && (
                                     <div className="text-[11px] text-amber-200/80 truncate">
                                       Hito: {missingHito.nombre}

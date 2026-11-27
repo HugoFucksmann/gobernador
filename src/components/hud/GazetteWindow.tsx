@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Compass, GitBranch, Newspaper, SlidersHorizontal } from 'lucide-react';
 import { isObserverMode } from '../../engine/policies';
 import { GameState, ZoneId } from '../../types/game';
-import { focusSimEventCamera } from '../../utils/eventFocus';
+import { focusSimEventCamera, getEventParticipantIds } from '../../utils/eventFocus';
 import { RctWindow } from './RctWindow';
 import { UiTooltip } from './UiTooltip';
 
@@ -75,6 +75,7 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
 }) => {
   const [pressView, setPressView] = useState<'edicion' | 'medios'>('edicion');
   const [topicFilter, setTopicFilter] = useState<GazetteTopicFilter>('todas');
+  const [participantCycle, setParticipantCycle] = useState<Record<string, number>>({});
   const isG0 = isObserverMode(state.config);
   const filteredArticles = state.noticias
     .filter((a) => matchesGazetteTopic(a.tema, topicFilter))
@@ -156,53 +157,81 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
                     Sin noticias en este filtro temático.
                   </div>
                 ) : (
-                  filteredArticles.map((article) => (
+                  filteredArticles.map((article) => {
+                    const simEv = article.causa
+                      ? state.eventos.find((ev) => ev.id === article.causa)
+                      : undefined;
+                    const targetZone = article.zonaOrigen ?? article.zona ?? simEv?.zona;
+                    const participants = simEv ? getEventParticipantIds(simEv, state) : [];
+                    const cycleIdx = participantCycle[article.id] ?? 0;
+                    const handleFocusArticle = () => {
+                      if (simEv) {
+                        focusSimEventCamera(simEv, state, {
+                          onFollowNpc,
+                          onSelectNpc,
+                          onSelectParcela,
+                          onSelectZona,
+                          onJumpZone,
+                        });
+                      } else if (targetZone) {
+                        onSelectZona?.(targetZone);
+                        onJumpZone?.(targetZone);
+                      }
+                    };
+                    const handleCycleArticleParticipants = () => {
+                      if (participants.length === 0) return;
+                      const nextIdx = cycleIdx % participants.length;
+                      const targetId = participants[nextIdx];
+                      if (onFollowNpc) onFollowNpc(targetId);
+                      else onSelectNpc?.(targetId);
+                      setParticipantCycle((prev) => ({
+                        ...prev,
+                        [article.id]: (nextIdx + 1) % participants.length,
+                      }));
+                    };
+                    return (
                     <article key={article.id} className="p-4 space-y-1.5">
-                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
-                        <span className="font-semibold text-zinc-900">
-                          {article.medioNombre} · D{article.dia}
-                        </span>
-                        <span className="font-mono text-zinc-600 tabular-nums">
-                          {article.autorNombre} · {article.tema}
-                          {article.origen?.includes('rareza') ? ' (rareza)' : ''} · {article.tono} · {Math.round(article.alcance)}%
-                          {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
-                        </span>
+                      <div
+                        onClick={simEv || targetZone ? handleFocusArticle : undefined}
+                        className={simEv || targetZone ? 'cursor-pointer hover:opacity-90' : undefined}
+                        title={simEv || targetZone ? 'Clic para enfocar el hecho en el mapa' : undefined}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
+                          <span className="font-semibold text-zinc-900">
+                            {article.medioNombre} · D{article.dia}
+                          </span>
+                          <span className="font-mono text-zinc-600 tabular-nums">
+                            {article.autorNombre} · {article.tema}
+                            {article.origen?.includes('rareza') ? ' (rareza)' : ''} · {article.tono} · {Math.round(article.alcance)}%
+                            {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
+                          </span>
+                        </div>
+                        <h3 className="font-display text-base font-bold text-zinc-900 leading-snug mt-1">
+                          {article.titulo}
+                        </h3>
+                        <p className="text-sm text-zinc-700 leading-relaxed mt-1">{article.texto}</p>
                       </div>
-                      <h3 className="font-display text-base font-bold text-zinc-900 leading-snug">
-                        {article.titulo}
-                      </h3>
-                      <p className="text-sm text-zinc-700 leading-relaxed">{article.texto}</p>
-                      <div className="flex items-center justify-end gap-3 pt-1">
-                        {(() => {
-                          const simEv = article.causa
-                            ? state.eventos.find((ev) => ev.id === article.causa)
-                            : undefined;
-                          const targetZone = article.zonaOrigen ?? article.zona ?? simEv?.zona;
-                          if (!simEv && !targetZone) return null;
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (simEv) {
-                                  focusSimEventCamera(simEv, state, {
-                                    onFollowNpc,
-                                    onSelectNpc,
-                                    onSelectParcela,
-                                    onSelectZona,
-                                    onJumpZone,
-                                  });
-                                } else if (targetZone) {
-                                  onSelectZona?.(targetZone);
-                                  onJumpZone?.(targetZone);
-                                }
-                              }}
-                              className="flex items-center gap-1 text-xs font-semibold text-zinc-700 hover:text-zinc-950 hover:underline"
-                            >
-                              <Compass className="w-3.5 h-3.5" />
-                              {simEv ? 'Ver foco' : `Ir (${state.zonas[targetZone!]?.nombre ?? targetZone})`}
-                            </button>
-                          );
-                        })()}
+                      <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+                        {participants.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={handleCycleArticleParticipants}
+                            className="text-xs font-semibold text-amber-700 hover:text-amber-900 hover:underline whitespace-nowrap"
+                          >
+                            Ver a todos ({participants.length})
+                            {cycleIdx > 0 ? ` · ${cycleIdx}/${participants.length}` : ''}
+                          </button>
+                        )}
+                        {(simEv || targetZone) && (
+                          <button
+                            type="button"
+                            onClick={handleFocusArticle}
+                            className="flex items-center gap-1 text-xs font-semibold text-zinc-700 hover:text-zinc-950 hover:underline"
+                          >
+                            <Compass className="w-3.5 h-3.5" />
+                            {simEv ? 'Ver foco' : `Ir (${state.zonas[targetZone!]?.nombre ?? targetZone})`}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() =>
@@ -219,7 +248,8 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
                         </button>
                       </div>
                     </article>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

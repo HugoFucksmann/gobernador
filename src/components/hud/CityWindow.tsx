@@ -1345,13 +1345,23 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                       };
                       return (
                         <div key={entry.id} className="py-2.5 text-sm">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold text-zinc-100">{entry.titulo}</span>
-                            <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
-                              D{entry.dia}
-                            </span>
+                          <div
+                            onClick={entry.simEvent || entry.zona ? handlePrimaryFocus : undefined}
+                            className={
+                              entry.simEvent || entry.zona
+                                ? 'cursor-pointer rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-zinc-800/50 transition-colors'
+                                : undefined
+                            }
+                            title={entry.simEvent || entry.zona ? 'Clic para centrar cámara en el foco' : undefined}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-zinc-100">{entry.titulo}</span>
+                              <span className="font-mono text-xs text-zinc-500 tabular-nums shrink-0">
+                                D{entry.dia}
+                              </span>
+                            </div>
+                            <p className="text-zinc-400 text-xs mt-1">{entry.detalle}</p>
                           </div>
-                          <p className="text-zinc-400 text-xs mt-1">{entry.detalle}</p>
                           {(entry.zona || entry.causalRef || participants.length > 0) && (
                             <div className="flex flex-wrap items-center justify-end gap-3 mt-1.5">
                               {participants.length > 1 && (

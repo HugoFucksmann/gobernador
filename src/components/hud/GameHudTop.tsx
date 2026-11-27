@@ -211,24 +211,52 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
       : derived.poblacion;
   const objectiveHealthy = vicCurrent >= preset.victoria.umbral;
 
-  const defCurrent =
-    preset.derrota.metrica === 'hambreCriticaPct'
-      ? derived.hambreCriticaPct
-      : preset.derrota.metrica === 'poblacionPct'
-      ? derived.poblacionPct
-      : derived.poblacion;
-  const defInit =
-    preset.derrota.metrica === 'hambreCriticaPct'
-      ? 0
-      : preset.derrota.metrica === 'poblacionPct'
-      ? 100
-      : basePop;
-  const defLimit = preset.derrota.umbral;
-  const defProgress =
-    preset.derrota.op === '>'
-      ? Math.max(0, (defCurrent - defInit) / Math.max(1, defLimit - defInit))
-      : Math.max(0, (defInit - defCurrent) / Math.max(1, defInit - defLimit));
+  const defeatRules = [preset.derrota, ...(preset.derrotasExtra ?? [])].map((cond) => {
+    const cur =
+      cond.metrica === 'hambreCriticaPct'
+        ? derived.hambreCriticaPct
+        : cond.metrica === 'poblacionPct'
+        ? derived.poblacionPct
+        : derived.poblacion;
+    const prev =
+      cond.metrica === 'hambreCriticaPct'
+        ? state.metricasPeriodoAnterior.hambreCriticaPct
+        : cond.metrica === 'poblacionPct'
+        ? Number(((state.metricasPeriodoAnterior.poblacion / basePop) * 100).toFixed(1))
+        : state.metricasPeriodoAnterior.poblacion;
+    const init =
+      cond.metrica === 'hambreCriticaPct' ? 0 : cond.metrica === 'poblacionPct' ? 100 : basePop;
+    const limit = cond.umbral;
+    const progress =
+      cond.op === '>' || cond.op === '>='
+        ? Math.max(0, (cur - init) / Math.max(1, limit - init))
+        : Math.max(0, (init - cur) / Math.max(1, init - limit));
+    const delta = Number((cur - prev).toFixed(1));
+    const worsensUp = cond.op === '>' || cond.op === '>=';
+    const isWorsening = worsensUp ? delta > 0.4 : delta < -0.4;
+    const isImproving = worsensUp ? delta < -0.4 : delta > 0.4;
+    const trendSymbol = delta > 0.4 ? '↑' : delta < -0.4 ? '↓' : '→';
+    const trendColor = isWorsening
+      ? 'text-rose-400'
+      : isImproving
+      ? 'text-emerald-400'
+      : 'text-zinc-400';
+    const label =
+      cond.metrica === 'hambreCriticaPct'
+        ? 'Hambre'
+        : cond.metrica === 'poblacionPct'
+        ? 'Pob'
+        : 'Vivos';
+    const isPct = cond.metrica === 'hambreCriticaPct' || cond.metrica === 'poblacionPct';
+    return { cond, cur, limit, progress, trendSymbol, trendColor, label, isPct };
+  });
+  const worstDefeat = defeatRules.reduce(
+    (best, cur) => (cur.progress > best.progress ? cur : best),
+    defeatRules[0]
+  );
+  const defProgress = worstDefeat?.progress ?? 0;
   const defeatDanger = defProgress >= ECON_CONSTANTS.umbralAlertaDerrota;
+  const defeatWarn = !defeatDanger && defProgress >= 0.3;
 
   const vicPrev =
     preset.victoria.metrica === 'apoyoPct'
@@ -386,7 +414,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                   </span>
                 )}
                 <UiTooltip
-                  text={`${preset.victoria.descripcion} · Derrota: ${preset.derrota.descripcion} (${daysLeft}d restantes)`}
+                  text={`${preset.victoria.descripcion} · Límites derrota: ${[preset.derrota, ...(preset.derrotasExtra ?? [])].map((d) => d.descripcion).join(' / ')} (${daysLeft}d restantes)`}
                 >
                   <button
                     type="button"
@@ -394,6 +422,8 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                     className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-colors text-sm font-mono tabular-nums whitespace-nowrap shrink-0 ${
                       objetivoPerdido || defeatDanger
                         ? 'border-rose-500/50 bg-rose-950/35 hover:bg-rose-950/55'
+                        : defeatWarn
+                        ? 'border-amber-500/40 bg-amber-950/25 hover:bg-amber-950/45'
                         : 'border-transparent hover:bg-zinc-800/90'
                     }`}
                   >
@@ -419,7 +449,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                     </span>
                     <span
                       className={`text-xs font-bold ${vicTrendColor}`}
-                      aria-label={`Tendencia ${vicTrendSymbol}`}
+                      aria-label={`Tendencia meta ${vicTrendSymbol}`}
                     >
                       {vicTrendSymbol}
                     </span>
@@ -439,6 +469,29 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                     >
                       {goalStateLabel}
                     </span>
+                    {worstDefeat && (
+                      <>
+                        <span className="text-zinc-600">|</span>
+                        <span
+                          className={`text-xs font-semibold ${
+                            defeatDanger
+                              ? 'text-rose-300'
+                              : defeatWarn
+                              ? 'text-amber-300'
+                              : 'text-emerald-300/90'
+                          }`}
+                        >
+                          Lím.{worstDefeat.label} {Math.round(worstDefeat.cur)}/{worstDefeat.limit}
+                          {worstDefeat.isPct ? '%' : ''}
+                        </span>
+                        <span
+                          className={`text-xs font-bold ${worstDefeat.trendColor}`}
+                          aria-label={`Tendencia límite ${worstDefeat.trendSymbol}`}
+                        >
+                          {worstDefeat.trendSymbol}
+                        </span>
+                      </>
+                    )}
                   </button>
                 </UiTooltip>
               </div>

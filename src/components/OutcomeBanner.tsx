@@ -31,18 +31,32 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
 
   if (!showMilestone && !isDefeat) return null;
 
+  const keyTimeline = state.bitacora
+    .filter((b) =>
+      ['economia', 'clima', 'caos', 'obras', 'mercado', 'vivienda', 'gobernador', 'sistema'].includes(b.categoria)
+    )
+    .slice(0, 6);
+
   if (showMilestone) {
     const isVictory = victoryCumplida;
+    const milestoneEvent =
+      state.eventos.find((e) => e.tipo === (isVictory ? 'victoria' : 'objetivo_perdido')) ??
+      state.eventos[0];
+    const milestoneCauses = buildCausalChain(
+      state,
+      milestoneEvent?.id || milestoneEvent?.causa,
+      state.resultado.razon
+    );
     return (
       <div
         role="dialog"
         aria-modal="true"
-        className="fixed inset-0 z-40 bg-zinc-950/65 backdrop-blur-xs flex items-center justify-center p-4"
+        className="fixed inset-0 z-40 bg-zinc-950/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
       >
         <div
           className={`bg-zinc-900 text-zinc-100 border ${
             isVictory ? 'border-emerald-500/50' : 'border-amber-500/50'
-          } rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl`}
+          } rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl my-8`}
         >
           <div className="flex items-center gap-3.5">
             <div
@@ -69,7 +83,7 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
                 : 'No se alcanzó la meta al cierre, pero la comunidad continúa.')}
           </p>
 
-          <div className="grid grid-cols-2 gap-4 py-3.5 border-y border-zinc-800 text-xs font-mono tabular-nums">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-3.5 border-y border-zinc-800 text-xs font-mono tabular-nums">
             <div>
               <span className="font-sans text-zinc-400 block">Población</span>
               <span className="text-base font-bold text-white">
@@ -91,6 +105,43 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
               <span className="text-base font-bold text-white">{derived.hambreCriticaPct}%</span>
             </div>
           </div>
+
+          {milestoneCauses.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
+                <GitBranch className="w-4 h-4 text-emerald-400" />
+                Cadena de causas
+              </div>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                {milestoneCauses.map((step, i) => (
+                  <div
+                    key={`${step.id}_${i}`}
+                    className="bg-zinc-800/65 rounded-xl p-2.5 text-xs space-y-0.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-white">{step.titulo}</span>
+                      <span className="font-mono text-zinc-400">D{step.dia}</span>
+                    </div>
+                    <p className="text-zinc-300">{step.detalle}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {keyTimeline.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-zinc-300">Línea de tiempo</div>
+              <div className="divide-y divide-zinc-800 bg-zinc-800/45 rounded-xl max-h-32 overflow-y-auto">
+                {keyTimeline.map((item) => (
+                  <div key={item.id} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                    <span className="text-zinc-200 truncate">{item.titulo}</span>
+                    <span className="font-mono text-zinc-400 shrink-0">D{item.dia}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap justify-end gap-3">
             <button
@@ -122,11 +173,6 @@ export const OutcomeBanner: React.FC<OutcomeBannerProps> = ({
     endEvent?.id || endEvent?.causa,
     state.resultado.razon
   );
-  const keyTimeline = state.bitacora
-    .filter((b) =>
-      ['economia', 'clima', 'condicion', 'caos', 'gobernador', 'sistema'].includes(b.categoria)
-    )
-    .slice(0, 5);
 
   return (
     <div
