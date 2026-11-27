@@ -174,6 +174,14 @@ function pickNpcRef(npcId: string): string | undefined {
 
 function handle(ws: WebSocket, cmd: Cmd) {
   const st = controller.getState();
+  const replyResult = (
+    r: { ok: boolean; error?: string },
+    extra: Record<string, unknown> = {},
+    includeEvents = true
+  ) => {
+    if (r.ok) pushState(undefined, includeEvents);
+    return ack(ws, cmd, r.ok, { error: r.error, ...extra });
+  };
   switch (cmd.c) {
     case 'ping': return ack(ws, cmd, true, { dia: st.reloj.dia });
     case 'pausa': controller.setPaused(Boolean(cmd.valor ?? true)); return ack(ws, cmd, true);
@@ -210,11 +218,8 @@ function handle(ws: WebSocket, cmd: Cmd) {
       send(ws, { t: 'previa', clave: key, valor: v, estimacion: est, base, id: cmd.id ?? null });
       return;
     }
-    case 'palanca_extra': {
-      const r = controller.setExtraLever(String(cmd.clave) as never, Number(cmd.valor));
-      if (r.ok) pushState(undefined, false);
-      return ack(ws, cmd, r.ok, { error: r.error });
-    }
+    case 'palanca_extra':
+      return replyResult(controller.setExtraLever(String(cmd.clave) as never, Number(cmd.valor)), {}, false);
     case 'previa_extra': {
       const key = String(cmd.clave) as keyof typeof EXTRA_LEVER_BOUNDS;
       const b = EXTRA_LEVER_BOUNDS[key];
@@ -228,34 +233,21 @@ function handle(ws: WebSocket, cmd: Cmd) {
     }
     case 'contraoferta': {
       const r = controller.counterOffer(String(cmd.demanda));
-      if (r.ok) pushState();
-      return ack(ws, cmd, r.ok, { error: r.error, aceptada: r.aceptada, texto: r.texto });
+      return replyResult(r, { aceptada: r.aceptada, texto: r.texto });
     }
-    case 'construir': {
-      const r = controller.buildInParcela(String(cmd.parcela), String(cmd.tipo) as never);
-      if (r.ok) pushState();
-      return ack(ws, cmd, r.ok, { error: r.error });
-    }
-    case 'construir_via': {
-      const r = controller.buildVia(String(cmd.tramo));
-      if (r.ok) pushState();
-      return ack(ws, cmd, r.ok, { error: r.error });
-    }
+    case 'construir':
+      return replyResult(controller.buildInParcela(String(cmd.parcela), String(cmd.tipo) as never));
+    case 'construir_via':
+      return replyResult(controller.buildVia(String(cmd.tramo)));
     case 'estado_automatico': {
       controller.setEstadoAutomatico(Boolean(cmd.valor));
       pushState(undefined, false);
       return ack(ws, cmd, true);
     }
-    case 'demoler': {
-      const r = controller.demolishParcela(String(cmd.parcela));
-      if (r.ok) pushState();
-      return ack(ws, cmd, r.ok, { error: r.error });
-    }
-    case 'responder_demanda': {
-      const r = controller.respondDemand(String(cmd.demanda), Boolean(cmd.aceptar));
-      if (r.ok) pushState();
-      return ack(ws, cmd, r.ok, { error: r.error });
-    }
+    case 'demoler':
+      return replyResult(controller.demolishParcela(String(cmd.parcela)));
+    case 'responder_demanda':
+      return replyResult(controller.respondDemand(String(cmd.demanda), Boolean(cmd.aceptar)));
     case 'foco_npc': {
       focoNpc = cmd.npc ? String(cmd.npc) : null;
       pushState(ws);

@@ -116,6 +116,30 @@ function describeBuilding(def: BuildingDefinition): string {
   return parts.length > 0 ? parts.join(' · ') : def.nombre;
 }
 
+function renderOwnerBadges(
+  partes: FirmPart[],
+  npcs: Npc[],
+  onSelectNpc?: (npcId: string) => void
+) {
+  return partes.map((pt, idx) => {
+    const ownerNpc = pt.tipo === 'npc' ? npcs.find((n) => n.id === pt.id) : undefined;
+    return ownerNpc ? (
+      <button
+        key={`${pt.id}_${idx}`}
+        type="button"
+        onClick={() => onSelectNpc?.(ownerNpc.id)}
+        className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-emerald-300 rounded-lg"
+      >
+        {ownerNpc.nombre} {ownerNpc.apellido} ({Math.round(pt.pct)}%)
+      </button>
+    ) : (
+      <span key={`${pt.id}_${idx}`} className="px-2.5 py-1 bg-zinc-800 text-zinc-300 rounded-lg">
+        {pt.tipo === 'estado' ? 'Estado' : pt.id} ({Math.round(pt.pct)}%)
+      </span>
+    );
+  });
+}
+
 interface SideInspectorPanelProps {
   state: GameState;
   derived: CommunityDerived;
@@ -1508,23 +1532,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
               <div className="space-y-1.5">
                 <div className="font-semibold text-zinc-400">Dueños ({selectedFirma.partes.length})</div>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedFirma.partes.map((pt, idx) => {
-                    const ownerNpc = pt.tipo === 'npc' ? state.npcs.find((n) => n.id === pt.id) : undefined;
-                    return ownerNpc ? (
-                      <button
-                        key={`${pt.id}_${idx}`}
-                        type="button"
-                        onClick={() => onSelectNpc?.(ownerNpc.id)}
-                        className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-emerald-300 rounded-lg"
-                      >
-                        {ownerNpc.nombre} {ownerNpc.apellido} ({Math.round(pt.pct)}%)
-                      </button>
-                    ) : (
-                      <span key={`${pt.id}_${idx}`} className="px-2.5 py-1 bg-zinc-800 text-zinc-300 rounded-lg">
-                        {pt.tipo === 'estado' ? 'Estado' : pt.id} ({Math.round(pt.pct)}%)
-                      </span>
-                    );
-                  })}
+                  {renderOwnerBadges(selectedFirma.partes, state.npcs, onSelectNpc)}
                 </div>
               </div>
 
@@ -1763,23 +1771,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 <div className="space-y-1.5">
                   <div className="font-semibold text-zinc-400">Dueños</div>
                   <div className="flex flex-wrap gap-1.5">
-                    {owners.map((pt: FirmPart, idx: number) => {
-                      const npcOwner = pt.tipo === 'npc' ? state.npcs.find((n) => n.id === pt.id) : undefined;
-                      return npcOwner ? (
-                        <button
-                          key={`${pt.id}_${idx}`}
-                          type="button"
-                          onClick={() => onSelectNpc?.(npcOwner.id)}
-                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-emerald-300 rounded-lg"
-                        >
-                          {npcOwner.nombre} {npcOwner.apellido} ({Math.round(pt.pct)}%)
-                        </button>
-                      ) : (
-                        <span key={`${pt.id}_${idx}`} className="px-2.5 py-1 bg-zinc-800 text-zinc-300 rounded-lg">
-                          {pt.tipo === 'estado' ? 'Estado' : pt.id} ({Math.round(pt.pct)}%)
-                        </span>
-                      );
-                    })}
+                    {renderOwnerBadges(owners, state.npcs, onSelectNpc)}
                   </div>
                 </div>
               )}

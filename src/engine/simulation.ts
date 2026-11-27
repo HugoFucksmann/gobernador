@@ -150,26 +150,6 @@ export interface HospitalFacilityInfo extends WorldHospitalFacilityInfo {
 
 export const TICKS_PER_DAY = 120;
 
-function drawSubRand(
-  state: { rng?: SubsystemRngState; rngState: number } | undefined,
-  sub: SubsystemName
-): number {
-  return state ? nextSubRand(state, sub) : Math.random();
-}
-
-function drawSubInt(
-  state: { rng?: SubsystemRngState; rngState: number } | undefined,
-  sub: SubsystemName,
-  min: number,
-  max: number
-): number {
-  return state ? subRandInt(state, sub, min, max) : min + Math.floor(Math.random() * (max - min + 1));
-}
-
-function makeSeqId(state: { idSeq: number } | undefined, prefix: string): string {
-  return state ? nextSeqId(state, prefix) : `${prefix}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
 function getZonesMap(state: GameState): GameState['zonas'] {
   return state.zonas && Object.keys(state.zonas).length > 0
     ? state.zonas
@@ -267,10 +247,6 @@ function computePoliceSplitAndMetrics(state: GameState): {
   }
 
   return { defensa, orden, satMediaZona, necesidadTotalZona, amenaza };
-}
-
-function computeZoneDefense(state: GameState): Record<ZoneId, number> {
-  return computePoliceSplitAndMetrics(state).defensa;
 }
 
 function updateZoneIntegrity(state: GameState, zonesCount: number): void {
@@ -1631,11 +1607,11 @@ function evaluateActorDemands(state: GameState, derived: CommunityDerived): void
 function applyModifierToNpc(
   npc: Npc,
   mod: Omit<Modifier, 'id' | 'diasRestantes'>,
-  state?: { idSeq: number }
+  state: { idSeq: number }
 ): void {
   npc.modificadores.push({
     ...mod,
-    id: makeSeqId(state, 'mod'),
+    id: nextSeqId(state, 'mod'),
     diasRestantes: mod.duracionDias,
   });
   const varKeys: NpcVariable[] = ['salud', 'hambre', 'miedo', 'satisfaccion', 'lealtad'];
@@ -1656,7 +1632,7 @@ function applyInstantModifierToNpc(
     causa?: string;
     recordOnNpc?: boolean;
   },
-  state?: { idSeq: number }
+  state: { idSeq: number }
 ): void {
   const varKeys: NpcVariable[] = ['salud', 'hambre', 'miedo', 'satisfaccion', 'lealtad'];
   for (const key of varKeys) {
@@ -1667,7 +1643,7 @@ function applyInstantModifierToNpc(
   }
   if (mod.recordOnNpc) {
     npc.modificadores.push({
-      id: makeSeqId(state, 'imod'),
+      id: nextSeqId(state, 'imod'),
       afecta: mod.afecta,
       duracionDias: 0,
       diasRestantes: 0,
@@ -1692,15 +1668,16 @@ export function pickActionText(
       ? state.ultimaVariantePorAccion[action.id]
       : undefined;
 
+  const drawRand = () => (state ? nextSubRand(state, sub) : Math.random());
   let chosenIdx = 0;
   if (pool.length > 1 && typeof lastIdx === 'number' && lastIdx >= 0 && lastIdx < pool.length) {
     const candidates: number[] = [];
     for (let i = 0; i < pool.length; i++) {
       if (i !== lastIdx) candidates.push(i);
     }
-    chosenIdx = candidates[Math.floor(drawSubRand(state, sub) * candidates.length)];
+    chosenIdx = candidates[Math.floor(drawRand() * candidates.length)];
   } else {
-    chosenIdx = Math.floor(drawSubRand(state, sub) * pool.length);
+    chosenIdx = Math.floor(drawRand() * pool.length);
   }
 
   if (state && 'ultimaVariantePorAccion' in state && state.ultimaVariantePorAccion) {
@@ -2120,7 +2097,7 @@ export function applyActionToNpc(
   const [minD, maxD] = action.duracionDias;
   const maxAllowed = action.tipo === 'espontanea' ? state.config.caos.duracionMaxDias : maxD;
   const duracion = clamp(
-    Math.round(minD + drawSubRand(state, 'caos') * (maxD - minD)),
+    Math.round(minD + nextSubRand(state, 'caos') * (maxD - minD)),
     1,
     maxAllowed
   );
@@ -2310,7 +2287,7 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
 
       const affinityFactor = clamp(scoreActionAffinity(other, action) / 100, 0.3, 1.5);
       const prob = clamp(action.contagio * exposure * brake * affinityFactor, 0, 0.95);
-      if (drawSubRand(state, 'caos') >= prob) continue;
+      if (nextSubRand(state, 'caos') >= prob) continue;
 
       const zoneName = other.zona || 'centro';
       const copyText = pickActionText(
@@ -2393,7 +2370,7 @@ function runDailyActionContagion(state: GameState, zonesCount: number): void {
 function isNpcEligibleForAction(
   npc: Npc,
   action: ActionDefinition,
-  state?: GameState,
+  state: GameState,
   eligCtx?: EligibilityContext
 ): boolean {
   if (!npc.vivo || npc.hospital.internado) return false;
@@ -2406,14 +2383,14 @@ function isNpcEligibleForAction(
 
   const hogar = eligCtx
     ? eligCtx.hogaresById.get(npc.hogarId)
-    : state?.hogares.find((h) => h.id === npc.hogarId);
+    : state.hogares.find((h) => h.id === npc.hogarId);
   const hogCash = hogar ? hogar.dinero : 0;
   const hogPantryPP = hogar
     ? hogar.despensa / Math.max(1, hogar.miembros.length)
     : 0;
 
   if (req.conDinero) {
-    const minCash = eligCtx ? eligCtx.minCash : state ? Math.max(4, state.alimento.precio * 1.5) : 6;
+    const minCash = eligCtx ? eligCtx.minCash : Math.max(4, state.alimento.precio * 1.5);
     if (hogCash < minCash) return false;
   }
   if (req.conDespensa && hogPantryPP <= ECON_CONSTANTS.umbralDespensaBaja) {
@@ -2432,7 +2409,7 @@ function isNpcEligibleForAction(
     return false;
   }
   if (req.conJubiladoEnHogar) {
-    if (!hogar || !state) return false;
+    if (!hogar) return false;
     const hasRetiree = hogar.miembros.some((mid) => {
       const m = state.npcs.find((n) => n.id === mid);
       return Boolean(m && m.vivo && (m.rol === 'jubilado' || m.edad >= 65));
@@ -2443,11 +2420,11 @@ function isNpcEligibleForAction(
     if (!hogar?.casaId) return false;
     const casa = eligCtx
       ? eligCtx.casasById.get(hogar.casaId)
-      : state?.casas.find((c) => c.id === hogar.casaId);
+      : state.casas.find((c) => c.id === hogar.casaId);
     if (!casa || casa.estado >= 60) return false;
   }
 
-  if (state && action.contexto) {
+  if (action.contexto) {
     const ctx = action.contexto;
     const zonesCount = eligCtx ? eligCtx.zonesCount : getWorldZones(state).length;
     const effZone = getEffectiveZone(npc, zonesCount);
@@ -2542,41 +2519,39 @@ export function scoreActionAffinity(npc: Npc, action: ActionDefinition): number 
 
 export function selectCandidateActions(
   npc: Npc,
-  state?: GameState,
+  state: GameState,
   eligCtx?: EligibilityContext
 ): ActionDefinition[] {
   const valid = ACTION_TABLE.filter((a) => {
     if (a.tipo !== 'espontanea') return false;
     if (!isNpcEligibleForAction(npc, a, state, eligCtx)) return false;
-    if (state && hasOutOfPostEffect(a) && !canRoleLeavePost(state, npc.rol, eligCtx)) return false;
+    if (hasOutOfPostEffect(a) && !canRoleLeavePost(state, npc.rol, eligCtx)) return false;
     return true;
   });
   if (valid.length === 0) return [];
 
   let filtered = valid;
-  if (state) {
-    let focusCounts: Map<string, number>;
-    let totalFocos: number;
-    if (eligCtx) {
-      focusCounts = eligCtx.focusCounts;
-      totalFocos = eligCtx.totalFocos;
-    } else {
-      focusCounts = new Map<string, number>();
-      totalFocos = 0;
-      for (const n of state.npcs) {
-        if (n.vivo && n.accionIa?.tipo === 'espontanea' && n.accionIa.esFoco) {
-          totalFocos++;
-          focusCounts.set(n.accionIa.id, (focusCounts.get(n.accionIa.id) || 0) + 1);
-        }
+  let focusCounts: Map<string, number>;
+  let totalFocos: number;
+  if (eligCtx) {
+    focusCounts = eligCtx.focusCounts;
+    totalFocos = eligCtx.totalFocos;
+  } else {
+    focusCounts = new Map<string, number>();
+    totalFocos = 0;
+    for (const n of state.npcs) {
+      if (n.vivo && n.accionIa?.tipo === 'espontanea' && n.accionIa.esFoco) {
+        totalFocos++;
+        focusCounts.set(n.accionIa.id, (focusCounts.get(n.accionIa.id) || 0) + 1);
       }
     }
-    if (totalFocos >= 4) {
-      const underCap = valid.filter((a) => {
-        const c = focusCounts.get(a.id) || 0;
-        return (c / totalFocos) * 100 < DIRECTOR_CONSTANTS.maxPctAccion;
-      });
-      if (underCap.length > 0) filtered = underCap;
-    }
+  }
+  if (totalFocos >= 4) {
+    const underCap = valid.filter((a) => {
+      const c = focusCounts.get(a.id) || 0;
+      return (c / totalFocos) * 100 < DIRECTOR_CONSTANTS.maxPctAccion;
+    });
+    if (underCap.length > 0) filtered = underCap;
   }
 
   // Weighted sampling without replacement up to candidatasMax (DIRECTOR_PRENSA §2.3)
@@ -2586,11 +2561,11 @@ export function selectCandidateActions(
   for (let i = 0; i < limit && pool.length > 0; i++) {
     const totalW = pool.reduce((acc, item) => acc + item.w, 0);
     if (totalW <= 0) {
-      const idx = Math.floor(drawSubRand(state, 'caos') * pool.length);
+      const idx = Math.floor(nextSubRand(state, 'caos') * pool.length);
       picked.push(pool.splice(idx, 1)[0].a);
       continue;
     }
-    let r = drawSubRand(state, 'caos') * totalW;
+    let r = nextSubRand(state, 'caos') * totalW;
     let chosenIdx = pool.length - 1;
     for (let k = 0; k < pool.length; k++) {
       r -= pool[k].w;
@@ -2686,9 +2661,9 @@ export function pickChaosCandidateNpc(state: GameState): Npc | null {
 
   const totalInterest = weighted.reduce((acc, item) => acc + item.interest, 0);
   if (totalInterest <= 0) {
-    return weighted[Math.floor(drawSubRand(state, 'caos') * weighted.length)].n;
+    return weighted[Math.floor(nextSubRand(state, 'caos') * weighted.length)].n;
   }
-  let r = drawSubRand(state, 'caos') * totalInterest;
+  let r = nextSubRand(state, 'caos') * totalInterest;
   for (const item of weighted) {
     r -= item.interest;
     if (r <= 0) return item.n;
@@ -2784,7 +2759,7 @@ export function applyPressArticleEffects(state: GameState, article: NewsArticle)
       const rebPref = (1 - medio.lineaEditorial.afinidadGobierno / 100) * rebeldia * 20;
       const sensPref =
         (medio.lineaEditorial.sensacionalismo / 100) * (10 + rebeldia * 10 + (1 - valentia) * 10);
-      return { n, score: 100 - affinityDiff + rebPref + sensPref + drawSubRand(state, 'prensa') * 25 };
+      return { n, score: 100 - affinityDiff + rebPref + sensPref + nextSubRand(state, 'prensa') * 25 };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, consumersCount)
@@ -3158,13 +3133,13 @@ function runPoliceRelocation(state: GameState): void {
     if (policias.length > 0) {
       const exactMove = policias.length * (ECON_CONSTANTS.reubicacionPoliciasPct / 100);
       const countToMove =
-        Math.floor(exactMove) + (drawSubRand(state, 'caos') < exactMove - Math.floor(exactMove) ? 1 : 0);
+        Math.floor(exactMove) + (nextSubRand(state, 'caos') < exactMove - Math.floor(exactMove) ? 1 : 0);
 
       const movedByRoute = new Map<string, string[]>();
       const pool = [...policias];
 
       for (let i = 0; i < countToMove && pool.length > 0; i++) {
-        let r = drawSubRand(state, 'caos') * totalNecesidad;
+        let r = nextSubRand(state, 'caos') * totalNecesidad;
         let targetZone: ZoneId = zones[0];
         for (const z of zones) {
           r -= necesidadTotalZona[z] || 0;
@@ -3180,7 +3155,7 @@ function runPoliceRelocation(state: GameState): void {
         }
         if (candidateIdxs.length === 0) continue;
 
-        const pickIdx = candidateIdxs[Math.floor(drawSubRand(state, 'caos') * candidateIdxs.length)];
+        const pickIdx = candidateIdxs[Math.floor(nextSubRand(state, 'caos') * candidateIdxs.length)];
         const chosen = pool.splice(pickIdx, 1)[0];
         const deZona = chosen.zona;
         chosen.zona = targetZone;
@@ -3248,7 +3223,7 @@ function runClimateAttacksAndHits(state: GameState): void {
   const zonesCount = zones.length;
   const zonesMap = getZonesMap(state);
   const activePhenomena = getActivePhenomena(state);
-  const defensa = computeZoneDefense(state);
+  const { defensa } = computePoliceSplitAndMetrics(state);
   const attackPhenomena = activePhenomena.filter(
     (f) => f.tipo === 'plaga_zombie' || f.tipo === 'pandemia'
   );
@@ -3273,7 +3248,7 @@ function runClimateAttacksAndHits(state: GameState): void {
         0,
         1
       );
-      if (drawSubRand(state, 'clima') >= prob) continue;
+      if (nextSubRand(state, 'clima') >= prob) continue;
 
       let repelledZone: ZoneId | null = null;
       if (cfg.usaProteccion) {
@@ -3283,7 +3258,7 @@ function runClimateAttacksAndHits(state: GameState): void {
             0,
             0.99
           );
-          if (drawSubRand(state, 'clima') < repelProb) {
+          if (nextSubRand(state, 'clima') < repelProb) {
             repelledZone = z;
             break;
           }
@@ -3303,7 +3278,7 @@ function runClimateAttacksAndHits(state: GameState): void {
           causa: state.ultimoEventoClimaId || causa,
         });
       } else {
-        let dano = Math.round(cfg.danoMin + drawSubRand(state, 'clima') * (cfg.danoMax - cfg.danoMin));
+        let dano = Math.round(cfg.danoMin + nextSubRand(state, 'clima') * (cfg.danoMax - cfg.danoMin));
         if (npc.edad < 18 || npc.edad >= 65) {
           dano = Math.round(dano * ECON_CONSTANTS.kVulnerabilidadEdad);
         }
@@ -3655,7 +3630,7 @@ function runDailyVariablesV2(state: GameState): void {
   const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
   const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
   const { poderAdquisitivo } = state.ultimaSalidaEconomica;
-  const defensa = computeZoneDefense(state);
+  const { defensa } = computePoliceSplitAndMetrics(state);
   const segService = state.gobierno.indicadores.seguridad / 100;
   const saludService = state.gobierno.indicadores.salud / 100;
   const activeZombies = activePhenomena.filter((f) => f.tipo === 'plaga_zombie');
@@ -3889,15 +3864,15 @@ function updateClimate(state: GameState, allowRandom = true): void {
   if (allowRandom && dia >= state.clima.proximoEventoDia) {
     const pool: PhenomenonType[] =
       state.config.escenarioId === 'zombies' ? ['sequia', 'plaga'] : ['sequia', 'plaga', 'pandemia'];
-    const tipo = pool[Math.floor(drawSubRand(state, 'clima') * pool.length)];
+    const tipo = pool[Math.floor(nextSubRand(state, 'clima') * pool.length)];
     const names: Record<PhenomenonType, string> = {
       sequia: 'Sequía Estacional',
       plaga: 'Plaga de Cultivos',
       pandemia: 'Brote Gripal Comunitario',
       plaga_zombie: 'Oleada Zombie',
     };
-    const duracion = 14 + drawSubInt(state, 'clima', 0, 13);
-    const intensidad = 35 + drawSubInt(state, 'clima', 0, 34);
+    const duracion = 14 + subRandInt(state, 'clima', 0, 13);
+    const intensidad = 35 + subRandInt(state, 'clima', 0, 34);
     const origenZona = pickRandomZoneSub(state, 'clima');
     const newId = `fen_${dia}`;
     state.clima.fenomenos.push({
@@ -3921,7 +3896,7 @@ function updateClimate(state: GameState, allowRandom = true): void {
       fenomeno: names[tipo],
       zonaOrigen: origenZona,
     });
-    state.clima.proximoEventoDia = dia + duracion + 18 + drawSubInt(state, 'clima', 0, 19);
+    state.clima.proximoEventoDia = dia + duracion + 18 + subRandInt(state, 'clima', 0, 19);
     addLog(
       state,
       'clima',
@@ -4432,7 +4407,7 @@ function advanceDay(state: GameState): void {
     if (!state.config.usarIaGemini) {
       for (const win of state.ventanasCondicion) {
         if (win.estado === 'pendiente') {
-          const chosen = win.candidatas[Math.floor(drawSubRand(state, 'caos') * win.candidatas.length)];
+          const chosen = win.candidatas[Math.floor(nextSubRand(state, 'caos') * win.candidatas.length)];
           resolveConditionWindowWithFallback(state, win.id, chosen?.id, 'motor');
         }
       }
@@ -4444,7 +4419,7 @@ function advanceDay(state: GameState): void {
           if (!npc) break;
           const candidatas = selectCandidateActions(npc, state);
           if (candidatas.length === 0) break;
-          const chosen = candidatas[Math.floor(drawSubRand(state, 'caos') * candidatas.length)];
+          const chosen = candidatas[Math.floor(nextSubRand(state, 'caos') * candidatas.length)];
           const roleName = ROLE_CATALOG[npc.rol].nombre.toLowerCase();
           applyActionToNpc(
             state,
@@ -5402,7 +5377,7 @@ function drawPressToneForFact(
   ];
 
   const total = weights.reduce((acc, item) => acc + item.w, 0);
-  let r = drawSubRand(rng, 'prensa') * Math.max(0.001, total);
+  let r = nextSubRand(rng, 'prensa') * Math.max(0.001, total);
   let chosen: NewsTone = 'neutral';
   for (const item of weights) {
     r -= item.w;
@@ -5461,7 +5436,7 @@ export function planDailyPressPublications(
       });
 
       const totalW = weights.reduce((acc, w) => acc + w, 0);
-      let r = drawSubRand(rng, 'prensa') * Math.max(0.001, totalW);
+      let r = nextSubRand(rng, 'prensa') * Math.max(0.001, totalW);
       let pickIdx = optionalPool.length - 1;
       for (let i = 0; i < optionalPool.length; i++) {
         r -= weights[i];
@@ -5475,7 +5450,7 @@ export function planDailyPressPublications(
     }
 
     for (const fact of chosenFacts) {
-      const autor = livingCols[Math.floor(drawSubRand(rng, 'prensa') * livingCols.length)];
+      const autor = livingCols[Math.floor(nextSubRand(rng, 'prensa') * livingCols.length)];
       const tono = drawPressToneForFact(state, medio, fact, rng);
       const variants =
         NEWS_TEMPLATES[fact.tema]?.[tono] ||
@@ -5485,7 +5460,7 @@ export function planDailyPressPublications(
             texto: `{autor} reporta desde {medio} las novedades de la jornada.`,
           },
         ];
-      const variant = variants[Math.floor(drawSubRand(rng, 'prensa') * variants.length)];
+      const variant = variants[Math.floor(nextSubRand(rng, 'prensa') * variants.length)];
       const zoneNorm = fact.datos.zona ?? fact.zona ?? 'centro';
 
       planned.push({

@@ -43,7 +43,7 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   usarIaGemini: false,
 };
 
-export interface PeriodBudgetEstimate {
+interface PeriodBudgetEstimate {
   ingresosEst: number;
   nominaEst: number;
   pensionesEst: number;

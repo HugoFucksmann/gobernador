@@ -35,6 +35,15 @@ function getAIClient(): GoogleGenAI | null {
   return client;
 }
 
+function requireAIClient(res: express.Response): GoogleGenAI | null {
+  const ai = getAIClient();
+  if (!ai) {
+    res.status(503).json({ error: 'GEMINI_API_KEY no configurada en el servidor.' });
+    return null;
+  }
+  return ai;
+}
+
 function safeParseJsonObject(raw: string | undefined): Record<string, unknown> | null {
   if (!raw) return null;
   try {
@@ -59,18 +68,16 @@ async function startServer() {
   });
 
   app.post('/api/ai/press', async (req, res) => {
-    const ai = getAIClient();
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY no configurada en el servidor.' });
-    }
+    const ai = requireAIClient(res);
+    if (!ai) return;
 
     try {
       const body = req.body ?? {};
-      const tema = String(body.tema ?? body.noticia?.tema ?? 'vecinos');
-      const tono = String(body.tono ?? body.noticia?.tono ?? 'neutral');
+      const tema = String(body.tema ?? 'vecinos');
+      const tono = String(body.tono ?? 'neutral');
       const medio = body.medio ?? { nombre: 'Prensa Local', afinidad_gobierno: 50, sensacionalismo: 50, credibilidad: 70 };
-      const autor = typeof body.autor === 'string' ? body.autor : String(body.periodista?.nombre ?? 'Redacción');
-      const datos = body.datos ?? { detalle: body.noticia?.detalle ?? '' };
+      const autor = typeof body.autor === 'string' ? body.autor : 'Redacción';
+      const datos = body.datos ?? {};
       const plantilla = body.plantilla ?? { titulo: '', texto: '' };
       const rawMax = body.max_largo ?? {};
       const maxTitulo = Math.max(20, Math.min(140, Math.round(Number(rawMax.titulo) || 90)));
@@ -170,12 +177,6 @@ async function runClassifierPrompt(
   };
 }
 
-function normalizeSituacion(body: Record<string, unknown>): string[] {
-  if (Array.isArray(body.situacion)) return body.situacion as string[];
-  const ctx = body.contexto as { resumen?: unknown } | undefined;
-  return ctx?.resumen ? [String(ctx.resumen)] : [];
-}
-
 function formatCandidatas(body: Record<string, unknown>): string {
   const candidatas = (Array.isArray(body.candidatas) ? body.candidatas : []) as Array<{
     id: string;
@@ -185,17 +186,15 @@ function formatCandidatas(body: Record<string, unknown>): string {
 }
 
   app.post('/api/ai/action', async (req, res) => {
-    const ai = getAIClient();
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY no configurada en el servidor.' });
-    }
+    const ai = requireAIClient(res);
+    if (!ai) return;
 
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const npc = (body.npc ?? {}) as Record<string, unknown>;
-      const rasgos = npc.rasgos ?? npc.personalidad ?? {};
+      const rasgos = npc.rasgos ?? {};
       const variables = npc.variables ?? {};
-      const situacion = normalizeSituacion(body);
+      const situacion = Array.isArray(body.situacion) ? (body.situacion as string[]) : [];
       const lista = formatCandidatas(body);
 
       const prompt = `Actúa SOLO como clasificador de probabilidades (MOTOR §4). NO generes texto narrativo.
@@ -220,16 +219,14 @@ ${lista}`;
   });
 
   app.post('/api/ai/condition', async (req, res) => {
-    const ai = getAIClient();
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY no configurada en el servidor.' });
-    }
+    const ai = requireAIClient(res);
+    if (!ai) return;
 
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const disparador = String(body.disparador ?? 'descontento');
       const afectados = (body.afectados ?? { cantidad: 1 }) as { cantidad?: unknown; muestra?: unknown };
-      const situacion = normalizeSituacion(body);
+      const situacion = Array.isArray(body.situacion) ? (body.situacion as string[]) : [];
       const lista = formatCandidatas(body);
 
       const prompt = `Actúa SOLO como clasificador de probabilidades (MOTOR §4). Se disparó una acción de condición (${disparador}). NO puedes evitarla ni generar texto narrativo. Devuelve un peso entre 0 y 1 para cada id.

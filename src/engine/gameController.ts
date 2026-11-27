@@ -84,7 +84,7 @@ export interface AiDirectorPort {
   ): Promise<AiDirectorResult | null>;
 }
 
-export interface GameControllerOptions {
+interface GameControllerOptions {
   storage?: StorageAdapter;
   aiDirector?: AiDirectorPort;
 }
@@ -113,7 +113,7 @@ export interface SaveSlotMeta {
   savedAt: string;
 }
 
-export interface GameControllerSnapshot {
+interface GameControllerSnapshot {
   state: GameState;
   derived: CommunityDerived;
   paused: boolean;
