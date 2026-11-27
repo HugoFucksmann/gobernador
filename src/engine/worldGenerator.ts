@@ -290,7 +290,11 @@ function buildScaledParcelas(
       });
     }
 
-    const extraFields = Math.max(0, Math.round(6 * (scale - 1)));
+    const existingFields = base.filter(
+      (p) => p.estado === 'ocupada' && p.edificio?.tipo === 'campo'
+    ).length;
+    const targetFields = Math.round(2 * scale);
+    const extraFields = Math.max(0, targetFields - existingFields);
     const agroZones = zoneList.filter((z) => zonas[z].caracter === 'agricola');
     for (let i = 0; i < extraFields; i++) {
       const z = agroZones[i % Math.max(1, agroZones.length)] ?? 'noroeste';
@@ -327,7 +331,24 @@ function buildScaledParcelas(
     const v2ShopCycle: BuildingType[] = isM0
       ? ['almacen', 'supermercado', 'tienda', 'kiosco']
       : ['supermercado', 'tienda', 'restoran', 'bar_cafe', 'taller', 'cine_teatro', 'almacen', 'gimnasio'];
-    const extraShops = Math.max(0, Math.round(6 * (scale - 1)));
+    const shopTypeSet = new Set<BuildingType>([
+      'almacen',
+      'supermercado',
+      'tienda',
+      'kiosco',
+      'restoran',
+      'bar_cafe',
+      'peluqueria',
+      'taller',
+      'gimnasio',
+      'cine_teatro',
+      'club',
+    ]);
+    const existingShops = base.filter(
+      (p) => p.estado === 'ocupada' && p.edificio && shopTypeSet.has(p.edificio.tipo)
+    ).length;
+    const targetShops = Math.round(7 * scale);
+    const extraShops = Math.max(0, targetShops - existingShops);
     const comZones = zoneList.filter((z) => zonas[z].caracter !== 'agricola');
     for (let i = 0; i < extraShops; i++) {
       const z = comZones[i % Math.max(1, comZones.length)] ?? 'centro';
@@ -363,7 +384,11 @@ function buildScaledParcelas(
     }
 
     if (!isM0) {
-      const extraFactories = Math.max(0, Math.floor((pop - 120) / 180));
+      const existingFactories = base.filter(
+        (p) => p.estado === 'ocupada' && p.edificio?.tipo === 'fabrica'
+      ).length;
+      const targetFactories = Math.max(1, Math.round(scale));
+      const extraFactories = Math.max(0, targetFactories - existingFactories);
       const indZones = ['este', 'oeste'].filter((z) => zonas[z]?.estado !== 'no_urbanizada');
       const indFallback = indZones.length > 0 ? indZones : zoneList;
       for (let i = 0; i < extraFactories; i++) {
@@ -398,7 +423,11 @@ function buildScaledParcelas(
         });
       }
 
-      const extraOffices = Math.max(0, Math.floor((pop - 120) / 160));
+      const existingConstr = base.filter(
+        (p) => p.estado === 'ocupada' && p.edificio?.tipo === 'oficina_constructora'
+      ).length;
+      const targetOffices = Math.max(1, Math.round(1 + (scale - 1) * 0.5));
+      const extraOffices = Math.max(0, targetOffices - existingConstr);
       const rawOfficeZones = ['centro', 'norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'].filter(
         (z) => zonas[z]?.estado !== 'no_urbanizada'
       );
@@ -681,16 +710,29 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     Math.max(1, Math.round((pop / SERVICE_RADIUS_CONSTANTS.habitantesPorMedico) * profile.coberturaInicial))
   );
 
-  // Build role counts that fit exact initial vacancies + balanced minors/retirees per stability profile
+  // Build role counts that fit exact initial vacancies + scaled topesPrivados + stability profile
+  const maxPriv = (r: RoleId): number => {
+    const t = Object.hasOwn(preset.topesPrivados, r) ? preset.topesPrivados[r] : undefined;
+    return typeof t === 'number' ? Math.max(1, Math.round(t * scale)) : 9999;
+  };
   const roleDistribution: Array<{ rol: RoleId; count: number }> = [
-    { rol: 'agricultor', count: jobCaps.agricultor },
-    { rol: 'tecnico', count: jobCaps.tecnico },
-    { rol: 'obrero', count: jobCaps.obrero },
-    { rol: 'comerciante', count: jobCaps.comerciante },
-    { rol: 'constructor', count: config.nivelMundo === 'M0' ? 0 : Math.max(2, jobCaps.constructor) },
-    { rol: 'inmobiliario', count: config.nivelMundo === 'M0' ? 0 : Math.max(1, jobCaps.inmobiliario) },
-    { rol: 'empresario', count: Math.max(2, Math.round(3 * scale)) },
-    { rol: 'periodista', count: mediaCount === 0 ? 0 : Math.max(mediaCount, jobCaps.periodista) },
+    { rol: 'agricultor', count: Math.min(jobCaps.agricultor, maxPriv('agricultor')) },
+    { rol: 'tecnico', count: Math.min(jobCaps.tecnico, maxPriv('tecnico')) },
+    { rol: 'obrero', count: Math.min(jobCaps.obrero, maxPriv('obrero')) },
+    { rol: 'comerciante', count: Math.min(jobCaps.comerciante, maxPriv('comerciante')) },
+    {
+      rol: 'constructor',
+      count: config.nivelMundo === 'M0' ? 0 : Math.min(Math.max(2, jobCaps.constructor), maxPriv('constructor')),
+    },
+    {
+      rol: 'inmobiliario',
+      count: config.nivelMundo === 'M0' ? 0 : Math.min(Math.max(1, jobCaps.inmobiliario), maxPriv('inmobiliario')),
+    },
+    { rol: 'empresario', count: Math.max(2, maxPriv('empresario')) },
+    {
+      rol: 'periodista',
+      count: mediaCount === 0 ? 0 : Math.min(Math.max(mediaCount, jobCaps.periodista), maxPriv('periodista')),
+    },
     { rol: 'policia', count: initPolicia },
     { rol: 'medico', count: initMedico },
     { rol: 'ingeniero', count: getObrasTargetJobs(pop, initialLevers.nivelObras) },
@@ -714,11 +756,31 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     desSlot.count += slack - extraOb - extraAg;
   } else if (sumAssigned > pop) {
     let over = sumAssigned - pop;
-    for (const r of ['obrero', 'comerciante', 'tecnico', 'agricultor', 'estudiante', 'jubilado'] as RoleId[]) {
-      const slot = roleDistribution.find((x) => x.rol === r)!;
-      const cut = Math.min(over, Math.max(0, slot.count - 2));
-      slot.count -= cut;
-      over -= cut;
+    const trimOrder: RoleId[] = ['obrero', 'comerciante', 'agricultor', 'estudiante', 'jubilado', 'tecnico'];
+    const trimSlots = trimOrder.map((r) => roleDistribution.find((x) => x.rol === r)!);
+    const floors = new Map<RoleId, number>(
+      trimSlots.map((s) => [s.rol, Math.max(2, Math.floor(s.count * 0.55))])
+    );
+    while (over > 0) {
+      let trimmedAny = false;
+      for (const slot of trimSlots) {
+        if (over <= 0) break;
+        const floor = floors.get(slot.rol) ?? 2;
+        if (slot.count > floor) {
+          slot.count -= 1;
+          over -= 1;
+          trimmedAny = true;
+        }
+      }
+      if (!trimmedAny) break;
+    }
+    if (over > 0) {
+      for (const slot of trimSlots) {
+        if (over <= 0) break;
+        const cut = Math.min(over, Math.max(0, slot.count - 2));
+        slot.count -= cut;
+        over -= cut;
+      }
     }
   }
 
@@ -1172,11 +1234,18 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     if (pool.length === 0) continue;
 
     pool.sort((a, b) => {
-      const aOpen = (firmRoleCaps.get(a.id)?.[n.rol] ?? 0) - a.empleados.filter((id) => npcById.get(id)?.rol === n.rol).length;
-      const bOpen = (firmRoleCaps.get(b.id)?.[n.rol] ?? 0) - b.empleados.filter((id) => npcById.get(id)?.rol === n.rol).length;
+      const aCap = firmRoleCaps.get(a.id)?.[n.rol] ?? 0;
+      const bCap = firmRoleCaps.get(b.id)?.[n.rol] ?? 0;
+      const aCur = a.empleados.filter((id) => npcById.get(id)?.rol === n.rol).length;
+      const bCur = b.empleados.filter((id) => npcById.get(id)?.rol === n.rol).length;
+      const aOpen = aCap - aCur;
+      const bOpen = bCap - bCur;
       const aHasSlot = aOpen > 0 ? 0 : 1;
       const bHasSlot = bOpen > 0 ? 0 : 1;
       if (aHasSlot !== bHasSlot) return aHasSlot - bHasSlot;
+      const aRatio = aCap > 0 ? aCur / aCap : 1;
+      const bRatio = bCap > 0 ? bCur / bCap : 1;
+      if (Math.abs(aRatio - bRatio) > 0.05) return aRatio - bRatio;
       const aZone = a.zona === n.zona ? 0 : 1;
       const bZone = b.zona === n.zona ? 0 : 1;
       if (aZone !== bZone) return aZone - bZone;
@@ -1254,9 +1323,10 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     cSeq++;
     const casaId = `c_${cSeq}`;
 
-    // Distribute ownership: ~45% homeowner, ~35% inmobiliaria, ~20% individual npc
+    // Distribute ownership: retiree-only households own their cottage, else ~50% homeowner, ~30% inmobiliaria, ~20% individual npc
+    const isRetireeOnly = h ? h.miembros.every((id) => (npcById.get(id)?.edad ?? 30) >= 65) : false;
     let dueno: Casa['dueno'] = { tipo: 'hogar', id: h?.id ?? 'estado' };
-    if (h && i % 10 < 5) {
+    if (h && (isRetireeOnly || i % 10 < 5)) {
       dueno = { tipo: 'hogar', id: h.id };
     } else if (inmobFirms.length > 0 && i % 10 < 8) {
       const inf = inmobFirms[i % inmobFirms.length];
@@ -1320,7 +1390,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     casas.push(casa);
   }
 
-  // Calibrate initial household dinero, despensa & agro stock (scaled by holguraInicial)
+  // Calibrate initial household dinero, despensa, ultimoIngresoNeto & agro stock (ECONOMIA §16)
   const totalStockInicial = Math.round(preset.stockAlimentoInicial * scale * profile.holguraInicial);
   const agroFirms = firmas.filter((f) => f.rubro === 'agro');
   if (agroFirms.length > 0) {
@@ -1328,16 +1398,139 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     for (const af of agroFirms) af.stock = Number(perAgro.toFixed(2));
   }
 
+  const initTaxRate = clamp(initialLevers.impuesto, 0, 75) / 100;
+  const initDiasStock = totalStockInicial / Math.max(1, pop * ECON_CONSTANTS.consumoPorNpc);
+  const initScarcity = clamp(10 / Math.max(1.5, initDiasStock), 0.72, 2.4);
+  const initFoodPrice = ECON_CONSTANTS.precioBaseAlimento * initScarcity;
+  const casaByIdInit = new Map(casas.map((c) => [c.id, c]));
+  const avgDailyProdFactor = 0.85;
   for (const h of hogares) {
     const mCount = Math.max(1, h.miembros.length);
-    const earners = h.miembros.filter((id) => {
+    let estNetWeek = 0;
+    for (const id of h.miembros) {
       const m = npcById.get(id);
-      return m && (ROLE_CATALOG[m.rol].grupo !== 'sin_ingreso' || m.rol === 'jubilado');
-    }).length;
-    const baseNetPerPeriod = Math.max(24, earners * 42 + mCount * 10);
-    h.ultimoIngresoNeto = baseNetPerPeriod;
-    h.dinero = Math.round((baseNetPerPeriod * 1.45 + mCount * 18) * profile.holguraInicial);
+      if (!m) continue;
+      const def = ROLE_CATALOG[m.rol];
+      if (def.publico) {
+        const gross = ECON_CONSTANTS.salarioBasePublico * (initialLevers.salarioPublico / 100) * 7;
+        estNetWeek += gross * (1 - initTaxRate);
+      } else if (m.rol === 'jubilado') {
+        estNetWeek += (ECON_CONSTANTS.pensionBase + initialLevers.ayudaSocial) * 7;
+      } else if (m.rol === 'desempleado') {
+        estNetWeek += initialLevers.ayudaSocial * 7;
+      } else if (def.grupo === 'privado' && def.ingreso) {
+        const baseD = def.ingreso[0] + (m.economia.ingresoPos / 100) * (def.ingreso[1] - def.ingreso[0]);
+        const gross = baseD * 0.65 * avgDailyProdFactor * 7;
+        const net = gross * (1 - initTaxRate);
+        m.economia.ultimoIngresoNeto = Number((net / 7).toFixed(2));
+        estNetWeek += net;
+      }
+      if (m.partes.length > 0) {
+        estNetWeek += 14 * (1 - initTaxRate);
+      }
+    }
+    const foodWeekCost = mCount * ECON_CONSTANTS.consumoPorNpc * initFoodPrice * 7;
+    const hCasa = h.casaId ? casaByIdInit.get(h.casaId) : undefined;
+    if (hCasa) {
+      const isSelfOwner =
+        (hCasa.dueno.tipo === 'hogar' && hCasa.dueno.id === h.id) ||
+        (hCasa.dueno.tipo === 'npc' && h.miembros.includes(hCasa.dueno.id));
+      if (!isSelfOwner) {
+        const maxAffordableRent = Math.max(4.5, (estNetWeek - foodWeekCost) * 0.45);
+        if (hCasa.alquiler > maxAffordableRent) {
+          hCasa.alquiler = Number(maxAffordableRent.toFixed(2));
+        }
+      }
+    }
+    h.ultimoIngresoNeto = Number(Math.max(18, estNetWeek).toFixed(2));
+    const isM0Init = config.nivelMundo === 'M0';
+    h.dinero = Math.round(
+      (h.ultimoIngresoNeto * (isM0Init ? 0.55 : 1.4) +
+        mCount * ECON_CONSTANTS.colchonDias * initFoodPrice * (isM0Init ? 1.0 : 0.55)) *
+        profile.holguraInicial
+    );
     h.despensa = h.estado === 'calle' ? 0 : Number((mCount * 3.1).toFixed(2));
+  }
+
+  // Calibrate initial firm market share (cuotaZona), expected agro production & M0/agro parteSueldos (ECONOMIA §16)
+  const rubricZoneGroups = new Map<string, Firma[]>();
+  for (const f of firmas) {
+    const key = `${f.rubro}:${f.zona}`;
+    const g = rubricZoneGroups.get(key);
+    if (g) g.push(f);
+    else rubricZoneGroups.set(key, [f]);
+  }
+  for (const [, list] of rubricZoneGroups) {
+    const share = Number((1 / list.length).toFixed(3));
+    for (const f of list) f.cuotaZona[f.zona] = share;
+  }
+
+  let initialAgroProd = 0;
+  const totalAgroWorkers = agroFirms.reduce(
+    (s, f) => s + f.empleados.filter((id) => npcById.get(id)?.rol === 'agricultor').length,
+    0
+  );
+  const estTotalAgroRev =
+    pop *
+    ECON_CONSTANTS.consumoPorNpc *
+    7 *
+    initFoodPrice *
+    (1 - ECON_CONSTANTS.margenComercialPct / 100);
+  const estComFoodMargin =
+    pop *
+    ECON_CONSTANTS.consumoPorNpc *
+    7 *
+    initFoodPrice *
+    (ECON_CONSTANTS.margenComercialPct / 100);
+
+  for (const af of agroFirms) {
+    let ag = 0;
+    let tec = 0;
+    let estRef = 0;
+    for (const eid of af.empleados) {
+      const emp = npcById.get(eid);
+      if (!emp) continue;
+      if (emp.rol === 'agricultor') ag++;
+      else if (emp.rol === 'tecnico') tec++;
+      const range = ROLE_CATALOG[emp.rol].ingreso ?? [8, 9];
+      const baseD = range[0] + (emp.economia.ingresoPos / 100) * (range[1] - range[0]);
+      estRef += baseD * 0.65 * avgDailyProdFactor * 7;
+    }
+    const effT = Math.min(tec, ag * ECON_CONSTANTS.tecnicosPorAgricultor);
+    const mult = 1 + ECON_CONSTANTS.kTecnificacion * (effT / Math.max(1, ag));
+    initialAgroProd += ag * ECON_CONSTANTS.produccionBaseAgricultor * avgDailyProdFactor * mult;
+    const revShare = totalAgroWorkers > 0 ? ag / totalAgroWorkers : 1 / Math.max(1, agroFirms.length);
+    const expRev = estTotalAgroRev * revShare;
+    if (estRef > 0 && expRev > 0) {
+      af.parteSueldos = Number(clamp(estRef / expRev, 0.42, 0.86).toFixed(3));
+    }
+    if (config.nivelMundo === 'M0' && estRef > 0) {
+      af.caja = Math.max(280, Math.round(estRef * 1.1));
+    }
+  }
+
+  if (config.nivelMundo === 'M0') {
+    const comFirma = firmas.find((f) => f.rubro === 'comercio');
+    if (comFirma) {
+      let estComRef = 0;
+      for (const eid of comFirma.empleados) {
+        const emp = npcById.get(eid);
+        if (!emp) continue;
+        const range = ROLE_CATALOG[emp.rol].ingreso ?? [8.2, 10.4];
+        const baseD = range[0] + (emp.economia.ingresoPos / 100) * (range[1] - range[0]);
+        estComRef += baseD * 0.65 * avgDailyProdFactor * 7;
+      }
+      const totalHNet = hogares.reduce((s, h) => s + h.ultimoIngresoNeto, 0);
+      const foodCostAll = pop * ECON_CONSTANTS.consumoPorNpc * 7 * initFoodPrice;
+      const expLivingSpend = Math.max(pop * 8.2, (totalHNet - foodCostAll) * 1.15);
+      const expComRev = estComFoodMargin + expLivingSpend;
+      if (estComRef > 0 && expComRev > 0) {
+        comFirma.parteSueldos = Number(clamp(estComRef / expComRev, 0.45, 0.88).toFixed(3));
+      }
+      if (estComRef > 0) {
+        comFirma.caja = Math.max(280, Math.round(estComRef * 1.1));
+      }
+    }
   }
 
   // Initial service coverage & integrity per zone
@@ -1419,7 +1612,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     firmas,
     alimento: {
       stock: totalStockInicial,
-      produccionDiaria: Math.round(pop * 1.15),
+      produccionDiaria: Number(Math.max(1, initialAgroProd).toFixed(2)),
       consumoDiario: pop * ECON_CONSTANTS.consumoPorNpc,
       diasStock: diasStockInit,
       siloDias: ECON_CONSTANTS.siloDias,
@@ -1457,6 +1650,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         operacionObras: 0,
         operacion: 0,
         obras: 0,
+        subsidios: 0,
         prensa: 0,
         importaciones: 0,
         exportaciones: 0,
@@ -1476,6 +1670,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
         operacionObras: 0,
         operacion: 0,
         obras: 0,
+        subsidios: 0,
         prensa: 0,
         saldo: 0,
         emision: 0,

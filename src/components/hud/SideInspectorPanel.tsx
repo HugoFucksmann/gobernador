@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AUTOPILOT_CONSTANTS,
   BUILDING_CATALOG,
   GOVERNOR_BUILDABLE_TYPES,
   OBRAS_LEVEL_TABLE,
@@ -54,6 +55,7 @@ import {
   getParcelTerrainTiles,
   getRubroDisplayName,
   getTerrainBuildCostInfo,
+  getViaTerrainTiles,
   isViaConnectableToNetwork,
 } from '../../engine/worldHelpers';
 import { InspectorDirectoryTab } from '../../hooks/useGameSession';
@@ -1075,9 +1077,14 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                             zonePop[n.zona] = (zonePop[n.zona] ?? 0) + 1;
                           }
 
+                          const hasBuilder = state.firmas.some((f) => f.activa && f.rubro === 'construccion');
+
                           return GOVERNOR_BUILDABLE_TYPES.map((tipo) => {
                             const def = BUILDING_CATALOG[tipo];
-                            const effectiveCost = Math.round(def.costoObra * terrainInfo.multiplier);
+                            const baseEffective = def.costoObra * terrainInfo.multiplier;
+                            const effectiveCost = Math.round(
+                              hasBuilder ? baseEffective : baseEffective * AUTOPILOT_CONSTANTS.kObraDirecta
+                            );
                             const gatedSuceso = Boolean(def.requiereG2) && isG1OrG2;
                             const unlockers = isG2Plus
                               ? (preset?.hitos ?? []).filter((h) => h.desbloquea?.includes(tipo))
@@ -1088,10 +1095,13 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                                 ? unlockers[0]
                                 : null;
                             const noFunds = state.gobierno.reserva < effectiveCost;
-                            const estDays = Math.max(
+                            const baseDaysEst = Math.max(
                               1,
                               Math.round(def.diasObra * obrasRow.diasObraFactor * infraFactor)
                             );
+                            const estDays = hasBuilder
+                              ? baseDaysEst
+                              : Math.max(1, Math.round(baseDaysEst * AUTOPILOT_CONSTANTS.kDiasObraDirecta));
                             const disabled =
                               isG0 ||
                               gatedSuceso ||
@@ -1396,7 +1406,19 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           const connectable = isViaConnectableToNetwork(state, selectedTramo);
           const canBuild = !selectedTramo.construida && !selectedTramo.enObra && connectable;
           const viaBlocked = isG0;
-          const noFunds = state.gobierno.reserva < selectedTramo.costoObra;
+          const viaTerrain = getTerrainBuildCostInfo(
+            state.mapaGrid,
+            getViaTerrainTiles(state, selectedTramo),
+            selectedTramo.tipo === 'puente'
+          );
+          const hasBuilder = state.firmas.some((f) => f.activa && f.rubro === 'construccion');
+          const rawViaCost = Number(
+            (selectedTramo.costoObra * viaTerrain.multiplier + viaTerrain.bridgeExtraCost).toFixed(2)
+          );
+          const effectiveViaCost = Math.round(
+            hasBuilder ? rawViaCost : rawViaCost * AUTOPILOT_CONSTANTS.kObraDirecta
+          );
+          const noFunds = state.gobierno.reserva < effectiveViaCost;
           const zA = state.zonas[selectedTramo.zonaA]?.nombre ?? selectedTramo.zonaA;
           const zB = selectedTramo.zonaB
             ? state.zonas[selectedTramo.zonaB]?.nombre ?? selectedTramo.zonaB
@@ -1452,7 +1474,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-700/60 font-mono tabular-nums">
                   <div>
                     <span className="font-sans text-zinc-400 block">Costo</span>
-                    <span className="font-bold text-white">${selectedTramo.costoObra}</span>
+                    <span className="font-bold text-white">${effectiveViaCost}</span>
                   </div>
                   <div>
                     <span className="font-sans text-zinc-400 block">Plazo</span>
@@ -1479,8 +1501,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                   {viaBlocked
                     ? 'Modo automático'
                     : noFunds
-                    ? `Sin caja ($${selectedTramo.costoObra})`
-                    : `Construir vía ($${selectedTramo.costoObra})`}
+                    ? `Sin caja ($${effectiveViaCost})`
+                    : `Construir vía ($${effectiveViaCost})`}
                 </button>
               )}
             </div>
@@ -2223,7 +2245,17 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
               ) : (
                 <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
                   {connectableVias.map((t) => {
-                    const noFunds = state.gobierno.reserva < t.costoObra;
+                    const tInfo = getTerrainBuildCostInfo(
+                      state.mapaGrid,
+                      getViaTerrainTiles(state, t),
+                      t.tipo === 'puente'
+                    );
+                    const hasBuilder = state.firmas.some((f) => f.activa && f.rubro === 'construccion');
+                    const rawViaCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
+                    const effectiveViaCost = Math.round(
+                      hasBuilder ? rawViaCost : rawViaCost * AUTOPILOT_CONSTANTS.kObraDirecta
+                    );
+                    const noFunds = state.gobierno.reserva < effectiveViaCost;
                     const viaBlocked = isG0;
                     return (
                       <div
@@ -2242,7 +2274,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                         >
                           <div className="font-semibold text-white truncate">{t.nombre}</div>
                           <div className="text-xs text-amber-300 font-mono tabular-nums mt-0.5">
-                            ${t.costoObra} · {t.diasObraTotal}d · +{t.parcelasAbiertas.length} parc.
+                            ${effectiveViaCost} · {t.diasObraTotal}d · +{t.parcelasAbiertas.length} parc.
                           </div>
                         </button>
                         <button

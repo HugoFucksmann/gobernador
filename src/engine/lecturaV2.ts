@@ -368,7 +368,7 @@ export function initLecturaState(state: GameState, derived: CommunityDerived): L
       animo: 0,
       orden: 0,
     },
-    notables: [],
+    notables: deriveNotablesPayday(state, []),
     informes: [],
     ultimoDiaActualizado: state.reloj.dia,
     ultimoPeriodoActualizado: state.reloj.periodo,

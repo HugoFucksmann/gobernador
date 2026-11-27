@@ -142,6 +142,7 @@ export {
   clamp,
   compactEvents,
   computeTotalWorldMoney,
+  computeZoneServiceCoverage,
   deriveCommunityStats,
   emitSimEvent,
   getActivePhenomena,
@@ -1145,7 +1146,7 @@ function getHitoMetricValue(
 }
 
 function getOrComputeActorNotables(state: GameState): LecturaNotable[] {
-  if (state.config.lecturaActiva !== false && state.lectura?.notables) {
+  if (state.config.lecturaActiva !== false && state.lectura?.notables && state.lectura.notables.length > 0) {
     return state.lectura.notables;
   }
   const existing = state.lectura?.notables ?? [];
@@ -1481,6 +1482,85 @@ function setLeverValueImmediate(
       recordControlEvent(state, 'tope_emision_pct', prev, next, 'tope_emision');
       break;
     }
+  }
+}
+
+export function setGovernorLeverObjetivo(
+  state: GameState,
+  key: LeverKey,
+  value: number | string
+): { ok: boolean; error?: string } {
+  if (state.resultado.estado !== 'jugando') {
+    return { ok: false, error: 'La partida ya finalizó.' };
+  }
+  const govLevel = getGovernorLevel(state.config);
+  if (govLevel === 'G0' || isObserverMode(state.config)) {
+    return { ok: false, error: 'En modo observador o automático no hay palancas manuales.' };
+  }
+
+  const g1Keys: LeverKey[] = ['impuesto', 'salarioPublico', 'nivelObras'];
+  const g2Keys: LeverKey[] = [...g1Keys, 'ayudaSocial', 'garantiaAlimentaria'];
+  const g3Keys: LeverKey[] = [...g2Keys, 'precioMaximo', 'comercioExterior', 'prensa'];
+
+  const allowed =
+    govLevel === 'G1'
+      ? g1Keys.includes(key)
+      : govLevel === 'G2'
+      ? g2Keys.includes(key)
+      : govLevel === 'G3'
+      ? g3Keys.includes(key)
+      : key === 'topeEmision'
+      ? state.config.economiaModulo === 'fiscal'
+      : g3Keys.includes(key);
+
+  if (!allowed) {
+    return { ok: false, error: `La palanca ${key} no está habilitada en ${govLevel}.` };
+  }
+  if (isLeverLocked(state, key)) {
+    return { ok: false, error: `La palanca ${key} está bloqueada por un acuerdo vigente.` };
+  }
+
+  const tgt = state.gobierno.palancasObjetivo;
+  switch (key) {
+    case 'impuesto':
+    case 'salarioPublico':
+    case 'ayudaSocial':
+    case 'garantiaAlimentaria':
+    case 'prensa':
+    case 'topeEmision': {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return { ok: false, error: `Valor inválido para ${key}.` };
+      }
+      const b = LEVER_BOUNDS[key];
+      tgt[key] = clamp(Number(num.toFixed(2)), b.min, b.max);
+      return { ok: true };
+    }
+    case 'nivelObras': {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return { ok: false, error: 'Valor inválido para nivelObras.' };
+      }
+      tgt.nivelObras = clamp(Math.round(num), 0, 5) as ServiceLevel;
+      return { ok: true };
+    }
+    case 'precioMaximo': {
+      if (value !== 'libre' && value !== 'moderado' && value !== 'estricto') {
+        return { ok: false, error: 'Modo de precio máximo inválido.' };
+      }
+      tgt.precioMaximo = value;
+      return { ok: true };
+    }
+    case 'comercioExterior': {
+      const num = Number(value) as ForeignTradeStep;
+      if (!FOREIGN_TRADE_STEPS.some((s) => s.value === num)) {
+        return { ok: false, error: 'Escalón de comercio exterior inválido.' };
+      }
+      tgt.comercioExterior = num;
+      return { ok: true };
+    }
+    default:
+      return { ok: false, error: 'Palanca desconocida.' };
   }
 }
 
@@ -2032,7 +2112,8 @@ function evaluateActorDemands(state: GameState, derived: CommunityDerived): void
       // 1. bajen_impuestos (G2+)
       if (
         (lowFactorStreak || vig.impuesto > ACTOR_CONSTANTS.umbralImpuestoDemanda) &&
-        vig.impuesto > LEVER_BOUNDS.impuesto.min
+        vig.impuesto > LEVER_BOUNDS.impuesto.min &&
+        !state.demandasActivas.some((d) => d.demandaId === 'bajen_impuestos')
       ) {
         const step = canExtort ? 10 : 5;
         const nextTax = Math.max(LEVER_BOUNDS.impuesto.min, vig.impuesto - step);
@@ -2163,7 +2244,8 @@ function evaluateActorDemands(state: GameState, derived: CommunityDerived): void
       if (
         isG3Plus &&
         (vig.precioMaximo === 'estricto' || vig.precioMaximo === 'moderado') &&
-        agroUnderOne
+        agroUnderOne &&
+        !state.demandasActivas.some((d) => d.demandaId === 'liberen_precio')
       ) {
         const nextCap: PriceCapMode = canExtort || vig.precioMaximo === 'moderado' ? 'libre' : 'moderado';
         pushActorDemandRecord(
@@ -2188,8 +2270,9 @@ function evaluateActorDemands(state: GameState, derived: CommunityDerived): void
       if (
         isG3Plus &&
         agroFirms.length > 0 &&
-        state.alimento.diasStock >= Math.max(10, state.alimento.siloDias - 3) &&
-        vig.comercioExterior >= 0
+        state.alimento.diasStock >= Math.max(10, state.alimento.siloDias - 1) &&
+        vig.comercioExterior >= 0 &&
+        !state.demandasActivas.some((d) => d.demandaId === 'abran_exportacion')
       ) {
         pushActorDemandRecord(
           state,
@@ -2475,12 +2558,16 @@ function setNpcActionMovement(
   actionName: string,
   state: GameState
 ): void {
-  const targetZone =
-    actionId === 'huelga' || actionId === 'protesta'
-      ? 'civico'
-      : ['saqueo', 'organizar_fiesta', 'cantar_en_plaza', 'organizar_asamblea'].includes(actionId)
-      ? 'mercado'
-      : npc.zona;
+  const targetZone = [
+    'huelga',
+    'protesta',
+    'saqueo',
+    'organizar_fiesta',
+    'cantar_en_plaza',
+    'organizar_asamblea',
+  ].includes(actionId)
+    ? 'centro'
+    : npc.zona;
   if (['protesta', 'huelga', 'predicar', 'saqueo', 'organizar_asamblea', 'organizar_fiesta', 'cantar_en_plaza'].includes(actionId)) {
     npc.mapa.destino = getZoneCanvasPosition(state.zonas[targetZone] ? targetZone : npc.zona, state, state.zonas);
   }
@@ -5343,7 +5430,16 @@ function advanceDay(state: GameState): void {
 }
 
 export function stepSimulation(state: GameState, ticksToRun: number): GameState {
-  if (state.resultado.estado !== 'jugando' || ticksToRun <= 0) return state;
+  if (state.resultado.estado !== 'jugando' || ticksToRun <= 0) {
+    if (state.auditEntradasDia !== 0 || state.auditSalidasDia !== 0) {
+      return {
+        ...state,
+        auditEntradasDia: 0,
+        auditSalidasDia: 0,
+      };
+    }
+    return state;
+  }
 
   const startTick = state.reloj.tick;
   const crossesDay =
@@ -5393,7 +5489,11 @@ export function stepSimulation(state: GameState, ticksToRun: number): GameState 
 }
 
 export function stepHeadlessDay(state: GameState): void {
-  if (state.resultado.estado !== 'jugando') return;
+  if (state.resultado.estado !== 'jugando') {
+    state.auditEntradasDia = 0;
+    state.auditSalidasDia = 0;
+    return;
+  }
   state.reloj.tick += TICKS_PER_DAY;
   advanceDay(state);
 }

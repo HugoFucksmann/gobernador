@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   ACTION_TABLE,
+  AUTOPILOT_CONSTANTS,
   BUILDING_CATALOG,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
@@ -25,7 +26,7 @@ import {
   getEffectiveZone,
   getWorldZones,
 } from '../../engine/simulation';
-import { isViaConnectableToNetwork } from '../../engine/worldHelpers';
+import { getTerrainBuildCostInfo, getViaTerrainTiles, isViaConnectableToNetwork } from '../../engine/worldHelpers';
 import {
   CommunityDerived,
   GameState,
@@ -844,7 +845,17 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                   .map((t) => {
                     const connectable = isViaConnectableToNetwork(state, t);
                     const isOpenable = !t.construida && !t.enObra && connectable;
-                    const noFunds = state.gobierno.reserva < t.costoObra;
+                    const tInfo = getTerrainBuildCostInfo(
+                      state.mapaGrid,
+                      getViaTerrainTiles(state, t),
+                      t.tipo === 'puente'
+                    );
+                    const hasBuilder = state.firmas.some((f) => f.activa && f.rubro === 'construccion');
+                    const rawViaCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
+                    const effectiveViaCost = Number(
+                      (hasBuilder ? rawViaCost : rawViaCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2)
+                    );
+                    const noFunds = state.gobierno.reserva < effectiveViaCost;
                     const viaBlockedByGov = isG0;
                     const zA = state.zonas[t.zonaA]?.nombre ?? t.zonaA;
                     const zB = t.zonaB ? state.zonas[t.zonaB]?.nombre ?? t.zonaB : null;
@@ -886,7 +897,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                               </span>
                             ) : (
                               <span className={connectable ? 'text-amber-200' : 'text-zinc-500'}>
-                                ${t.costoObra} · {t.diasObraTotal}d · Mant. ${t.mantenimientoPeriodo}/per
+                                ${Math.round(effectiveViaCost)} · {t.diasObraTotal}d · Mant. ${t.mantenimientoPeriodo}/per
                                 {!connectable ? ' · Sin conexión' : ''}
                               </span>
                             )}

@@ -595,9 +595,11 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
                     const inter = interlocutor(state, n.npcId);
                     const matchedMedio =
                       n.tipo === 'medio'
-                        ? state.medios.find(
-                            (m) => m.columnistas.includes(n.npcId) || state.actoresEstado?.[m.id]
-                          )
+                        ? n.medioId
+                          ? state.medios.find((m) => m.id === n.medioId)
+                          : state.medios.find(
+                              (m) => m.duenoNpcIds.includes(n.npcId) || m.columnistas.includes(n.npcId)
+                            )
                         : undefined;
                     const actorRel =
                       state.actoresEstado?.[n.npcId] ??

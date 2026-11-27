@@ -198,7 +198,7 @@ export const BUILDING_CATALOG: Record<BuildingType, BuildingDefinition> = {
     mantenimientoPeriodo: 8.0,
     diasObra: 3,
     capacidadVentasDiaria: 120,
-    puestos: puestos({ agricultor: 5, tecnico: 1 }),
+    puestos: puestos({ agricultor: 9, tecnico: 2 }),
   },
   fabrica: {
     tipo: 'fabrica',
@@ -2012,7 +2012,6 @@ const HITOS_ELECCIONES: HitoDefinition[] = [
       op: '>=',
       umbral: 52,
     },
-    desbloquea: ['silo', 'riego'],
   },
   {
     id: 'hito_prosperidad',
@@ -2024,7 +2023,6 @@ const HITOS_ELECCIONES: HitoDefinition[] = [
       op: '>=',
       umbral: 55,
     },
-    desbloquea: ['muralla', 'hospital_campana'],
   },
 ];
 
@@ -2039,7 +2037,6 @@ const HITOS_ZOMBIES: HitoDefinition[] = [
       op: '<=',
       umbral: 15,
     },
-    desbloquea: ['muralla', 'hospital_campana'],
   },
   {
     id: 'hito_prosperidad',
@@ -2051,7 +2048,6 @@ const HITOS_ZOMBIES: HitoDefinition[] = [
       op: '>=',
       umbral: 80,
     },
-    desbloquea: ['silo', 'riego'],
   },
 ];
 

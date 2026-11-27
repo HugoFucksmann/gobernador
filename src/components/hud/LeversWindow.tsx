@@ -323,8 +323,9 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
 
               <div className="flex items-center justify-between text-xs text-zinc-400 font-mono tabular-nums pt-2 border-t border-zinc-700/60">
                 <span>
-                  Mant.: Edif. ${budget.mantenimientoEdificiosEst.toFixed(0)} · Vías $
-                  {budget.mantenimientoViasEst.toFixed(0)}
+                  Mant. total: ${budget.mantenimientoEst.toFixed(0)} (Edif. $
+                  {budget.mantenimientoEdificiosEst.toFixed(0)} · Vías $
+                  {budget.mantenimientoViasEst.toFixed(0)})
                 </span>
                 {Math.abs(saldoDelta) >= 1 && (
                   <span className={saldoDelta >= 0 ? 'text-emerald-300' : 'text-amber-300'}>

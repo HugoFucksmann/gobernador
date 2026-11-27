@@ -267,7 +267,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
 
   const daysToClose = Math.max(1, PERIOD_DAYS - state.reloj.diasEnPeriodo);
   const reserveColor =
-    reserveWeeks < 1.5 || fin.impago
+    reserveWeeks < 2 || fin.impago
       ? 'text-rose-400'
       : reserveWeeks < 3 || estDiario < 0
       ? 'text-amber-300'
@@ -718,15 +718,17 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
         </div>
       )}
 
-      {/* Optional Non-blocking 30-day Summary Card (only in Governor mode) */}
+      {/* Optional Non-blocking Periodic Balance Card (every periodos_balance periods, only in Governor mode) */}
       {monthlySummary && !isG0 && (
         <div className="pointer-events-auto self-end w-[340px] max-w-[calc(100vw-32px)] bg-zinc-900/95 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-3.5 shadow-2xl space-y-2 text-xs">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-bold text-white">Balance mensual · Día {monthlySummary.dia}</span>
+            <span className="font-bold text-white">
+              Balance de período{monthlySummary.periodo ? ` (P${monthlySummary.periodo})` : ''} · Día {monthlySummary.dia}
+            </span>
             <button
               type="button"
               onClick={onDismissMonthly}
-              aria-label="Cerrar balance mensual"
+              aria-label="Cerrar balance"
               className="text-zinc-400 hover:text-white p-0.5 rounded-lg"
             >
               <X className="w-3.5 h-3.5" />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { UI_CONSTANTS } from '../data/catalogs';
 import { ExtraLeverKey, GameController } from '../engine/gameController';
 import { DEFAULT_WORLD_CONFIG, getGovernorLevel, hasActiveCrisisAlert, isObserverMode, sumPeriodExpenses } from '../engine/policies';
 import { getActivePhenomena } from '../engine/simulation';
@@ -120,41 +121,47 @@ export function useGameSession() {
         setMonthlySummary(null);
       } else if (hasStarted && st.resultado.estado === 'jugando' && !isG0) {
         if (st.reloj.periodo > prevPeriodoRef.current) {
+          const settledPeriod = prevPeriodoRef.current;
           const gastos = sumPeriodExpenses(st.gobierno.finanzas);
           setPaydaySummary({
-            periodo: prevPeriodoRef.current,
+            periodo: settledPeriod,
             dia: st.reloj.dia,
             ingresos: st.gobierno.finanzas.ingresos,
             gastos,
             saldo: st.gobierno.finanzas.saldo,
             reserva: st.gobierno.reserva,
           });
-        }
-        if (st.reloj.dia >= 30 && st.reloj.dia % 30 === 0) {
-          const positives: string[] = [];
-          const negatives: string[] = [];
-          if (derived.hambreCriticaPct < 5) positives.push('Abasto de alimentos estable');
-          else negatives.push(`Hambre crítica en ${derived.hambreCriticaPct}%`);
-          if (derived.callePct <= 5) positives.push('Cobertura habitacional sólida');
-          else negatives.push(`${derived.callePct}% de hogares sin techo`);
-          if (st.gobierno.finanzas.impago) negatives.push('Atraso de pagos del Tesoro');
-          else if (st.gobierno.finanzas.saldo >= 0) positives.push('Cuentas públicas equilibradas');
-          else negatives.push('Déficit en el último período');
-          if (derived.satisfaccionMedia >= 60) positives.push(`Ánimo ciudadano en ${derived.satisfaccionMedia}%`);
-          else if (derived.satisfaccionMedia < 45) negatives.push(`Ánimo bajo (${derived.satisfaccionMedia}%)`);
-          if (derived.desempleoPct > 18) negatives.push(`Desempleo elevado (${derived.desempleoPct}%)`);
-          else if (derived.desempleoPct <= 8) positives.push('Empleo activo en las firmas');
-          const brokenTramos = st.tramos.filter((t) => t.construida && t.estado <= 0).length;
-          if (brokenTramos > 0) negatives.push(`${brokenTramos} vía(s) cortada(s)`);
+          if (settledPeriod > 0 && settledPeriod % UI_CONSTANTS.periodosBalance === 0) {
+            const positives: string[] = [];
+            const negatives: string[] = [];
+            if (derived.hambreCriticaPct < 5) positives.push('Abasto de alimentos estable');
+            else negatives.push(`Hambre crítica en ${derived.hambreCriticaPct}%`);
+            if (derived.callePct <= 5) positives.push('Cobertura habitacional sólida');
+            else negatives.push(`${derived.callePct}% de hogares sin techo`);
+            if (st.gobierno.finanzas.impago) negatives.push('Atraso de pagos del Tesoro');
+            else if (st.gobierno.finanzas.saldo >= 0) positives.push('Cuentas públicas equilibradas');
+            else negatives.push('Déficit en el último período');
+            if (derived.satisfaccionMedia >= 60) positives.push(`Ánimo ciudadano en ${derived.satisfaccionMedia}%`);
+            else if (derived.satisfaccionMedia < 45) negatives.push(`Ánimo bajo (${derived.satisfaccionMedia}%)`);
+            if (derived.desempleoPct > 18) negatives.push(`Desempleo elevado (${derived.desempleoPct}%)`);
+            else if (derived.desempleoPct <= 8) positives.push('Empleo activo en las firmas');
+            const brokenTramos = st.tramos.filter((t) => t.construida && t.estado <= 0).length;
+            if (brokenTramos > 0) negatives.push(`${brokenTramos} vía(s) cortada(s)`);
 
-          setMonthlySummary({
-            dia: st.reloj.dia,
-            apoyoPct: derived.apoyoPct,
-            poblacion: derived.poblacion,
-            reserva: st.gobierno.reserva,
-            topPositivos: positives.slice(0, 3),
-            topNegativos: negatives.slice(0, 3),
-          });
+            const maxFactors = 3;
+            const pickedNeg = negatives.slice(0, maxFactors);
+            const pickedPos = positives.slice(0, Math.max(0, maxFactors - pickedNeg.length));
+
+            setMonthlySummary({
+              periodo: settledPeriod,
+              dia: st.reloj.dia,
+              apoyoPct: derived.apoyoPct,
+              poblacion: derived.poblacion,
+              reserva: st.gobierno.reserva,
+              topPositivos: pickedPos,
+              topNegativos: pickedNeg,
+            });
+          }
         }
       }
       prevDiaRef.current = st.reloj.dia;

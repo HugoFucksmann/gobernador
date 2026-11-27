@@ -67,6 +67,7 @@ export interface PaydaySummary {
 }
 
 export interface MonthlySummary {
+  periodo?: number;
   dia: number;
   apoyoPct: number;
   poblacion: number;

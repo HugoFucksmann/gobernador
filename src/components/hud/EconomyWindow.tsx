@@ -196,6 +196,7 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                   { label: 'Ayuda social', val: -fin.ayudaSocial },
                   { label: 'Mant. edificios', val: -mantEdif },
                   { label: 'Mant. vías', val: -mantVias },
+                  { label: 'Mant. total período', val: -(derived.mantenimientoTotalPeriodo ?? mantEdif + mantVias) },
                   { label: 'Obras públicas', val: -((fin.operacionObras ?? 0) + (fin.obras ?? 0)) },
                   { label: 'Subsidios agro', val: -(fin.subsidios ?? 0) },
                   { label: 'Pauta prensa', val: -fin.prensa },
@@ -268,13 +269,17 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                 </div>
                 <div className="bg-zinc-800/55 rounded-xl p-3">
                   <span className="font-sans text-zinc-400 block">Constructoras</span>
-                  <span
-                    className={`font-bold text-sm ${
-                      (derived.constructoraSalud?.firmas ?? 0) === 0 ? 'text-amber-300' : 'text-emerald-400'
-                    }`}
+                  <UiTooltip
+                    text={`Ventas período: $${Math.round(derived.constructoraSalud?.ventasPeriodo ?? 0)} · ${derived.constructoraSalud?.empleos ?? 0} emp.`}
                   >
-                    {derived.constructoraSalud?.firmas ?? 0} ({Math.round((derived.constructoraSalud?.factorMedio ?? 1) * 100)}%)
-                  </span>
+                    <span
+                      className={`font-bold text-sm cursor-help ${
+                        (derived.constructoraSalud?.firmas ?? 0) === 0 ? 'text-amber-300' : 'text-emerald-400'
+                      }`}
+                    >
+                      {derived.constructoraSalud?.firmas ?? 0} ({Math.round((derived.constructoraSalud?.factorMedio ?? 1) * 100)}%) · ${Math.round(derived.constructoraSalud?.ventasPeriodo ?? 0)}
+                    </span>
+                  </UiTooltip>
                 </div>
               </div>
 

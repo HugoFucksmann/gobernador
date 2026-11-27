@@ -419,6 +419,8 @@ export function runDailyEconomyV2(state: GameState): void {
     entretenimiento: 0,
   };
 
+  const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
+
   // 4 & 5 & 6. Daily Household food purchase, living spend & consumption
   for (const h of state.hogares) {
     const members = h.miembros.map((id) => npcById.get(id)).filter((n): n is Npc => Boolean(n && n.vivo));
@@ -554,8 +556,17 @@ export function runDailyEconomyV2(state: GameState): void {
       const wealthTerm = h.dinero > colchon ? ECON_CONSTANTS.kRiqueza * (h.dinero - colchon) : 0;
       const codiciaCut = 1 - Math.max(0, avgCodicia - 0.5) * 0.14;
       const targetSpend = Math.max(0, (avgProp * dailyNetIncome + wealthTerm) * codiciaCut);
-      const cashFloorDays = isM1Plus ? 1.8 : 0.5;
-      const actualSpend = Math.min(Math.max(0, h.dinero - count * effPrice * cashFloorDays), targetSpend);
+      const hCasa = h.casaId ? casaById.get(h.casaId) : undefined;
+      const isRenting =
+        Boolean(hCasa && h.estado === 'con_casa' && !h.ocupandoCasaId) &&
+        !(
+          (hCasa!.dueno.tipo === 'hogar' && hCasa!.dueno.id === h.id) ||
+          (hCasa!.dueno.tipo === 'npc' && h.miembros.includes(hCasa!.dueno.id))
+        );
+      const rentReserve = isRenting && hCasa ? hCasa.alquiler : 0;
+      const missingPantryReserve = Math.max(0, objDiasPerPerson * count - h.despensa) * effPrice;
+      const cashFloor = count * effPrice * (isM1Plus ? 1.8 : 1.0) + missingPantryReserve + rentReserve;
+      const actualSpend = Math.min(Math.max(0, h.dinero - cashFloor), targetSpend);
 
       if (actualSpend > 0.01) {
         if (!isM1Plus) {
@@ -740,6 +751,8 @@ export function runPaydayEconomyV2(state: GameState): void {
   const npcById = new Map<string, Npc>(state.npcs.map((n) => [n.id, n]));
   const hogarById = new Map<string, Hogar>(state.hogares.map((h) => [h.id, h]));
   const firmaById = new Map<string, Firma>(state.firmas.map((f) => [f.id, f]));
+  const parcelById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
+  const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
 
   // Track net household income during this payday
   for (const h of state.hogares) {
@@ -777,10 +790,6 @@ export function runPaydayEconomyV2(state: GameState): void {
   const creditNetToNpc = (npc: Npc, gross: number, taxable: boolean) =>
     creditNetAmountToHogarOrNpc(npc, gross, taxable);
 
-  // ====================================================================
-  // 1. FIRMS SETTLEMENT HELPER (settle non-constructora/non-medio first,
-  //    then credit maintenance & public works, then settle constructora & medio)
-  // ====================================================================
   const activeMedios = state.medios.filter((m) => m.activa !== false);
   const medioFirmaPairs = activeMedios
     .map((m) => ({ m, f: m.firmaId ? firmaById.get(m.firmaId) : undefined }))
@@ -791,7 +800,281 @@ export function runPaydayEconomyV2(state: GameState): void {
     m.finanzas.fondosEstado = 0;
   }
 
-  // Pre-bucket unemployed adults once (O(N) instead of O(F*N) for 5.000 pop)
+  const constructoras = state.firmas.filter((f) => f.activa && f.rubro === 'construccion');
+  const pickConstructora = (zona: ZoneId): Firma | undefined =>
+    constructoras.find((f) => f.zona === zona) ?? constructoras[0];
+
+  const payDirectWorksWages = (amount: number): boolean => {
+    if (amount <= 0) return false;
+    const unemployedAdults = state.npcs.filter(
+      (n) => n.vivo && n.edad >= 18 && n.edad < 65 && n.rol === 'desempleado'
+    );
+    const recipients =
+      unemployedAdults.length > 0
+        ? unemployedAdults
+        : state.npcs.filter((n) => n.vivo && n.edad >= 18 && n.edad < 65);
+    if (recipients.length === 0) return false;
+    state.gobierno.reserva -= amount;
+    const perWorker = amount / recipients.length;
+    let credited = 0;
+    for (const w of recipients) {
+      const h = hogarById.get(w.hogarId);
+      if (h) {
+        h.dinero += perWorker;
+        credited += perWorker;
+      }
+    }
+    if (Math.abs(amount - credited) > 0.0001) {
+      state.gobierno.reserva += amount - credited;
+    }
+    return credited > 0;
+  };
+
+  // ====================================================================
+  // 1. STATE SETTLEMENT (ECONOMIA §2 step 1 & §10 priority order:
+  //    pensiones -> nomina -> ayuda social -> mantenimiento/operacion -> prensa,
+  //    using reserve left from previous period; current payday tax goes to next period)
+  // ====================================================================
+  const acum = state.gobierno.acumuladoPeriodo;
+  const fin = state.gobierno.finanzas;
+  const opBreak = computeMaintenanceBreakdown(
+    state.parcelas,
+    state.gobierno.palancasVigentes.nivelObras,
+    Math.max(1, state.npcs.filter((n) => n.vivo).length),
+    state.tramos ?? []
+  );
+
+  const pensDue = acum.pensionesDevengadas;
+  const nominaDue = acum.nominaDevengada;
+  const ayuDue = acum.ayudaDevengada;
+  const opDue = opBreak.operacionTotal + (acum.operacion ?? 0);
+  const prensaDue =
+    activeMedios.length > 0 ? state.gobierno.palancasVigentes.prensa + (acum.prensa ?? 0) : 0;
+  const totalDue = pensDue + nominaDue + ayuDue + opDue + prensaDue;
+
+  let statePayBudget = Math.max(0, state.gobierno.reserva);
+
+  // 1a. Pensiones
+  const ratioPens = pensDue > 0 ? Math.min(1, statePayBudget / pensDue) : 1;
+  const pensPaid = pensDue * ratioPens;
+  if (pensPaid > 0 && pensDue > 0) {
+    state.gobierno.reserva -= pensPaid;
+    statePayBudget = Math.max(0, statePayBudget - pensPaid);
+    let credited = 0;
+    for (const [nid, amt] of Object.entries(acum.pensionesPorNpc)) {
+      const share = amt * ratioPens;
+      credited += share;
+      const npc = npcById.get(nid);
+      creditNetAmountToHogarOrNpc(npc, share, false);
+    }
+    if (Math.abs(pensPaid - credited) > 0.0001) {
+      state.gobierno.reserva += pensPaid - credited;
+    }
+  }
+
+  // 1b. Nómina pública
+  const ratioNom = nominaDue > 0 ? Math.min(1, statePayBudget / nominaDue) : 1;
+  const nomPaid = nominaDue * ratioNom;
+  if (nomPaid > 0 && nominaDue > 0) {
+    state.gobierno.reserva -= nomPaid;
+    statePayBudget = Math.max(0, statePayBudget - nomPaid);
+    let credited = 0;
+    for (const [nid, amt] of Object.entries(acum.nominaPorNpc)) {
+      const share = amt * ratioNom;
+      credited += share;
+      const npc = npcById.get(nid);
+      creditNetAmountToHogarOrNpc(npc, share, true);
+    }
+    if (Math.abs(nomPaid - credited) > 0.0001) {
+      state.gobierno.reserva += nomPaid - credited;
+    }
+  }
+
+  // 1c. Ayuda social
+  const ratioAyu = ayuDue > 0 ? Math.min(1, statePayBudget / ayuDue) : 1;
+  const ayuPaid = ayuDue * ratioAyu;
+  if (ayuPaid > 0 && ayuDue > 0) {
+    state.gobierno.reserva -= ayuPaid;
+    statePayBudget = Math.max(0, statePayBudget - ayuPaid);
+    let credited = 0;
+    for (const [nid, amt] of Object.entries(acum.ayudaPorNpc)) {
+      const share = amt * ratioAyu;
+      credited += share;
+      const npc = npcById.get(nid);
+      creditNetAmountToHogarOrNpc(npc, share, false);
+    }
+    if (Math.abs(ayuPaid - credited) > 0.0001) {
+      state.gobierno.reserva += ayuPaid - credited;
+    }
+  }
+
+  // 1d. Operación y mantenimiento de obras/vías/edificios (a constructoras u obra directa)
+  const ratioOp = opDue > 0 ? Math.min(1, statePayBudget / opDue) : 1;
+  const opPaid = opDue * ratioOp;
+  let opActuallyPaid = 0;
+  if (opPaid > 0) {
+    statePayBudget = Math.max(0, statePayBudget - opPaid);
+    if (constructoras.length > 0) {
+      state.gobierno.reserva -= opPaid;
+      const share = opPaid / constructoras.length;
+      for (const cf of constructoras) cf.ventas += share;
+      opActuallyPaid = opPaid;
+    } else if (payDirectWorksWages(opPaid)) {
+      opActuallyPaid = opPaid;
+    }
+  }
+
+  // 1e. Fondos de prensa (a medios activos)
+  const ratioPrensa = prensaDue > 0 ? Math.min(1, statePayBudget / prensaDue) : 1;
+  const prensaPaid = prensaDue * ratioPrensa;
+  if (prensaPaid > 0 && medioFirmaPairs.length > 0) {
+    state.gobierno.reserva -= prensaPaid;
+    statePayBudget = Math.max(0, statePayBudget - prensaPaid);
+    const perM = prensaPaid / medioFirmaPairs.length;
+    for (const { m, f } of medioFirmaPairs) {
+      f.ventas += perM;
+      m.finanzas.fondosEstado += perM;
+    }
+  }
+
+  const discDue = ayuDue + opDue + prensaDue;
+  const ratioDisc = discDue > 0 ? (ayuPaid + opPaid + prensaPaid) / discDue : 1;
+
+  // Road maintenance condition update (EDIFICIOS §3b)
+  const roadMantFailed = state.gobierno.palancasVigentes.nivelObras === 0 || ratioOp < 0.75;
+  let roadTopologyChanged = false;
+  for (const t of state.tramos ?? []) {
+    if (!t.construida) continue;
+    const prevEst = t.estado;
+    if (roadMantFailed) {
+      t.estado = clamp(t.estado - VIAL_CONSTANTS.decaimientoViaSinMant, 0, 100);
+      if (Math.abs(t.estado - prevEst) >= 2) {
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_vest'),
+          dia: state.reloj.dia,
+          tipo: 'via_estado',
+          zona: t.zonaA,
+          tramoId: t.id,
+          estado: Number(t.estado.toFixed(1)),
+          causa: ratioOp < 0.75 ? 'estado:impago' : 'estado:sin_obras',
+        });
+      }
+      if (prevEst > 0 && t.estado <= 0) {
+        roadTopologyChanged = true;
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_rcort'),
+          dia: state.reloj.dia,
+          tipo: 'ruta_cortada',
+          zona: t.zonaA,
+          tramoId: t.id,
+          parcelasAisladas: [...t.parcelasAbiertas],
+          causa: ratioOp < 0.75 ? 'estado:impago' : 'estado:sin_obras',
+        });
+      }
+    } else if (t.estado < 100) {
+      const recov =
+        VIAL_CONSTANTS.recuperacionViaConMant *
+        (state.gobierno.palancasVigentes.nivelObras >= 3 ? 1.25 : 1);
+      t.estado = clamp(t.estado + recov, 0, 100);
+      if (prevEst <= 0 && t.estado > 0) roadTopologyChanged = true;
+      if (Math.abs(t.estado - prevEst) >= 2) {
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_vest'),
+          dia: state.reloj.dia,
+          tipo: 'via_estado',
+          zona: t.zonaA,
+          tramoId: t.id,
+          estado: Number(t.estado.toFixed(1)),
+          causa: 'estado:mantenimiento',
+        });
+      }
+    }
+  }
+  if (roadTopologyChanged || roadMantFailed) {
+    recomputeRoadDistances(state);
+  }
+
+  // Record Step-1 expenses & impago status
+  fin.nomina = Number(nomPaid.toFixed(2));
+  fin.pensiones = Number(pensPaid.toFixed(2));
+  fin.ayudaSocial = Number(ayuPaid.toFixed(2));
+  fin.garantiaAlimentaria = Number(acum.garantiaAlimentaria.toFixed(2));
+  fin.garantiaImpaga = Number(acum.garantiaImpaga.toFixed(2));
+  fin.comidaMenores = Number(acum.comidaMenores.toFixed(2));
+  fin.acogidaMenores = Number(acum.acogidaMenores.toFixed(2));
+  fin.mantenimientoVias = Number(opBreak.mantenimientoVias.toFixed(2));
+  fin.mantenimientoEdificios = Number(opBreak.mantenimientoEdificios.toFixed(2));
+  fin.mantenimiento = Number(opBreak.mantenimientoTotal.toFixed(2));
+  fin.operacionObras = Number(opBreak.operacionObras.toFixed(2));
+  fin.operacion = Number(opActuallyPaid.toFixed(2));
+  fin.obras = Number((acum.obras ?? 0).toFixed(2));
+  fin.subsidios = Number((acum.subsidios ?? 0).toFixed(2));
+  fin.prensa = Number(prensaPaid.toFixed(2));
+  fin.importaciones = Number(acum.importaciones.toFixed(2));
+  fin.exportaciones = Number(acum.exportaciones.toFixed(2));
+  const totalOut =
+    fin.nomina +
+    fin.pensiones +
+    fin.ayudaSocial +
+    fin.garantiaAlimentaria +
+    fin.comidaMenores +
+    fin.acogidaMenores +
+    fin.operacion +
+    fin.obras +
+    fin.subsidios +
+    fin.prensa;
+
+  const missing = Math.max(0, totalDue - (nomPaid + pensPaid + ayuPaid + opPaid + prensaPaid));
+  const wasImpago = fin.impago;
+  fin.impago = missing > 1;
+  fin.alcanzaNomina = fin.impago && nominaDue > 0 && ratioNom >= 0.98;
+  fin.prorrateoNomina = Number(ratioNom.toFixed(3));
+  fin.prorrateoPensionGarantia = Number(ratioPens.toFixed(3));
+  fin.prorrateoDiscrecional = Number(ratioDisc.toFixed(3));
+
+  if (fin.impago) {
+    emitSimEvent(state, {
+      id: nextSeqId(state, 'ev_impago'),
+      dia: state.reloj.dia,
+      tipo: 'impago',
+      zona: zones[0] ?? 'centro',
+      faltante: Number(missing.toFixed(2)),
+      alcanzaNomina: fin.alcanzaNomina,
+      causa: state.ultimaCausaPalanca,
+    });
+  } else if (wasImpago) {
+    emitSimEvent(state, {
+      id: nextSeqId(state, 'ev_impago_fin'),
+      dia: state.reloj.dia,
+      tipo: 'impago_fin',
+      zona: zones[0] ?? 'centro',
+    });
+  }
+
+  // Reset period accumulators
+  acum.dias = 0;
+  acum.impuestos = 0;
+  acum.nominaPorNpc = {};
+  acum.pensionesPorNpc = {};
+  acum.ayudaPorNpc = {};
+  acum.nominaDevengada = 0;
+  acum.pensionesDevengadas = 0;
+  acum.ayudaDevengada = 0;
+  acum.garantiaAlimentaria = 0;
+  acum.garantiaImpaga = 0;
+  acum.comidaMenores = 0;
+  acum.acogidaMenores = 0;
+  acum.operacion = 0;
+  acum.obras = 0;
+  acum.subsidios = 0;
+  acum.prensa = 0;
+  acum.importaciones = 0;
+  acum.exportaciones = 0;
+
+  // ====================================================================
+  // 2. FIRMS SETTLEMENT (ECONOMIA §2 step 2: all firms settle using
+  //    period ventas + Step-1 state revenue, then market shares update)
+  // ====================================================================
   const unempPool = state.npcs.filter(
     (n) => n.vivo && n.rol === 'desempleado' && n.edad >= 18 && n.edad < 65
   );
@@ -933,7 +1216,14 @@ export function runPaydayEconomyV2(state: GameState): void {
       f.historialGanancias = [...f.historialGanancias.slice(-7), f.ultimaGanancia];
 
       if (netSurplus >= 0) {
-        const reinv = f.partes.length > 0 ? netSurplus * FIRM_CONSTANTS.pctReinversion : netSurplus;
+        let reinv = f.partes.length > 0 ? netSurplus * FIRM_CONSTANTS.pctReinversion : netSurplus;
+        if (f.partes.length > 0) {
+          const cajaTarget = isM1Plus
+            ? Math.max(520, f.locales.length * 380, totalRef * 1.9)
+            : Math.max(280, totalRef * 1.1);
+          const room = Math.max(0, cajaTarget - f.caja);
+          reinv = Math.min(reinv, room);
+        }
         f.caja += reinv;
         const distPool = netSurplus - reinv;
 
@@ -954,9 +1244,11 @@ export function runPaydayEconomyV2(state: GameState): void {
               const oh = hogarById.get(part.id);
               if (oh) {
                 const tax = cut * taxRate;
+                const net = cut - tax;
                 state.gobierno.reserva += tax;
                 taxCollectedTotal += tax;
-                oh.dinero += cut - tax;
+                oh.dinero += net;
+                oh.ultimoIngresoNeto += net;
               } else {
                 state.gobierno.reserva += cut;
               }
@@ -1038,16 +1330,75 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   };
 
-  // Phase 1A: Settle operating consumer/producer firms (excluding construccion & medio)
-  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro !== 'construccion' && f.rubro !== 'medio'));
+  // Settle all non-media firms first (including constructora with Step-1 state funds & advertising out to medios),
+  // then settle media firms in the same Step 2 with both Step-1 state funds and Step-2 advertising revenues.
+  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro !== 'medio'));
+  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro === 'medio'));
+
+  // Update market share cuotaZona & monopoly pricing power across all active rubros
+  const rubros: FirmRubro[] = [
+    'agro',
+    'industria',
+    'comercio',
+    'gastronomia',
+    'servicios',
+    'entretenimiento',
+    'construccion',
+    'inmobiliaria',
+    'medio',
+  ];
+  const cuotaMercadoSalida: EconomyOutput['cuotaMercado'] = {};
+  const activeFirmByRubroZone = new Map<string, Firma[]>();
+  for (const f of state.firmas) {
+    if (!f.activa) continue;
+    const key = `${f.rubro}:${f.zona}`;
+    const list = activeFirmByRubroZone.get(key);
+    if (list) list.push(f);
+    else activeFirmByRubroZone.set(key, [f]);
+  }
+  for (const rubro of rubros) {
+    for (const z of zones) {
+      const fZone = activeFirmByRubroZone.get(`${rubro}:${z}`) ?? [];
+      if (fZone.length === 0) continue;
+      const sumRev = fZone.reduce((s, f) => s + Math.max(0.01, f.ultimoIngresoPeriodo), 0);
+      let leader: { firma: string; cuota: number } = { firma: '-', cuota: 0 };
+      let bestShare = -1;
+      for (const f of fZone) {
+        const share = fZone.length === 1 ? 1 : Math.max(0.01, f.ultimoIngresoPeriodo) / Math.max(0.01, sumRev);
+        const prevShare = f.cuotaZona[z] ?? 0;
+        f.cuotaZona[z] = Number(share.toFixed(3));
+        if (share > bestShare) {
+          bestShare = share;
+          leader = { firma: f.id, cuota: Number((share * 100).toFixed(1)) };
+        }
+        if (isM1Plus && share >= FIRM_CONSTANTS.umbralPoderPrecio) {
+          const excess = (share - FIRM_CONSTANTS.umbralPoderPrecio) / (1 - FIRM_CONSTANTS.umbralPoderPrecio);
+          f.margenPoder = Number(clamp(excess * FIRM_CONSTANTS.margenPoderMax, 0, FIRM_CONSTANTS.margenPoderMax).toFixed(3));
+          if (prevShare < FIRM_CONSTANTS.umbralPoderPrecio && fZone.length > 1) {
+            emitSimEvent(state, {
+              id: nextSeqId(state, 'ev_mono'),
+              dia: state.reloj.dia,
+              tipo: 'monopolio',
+              zona: z,
+              rubro,
+              firmaId: f.id,
+              cuota: Number((share * 100).toFixed(1)),
+              causa: `firma:${f.id}/mercado`,
+            });
+          }
+        } else {
+          f.margenPoder = 0;
+        }
+      }
+      if (leader.firma !== '-') {
+        cuotaMercadoSalida[`${rubro}:${z}`] = leader;
+      }
+    }
+  }
 
   // ====================================================================
-  // 2. RENT & MAINTENANCE (casas y locales -> firmas de construcción)
+  // 3. RENT & MAINTENANCE (ECONOMIA §2 step 3: after State & Firms pay)
   // ====================================================================
-  const constructoras = state.firmas.filter((f) => f.activa && f.rubro === 'construccion');
-  const pickConstructora = (zona: ZoneId): Firma | undefined =>
-    constructoras.find((f) => f.zona === zona) ?? constructoras[0];
-
   const creditAssetProceeds = (
     dueno: { tipo: 'hogar' | 'npc' | 'firma' | 'estado'; id: string },
     amount: number
@@ -1148,7 +1499,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       else occ.periodosHacinado = 0;
     }
 
-    // House decay & maintenance paid by owner to constructora (into ventas!)
+    // House decay & maintenance paid by owner to constructora (into ventas for next period!)
     const prevCasaEstado = c.estado;
     const decay = c.hogarId
       ? HOUSING_CONSTANTS.decaimientoEstadoCasaPeriodo
@@ -1165,7 +1516,7 @@ export function runPaydayEconomyV2(state: GameState): void {
       if (paid) c.estado = clamp(c.estado + decay + 2, 0, 100);
     }
 
-    // Venta forzada (ECONOMIA_V2 §7): unmaintained degraded house sold to inmobiliaria/hogar
+    // Venta forzada (ECONOMIA §7): unmaintained degraded house sold to inmobiliaria/hogar
     if (!paid && isM1Plus && c.estado < HOUSING_CONSTANTS.umbralEstadoCasaMalo && c.dueno.tipo !== 'estado') {
       const forcedPrice = Math.max(80, c.alquiler * HOUSING_CONSTANTS.multiploCasa * 0.65);
       const inmoBuyer = state.firmas.find(
@@ -1194,8 +1545,7 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   }
 
-  // Private firm local maintenance (into constr.ventas!)
-  const parcelById = new Map<string, Parcela>(state.parcelas.map((p) => [p.id, p]));
+  // Private firm local maintenance (into constr.ventas for next period!)
   for (const f of state.firmas) {
     if (!f.activa || f.rubro === 'construccion') continue;
     const constr = pickConstructora(f.zona);
@@ -1214,659 +1564,14 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   }
 
-  // ====================================================================
-  // 3. STATE SETTLEMENT & AUTOPILOT (M2+ & G0 / estadoAutomatico)
-  // ====================================================================
-  const acum = state.gobierno.acumuladoPeriodo;
-  const fin = state.gobierno.finanzas;
-  const opBreak = computeMaintenanceBreakdown(
-    state.parcelas,
-    state.gobierno.palancasVigentes.nivelObras,
-    Math.max(1, state.npcs.filter((n) => n.vivo).length),
-    state.tramos ?? []
-  );
-
-  const nominaDue = acum.nominaDevengada;
-  const pensDue = acum.pensionesDevengadas;
-  const ayuDue = acum.ayudaDevengada;
-  const opDue = opBreak.operacionTotal + (acum.operacion ?? 0);
-  const prensaDue =
-    activeMedios.length > 0 ? state.gobierno.palancasVigentes.prensa + (acum.prensa ?? 0) : 0;
-  const totalDue = nominaDue + pensDue + ayuDue + opDue + prensaDue;
-
-  const availNom = Math.max(0, state.gobierno.reserva);
-  const ratioNom = nominaDue > 0 ? Math.min(1, availNom / nominaDue) : 1;
-  const nomPaid = nominaDue * ratioNom;
-  if (nomPaid > 0 && nominaDue > 0) {
-    state.gobierno.reserva -= nomPaid;
-    let credited = 0;
-    for (const [nid, amt] of Object.entries(acum.nominaPorNpc)) {
-      const share = amt * ratioNom;
-      credited += share;
-      const npc = npcById.get(nid);
-      creditNetAmountToHogarOrNpc(npc, share, true);
-    }
-    if (Math.abs(nomPaid - credited) > 0.0001) {
-      state.gobierno.reserva += nomPaid - credited;
-    }
-  }
-
-  const availPens = Math.max(0, state.gobierno.reserva);
-  const ratioPens = pensDue > 0 ? Math.min(1, availPens / pensDue) : 1;
-  const pensPaid = pensDue * ratioPens;
-  if (pensPaid > 0 && pensDue > 0) {
-    state.gobierno.reserva -= pensPaid;
-    let credited = 0;
-    for (const [nid, amt] of Object.entries(acum.pensionesPorNpc)) {
-      const share = amt * ratioPens;
-      credited += share;
-      const npc = npcById.get(nid);
-      creditNetAmountToHogarOrNpc(npc, share, false);
-    }
-    if (Math.abs(pensPaid - credited) > 0.0001) {
-      state.gobierno.reserva += pensPaid - credited;
-    }
-  }
-
-  const availDisc = Math.max(0, state.gobierno.reserva);
-  const discDue = ayuDue + opDue + prensaDue;
-  const ratioDisc = discDue > 0 ? Math.min(1, availDisc / discDue) : 1;
-  const ayuPaid = ayuDue * ratioDisc;
-  const opPaid = opDue * ratioDisc;
-  const prensaPaid = prensaDue * ratioDisc;
-
-  if (ayuPaid > 0 && ayuDue > 0) {
-    state.gobierno.reserva -= ayuPaid;
-    let credited = 0;
-    for (const [nid, amt] of Object.entries(acum.ayudaPorNpc)) {
-      const share = amt * ratioDisc;
-      credited += share;
-      const npc = npcById.get(nid);
-      creditNetAmountToHogarOrNpc(npc, share, false);
-    }
-    if (Math.abs(ayuPaid - credited) > 0.0001) {
-      state.gobierno.reserva += ayuPaid - credited;
-    }
-  }
-
-  const payDirectWorksWages = (amount: number): boolean => {
-    if (amount <= 0) return false;
-    const unemployedAdults = state.npcs.filter(
-      (n) => n.vivo && n.edad >= 18 && n.edad < 65 && n.rol === 'desempleado'
-    );
-    const recipients =
-      unemployedAdults.length > 0
-        ? unemployedAdults
-        : state.npcs.filter((n) => n.vivo && n.edad >= 18 && n.edad < 65);
-    if (recipients.length === 0) return false;
-    state.gobierno.reserva -= amount;
-    const perWorker = amount / recipients.length;
-    let credited = 0;
-    for (const w of recipients) {
-      const h = hogarById.get(w.hogarId);
-      if (h) {
-        h.dinero += perWorker;
-        credited += perWorker;
-      }
-    }
-    if (Math.abs(amount - credited) > 0.0001) {
-      state.gobierno.reserva += amount - credited;
-    }
-    return credited > 0;
-  };
-
-  // Operation maintenance feeds constructora ventas if active, else direct works wages (zero leak!)
-  let opActuallyPaid = 0;
-  if (opPaid > 0) {
-    if (constructoras.length > 0) {
-      state.gobierno.reserva -= opPaid;
-      const share = opPaid / constructoras.length;
-      for (const cf of constructoras) cf.ventas += share;
-      opActuallyPaid = opPaid;
-    } else if (payDirectWorksWages(opPaid)) {
-      opActuallyPaid = opPaid;
-    }
-  }
-
-  // Press budget split evenly to active media firms' ventas
-  if (prensaPaid > 0 && medioFirmaPairs.length > 0) {
-    state.gobierno.reserva -= prensaPaid;
-    const perM = prensaPaid / medioFirmaPairs.length;
-    for (const { m, f } of medioFirmaPairs) {
-      f.ventas += perM;
-      m.finanzas.fondosEstado += perM;
-    }
-  }
-
-  // Road maintenance condition update (EDIFICIOS_V2 §3b)
-  const roadMantFailed = state.gobierno.palancasVigentes.nivelObras === 0 || ratioDisc < 0.75;
-  let roadTopologyChanged = false;
-  for (const t of state.tramos ?? []) {
-    if (!t.construida) continue;
-    const prevEst = t.estado;
-    if (roadMantFailed) {
-      t.estado = clamp(t.estado - VIAL_CONSTANTS.decaimientoViaSinMant, 0, 100);
-      if (Math.abs(t.estado - prevEst) >= 2) {
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_vest'),
-          dia: state.reloj.dia,
-          tipo: 'via_estado',
-          zona: t.zonaA,
-          tramoId: t.id,
-          estado: Number(t.estado.toFixed(1)),
-          causa: ratioDisc < 0.75 ? 'estado:impago' : 'estado:sin_obras',
-        });
-      }
-      if (prevEst > 0 && t.estado <= 0) {
-        roadTopologyChanged = true;
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_rcort'),
-          dia: state.reloj.dia,
-          tipo: 'ruta_cortada',
-          zona: t.zonaA,
-          tramoId: t.id,
-          parcelasAisladas: [...t.parcelasAbiertas],
-          causa: ratioDisc < 0.75 ? 'estado:impago' : 'estado:sin_obras',
-        });
-      }
-    } else if (t.estado < 100) {
-      const recov =
-        VIAL_CONSTANTS.recuperacionViaConMant *
-        (state.gobierno.palancasVigentes.nivelObras >= 3 ? 1.25 : 1);
-      t.estado = clamp(t.estado + recov, 0, 100);
-      if (prevEst <= 0 && t.estado > 0) roadTopologyChanged = true;
-      if (Math.abs(t.estado - prevEst) >= 2) {
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_vest'),
-          dia: state.reloj.dia,
-          tipo: 'via_estado',
-          zona: t.zonaA,
-          tramoId: t.id,
-          estado: Number(t.estado.toFixed(1)),
-          causa: 'estado:mantenimiento',
-        });
-      }
-    }
-  }
-  if (roadTopologyChanged || roadMantFailed) {
-    recomputeRoadDistances(state);
-  }
-
-  // Update finanzas ledger
-  fin.ingresos = Number(taxCollectedTotal.toFixed(2));
-  fin.nomina = Number(nomPaid.toFixed(2));
-  fin.pensiones = Number(pensPaid.toFixed(2));
-  fin.ayudaSocial = Number(ayuPaid.toFixed(2));
-  fin.garantiaAlimentaria = Number(acum.garantiaAlimentaria.toFixed(2));
-  fin.garantiaImpaga = Number(acum.garantiaImpaga.toFixed(2));
-  fin.comidaMenores = Number(acum.comidaMenores.toFixed(2));
-  fin.acogidaMenores = Number(acum.acogidaMenores.toFixed(2));
-  fin.mantenimientoVias = Number(opBreak.mantenimientoVias.toFixed(2));
-  fin.mantenimientoEdificios = Number(opBreak.mantenimientoEdificios.toFixed(2));
-  fin.mantenimiento = Number(opBreak.mantenimientoTotal.toFixed(2));
-  fin.operacionObras = Number(opBreak.operacionObras.toFixed(2));
-  fin.operacion = Number(opActuallyPaid.toFixed(2));
-  fin.obras = Number((acum.obras ?? 0).toFixed(2));
-  fin.subsidios = Number((acum.subsidios ?? 0).toFixed(2));
-  fin.prensa = Number(prensaPaid.toFixed(2));
-  fin.importaciones = Number(acum.importaciones.toFixed(2));
-  fin.exportaciones = Number(acum.exportaciones.toFixed(2));
-  const totalOut =
-    fin.nomina +
-    fin.pensiones +
-    fin.ayudaSocial +
-    fin.garantiaAlimentaria +
-    fin.comidaMenores +
-    fin.acogidaMenores +
-    fin.operacion +
-    fin.obras +
-    fin.subsidios +
-    fin.prensa;
-  fin.saldo = Number((fin.ingresos - totalOut).toFixed(2));
-  state.ultimoSaldoCierre = fin.saldo;
-
-  const missing = Math.max(0, totalDue - (nomPaid + pensPaid + ayuPaid + opPaid + prensaPaid));
-  const wasImpago = fin.impago;
-  fin.impago = missing > 1;
-  fin.alcanzaNomina = fin.impago && nominaDue > 0 && ratioNom < 0.98;
-  fin.prorrateoNomina = Number(ratioNom.toFixed(3));
-  fin.prorrateoPensionGarantia = Number(ratioPens.toFixed(3));
-  fin.prorrateoDiscrecional = Number(ratioDisc.toFixed(3));
-
-  if (fin.impago) {
-    emitSimEvent(state, {
-      id: nextSeqId(state, 'ev_impago'),
-      dia: state.reloj.dia,
-      tipo: 'impago',
-      zona: zones[0] ?? 'centro',
-      faltante: Number(missing.toFixed(2)),
-      alcanzaNomina: fin.alcanzaNomina,
-      causa: state.ultimaCausaPalanca,
-    });
-  } else if (wasImpago) {
-    emitSimEvent(state, {
-      id: nextSeqId(state, 'ev_impago_fin'),
-      dia: state.reloj.dia,
-      tipo: 'impago_fin',
-      zona: zones[0] ?? 'centro',
-    });
-  }
-
-  // Reset period accumulators
-  acum.dias = 0;
-  acum.impuestos = 0;
-  acum.nominaPorNpc = {};
-  acum.pensionesPorNpc = {};
-  acum.ayudaPorNpc = {};
-  acum.nominaDevengada = 0;
-  acum.pensionesDevengadas = 0;
-  acum.ayudaDevengada = 0;
-  acum.garantiaAlimentaria = 0;
-  acum.garantiaImpaga = 0;
-  acum.comidaMenores = 0;
-  acum.acogidaMenores = 0;
-  acum.operacion = 0;
-  acum.obras = 0;
-  acum.subsidios = 0;
-  acum.prensa = 0;
-  acum.importaciones = 0;
-  acum.exportaciones = 0;
-
-  // Autopilot: 4-rule state management when estadoAutomatico is enabled (MUNDO §9, EDIFICIOS §3, ECONOMIA §10)
-  // oficina_publica is preset-only and never built by autopilot.
-  const autoState = isObserverMode(state.config);
-  const periodIngresos = Math.max(fin.ingresos, taxCollectedTotal);
-  const avgDailyExpense = Math.max(
-    4,
-    (fin.nomina +
-      fin.pensiones +
-      fin.ayudaSocial +
-      fin.operacion +
-      fin.prensa +
-      fin.garantiaAlimentaria +
-      fin.comidaMenores +
-      fin.acogidaMenores +
-      fin.subsidios) /
-      PERIOD_DAYS
-  );
-  const floorReserva = avgDailyExpense * AUTOPILOT_CONSTANTS.reservaMinDias;
-  const ceilReserva = avgDailyExpense * AUTOPILOT_CONSTANTS.reservaMaxDias;
-  const canPassWorkBrake = (workCost: number, addedMaintPerPeriod: number): boolean => {
-    if (state.gobierno.reserva - workCost < floorReserva) return false;
-    if (periodIngresos > 0) {
-      const projectedMaint = opBreak.mantenimientoTotal + addedMaintPerPeriod;
-      if (projectedMaint > periodIngresos * (AUTOPILOT_CONSTANTS.pctMantMax / 100)) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  // Regla 1: Ajuste fiscal automático cada periodosAjusteFiscal
-  if (
-    autoState &&
-    state.reloj.periodo - (state.ultimoAjusteFiscalPeriodo ?? -99) >= AUTOPILOT_CONSTANTS.periodosAjusteFiscal
-  ) {
-    const curTax = state.gobierno.palancasVigentes.impuesto;
-    let nextTax = curTax;
-    if (fin.impago || state.gobierno.reserva < floorReserva) {
-      nextTax = Math.min(AUTOPILOT_CONSTANTS.tasaMaxAuto, curTax + 2);
-    } else if (state.gobierno.reserva > ceilReserva) {
-      nextTax = Math.max(AUTOPILOT_CONSTANTS.tasaMinAuto, curTax - 2);
-    }
-    if (nextTax !== curTax) {
-      state.gobierno.palancasVigentes.impuesto = nextTax;
-      state.gobierno.palancasObjetivo.impuesto = nextTax;
-      state.ultimoAjusteFiscalPeriodo = state.reloj.periodo;
-      const evId = nextSeqId(state, 'ev_ctrl');
-      state.ultimaCausaPalanca = evId;
-      emitSimEvent(state, {
-        id: evId,
-        dia: state.reloj.dia,
-        tipo: 'control',
-        zona: zones[0] ?? 'centro',
-        control: 'tasa_impuesto',
-        palanca: 'impuesto',
-        valorAnterior: curTax,
-        valorNuevo: nextTax,
-        causa: 'estado:piloto_automatico',
-      });
-    }
-  }
-
-  // Regla 2 + 3: Servicios públicos por cobertura zonal dentro del radio, sujeto a Freno de obra
-  const covByZone = computeZoneServiceCoverage(state);
-  state.coberturaServiciosPorZona = covByZone;
-  if (isM2Plus && autoState) {
-    const vivosList = state.npcs.filter((n) => n.vivo);
-    const stepMap = buildTraversableZoneStepMap(state);
-    const minPreEgresoAge = EDUCATION_CONSTANTS.edadEgreso - SERVICE_RADIUS_CONSTANTS.aniosPreEgreso;
-    const popByZone = new Map<ZoneId, number>();
-    let hasMenores = false;
-    let hasPreEgreso = false;
-    for (const n of vivosList) {
-      popByZone.set(n.zona, (popByZone.get(n.zona) ?? 0) + 1);
-      if (n.edad < EDUCATION_CONSTANTS.edadEgreso) {
-        hasMenores = true;
-        if (n.edad >= minPreEgresoAge) hasPreEgreso = true;
-      }
-    }
-
-    const inObraTipos = new Set<BuildingType>(
-      state.parcelas
-        .filter((p) => p.estado === 'en_obra' && p.edificio)
-        .map((p) => p.edificio!.tipo)
-    );
-
-    const prioritySpecs: Array<{
-      tipo: 'hospital' | 'comisaria' | 'escuela' | 'universidad';
-      covKey: 'salud' | 'policia' | 'escuela' | 'universidad';
-      radius: number;
-      enabled: boolean;
-    }> = [
-      { tipo: 'hospital', covKey: 'salud', radius: SERVICE_RADIUS_CONSTANTS.radioHospital, enabled: true },
-      { tipo: 'comisaria', covKey: 'policia', radius: SERVICE_RADIUS_CONSTANTS.radioComisaria, enabled: true },
-      { tipo: 'escuela', covKey: 'escuela', radius: SERVICE_RADIUS_CONSTANTS.radioEscuela, enabled: hasMenores },
-      { tipo: 'universidad', covKey: 'universidad', radius: SERVICE_RADIUS_CONSTANTS.radioUniversidad, enabled: hasPreEgreso },
-    ];
-
-    let chosenBuild: {
-      tipo: 'hospital' | 'comisaria' | 'escuela' | 'universidad';
-      parcela: Parcela;
-      effectiveCost: number;
-      diasObra: number;
-      isDirect: boolean;
-    } | null = null;
-
-    if (!state.autopilotLastBuildDay || state.reloj.dia - state.autopilotLastBuildDay >= 21) {
-      for (const spec of prioritySpecs) {
-        if (!spec.enabled || inObraTipos.has(spec.tipo)) continue;
-        const def = BUILDING_CATALOG[spec.tipo];
-        const lowZones = new Set(
-          zones.filter((z) => (covByZone[z]?.[spec.covKey] ?? 0) < SERVICE_RADIUS_CONSTANTS.coberturaMin)
-        );
-        if (lowZones.size === 0) continue;
-
-        let bestParcela: Parcela | null = null;
-        let bestGain = 0;
-        let bestCost = 0;
-
-        for (const p of state.parcelas) {
-          if (
-            p.tipoParcela !== 'publica' ||
-            p.estado !== 'libre' ||
-            isLotIsolated(state, p) ||
-            !canBuildTypeInParcela(p, spec.tipo)
-          ) {
-            continue;
-          }
-          const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false);
-          if (!tInfo.buildable) continue;
-          const baseCost = Number((def.costoObra * tInfo.multiplier).toFixed(2));
-          const isDirect = constructoras.length === 0;
-          const effCost = isDirect
-            ? Number((baseCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2))
-            : baseCost;
-          if (!canPassWorkBrake(effCost, def.mantenimientoPeriodo)) continue;
-
-          let coveredPopGain = 0;
-          for (const lz of lowZones) {
-            const dist = stepMap[p.zona]?.[lz];
-            if (typeof dist === 'number' && dist <= spec.radius) {
-              coveredPopGain += Math.max(1, popByZone.get(lz) ?? 0);
-            }
-          }
-          if (coveredPopGain > bestGain || (coveredPopGain === bestGain && bestGain > 0 && effCost < bestCost)) {
-            bestGain = coveredPopGain;
-            bestParcela = p;
-            bestCost = effCost;
-          }
-        }
-
-        if (bestParcela && bestGain > 0) {
-          const isDirect = constructoras.length === 0;
-          const diasObra = isDirect
-            ? Math.max(1, Math.round(def.diasObra * AUTOPILOT_CONSTANTS.kDiasObraDirecta))
-            : def.diasObra;
-          chosenBuild = {
-            tipo: spec.tipo,
-            parcela: bestParcela,
-            effectiveCost: bestCost,
-            diasObra,
-            isDirect,
-          };
-          break;
-        }
-      }
-    }
-
-    if (chosenBuild) {
-      const { tipo: toBuild, parcela: freePub, effectiveCost, diasObra, isDirect } = chosenBuild;
-      let paid = false;
-      if (!isDirect) {
-        const payee = constructoras.find((f) => f.zona === freePub.zona) ?? constructoras[0];
-        if (payee && state.gobierno.reserva >= effectiveCost) {
-          state.gobierno.reserva -= effectiveCost;
-          payee.ventas += effectiveCost;
-          paid = true;
-        }
-      } else if (state.gobierno.reserva >= effectiveCost && payDirectWorksWages(effectiveCost)) {
-        state.obrasSinCapacidadEnPeriodo = (state.obrasSinCapacidadEnPeriodo ?? 0) + 1;
-        paid = true;
-      }
-
-      if (paid) {
-        state.gobierno.acumuladoPeriodo.obras += effectiveCost;
-        freePub.estado = 'en_obra';
-        freePub.edificio = {
-          id: nextSeqId(state, 'ed'),
-          tipo: toBuild,
-          parcelaId: freePub.id,
-          dueno: 'estado',
-          duenoRef: { tipo: 'estado', id: 'estado' },
-          estado: 'en_obra',
-          activo: false,
-          estadoSalud: 100,
-          diasObraRestantes: diasObra,
-          diasObraTotal: diasObra,
-          zona: freePub.zona,
-        };
-        state.autopilotLastBuildDay = state.reloj.dia;
-        emitSimEvent(state, {
-          id: nextSeqId(state, 'ev_obra_i'),
-          dia: state.reloj.dia,
-          tipo: 'obra_inicio',
-          zona: freePub.zona,
-          parcelaId: freePub.id,
-          edificio: toBuild,
-          dueno: 'estado',
-          costo: effectiveCost,
-          diasObra,
-          causa: isDirect ? 'estado:obra_directa' : 'estado:piloto_automatico',
-        });
-      }
-    }
-  }
-
-  // Update demandaSuelo streaks & trigger road autopilot when exceeded (MUNDO §9, sujeto a Freno de obra)
-  const newDemanda = computeDemandaSuelo(state);
-  state.demandaSuelo = newDemanda;
-  for (const [k, val] of Object.entries(newDemanda)) {
-    if (val >= VIAL_CONSTANTS.umbralDemandaSuelo) {
-      state.demandaSueloRachas[k] = (state.demandaSueloRachas[k] ?? 0) + 1;
-    } else {
-      state.demandaSueloRachas[k] = 0;
-    }
-  }
-
-  if (
-    isM1Plus &&
-    autoState &&
-    (!state.autopilotLastViaDay || state.reloj.dia - state.autopilotLastViaDay >= 14)
-  ) {
-    const hotEntry = Object.entries(state.demandaSueloRachas)
-      .filter(([, streak]) => streak >= VIAL_CONSTANTS.periodosDemandaSuelo)
-      .sort((a, b) => (newDemanda[b[0]] ?? 0) - (newDemanda[a[0]] ?? 0))[0];
-
-    if (hotEntry) {
-      const [hotZone, hotTipo] = hotEntry[0].split(':');
-      const connectable = (state.tramos ?? []).filter((t) => isViaConnectableToNetwork(state, t));
-      const isDirect = constructoras.length === 0;
-      let bestTramo: { tramo: (typeof connectable)[number]; cost: number } | null = null;
-      let bestScore = Infinity;
-
-      for (const t of connectable) {
-        const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getViaTerrainTiles(state, t), t.tipo === 'puente');
-        if (!tInfo.buildable) continue;
-        const baseCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
-        const effectiveCost = isDirect
-          ? Number((baseCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2))
-          : baseCost;
-        if (!canPassWorkBrake(effectiveCost, t.mantenimientoPeriodo)) continue;
-        const opensMatchingType = t.parcelasAbiertas.filter((pid) => {
-          const p = parcelById.get(pid);
-          return p && (p.zona === hotZone || t.zonaAbierta === p.zona) && p.tipoParcela === hotTipo;
-        }).length;
-        const touchesHot = t.zonaA === hotZone || t.zonaB === hotZone;
-        const totalOpen = Math.max(1, t.parcelasAbiertas.length);
-        const relevance = opensMatchingType > 0 ? 0.45 : touchesHot ? 0.8 : 1.3;
-        const score = (effectiveCost / totalOpen) * relevance;
-        if (score < bestScore) {
-          bestScore = score;
-          bestTramo = { tramo: t, cost: effectiveCost };
-        }
-      }
-
-      if (bestTramo) {
-        const { tramo: chosenTramo, cost: effectiveCost } = bestTramo;
-        let paid = false;
-        if (!isDirect) {
-          const payee =
-            constructoras.find((f) => f.zona === chosenTramo.zonaA || f.zona === chosenTramo.zonaB) ??
-            constructoras[0];
-          if (payee && state.gobierno.reserva >= effectiveCost) {
-            state.gobierno.reserva -= effectiveCost;
-            payee.ventas += effectiveCost;
-            paid = true;
-          }
-        } else if (state.gobierno.reserva >= effectiveCost && payDirectWorksWages(effectiveCost)) {
-          state.obrasSinCapacidadEnPeriodo = (state.obrasSinCapacidadEnPeriodo ?? 0) + 1;
-          paid = true;
-        }
-
-        if (paid) {
-          state.gobierno.acumuladoPeriodo.obras += effectiveCost;
-          const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
-          const baseDias = Math.max(2, Math.round(chosenTramo.diasObraTotal * diasFactor));
-          const dias = isDirect
-            ? Math.max(2, Math.round(baseDias * AUTOPILOT_CONSTANTS.kDiasObraDirecta))
-            : baseDias;
-          chosenTramo.enObra = true;
-          chosenTramo.diasObraRestantes = dias;
-          state.autopilotLastViaDay = state.reloj.dia;
-          state.demandaSueloRachas[hotEntry[0]] = 0;
-
-          emitSimEvent(state, {
-            id: nextSeqId(state, 'ev_via_i'),
-            dia: state.reloj.dia,
-            tipo: 'via_inicio',
-            zona: chosenTramo.zonaA,
-            tramoId: chosenTramo.id,
-            tramoNombre: chosenTramo.nombre,
-            tipoVia: chosenTramo.tipo,
-            parcelasAbiertas: [...chosenTramo.parcelasAbiertas],
-            costo: effectiveCost,
-            diasObra: dias,
-            causa: isDirect ? 'estado:obra_directa' : 'estado:demanda_suelo',
-          });
-        }
-      }
-    }
-  }
-
-  // Track consecutive periods with direct works / lack of construction capacity (ECONOMIA §8)
-  if ((state.obrasSinCapacidadEnPeriodo ?? 0) >= AUTOPILOT_CONSTANTS.umbralObraSinCapacidad) {
-    state.obraDirectaSinCapacidadPeriodos = (state.obraDirectaSinCapacidadPeriodos ?? 0) + 1;
-  } else {
-    state.obraDirectaSinCapacidadPeriodos = 0;
-  }
-  state.obrasSinCapacidadEnPeriodo = 0;
-
-  // Phase 1B: Settle constructora & medio firms AFTER maintenance, public works & press budgets were credited!
-  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro === 'construccion'));
-  settleFirmList(state.firmas.filter((f) => f.activa && f.rubro === 'medio'));
-
-  // Refresh fiscal tax receipts ledger including Phase 1B constructora & medio taxes
+  // Finalize state fiscal ledger including all payday taxes (Step 1 + Step 2 + Step 3)
   fin.ingresos = Number(taxCollectedTotal.toFixed(2));
   fin.saldo = Number((fin.ingresos - totalOut).toFixed(2));
   state.ultimoSaldoCierre = fin.saldo;
-
-  // Update market share cuotaZona & monopoly pricing power across all active rubros
-  const rubros: FirmRubro[] = [
-    'agro',
-    'industria',
-    'comercio',
-    'gastronomia',
-    'servicios',
-    'entretenimiento',
-    'construccion',
-    'inmobiliaria',
-    'medio',
-  ];
-  const cuotaMercadoSalida: EconomyOutput['cuotaMercado'] = {};
-  const activeFirmByRubroZone = new Map<string, Firma[]>();
-  for (const f of state.firmas) {
-    if (!f.activa) continue;
-    const key = `${f.rubro}:${f.zona}`;
-    const list = activeFirmByRubroZone.get(key);
-    if (list) list.push(f);
-    else activeFirmByRubroZone.set(key, [f]);
-  }
-  for (const rubro of rubros) {
-    for (const z of zones) {
-      const fZone = activeFirmByRubroZone.get(`${rubro}:${z}`) ?? [];
-      if (fZone.length === 0) continue;
-      const sumRev = fZone.reduce((s, f) => s + Math.max(0.01, f.ultimoIngresoPeriodo), 0);
-      let leader: { firma: string; cuota: number } = { firma: '-', cuota: 0 };
-      let bestShare = -1;
-      for (const f of fZone) {
-        const share = fZone.length === 1 ? 1 : Math.max(0.01, f.ultimoIngresoPeriodo) / Math.max(0.01, sumRev);
-        const prevShare = f.cuotaZona[z] ?? 0;
-        f.cuotaZona[z] = Number(share.toFixed(3));
-        if (share > bestShare) {
-          bestShare = share;
-          leader = { firma: f.id, cuota: Number((share * 100).toFixed(1)) };
-        }
-        if (isM1Plus && share >= FIRM_CONSTANTS.umbralPoderPrecio) {
-          const excess = (share - FIRM_CONSTANTS.umbralPoderPrecio) / (1 - FIRM_CONSTANTS.umbralPoderPrecio);
-          f.margenPoder = Number(clamp(excess * FIRM_CONSTANTS.margenPoderMax, 0, FIRM_CONSTANTS.margenPoderMax).toFixed(3));
-          if (prevShare < FIRM_CONSTANTS.umbralPoderPrecio && fZone.length > 1) {
-            emitSimEvent(state, {
-              id: nextSeqId(state, 'ev_mono'),
-              dia: state.reloj.dia,
-              tipo: 'monopolio',
-              zona: z,
-              rubro,
-              firmaId: f.id,
-              cuota: Number((share * 100).toFixed(1)),
-              causa: `firma:${f.id}/mercado`,
-            });
-          }
-        } else {
-          f.margenPoder = 0;
-        }
-      }
-      if (leader.firma !== '-') {
-        cuotaMercadoSalida[`${rubro}:${z}`] = leader;
-      }
-    }
-  }
 
   // ====================================================================
   // 4. HOUSING MARKET (evictions, applications, price drops, home purchase)
   // ====================================================================
-  const casaById = new Map<string, Casa>(state.casas.map((c) => [c.id, c]));
-
   // Evictions
   for (const h of state.hogares) {
     if (
@@ -2726,7 +2431,329 @@ export function runPaydayEconomyV2(state: GameState): void {
   }
 
   // ====================================================================
-  // 8. MEDIA DEPENDENCY, CREDIBILITY & EDITORIAL DRIFT
+  // 8. STATE AUTOPILOT (ECONOMIA §2 step 5: MUNDO §9, EDIFICIOS §3, ECONOMIA §10)
+  // oficina_publica is preset-only and never built by autopilot.
+  // ====================================================================
+  const autoState = isObserverMode(state.config);
+  const periodIngresos = Math.max(fin.ingresos, taxCollectedTotal);
+  const avgDailyExpense = Math.max(
+    4,
+    (fin.nomina +
+      fin.pensiones +
+      fin.ayudaSocial +
+      fin.operacion +
+      fin.prensa +
+      fin.garantiaAlimentaria +
+      fin.comidaMenores +
+      fin.acogidaMenores +
+      fin.subsidios) /
+      PERIOD_DAYS
+  );
+  const floorReserva = avgDailyExpense * AUTOPILOT_CONSTANTS.reservaMinDias;
+  const ceilReserva = avgDailyExpense * AUTOPILOT_CONSTANTS.reservaMaxDias;
+  const canPassWorkBrake = (workCost: number, addedMaintPerPeriod: number): boolean => {
+    if (state.gobierno.reserva - workCost < floorReserva) return false;
+    if (periodIngresos > 0) {
+      const projectedMaint = opBreak.mantenimientoTotal + addedMaintPerPeriod;
+      if (projectedMaint > periodIngresos * (AUTOPILOT_CONSTANTS.pctMantMax / 100)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Regla 1: Ajuste fiscal automático cada periodosAjusteFiscal
+  if (
+    autoState &&
+    state.reloj.periodo - (state.ultimoAjusteFiscalPeriodo ?? -99) >= AUTOPILOT_CONSTANTS.periodosAjusteFiscal
+  ) {
+    const curTax = state.gobierno.palancasVigentes.impuesto;
+    let nextTax = curTax;
+    if (fin.impago || state.gobierno.reserva < floorReserva) {
+      nextTax = Math.min(AUTOPILOT_CONSTANTS.tasaMaxAuto, curTax + 2);
+    } else if (state.gobierno.reserva > ceilReserva) {
+      nextTax = Math.max(AUTOPILOT_CONSTANTS.tasaMinAuto, curTax - 2);
+    }
+    if (nextTax !== curTax) {
+      state.gobierno.palancasVigentes.impuesto = nextTax;
+      state.gobierno.palancasObjetivo.impuesto = nextTax;
+      state.ultimoAjusteFiscalPeriodo = state.reloj.periodo;
+      const evId = nextSeqId(state, 'ev_ctrl');
+      state.ultimaCausaPalanca = evId;
+      emitSimEvent(state, {
+        id: evId,
+        dia: state.reloj.dia,
+        tipo: 'control',
+        zona: zones[0] ?? 'centro',
+        control: 'tasa_impuesto',
+        palanca: 'impuesto',
+        valorAnterior: curTax,
+        valorNuevo: nextTax,
+        causa: 'estado:piloto_automatico',
+      });
+    }
+  }
+
+  // Regla 2 + 3: Servicios públicos por cobertura zonal dentro del radio, sujeto a Freno de obra
+  const covByZone = computeZoneServiceCoverage(state);
+  state.coberturaServiciosPorZona = covByZone;
+  if (isM2Plus && autoState) {
+    const vivosList = state.npcs.filter((n) => n.vivo);
+    const stepMap = buildTraversableZoneStepMap(state);
+    const minPreEgresoAge = EDUCATION_CONSTANTS.edadEgreso - SERVICE_RADIUS_CONSTANTS.aniosPreEgreso;
+    const popByZone = new Map<ZoneId, number>();
+    let hasMenores = false;
+    let hasPreEgreso = false;
+    for (const n of vivosList) {
+      popByZone.set(n.zona, (popByZone.get(n.zona) ?? 0) + 1);
+      if (n.edad < EDUCATION_CONSTANTS.edadEgreso) {
+        hasMenores = true;
+        if (n.edad >= minPreEgresoAge) hasPreEgreso = true;
+      }
+    }
+
+    const inObraTipos = new Set<BuildingType>(
+      state.parcelas
+        .filter((p) => p.estado === 'en_obra' && p.edificio)
+        .map((p) => p.edificio!.tipo)
+    );
+
+    const prioritySpecs: Array<{
+      tipo: 'hospital' | 'comisaria' | 'escuela' | 'universidad';
+      covKey: 'salud' | 'policia' | 'escuela' | 'universidad';
+      radius: number;
+      enabled: boolean;
+    }> = [
+      { tipo: 'hospital', covKey: 'salud', radius: SERVICE_RADIUS_CONSTANTS.radioHospital, enabled: true },
+      { tipo: 'comisaria', covKey: 'policia', radius: SERVICE_RADIUS_CONSTANTS.radioComisaria, enabled: true },
+      { tipo: 'escuela', covKey: 'escuela', radius: SERVICE_RADIUS_CONSTANTS.radioEscuela, enabled: hasMenores },
+      { tipo: 'universidad', covKey: 'universidad', radius: SERVICE_RADIUS_CONSTANTS.radioUniversidad, enabled: hasPreEgreso },
+    ];
+
+    let chosenBuild: {
+      tipo: 'hospital' | 'comisaria' | 'escuela' | 'universidad';
+      parcela: Parcela;
+      effectiveCost: number;
+      diasObra: number;
+      isDirect: boolean;
+    } | null = null;
+
+    if (!state.autopilotLastBuildDay || state.reloj.dia - state.autopilotLastBuildDay >= 21) {
+      for (const spec of prioritySpecs) {
+        if (!spec.enabled || inObraTipos.has(spec.tipo)) continue;
+        const def = BUILDING_CATALOG[spec.tipo];
+        const lowZones = new Set(
+          zones.filter((z) => (covByZone[z]?.[spec.covKey] ?? 0) < SERVICE_RADIUS_CONSTANTS.coberturaMin)
+        );
+        if (lowZones.size === 0) continue;
+
+        let bestParcela: Parcela | null = null;
+        let bestGain = 0;
+        let bestCost = 0;
+
+        for (const p of state.parcelas) {
+          if (
+            p.tipoParcela !== 'publica' ||
+            p.estado !== 'libre' ||
+            isLotIsolated(state, p) ||
+            !canBuildTypeInParcela(p, spec.tipo)
+          ) {
+            continue;
+          }
+          const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false);
+          if (!tInfo.buildable) continue;
+          const baseCost = Number((def.costoObra * tInfo.multiplier).toFixed(2));
+          const isDirect = constructoras.length === 0;
+          const effCost = isDirect
+            ? Number((baseCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2))
+            : baseCost;
+          if (!canPassWorkBrake(effCost, def.mantenimientoPeriodo)) continue;
+
+          let coveredPopGain = 0;
+          for (const lz of lowZones) {
+            const dist = stepMap[p.zona]?.[lz];
+            if (typeof dist === 'number' && dist <= spec.radius) {
+              coveredPopGain += Math.max(1, popByZone.get(lz) ?? 0);
+            }
+          }
+          if (coveredPopGain > bestGain || (coveredPopGain === bestGain && bestGain > 0 && effCost < bestCost)) {
+            bestGain = coveredPopGain;
+            bestParcela = p;
+            bestCost = effCost;
+          }
+        }
+
+        if (bestParcela && bestGain > 0) {
+          const isDirect = constructoras.length === 0;
+          const diasObra = isDirect
+            ? Math.max(1, Math.round(def.diasObra * AUTOPILOT_CONSTANTS.kDiasObraDirecta))
+            : def.diasObra;
+          chosenBuild = {
+            tipo: spec.tipo,
+            parcela: bestParcela,
+            effectiveCost: bestCost,
+            diasObra,
+            isDirect,
+          };
+          break;
+        }
+      }
+    }
+
+    if (chosenBuild) {
+      const { tipo: toBuild, parcela: freePub, effectiveCost, diasObra, isDirect } = chosenBuild;
+      let paid = false;
+      if (!isDirect) {
+        const payee = constructoras.find((f) => f.zona === freePub.zona) ?? constructoras[0];
+        if (payee && state.gobierno.reserva >= effectiveCost) {
+          state.gobierno.reserva -= effectiveCost;
+          payee.ventas += effectiveCost;
+          paid = true;
+        }
+      } else if (state.gobierno.reserva >= effectiveCost && payDirectWorksWages(effectiveCost)) {
+        state.obrasSinCapacidadEnPeriodo = (state.obrasSinCapacidadEnPeriodo ?? 0) + 1;
+        paid = true;
+      }
+
+      if (paid) {
+        state.gobierno.acumuladoPeriodo.obras += effectiveCost;
+        freePub.estado = 'en_obra';
+        freePub.edificio = {
+          id: nextSeqId(state, 'ed'),
+          tipo: toBuild,
+          parcelaId: freePub.id,
+          dueno: 'estado',
+          duenoRef: { tipo: 'estado', id: 'estado' },
+          estado: 'en_obra',
+          activo: false,
+          estadoSalud: 100,
+          diasObraRestantes: diasObra,
+          diasObraTotal: diasObra,
+          zona: freePub.zona,
+        };
+        state.autopilotLastBuildDay = state.reloj.dia;
+        emitSimEvent(state, {
+          id: nextSeqId(state, 'ev_obra_i'),
+          dia: state.reloj.dia,
+          tipo: 'obra_inicio',
+          zona: freePub.zona,
+          parcelaId: freePub.id,
+          edificio: toBuild,
+          dueno: 'estado',
+          costo: effectiveCost,
+          diasObra,
+          causa: isDirect ? 'estado:obra_directa' : 'estado:piloto_automatico',
+        });
+      }
+    }
+  }
+
+  // Update demandaSuelo streaks & trigger road autopilot when exceeded (MUNDO §9, sujeto a Freno de obra)
+  const newDemanda = computeDemandaSuelo(state);
+  state.demandaSuelo = newDemanda;
+  for (const [k, val] of Object.entries(newDemanda)) {
+    if (val >= VIAL_CONSTANTS.umbralDemandaSuelo) {
+      state.demandaSueloRachas[k] = (state.demandaSueloRachas[k] ?? 0) + 1;
+    } else {
+      state.demandaSueloRachas[k] = 0;
+    }
+  }
+
+  if (
+    isM1Plus &&
+    autoState &&
+    (!state.autopilotLastViaDay || state.reloj.dia - state.autopilotLastViaDay >= 14)
+  ) {
+    const hotEntry = Object.entries(state.demandaSueloRachas)
+      .filter(([, streak]) => streak >= VIAL_CONSTANTS.periodosDemandaSuelo)
+      .sort((a, b) => (newDemanda[b[0]] ?? 0) - (newDemanda[a[0]] ?? 0))[0];
+
+    if (hotEntry) {
+      const [hotZone, hotTipo] = hotEntry[0].split(':');
+      const connectable = (state.tramos ?? []).filter((t) => isViaConnectableToNetwork(state, t));
+      const isDirect = constructoras.length === 0;
+      let bestTramo: { tramo: (typeof connectable)[number]; cost: number } | null = null;
+      let bestScore = Infinity;
+
+      for (const t of connectable) {
+        const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getViaTerrainTiles(state, t), t.tipo === 'puente');
+        if (!tInfo.buildable) continue;
+        const baseCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
+        const effectiveCost = isDirect
+          ? Number((baseCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2))
+          : baseCost;
+        if (!canPassWorkBrake(effectiveCost, t.mantenimientoPeriodo)) continue;
+        const opensMatchingType = t.parcelasAbiertas.filter((pid) => {
+          const p = parcelById.get(pid);
+          return p && (p.zona === hotZone || t.zonaAbierta === p.zona) && p.tipoParcela === hotTipo;
+        }).length;
+        const touchesHot = t.zonaA === hotZone || t.zonaB === hotZone;
+        const totalOpen = Math.max(1, t.parcelasAbiertas.length);
+        const relevance = opensMatchingType > 0 ? 0.45 : touchesHot ? 0.8 : 1.3;
+        const score = (effectiveCost / totalOpen) * relevance;
+        if (score < bestScore) {
+          bestScore = score;
+          bestTramo = { tramo: t, cost: effectiveCost };
+        }
+      }
+
+      if (bestTramo) {
+        const { tramo: chosenTramo, cost: effectiveCost } = bestTramo;
+        let paid = false;
+        if (!isDirect) {
+          const payee =
+            constructoras.find((f) => f.zona === chosenTramo.zonaA || f.zona === chosenTramo.zonaB) ??
+            constructoras[0];
+          if (payee && state.gobierno.reserva >= effectiveCost) {
+            state.gobierno.reserva -= effectiveCost;
+            payee.ventas += effectiveCost;
+            paid = true;
+          }
+        } else if (state.gobierno.reserva >= effectiveCost && payDirectWorksWages(effectiveCost)) {
+          state.obrasSinCapacidadEnPeriodo = (state.obrasSinCapacidadEnPeriodo ?? 0) + 1;
+          paid = true;
+        }
+
+        if (paid) {
+          state.gobierno.acumuladoPeriodo.obras += effectiveCost;
+          const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
+          const baseDias = Math.max(2, Math.round(chosenTramo.diasObraTotal * diasFactor));
+          const dias = isDirect
+            ? Math.max(2, Math.round(baseDias * AUTOPILOT_CONSTANTS.kDiasObraDirecta))
+            : baseDias;
+          chosenTramo.enObra = true;
+          chosenTramo.diasObraRestantes = dias;
+          state.autopilotLastViaDay = state.reloj.dia;
+          state.demandaSueloRachas[hotEntry[0]] = 0;
+
+          emitSimEvent(state, {
+            id: nextSeqId(state, 'ev_via_i'),
+            dia: state.reloj.dia,
+            tipo: 'via_inicio',
+            zona: chosenTramo.zonaA,
+            tramoId: chosenTramo.id,
+            tramoNombre: chosenTramo.nombre,
+            tipoVia: chosenTramo.tipo,
+            parcelasAbiertas: [...chosenTramo.parcelasAbiertas],
+            costo: effectiveCost,
+            diasObra: dias,
+            causa: isDirect ? 'estado:obra_directa' : 'estado:demanda_suelo',
+          });
+        }
+      }
+    }
+  }
+
+  // Track consecutive periods with direct works / lack of construction capacity (ECONOMIA §8)
+  if ((state.obrasSinCapacidadEnPeriodo ?? 0) >= AUTOPILOT_CONSTANTS.umbralObraSinCapacidad) {
+    state.obraDirectaSinCapacidadPeriodos = (state.obraDirectaSinCapacidadPeriodos ?? 0) + 1;
+  } else {
+    state.obraDirectaSinCapacidadPeriodos = 0;
+  }
+  state.obrasSinCapacidadEnPeriodo = 0;
+
+  // ====================================================================
+  // 9. MEDIA DEPENDENCY, CREDIBILITY & EDITORIAL DRIFT (ECONOMIA §2 step 5)
   // ====================================================================
   const extrasPresion = state.gobierno.extras?.vigentes?.presion ?? 0;
   const extrasAcceso = state.gobierno.extras?.vigentes?.acceso ?? 0;
