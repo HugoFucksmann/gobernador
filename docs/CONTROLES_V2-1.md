@@ -16,19 +16,18 @@
 | Control | Unidad | Dónde actúa |
 |---|---|---|
 | `tasa_impuesto` | % sobre el ingreso | ECONOMIA_V2 §3 |
-| `salario_publico` | Monto por día | ECONOMIA_V2 §3 |
-| `puestos[ingeniero]` | Cantidad | MUNDO_V1 §3 |
-| `operacion[obras]` | Monto por período | MUNDO_V1 §7 |
+| `salario_publico` | % del valor base (50-150) | ECONOMIA_V2 §3 |
+| `nivel_obras` (fija `puestos[ingeniero]` y `operacion[obras]`) | Nivel 0..5 | MUNDO_V1 §3 y §7 |
 | `ayuda_social` | Monto por día por desempleado o jubilado | ECONOMIA_V2 §3 |
 | `garantia_pct` | % del faltante de comida | ECONOMIA_V2 §6 |
-| `tope_precio` | Múltiplo de `precio_base`, o sin tope | ECONOMIA_V2 §6 |
+| `tope_precio` | Modo: `libre`, `moderado` (1,25×) o `estricto` (0,6×) el `precio_base` | ECONOMIA_V2 §6 |
 | `flujo_exterior_pct` | −100 a 100 de la capacidad | ECONOMIA_V2 §11 |
 | `fondos_prensa` | Monto por período | CAOS_PRENSA_V2 §7 |
 | `tope_emision_pct` (M4) | % de los ingresos | ECONOMIA_V2 §14 |
 
 Cada control tiene un rango válido (parámetros del preset) y el mundo acota lo que recibe.
 
-**Unidades del motor (decididas):**
+**Unidades del motor (decididas; la tabla de arriba ya las refleja):**
 - `salario_publico`: % del valor base (`salarioBasePublico`), rango 50-150. La UI muestra también el monto diario equivalente.
 - `puestos[ingeniero]` y `operacion[obras]`: el motor los expone juntos como un único nivel de obras 0..5; el contrato conserva los dos controles y el nivel los fija a la vez.
 - `tope_precio`: tres modos (`libre` = sin tope, `moderado` = 1,25×, `estricto` = 0,6× el `precio_base`).
@@ -61,7 +60,7 @@ En el mundo base solo las ejecuta el estado en piloto automático para servicios
 | Grupo | Indicadores |
 |---|---|
 | Finanzas | `reserva`, ingresos y gastos por rubro, `saldo`, `importacion`, `impago`, `inflacion` |
-| Hogares | Cantidad, composición, dinero, despensa, estado (con casa o calle), alquiler pagado, meses sin pagar |
+| Hogares | Cantidad, composición, dinero, despensa, estado (`con_casa`, `calle` o `acogida`), alquiler pagado, meses sin pagar |
 | Vivienda | Casas (dueño, capacidad, estado, alquiler, ocupación), `calle_pct`, `hacinamiento_pct`, mercado de vivienda por zona |
 | Demografía | Población, pirámide de edades, natalidad, mortalidad, edad media, árbol de parentescos de la persona en foco |
 | Comida | `stock` por firma y por zona, días de stock, precio por zona, despensas en resumen |

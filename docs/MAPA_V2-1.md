@@ -105,6 +105,8 @@ Cada baldosa tiene un **terreno** y, si la hay, una **vía**.
 
 **Regla del generador [propuesta]:** el lado del mapa sale de la población inicial: `lado` = raíz de (`poblacion_inicial` × `baldosas_por_persona` ÷ `suelo_util_pct`), redondeado. `suelo_util_pct` es la parte del mapa que queda como suelo después del terreno (§3b), así que un mapa con más ríos y montañas sale más grande. La tabla de arriba son valores de referencia, no una regla. El tamaño se puede fijar a mano en un preset o en el modo desarrollador.
 
+**Lotes por escala:** el generador crea lotes en proporción a la población: lotes residenciales = hogares × (1 + `margen_lotes_residenciales`), de modo que al arrancar queden lotes `libre` para nacimientos, migración y mudanzas y el precio del suelo no sea cero. Un mundo no debe arrancar con hogares en la calle por falta de lotes (solo los que el preset pida).
+
 El preset ajusta la cantidad de lotes por tipo para que hogares, comercios y campos tengan lugar, con un 30 % de suelo `sin_calle` para crecer.
 
 ## 9. Formato del mapa (`mapa.json`)
@@ -124,6 +126,7 @@ El preset ajusta la cantidad de lotes por tipo para que hogares, comercios y cam
 
 - Las tres capas (terreno, vías, zonas) son matrices del mismo tamaño, una cadena por fila.
 - El estado dinámico (estado de las vías, lotes ocupados, edificios) vive en la partida, no en el mapa.
+- **El esquema exacto del archivo no es normativo:** manda el contenido (terreno, altura, vías, zonas, lotes con clase, frente y estado, y tramos posibles). El agente puede conservar su formato actual si lo expresa completo.
 - `altura` es opcional (un dígito 0-9 por baldosa); sin ella no hay pendiente. El mapa se escribe a mano o lo produce el generador de §3b.
 
 ## 10. UI 2D

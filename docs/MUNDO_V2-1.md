@@ -59,7 +59,7 @@
 ```
 
 - **Unidad de consumo, vivienda y herencia.** Cobra el ingreso de todos sus miembros y paga comida, alquiler, mantenimiento propio y gasto de vida (ECONOMIA_V2 §3).
-- **Estados:** `con_casa` o `calle`. Los menores sin adulto ni pariente pasan a un hogar de acogida (ver Composición), que no ocupa casa.
+- **Estados:** `con_casa`, `calle` o `acogida`. `acogida` es el hogar de menores sin adulto ni pariente (ver Composición): lo paga el estado y no ocupa casa.
 - **Composición:** al menos un adulto. Un menor sin adulto en su hogar pasa al hogar de un pariente (hermano, abuelo, tío por `padres`). Sin pariente, pasa a un **hogar de acogida** **[propuesta]**: lo paga el estado y no ocupa casa.
 - **Despensa:** días de comida de todos sus miembros; se conserva solo con casa.
 - Los hogares se crean al generar el mundo, por pareja, por independización o por separación por hacinamiento (sección 5), y se disuelven cuando mueren todos sus miembros.
