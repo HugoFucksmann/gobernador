@@ -7,8 +7,8 @@
 ## 1. Reglas
 
 - **El mundo no conoce palancas ni demandas.** Solo controles, órdenes y medidas, en valores crudos.
-- **Piloto automático:** sin gobernador los controles quedan en el valor del preset, no hay órdenes ni medidas, y el estado sostiene los servicios con la regla de MUNDO §9. El mundo tiene que poder correr así; es como se calibra.
-- **Estado automático:** la regla de MUNDO §9 (servicios y vías) es un interruptor del preset: encendido en piloto automático, apagado cuando hay gobernador.
+- **Piloto automático:** sin gobernador los controles quedan en el valor del preset (salvo `tasa_impuesto`, que el ajuste fiscal de MUNDO §9 mueve dentro de una banda y emite `control` con origen `estado_automatico`), no hay órdenes ni medidas, y el estado sostiene servicios y vías con las reglas de MUNDO §9. El mundo tiene que poder correr así; es como se calibra.
+- **Estado automático:** las reglas de MUNDO §9 (ajuste fiscal, freno de obra, servicios y vías) son un interruptor del preset: encendido en piloto automático, apagado cuando hay gobernador.
 - **Vigencia:** un cambio de control entra al día siguiente y emite `control`. Una orden se ejecuta al momento si es válida.
 
 ## 2. Controles

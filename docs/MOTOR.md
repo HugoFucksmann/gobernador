@@ -22,7 +22,7 @@
 7. Caos: contagio, acciones de condición, ofertas del director, vencimientos.
 8. Prensa: cola de hechos, publicación y efectos.
 9. Variables de las personas y vencimiento de modificadores.
-10. **Si es día de pago:** firmas (sueldos, ganancia, contratación) → alquileres y mantenimiento → estado → mercado de vivienda (asignación, mudanzas, desalojos) → mercado de compras → quiebras → inversión, emprendimientos y construcción → estado en piloto automático (servicios y vías según la demanda de suelo) → medios (ingresos, línea, cierre) → impago.
+10. **Si es día de pago** (mismo orden que ECONOMIA §2): estado paga (pensiones, nómina, ayuda, mantenimiento y operación, fondos de prensa; evalúa el impago) → firmas (sueldos, ganancia, contratación) → hogares (alquileres y mantenimiento) → mercado de vivienda (asignación, mudanzas, desalojos) → mercado de compras → quiebras → inversión, emprendimientos y construcción → estado en piloto automático (ajuste fiscal, freno de obra, servicios y vías) → medios (ingresos, línea, cierre).
 11. **Si es período demográfico:** parejas → nacimientos → independizaciones y separaciones → migración.
 12. Cambios de rol y asignación de puestos (vacantes, desempleados que buscan, emprendedores).
 13. Derivados de la comunidad e historial; indicadores de lectura, alertas y series (LECTURA). Si es día de pago: notables e informe.

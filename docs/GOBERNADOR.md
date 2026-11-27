@@ -39,13 +39,13 @@ Una palanca comprometida por una demanda aceptada queda bloqueada hasta que venc
 
 ## 4. Hitos
 
-Metas intermedias de prosperidad. Cada escenario define una lista ordenada (ESCENARIOS.md); al cumplir uno, la capa del gobernador emite `hito`. Los hitos **no habilitan suelo**: la expansión es solo por vías.
+Metas intermedias de progreso. Cada escenario define una lista ordenada (ESCENARIOS.md); al cumplir uno, la capa del gobernador emite `hito` y **desbloquea tipos del catálogo** (edificios, vías u obras de suceso) que hasta entonces no estaban disponibles para `construir`. Los hitos no tocan el mundo ni el suelo: la expansión es solo por vías.
 
 ```json
-{ "id": "h1", "condicion": { "metrica": "satisfaccion_media", "op": ">=", "umbral": 60, "periodos": 2 } }
+{ "id": "h1", "condicion": { "metrica": "satisfaccion_media", "op": ">=", "umbral": 60, "periodos": 2 }, "desbloquea": ["universidad", "muralla"] }
 ```
 
-Métricas posibles: las de la comunidad (MUNDO §11, incluido `desempleo_pct`) y los ingresos del estado. Los hitos no se pierden.
+Métricas posibles: las de la comunidad (MUNDO §11, incluido `desempleo_pct`) y los ingresos del estado. Los hitos no se pierden. El gobernador ve en el menú de construcción los tipos aún bloqueados y el hito que los abre.
 
 ## 5. Qué ve
 

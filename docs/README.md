@@ -26,6 +26,6 @@ Un doc por tema, sin versiones: cada uno es autocontenido y es la única fuente 
 ## Convenciones
 
 - **Referencias:** `DOC §n` (por ejemplo `MUNDO §9`). Un doc no repite lo que otro define: lo cita.
-- **Parámetros:** los valores son nombres con formato `parametro_en_codigo`, definidos en el preset del escenario; los docs no fijan números salvo ejemplos.
+- **Parámetros:** los valores son nombres con formato `parametro_en_codigo`. Su lista, significado y valores iniciales están en `PARAMETROS.md`, que mantiene el agente de código; los docs no fijan números salvo ejemplos. Los parámetros nuevos de estos docs (`personas_por_zona`, `reserva_min_dias`, `reserva_max_dias`, `tasa_min_auto`, `tasa_max_auto`, `periodos_ajuste_fiscal`, `pct_mant_max`, `n_constructoras_inicial`, `k_obra_directa`, `k_dias_obra_directa`, `umbral_obra_sin_capacidad`, `periodos_obra_sin_capacidad`) también van ahí.
 - **[propuesta]:** regla a pulir. Lo demás está decidido.
 - **Capa del gobernador** (GOBERNADOR, ACTORES, ESCENARIOS, UI): alineada con el mundo, pendiente de rediseño de palancas.

@@ -98,7 +98,7 @@ Cada evento que cambia la composición de un hogar genera un evento con origen (
 - **Separaciones:** una pareja puede separarse (probabilidad baja, sube con la pobreza y el hacinamiento). Los bienes y los hijos se reparten por regla fija **[propuesta]**.
 - **Muerte y herencia:** al morir una persona, su `dinero` es del hogar. Sus partes de firma pasan al cónyuge y a los hijos en partes iguales (ECONOMIA §9). Si muere el último miembro, el hogar se disuelve y todo (dinero, casa, partes) va a sus hijos adultos (cada uno a su hogar), o a un pariente, o al estado si no hay nadie.
 - **Migración [propuesta]:** cada período demográfico, si hay casas libres y vacantes, llegan hasta `max_llegadas` hogares nuevos (personas generadas por semilla) con `dinero_migrante`, que entra como dinero del exterior (ECONOMIA §12). Se van los hogares sin casa propia ni partes de firma que llevan más de `periodos_para_emigrar` en la calle o con satisfacción bajo `umbral_emigrar` sostenida; su dinero sale del mundo. Eventos `migracion_llegada` y `migracion_salida` con causa. Es la válvula contra la extinción en mundos chicos; `max_llegadas` en 0 la apaga.
-- **Capacitación [propuesta]:** si un puesto crítico (médico, docente, policía, ingeniero u otro con `educ_min`) queda vacante más de `periodos_vacante_critica` y nadie cumple la educación pedida, un adulto de aptitud alta (laboriosidad, resiliencia) y menos de `edad_max_capacitacion` se capacita durante `periodos_capacitacion`: no trabaja ese tiempo, su hogar paga `costo_capacitacion` y al terminar sube un nivel de `educacion` hasta el máximo que permiten las escuelas y universidades al alcance. Eventos `capacitacion_inicio` y `capacitacion_fin` con causa. Permite que un mundo chico cubra un rol que le falta sin esperar una generación.
+- **Capacitación:** si un puesto crítico (médico, docente, policía, ingeniero u otro con `educ_min`) queda vacante más de `periodos_vacante_critica` y nadie cumple la educación pedida, un adulto de aptitud alta (laboriosidad, resiliencia) y menos de `edad_max_capacitacion` se capacita durante `periodos_capacitacion`: no trabaja ese tiempo, su hogar paga `costo_capacitacion` y al terminar sube un nivel de `educacion` hasta el máximo que permiten las escuelas y universidades al alcance. Eventos `capacitacion_inicio` y `capacitacion_fin` con causa. Permite que un mundo chico cubra un rol que le falta sin esperar una generación. Como el nivel 3 exige una `universidad` al alcance, el generador siempre crea una (§12), también en mundos de 100 personas.
 - **Longevidad del mundo:** con las reglas correctas, la población se sostiene o se acomoda a la economía; no hay tope artificial salvo `tope_natalidad`.
 
 ## 6. Salud
@@ -159,7 +159,7 @@ Orden diario: golpes → deriva y hambre crítica → internación → cura → 
 
 > El territorio es una grilla de baldosas con calles y lotes (MAPA.md). "Parcela" y "lote" son lo mismo. Las zonas son regiones de baldosas, su vecindad se deriva de la contigüidad y la red de rutas sale de las baldosas de vía.
 
-- **8 a 12 zonas activas al empezar** (más con escala alta), más las zonas `no_urbanizada` que traiga el preset. Un mundo de una zona es solo para pruebas.
+- **Cantidad de zonas activas al empezar** = `poblacion_inicial` ÷ `personas_por_zona`, redondeada y acotada entre 4 y 12 (más zonas con escala alta solo si el preset sube el tope). Así ninguna zona nace casi vacía: con 100 personas salen 4 zonas, con 500 y más se llega a 8-12. Más las zonas `no_urbanizada` que traiga el preset. Un mundo de una zona es solo para el perfil `minimo` de pruebas.
 - **Distancia entre zonas** = número de pasos entre vecinas (en un empate, el primero de la configuración). La usan el clima, los ataques y el orden.
 - **Tipos de parcela:** `residencial`, `comercial`, `agricola`, `industrial`, `publica` y `especial`. Cada zona define cuántas de cada tipo y en qué orden. `especial` reserva puntos de interés del mapa (plaza, puerto, muelle de comercio exterior) y no se edifica.
 - **Estados:** `sin_calle` (existe en el suelo urbanizable pero no tiene acceso), `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` no admite obra.
@@ -219,11 +219,14 @@ Indicadores de servicio: `seguridad`, `salud` (calidad de atención, no la salud
 
 ### Estado en piloto automático
 
-Sin gobernador, el estado sostiene el mundo con reglas fijas que existen solo para calibrar y desaparecen cuando entra el gobernador. Son un interruptor del preset (CONTROLES §1). No cambia tasas ni sueldos.
+Sin gobernador, el estado sostiene el mundo con reglas fijas que existen solo para calibrar y desaparecen cuando entra el gobernador. Son un interruptor del preset (CONTROLES §1). Corren el día de pago, después del mercado (MOTOR §2, paso 10), en este orden:
 
-- **Servicios [propuesta]:** cuando la cobertura de policía, médico, escuela o universidad cae bajo la referencia y la reserva alcanza, construye una comisaría, un hospital, una escuela o una universidad en una parcela pública libre (la cobertura de escuela se mide sobre los menores y la de universidad sobre los jóvenes de la zona y su entorno). Cuando sobra capacidad por mucho tiempo, no demuele.
-- **Vías [propuesta]:** cuando la demanda de suelo de un tipo de parcela en una zona supera `umbral_demanda_suelo` durante `periodos_demanda_suelo` y la reserva alcanza, construye el tramo que abre más parcelas de ese tipo (calle dentro de la zona; camino o puente hacia una zona no urbanizada si la zona se llenó). Elige el tramo de menor costo por parcela abierta. Si la reserva no alcanza, espera.
-- Las viviendas y los locales no son del estado en el mundo base.
+1. **Ajuste fiscal:** si hay impago, o la reserva queda bajo `reserva_min_dias` de gasto corriente, sube `tasa_impuesto` un paso; si supera `reserva_max_dias`, la baja un paso. Un paso por `periodos_ajuste_fiscal` y siempre dentro de [`tasa_min_auto`, `tasa_max_auto`]. Emite `control` con origen `estado_automatico`. No toca salarios ni ayuda. Si en el tope de la banda el impago sigue (huelga, servicios que caen), el mundo lo sufre: es una señal de calibración, no un error del motor.
+2. **Freno de obra:** no ordena una obra si tras pagarla la reserva queda bajo `reserva_min_dias`, ni si el mantenimiento total (edificios y vías) proyectado supera `pct_mant_max` de los ingresos del estado en el período. Esto evita que lo construido hunda al estado.
+3. **Servicios [propuesta]:** cuando la cobertura de policía, médico, escuela o universidad cae bajo la referencia y el freno de obra lo permite, construye una comisaría, un hospital, una escuela o una universidad en un lote público libre (la cobertura de escuela se mide sobre los menores y la de universidad sobre los jóvenes de la zona y su entorno). No demuele nunca; el freno de obra es lo que acota el crecimiento.
+4. **Vías [propuesta]:** cuando la demanda de suelo de un tipo de parcela en una zona supera `umbral_demanda_suelo` durante `periodos_demanda_suelo` y el freno de obra lo permite, construye el tramo que abre más parcelas de ese tipo (calle dentro de la zona; camino o puente hacia una zona no urbanizada si la zona se llenó), el de menor costo por parcela abierta. Si no puede, espera: la salida es el ajuste fiscal del punto 1, que repone la reserva.
+
+Las obras del estado se pagan a firmas de construcción; si no hay ninguna con capacidad, rige la **obra directa** (ECONOMIA §10). Las viviendas y los locales no son del estado en el mundo base.
 
 ## 10. Modificadores, causas y variables
 
@@ -273,7 +276,7 @@ El generador (con semilla) arma un mundo consistente y cierra las cuentas de ECO
 3. Educación, roles y personalidad de cada persona.
 4. Casas: se asignan una por hogar según capacidad y se reparte la propiedad entre hogares, personas e inmobiliarias; algunos hogares empiezan en la calle.
 5. **Suelo urbanizable y red vial inicial:** parcelas `sin_calle`, zonas `no_urbanizada` y los tramos posibles con lo que abre cada uno; solo la red inicial está construida.
-6. Firmas por rubro, sus locales y dueños (por `partes`), medios con columnistas, y los edificios públicos iniciales.
+6. Firmas por rubro, sus locales y dueños (por `partes`), medios con columnistas, y los edificios públicos iniciales: **como mínimo un hospital, una comisaría, una escuela y una universidad** en la zona central, y las oficinas públicas del preset. Siempre hay al menos `n_constructoras_inicial` firmas de `construccion` con su oficina (y una inmobiliaria si alguna casa tiene una firma por dueña), con capacidad de obra para el primer año; sin ellas el mundo no puede crecer ni reparar.
 7. Valores iniciales: reserva, stock, dinero de los hogares, caja de las firmas.
 
 El mundo arranca equilibrado; lo desajustan el clima, el caos y el propio mercado.

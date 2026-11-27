@@ -61,6 +61,9 @@ El mismo motor corre mundos más simples o más complejos cambiando solo la conf
 - Cada perfil de prueba corre sin errores y con las verificaciones del motor en verde.
 - La capa de lectura cumple sus pruebas (LECTURA §9): sin alertas en cadena, notables estables, apagarla no cambia la simulación.
 - Misma semilla, misma partida; guardar y cargar da el mismo resultado.
+- **Piloto automático sostenible:** 50 años sin gobernador sin impago sostenido (salvo con la tasa en el tope de la banda) y con el mantenimiento total bajo `pct_mant_max` (ECONOMIA §16).
+- **Constructoras:** forzando la quiebra de todas, la obra directa sigue reparando y expandiendo, y nacen constructoras nuevas.
+- **Escala:** con 100 personas hay 4 zonas, todas con población y con hospital, comisaría, escuela y universidad en el centro; con 500 y 5.000 el número de zonas sube sin zonas vacías.
 
 ## 6. Qué documentos leer
 

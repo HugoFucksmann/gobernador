@@ -63,7 +63,7 @@ De atrás hacia adelante:
 
 - **Alertas:** hechos del motor, exactos, agrupados con aceleración. Llevan al hecho y a su causa. Nunca pausan.
 - **Demandas:** tarjeta con el actor (retrato), lo que pide, lo que amenaza, el plazo y los botones aceptar o rechazar. Si vence, se toma como rechazo.
-- **Hitos:** al cumplirse, sale una tarjeta y el progreso se marca en el objetivo. No tocan el suelo; la expansión es por vías: al terminar una, los lotes que abre se iluminan y la cámara los muestra.
+- **Hitos:** al cumplirse, sale una tarjeta con lo que desbloquean y el progreso se marca en el objetivo. No tocan el suelo; la expansión es por vías: al terminar una, los lotes que abre se iluminan y la cámara los muestra.
 - **Noticias:** la versión de la prensa, con sesgo, que puede llegar después del hecho. Con medio, autor, tema, tono y alcance; plantilla o texto generado se ven igual.
 - **"¿Por qué pasó esto?":** desde una alerta, noticia o persona, una línea de hasta 5 pasos clicables armada por el motor. Si empezó en una decisión del jugador, termina en ella.
 

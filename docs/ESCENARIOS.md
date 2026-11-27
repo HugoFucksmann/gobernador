@@ -40,5 +40,5 @@ Se implementa primero.
 
 - **Mundo:** población y roles, mapa (terreno o semilla, vías iniciales, zonas), lotes de cada zona (libres y `sin_calle`) y tramos posibles, edificios iniciales (públicos, locales y campos), firmas con sus dueños, fenómenos, medios, valores iniciales (reserva, stock, dinero) y nivel de mundo (MUNDO §13).
 - **Controles en piloto automático:** el valor inicial de cada control (CONTROLES §2).
-- **Gobernador:** nivel de gobernador (GOBERNADOR §7), palancas bloqueadas, edificios y vías disponibles, hitos (GOBERNADOR §4), demandas activas (ACTORES §3), objetivo y derrota.
+- **Gobernador:** nivel de gobernador (GOBERNADOR §7), palancas bloqueadas, tipos de edificio y vía disponibles desde el inicio, hitos con lo que desbloquean (GOBERNADOR §4), demandas activas (ACTORES §3), objetivo y derrota.
 - **Arranque:** el generador cierra las cuentas de ECONOMIA §16 para que todo encaje al empezar.

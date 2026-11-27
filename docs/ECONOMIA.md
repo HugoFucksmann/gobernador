@@ -22,7 +22,15 @@
 
 **Calendario diario:** producción → comercio exterior → precio → compras de comida → gasto de vida → consumo.
 
-**Día de pago:** pagos del estado a firmas (mantenimiento, obras) y medios (fondos de prensa), que se acreditan antes de liquidar las firmas → firmas (sueldos y ganancias) → alquileres y mantenimiento privados → estado → mercado de vivienda → mercado de compras → quiebras → inversión, emprendimientos y construcción. Si la reserva no alcanza, el estado paga con el orden de prioridad de §10.
+**Día de pago** (orden único, el mismo de MOTOR §2 paso 10):
+
+1. **Estado paga**, con el orden de prioridad de §10: pensiones, nómina y ayuda (a hogares), mantenimiento y operación de obras (a constructoras) y fondos de prensa (a medios). Usa la reserva que dejó el período anterior; el impuesto retenido en este día de pago entra a la reserva y se usa desde el siguiente. Si falta plata, evalúa el impago (§10).
+2. **Firmas liquidan** sueldos y ganancias, con las ventas del período y lo que cobraron del estado en el paso 1.
+3. **Hogares pagan** alquileres y mantenimiento de sus casas.
+4. Mercado de vivienda → mercado de compras → quiebras → inversión, emprendimientos y construcción.
+5. Piloto automático del estado, si está encendido (MUNDO §9) → medios (ingresos, línea editorial, cierre).
+
+Las obras se pagan en el momento de ordenarlas (§10), no el día de pago.
 
 ## 3. Hogar
 
@@ -138,6 +146,7 @@ Cada día de pago, por firma:
 - **Crecer:** una firma con `factor` > 1 durante `periodos_para_invertir` y caja suficiente construye un local o un campo en una parcela libre comercial o agrícola. Lo hace una firma de construcción y la paga su caja.
 - **Emprender:** una persona (adulta, con ahorro sobre `ahorro_min_emprender` y alta `propension_emprender`) abre una firma chica en un rubro con demanda no cubierta (por categoría de gasto, margen alto, cuota baja) en una parcela libre del tipo correcto de su zona o vecina. Ella es la dueña y gerente. Puede ser desempleada, empleada o jubilada.
 - **Construir vivienda:** si `calle_pct` o el hacinamiento de una zona superan su umbral, una firma de construcción o inmobiliaria levanta casas en parcelas residenciales libres, si el alquiler esperado recupera la inversión en `periodos_recupero`. Una firma o un hogar rico construyen también para su propio uso.
+- **Construcción sin capacidad:** si la obra directa (§10) o la demanda de obras sin atender supera `umbral_obra_sin_capacidad` durante `periodos_obra_sin_capacidad`, cuenta como demanda no cubierta del rubro `construccion` y atrae emprendimientos, igual que una categoría de gasto sin vendedor.
 - **Fundar un medio:** una persona con formación de periodista y ahorro, o una firma con caja alta, funda un medio. La línea editorial sale de sus dueños (CAOS_PRENSA §7).
 - **Suelo [propuesta]:** los lotes `libre` son del estado. Quien construye lo compra al `precio_lote` = `precio_base_lote`[clase] × (1 + `k_acceso` × accesibilidad), con accesibilidad 0-1 según la cercanía por ruta al centro comercial de la ciudad. El pago entra a la reserva. Sin mercado de suelo ni especulación en esta etapa; el lote se vende junto con su edificio.
 - **Costo de obra por terreno:** el costo de construir en un lote se multiplica por el factor de su terreno (MAPA §3b).
@@ -160,7 +169,7 @@ Cada día de pago, por firma:
 1. Despide a todos, al ritmo `max_pase_desempleo_por_dia`.
 2. Los dueños pierden sus partes.
 3. La caja restante, si hay, va a los empleados como indemnización proporcional a su sueldo; si no hay caja, no hay deuda ni acreedores.
-4. Sus locales quedan libres o salen a remate (los compra otra firma o el estado, a valor de parcela).
+4. Sus locales quedan libres o salen a remate (los compra otra firma o el estado, a valor de parcela). Si era la última constructora con capacidad, el estado pasa a obra directa (§10).
 5. Emite `firma_quiebra` con causa en el evento que más bajó sus ventas.
 
 **Herencia de partes:** al morir un dueño, sus partes pasan al cónyuge y los hijos en partes iguales; sin herederos, al estado, que las vende por remate (a hogares o firmas).
@@ -172,12 +181,13 @@ Cada día de pago, por firma:
 - **Entra:** el impuesto, más herencias sin herederos, remates de firmas y locales, excedente de firmas sin dueño y venta de lotes.
 - **Sale cada día** (de la `reserva`): garantía, importaciones y la comida de menores solo si el hogar no puede o el menor está en acogida (costo diario de acogida).
 - **Sale al ordenar una obra:** su costo, de una vez, a una firma de construcción. Si la reserva no alcanza, no se puede ordenar. Rige para edificios y vías (EDIFICIOS §3 y §3b).
-- **Sale el día de pago,** en este orden de prioridad: pensiones → nómina → ayuda social → mantenimiento de edificios y vías y operación de obras (a firmas de construcción) → fondos de prensa (a los medios).
+- **Obra directa:** si no hay ninguna firma de construcción con capacidad de obra libre (quebraron o están saturadas), el estado ejecuta la obra por su cuenta con costo × `k_obra_directa` (mayor que 1) y días × `k_dias_obra_directa`. El pago no sale del mundo: se reparte como jornales entre los hogares con adultos desempleados. Es el plan B; la obra directa sostenida atrae emprendimientos de construcción (§8).
+- **Sale el día de pago** (paso 1 de §2), en este orden de prioridad: pensiones → nómina → ayuda social → mantenimiento de edificios y vías y operación de obras (a firmas de construcción) → fondos de prensa (a los medios).
 - **Si no alcanza:** se paga en ese orden y lo que queda se prorratea. Una importación se reduce a lo que cubre la reserva; la garantía se prorratea; la comida de menores en acogida se paga siempre, antes que nada.
 - **Impago:** cualquier faltante emite `impago {faltante, alcanza_nomina}` y dura hasta el primer día de pago sin faltante (`impago_fin`). Si alcanza la nómina, los públicos pierden satisfacción y productividad y se dispara la huelga (CAOS_PRENSA §3).
 - **Saldo del período** = ingresos − gastos, sin las importaciones (se ven aparte).
 - **Banco central:** el estado es el banco central: la reserva y la emisión (`fiscal`) son su única función monetaria. No hay bancos privados ni crédito.
-- **Sin gobernador:** el estado sigue las reglas del preset y la regla de piloto automático (MUNDO §9): sostiene servicios y vías, y no cambia tasas ni sueldos.
+- **Sin gobernador:** rige el piloto automático (MUNDO §9): ajusta `tasa_impuesto` dentro de una banda, frena la obra según la reserva y el mantenimiento, y sostiene servicios y vías. No toca salarios ni ayuda.
 
 ## 11. Comercio exterior
 
@@ -249,4 +259,5 @@ El agente de prototipo valida **que el mundo se sostiene**, sin calibrar valores
 - Ninguna firma queda con todo el mercado en pocos años, sin fricción que lo impida.
 - La demanda de suelo dispara la construcción de vías: la ciudad crece cuando hace falta y no se frena sin causa explicable.
 - Los medios sobreviven, o cierran por una causa explicable.
+- **Piloto automático sostenible:** en 50 años sin gobernador la reserva no cae a impago sostenido salvo que la tasa esté en el tope de la banda; el mantenimiento total no pasa `pct_mant_max`; si todas las constructoras quiebran, la obra directa mantiene la reparación y la expansión.
 - El tamaño del sector público y de los jubilados del preset no obliga a un impuesto desproporcionado.
