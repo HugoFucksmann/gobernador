@@ -255,7 +255,7 @@ function applyFullStrategistPolicy(state: GameState): void {
   const allFen = [...active, ...announced];
 
   // 1. Handle active actor demands selectively (G2+)
-  if (govLevel === 'G2' || govLevel === 'G3') {
+  if (govLevel === 'G2' || govLevel === 'G3' || govLevel === 'G4') {
     for (const dem of [...state.demandasActivas]) {
       const accept =
         dem.demandaId === 'abran_exportacion' ||
@@ -266,7 +266,7 @@ function applyFullStrategistPolicy(state: GameState): void {
     }
   }
 
-  // 2. Build services & suceso works when budget permits
+  // 2. Build services & suceso works (G3+) when budget permits
   const inConstruction = state.parcelas.filter((p) => p.estado === 'en_obra').length;
   const findFreeFor = (tipo: BuildingType) =>
     state.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, tipo));
@@ -285,13 +285,13 @@ function applyFullStrategistPolicy(state: GameState): void {
     let chosenBuild: BuildingType | null = null;
     if (state.config.escenarioId === 'zombies' && comisarias < 2 && state.gobierno.reserva >= 1800) {
       chosenBuild = 'comisaria';
-    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasDrought && !activeTypes.has('riego') && state.gobierno.reserva >= 1900) {
+    } else if ((govLevel === 'G3' || govLevel === 'G4') && hasDrought && !activeTypes.has('riego') && state.gobierno.reserva >= 1900) {
       chosenBuild = 'riego';
-    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasDrought && !activeTypes.has('silo') && state.gobierno.reserva >= 2100) {
+    } else if ((govLevel === 'G3' || govLevel === 'G4') && hasDrought && !activeTypes.has('silo') && state.gobierno.reserva >= 2100) {
       chosenBuild = 'silo';
-    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasZombie && !activeTypes.has('muralla') && state.gobierno.reserva >= 2200) {
+    } else if ((govLevel === 'G3' || govLevel === 'G4') && hasZombie && !activeTypes.has('muralla') && state.gobierno.reserva >= 2200) {
       chosenBuild = 'muralla';
-    } else if ((govLevel === 'G2' || govLevel === 'G3') && hasPandemic && !activeTypes.has('hospital_campana') && state.gobierno.reserva >= 1700) {
+    } else if ((govLevel === 'G3' || govLevel === 'G4') && hasPandemic && !activeTypes.has('hospital_campana') && state.gobierno.reserva >= 1700) {
       chosenBuild = 'hospital_campana';
     } else if ((d.hospitalOcupacionPct > 95 || d.esperandoCama > 1) && hospitales < 2 && state.gobierno.reserva >= 2400) {
       chosenBuild = 'hospital';
@@ -1290,13 +1290,23 @@ function verifyNewSystems() {
     );
   }
 
-  // 3. Suceso works in G2: silo, riego, hospital_campana (25-day expiry) + drought aviso detection
-  const g2 = makeInitState(11, 'elecciones', {
+  // 3. Suceso works in G3 (blocked in G2): silo, riego, hospital_campana (25-day expiry) + drought aviso detection
+  const g2Check = makeInitState(11, 'elecciones', {
     nivelMundo: 'M1',
     nivelGobernador: 'G2',
     disableRandomWeather: true,
   });
-  g2.clima.fenomenos.push({
+  const g2SiloParcel = g2Check.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, 'silo'));
+  if (g2SiloParcel) {
+    assert(!orderBuildInParcela(g2Check, g2SiloParcel.id, 'silo').ok, 'Silo (requiereG2/G3+) should be blocked in G2');
+  }
+
+  const g3 = makeInitState(11, 'elecciones', {
+    nivelMundo: 'M1',
+    nivelGobernador: 'G3',
+    disableRandomWeather: true,
+  });
+  g3.clima.fenomenos.push({
     id: 'fen_aviso_test',
     tipo: 'sequia',
     nombre: 'Sequía anunciada',
@@ -1305,11 +1315,11 @@ function verifyNewSystems() {
     duracionDias: 20,
     avisoDias: 8,
   });
-  stepHeadlessDay(g2);
-  stepHeadlessDay(g2);
-  assert(getAnnouncedPhenomena(g2).length >= 1, 'Expected announced drought to appear during aviso window');
+  stepHeadlessDay(g3);
+  stepHeadlessDay(g3);
+  assert(getAnnouncedPhenomena(g3).length >= 1, 'Expected announced drought to appear during aviso window');
 
-  const freePublicParcels = g2.parcelas.filter(
+  const freePublicParcels = g3.parcelas.filter(
     (p) => p.estado === 'libre' && canBuildTypeInParcela(p, 'silo')
   );
   assert(freePublicParcels.length >= 3, `Expected at least 3 free public parcels, got ${freePublicParcels.length}`);
@@ -1317,14 +1327,14 @@ function verifyNewSystems() {
     const pSilo = freePublicParcels[0];
     const pRiego = freePublicParcels[1];
     const pCamp = freePublicParcels[2];
-    assert(orderBuildInParcela(g2, pSilo.id, 'silo').ok, 'Silo build order should succeed in G2');
-    assert(orderBuildInParcela(g2, pRiego.id, 'riego').ok, 'Riego build order should succeed in G2');
-    assert(orderBuildInParcela(g2, pCamp.id, 'hospital_campana').ok, 'Hospital campana build should succeed in G2');
-    for (let i = 0; i < 5; i++) stepHeadlessDay(g2);
-    assert(g2.alimento.siloDias > 25, `Expected siloDias > 25 after Silo completes, got ${g2.alimento.siloDias}`);
+    assert(orderBuildInParcela(g3, pSilo.id, 'silo').ok, 'Silo build order should succeed in G3');
+    assert(orderBuildInParcela(g3, pRiego.id, 'riego').ok, 'Riego build order should succeed in G3');
+    assert(orderBuildInParcela(g3, pCamp.id, 'hospital_campana').ok, 'Hospital campana build should succeed in G3');
+    for (let i = 0; i < 5; i++) stepHeadlessDay(g3);
+    assert(g3.alimento.siloDias > 25, `Expected siloDias > 25 after Silo completes, got ${g3.alimento.siloDias}`);
     assert(pCamp.estado === 'ocupada' && pCamp.edificio?.tipo === 'hospital_campana', 'Hospital de campana should be active');
-    for (let i = 0; i < 27; i++) stepHeadlessDay(g2);
-    const campDismantled = g2.eventos.some(
+    for (let i = 0; i < 27; i++) stepHeadlessDay(g3);
+    const campDismantled = g3.eventos.some(
       (e) => e.tipo === 'demolicion' && e.parcelaId === pCamp.id && e.edificio === 'hospital_campana'
     );
     assert(

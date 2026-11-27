@@ -1,4 +1,4 @@
-import { BUILDING_CATALOG, LECTURA_CONSTANTS } from '../src/data/catalogs';
+import { BUILDING_CATALOG, COLLAPSE_CONSTANTS, LECTURA_CONSTANTS, STABILITY_PROFILES } from '../src/data/catalogs';
 import {
   alertas,
   causas,
@@ -13,7 +13,14 @@ import { DEFAULT_WORLD_CONFIG } from '../src/engine/policies';
 import {
   buildCausalChain,
   computeTotalWorldMoney,
+  computeZoneServiceCoverage,
+  counterOfferDemand,
   deriveCommunityStats,
+  forceDemandForDev,
+  orderBuildInParcela,
+  orderBuildVia,
+  setExtraLever,
+  setGovernorLeverObjetivo,
   stepHeadlessDay,
 } from '../src/engine/simulation';
 import { createInitialGameState } from '../src/engine/worldGenerator';
@@ -396,6 +403,68 @@ function runDays(state: GameState, days: number): { maxDrift: number; invariantE
       landPrice.precioLote > 0 &&
       streetDespensaZero,
     `grid100=${g100.ancho}x${g100.alto}, grid500=${g500.ancho}x${g500.alto}, landPrice=$${landPrice.precioLote}, street=${streetHogares.length}`
+  );
+}
+
+// 11. Aligned docs rules: G0-G4 matrix, service coverage radius, stability profiles & 7-day collapse tracker
+{
+  const mkGov = (g: 'G1' | 'G2' | 'G3' | 'G4') =>
+    createInitialGameState({
+      ...structuredClone(DEFAULT_WORLD_CONFIG),
+      nivelMundo: g === 'G4' ? 'M4' : 'M3',
+      nivelGobernador: g,
+      estadoAutomatico: false,
+      poblacionInicial: 100,
+      semilla: 41,
+    });
+
+  const g1 = mkGov('G1');
+  const closedTramo = g1.tramos.find((t) => !t.construida && !t.enObra);
+  const g1ViaOk = closedTramo ? orderBuildVia(g1, closedTramo.id).ok : true;
+  const g1AidBlocked = !setGovernorLeverObjetivo(g1, 'ayudaSocial', 1).ok;
+  const freePubG1 = g1.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, 'silo'));
+  const g1SiloBlocked = freePubG1 ? !orderBuildInParcela(g1, freePubG1.id, 'silo').ok : true;
+
+  const g2 = mkGov('G2');
+  const g2AidOk = setGovernorLeverObjetivo(g2, 'ayudaSocial', 1).ok;
+  const g2SubBlocked = !setExtraLever(g2, 'subsidioAlimento', 10).ok;
+  const g2CounterBlocked = (() => {
+    forceDemandForDev(g2, 'bajen_impuestos');
+    const id = g2.demandasActivas[0]?.id ?? 'x';
+    return !counterOfferDemand(g2, id).ok;
+  })();
+
+  const g3 = mkGov('G3');
+  const g3EduOk = setExtraLever(g3, 'nivelEducacion', 3).ok;
+  const g3PresBlocked = !setExtraLever(g3, 'presion', 40).ok;
+  const freePubG3 = g3.parcelas.find((p) => p.estado === 'libre' && canBuildTypeInParcela(p, 'silo'));
+  const g3SiloOk = freePubG3 ? orderBuildInParcela(g3, freePubG3.id, 'silo').ok : true;
+
+  const g4 = mkGov('G4');
+  const g4PresOk = setExtraLever(g4, 'presion', 40).ok;
+  const cov = computeZoneServiceCoverage(g4);
+  const covKeysOk = Boolean(cov.centro && typeof cov.centro.salud === 'number' && typeof cov.centro.policia === 'number');
+  const profilesOk = (['estable', 'normal', 'fragil', 'extremo'] as const).every(
+    (id) => Boolean(STABILITY_PROFILES[id])
+  );
+  const collapseDaysOk = COLLAPSE_CONSTANTS.diasColapso === 7;
+
+  assertCheck(
+    'GOBERNADOR + ACTORES + PARAMETROS: matriz G1-G4, radios de cobertura, perfiles y colapso 7d',
+    g1ViaOk &&
+      g1AidBlocked &&
+      g1SiloBlocked &&
+      g2AidOk &&
+      g2SubBlocked &&
+      g2CounterBlocked &&
+      g3EduOk &&
+      g3PresBlocked &&
+      g3SiloOk &&
+      g4PresOk &&
+      covKeysOk &&
+      profilesOk &&
+      collapseDaysOk,
+    `G1(via=${g1ViaOk},aidBlk=${g1AidBlocked}) G2(aid=${g2AidOk},ctrBlk=${g2CounterBlocked}) G3(edu=${g3EduOk},silo=${g3SiloOk}) G4(pres=${g4PresOk},cov=${covKeysOk})`
   );
 }
 

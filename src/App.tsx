@@ -34,6 +34,7 @@ export default function App() {
         hoveredPreview={session.hoveredPreview}
         filter={session.mapFilter}
         lens={session.mapLens}
+        coverageService={session.coverageService}
         lecturaHeatIndicator={session.lecturaHeatId}
         followSelected={session.followSelected}
         cameraTarget={session.cameraTarget}
@@ -230,6 +231,7 @@ export default function App() {
         directoryOpen={session.inspectorSearchOpen}
         openWindows={session.openWindows}
         mapLens={session.mapLens}
+        coverageService={session.coverageService}
         mapFilter={session.mapFilter}
         devMode={session.devMode}
         hasConditionAlert={session.hasConditionAlert}
@@ -237,6 +239,7 @@ export default function App() {
         onOpenDirectory={session.openInspectorDirectory}
         onToggleWindow={session.toggleWindow}
         onChangeLens={session.setMapLens}
+        onChangeCoverageService={session.setCoverageService}
         onChangeFilter={session.setMapFilter}
         onJumpZone={session.jumpToZone}
         onZoom={session.requestZoom}

@@ -9,6 +9,7 @@ import {
   PERIOD_DAYS,
   PERIOD_DAYS_DEMOG,
   ROLE_CATALOG,
+  SERVICE_RADIUS_CONSTANTS,
   SPANISH_LAST_NAMES,
   SPANISH_NAMES,
   TRAINING_CONSTANTS,
@@ -30,6 +31,7 @@ import { getBuildingJobCaps, getGovernorLevel } from './policies';
 import { nextSeqId, nextSubRand, subRandInt, subRandRange } from './rng';
 import {
   buildSeededNpcRitmo,
+  buildTraversableZoneStepMap,
   clamp,
   emitSimEvent,
   getEffectiveTrait,
@@ -386,6 +388,7 @@ function getReachableEduLimits(
   state: GameState,
   zone: ZoneId
 ): { maxLevel: 1 | 2 | 3; schoolRatio: number; univRatio: number } {
+  const steps = buildTraversableZoneStepMap(state);
   let schoolSeats = 0;
   let univSeats = 0;
   const schoolCoveredZones = new Set<ZoneId>();
@@ -394,9 +397,13 @@ function getReachableEduLimits(
   for (const p of state.parcelas) {
     if (!p.edificio?.activo || isLotIsolated(state, p)) continue;
     if (p.edificio.tipo !== 'escuela' && p.edificio.tipo !== 'universidad') continue;
-    const cost = getZoneTravelCost(state, zone, p.zona);
-    if (!Number.isFinite(cost) || cost > EDUCATION_CONSTANTS.rutaMaxEducacion) continue;
-    const seats = BUILDING_CATALOG[p.edificio.tipo].lugaresEstudio ?? (p.edificio.tipo === 'universidad' ? 40 : 50);
+    const distSteps = steps[zone]?.[p.zona];
+    const maxRadius =
+      p.edificio.tipo === 'escuela'
+        ? SERVICE_RADIUS_CONSTANTS.radioEscuela
+        : SERVICE_RADIUS_CONSTANTS.radioUniversidad;
+    if (typeof distSteps !== 'number' || distSteps > maxRadius) continue;
+    const seats = BUILDING_CATALOG[p.edificio.tipo].lugaresEstudio ?? (p.edificio.tipo === 'universidad' ? 14 : 18);
     if (p.edificio.tipo === 'escuela') {
       schoolSeats += seats;
       schoolCoveredZones.add(p.zona);
@@ -407,17 +414,15 @@ function getReachableEduLimits(
   }
 
   let minorsInCovered = 0;
-  let youthInCovered = 0;
+  let preEgresoInCovered = 0;
+  const minPreEgresoAge = EDUCATION_CONSTANTS.edadEgreso - SERVICE_RADIUS_CONSTANTS.aniosPreEgreso;
   for (const n of state.npcs) {
-    if (!n.vivo) continue;
-    if (n.edad < EDUCATION_CONSTANTS.edadEgreso && (schoolCoveredZones.has(n.zona) || n.zona === zone)) {
+    if (!n.vivo || n.edad >= EDUCATION_CONSTANTS.edadEgreso) continue;
+    if (schoolCoveredZones.has(n.zona) || n.zona === zone) {
       minorsInCovered++;
-    } else if (
-      n.edad >= EDUCATION_CONSTANTS.edadEgreso &&
-      n.edad <= EDUCATION_CONSTANTS.edadMaxJovenUniv &&
-      (univCoveredZones.has(n.zona) || n.zona === zone)
-    ) {
-      youthInCovered++;
+    }
+    if (n.edad >= minPreEgresoAge && (univCoveredZones.has(n.zona) || n.zona === zone)) {
+      preEgresoInCovered++;
     }
   }
 
@@ -427,7 +432,7 @@ function getReachableEduLimits(
       : 0;
   const univRatio =
     univSeats > 0
-      ? clamp(univSeats / Math.max(1, youthInCovered * EDUCATION_CONSTANTS.umbralCoberturaUniversidad), 0.25, 1)
+      ? clamp(univSeats / Math.max(1, preEgresoInCovered * EDUCATION_CONSTANTS.umbralCoberturaUniversidad), 0.25, 1)
       : 0;
 
   const maxLevel: 1 | 2 | 3 = schoolSeats === 0 ? 1 : univSeats === 0 ? 2 : 3;
@@ -438,7 +443,8 @@ export function runDailyLifecycleV2(state: GameState): void {
   const diaAnio = ((state.reloj.dia - 1) % 365) + 1;
   const hogarById = new Map(state.hogares.map((h) => [h.id, h]));
   const govLevel = getGovernorLevel(state.config);
-  const extraEduLever = govLevel === 'G3' ? (state.gobierno.extras?.vigentes?.nivelEducacion ?? 0) : 0;
+  const extraEduLever =
+    govLevel === 'G3' || govLevel === 'G4' ? (state.gobierno.extras?.vigentes?.nivelEducacion ?? 0) : 0;
 
   const vivosSnapshot = state.npcs.filter((n) => n.vivo);
   for (const npc of vivosSnapshot) {
@@ -1483,16 +1489,26 @@ export function assignRolesAndJobsV2(state: GameState): void {
   }
 
   // 1. Fill public vacancies from unemployed (education >= educMin)
+  const comisarias = state.parcelas.filter((p) => p.edificio?.activo && p.edificio.tipo === 'comisaria');
   const pubRolesOrder: PublicRoleId[] = ['medico', 'policia', 'ingeniero', 'docente', 'estatal'];
+  let nextComisariaIdx = 0;
   for (const pRole of pubRolesOrder) {
     let needed = pubTarget[pRole] - pubCount[pRole];
     if (needed <= 0) continue;
+    if (pRole === 'policia' && comisarias.length === 0) continue;
     const educMin = ROLE_CATALOG[pRole].educMin;
     for (let i = 0; i < unemployedAdults.length && needed > 0; i++) {
       const cand = unemployedAdults[i];
       if (cand.rol !== 'desempleado' || cand.educacion.nivel < educMin) continue;
       cand.rol = pRole;
       cand.empleadorId = null;
+      if (pRole === 'policia' && comisarias.length > 0) {
+        const assignedCom = comisarias[nextComisariaIdx % comisarias.length];
+        nextComisariaIdx++;
+        if (cand.zona !== assignedCom.zona) {
+          cand.zona = assignedCom.zona;
+        }
+      }
       needed--;
       pubCount[pRole]++;
     }

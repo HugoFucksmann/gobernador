@@ -848,6 +848,16 @@ export class GameController {
     if (!Array.isArray(loaded.bitacora)) {
       loaded.bitacora = [];
     }
+    loaded.config.perfilEstabilidad ??= 'normal';
+    loaded.actoresEstado ??= {};
+    loaded.colapsoDiasConsecutivos ??= 0;
+    loaded.obraDirectaSinCapacidadPeriodos ??= 0;
+    loaded.obrasSinCapacidadEnPeriodo ??= 0;
+    loaded.ultimoAjusteFiscalPeriodo ??= -99;
+    loaded.coberturaServiciosPorZona ??= {};
+    if (loaded.caosTracker) {
+      loaded.caosTracker.rarezasEnVentana ??= 0;
+    }
     if (!Array.isArray(loaded.historial)) {
       loaded.historial = [];
     }
@@ -947,6 +957,9 @@ export class GameController {
     }
     if (!Array.isArray(loaded.demandasActivas)) {
       loaded.demandasActivas = [];
+    }
+    if (!Array.isArray(loaded.compromisosObra)) {
+      loaded.compromisosObra = [];
     }
     if (!Array.isArray(loaded.bloqueosPalanca)) {
       loaded.bloqueosPalanca = [];
@@ -1105,10 +1118,19 @@ export class GameController {
       nextObjetivo = {
         ...prev,
         impuesto: updated.impuesto,
+        salarioPublico: updated.salarioPublico,
+        nivelObras: updated.nivelObras,
+      };
+    } else if (govLevel === 'G2') {
+      nextObjetivo = {
+        ...prev,
+        impuesto: updated.impuesto,
+        salarioPublico: updated.salarioPublico,
+        nivelObras: updated.nivelObras,
         ayudaSocial: updated.ayudaSocial,
         garantiaAlimentaria: updated.garantiaAlimentaria,
       };
-    } else if (govLevel === 'G2' || this.state.config.economiaModulo !== 'fiscal') {
+    } else if (govLevel === 'G3' || this.state.config.economiaModulo !== 'fiscal') {
       nextObjetivo = {
         ...updated,
         topeEmision: prev.topeEmision,

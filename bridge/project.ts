@@ -348,6 +348,7 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       orden: round1(derived.orden[z] ?? 0),
       amenaza: round1(derived.amenazaPercibida[z] ?? 0),
       integridad: round1(gov.integridad[z] ?? 100),
+      coberturaServicios: state.coberturaServiciosPorZona?.[z] ?? null,
     };
   });
 
@@ -402,6 +403,8 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       cantidadMedios: state.config.cantidadMedios,
       semilla: state.semilla,
       economiaModulo: state.config.economiaModulo,
+      perfilEstabilidad: state.config.perfilEstabilidad ?? 'normal',
+      lecturaActiva: state.config.lecturaActiva !== false,
     },
     resultado: state.resultado,
     objetivo: {
@@ -451,6 +454,7 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       credibilidad: m.credibilidad, alcancePct: m.alcancePct, dependenciaPct: m.finanzas.dependenciaPct, columnistas: m.columnistas.length,
     })),
     servicios: { indicadores: gov.indicadores, coberturas: gov.coberturas },
+    coberturaServiciosPorZona: state.coberturaServiciosPorZona ?? {},
     clima,
     parcelas: projectParcelas(state, derived),
     palancas: {
@@ -460,6 +464,9 @@ export function projectState(state: GameState, derived: CommunityDerived, ctx: P
       extras: state.gobierno.extras ?? { vigentes: { subsidioAlimento: 0, presion: 0, acceso: 0, nivelEducacion: 0 }, objetivo: { subsidioAlimento: 0, presion: 0, acceso: 0, nivelEducacion: 0 } },
     },
     demandas: state.demandasActivas,
+    actoresEstado: state.actoresEstado ?? {},
+    compromisosObra: state.compromisosObra ?? [],
+    colapsoDiasConsecutivos: state.colapsoDiasConsecutivos ?? 0,
     medidas: state.medidasVigentes,
     hitos: { cumplidos: state.hitosCumplidos, defs: preset.hitos },
     noticias: state.noticias.slice(0, 30).map((n) => ({

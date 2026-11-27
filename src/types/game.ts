@@ -932,6 +932,7 @@ export interface HitoDefinition {
     op: '>=' | '<=';
     umbral: number;
   };
+  desbloquea?: BuildingType[];
 }
 
 export interface ScenarioParcelDef {
@@ -1712,6 +1713,18 @@ export interface GameState {
   bloqueosPalanca: LeverLock[];
   cooldownActorDemanda: Record<string, number>;
   actoresEstado?: Record<string, ActorRelationState>;
+  compromisosObra?: Array<{
+    id: string;
+    actorId: string;
+    actorNombre: string;
+    demandaId: DemandId;
+    tipoPedido: 'obra' | 'via';
+    obraPedido: NonNullable<ActiveDemand['obraPedido']>;
+    amenaza: string;
+    esExtorsion?: boolean;
+    hastaDia: number;
+    causaId?: string;
+  }>;
   colapsoDiasConsecutivos?: number;
   obraDirectaSinCapacidadPeriodos?: number;
   obrasSinCapacidadEnPeriodo?: number;
@@ -1734,6 +1747,7 @@ export interface GameState {
   caosTracker: {
     ventanaInicioDia: number;
     accionesEnVentana: number;
+    rarezasEnVentana?: number;
     respiroActivo: boolean;
   };
   cooldownsCondicion: {

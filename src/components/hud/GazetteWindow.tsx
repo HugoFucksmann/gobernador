@@ -17,6 +17,40 @@ interface GazetteWindowProps {
   onInspectCausal: (title: string, ref?: string, fallbackText?: string) => void;
 }
 
+type GazetteTopicFilter =
+  | 'todas'
+  | 'alimento'
+  | 'economia'
+  | 'orden'
+  | 'vivienda'
+  | 'clima'
+  | 'presiones'
+  | 'vecinos';
+
+const GAZETTE_TOPIC_FILTERS: Array<{ id: GazetteTopicFilter; label: string }> = [
+  { id: 'todas', label: 'Todas' },
+  { id: 'alimento', label: 'Alimento' },
+  { id: 'economia', label: 'Economía' },
+  { id: 'orden', label: 'Orden' },
+  { id: 'vivienda', label: 'Vivienda' },
+  { id: 'clima', label: 'Clima' },
+  { id: 'presiones', label: 'Presiones' },
+  { id: 'vecinos', label: 'Vecinos' },
+];
+
+function matchesGazetteTopic(tema: string, filter: GazetteTopicFilter): boolean {
+  if (filter === 'todas') return true;
+  if (filter === 'alimento') return tema === 'hambre' || tema === 'precio';
+  if (filter === 'economia') return tema === 'empresas' || tema === 'firmas' || tema === 'impago';
+  if (filter === 'orden') return tema === 'conflicto' || tema === 'ataque' || tema === 'salud';
+  if (filter === 'vivienda') return tema === 'vivienda' || tema === 'demografia' || tema === 'familia';
+  if (filter === 'clima') return tema === 'clima' || tema === 'aviso';
+  if (filter === 'presiones') {
+    return tema === 'presiones' || tema === 'gobierno' || tema === 'obras' || tema === 'objetivo';
+  }
+  return tema === 'vecinos';
+}
+
 export const GazetteWindow: React.FC<GazetteWindowProps> = ({
   state,
   aiBusy,
@@ -29,7 +63,11 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
   onInspectCausal,
 }) => {
   const [pressView, setPressView] = useState<'edicion' | 'medios'>('edicion');
+  const [topicFilter, setTopicFilter] = useState<GazetteTopicFilter>('todas');
   const isG0 = isObserverMode(state.config);
+  const filteredArticles = state.noticias
+    .filter((a) => matchesGazetteTopic(a.tema, topicFilter))
+    .slice(0, 30);
 
   return (
     <div className="pointer-events-none fixed top-20 left-4 md:left-[380px]" style={{ zIndex }}>
@@ -80,46 +118,69 @@ export const GazetteWindow: React.FC<GazetteWindowProps> = ({
           </div>
 
           {pressView === 'edicion' ? (
-            <div className="bg-[#f6f4ef] text-zinc-900 rounded-xl divide-y divide-zinc-300 max-h-[430px] overflow-y-auto">
-              {state.noticias.length === 0 ? (
-                <div className="p-6 text-center text-sm text-zinc-600">
-                  Sin noticias publicadas (sin medios activos).
-                </div>
-              ) : (
-                state.noticias.slice(0, 14).map((article) => (
-                  <article key={article.id} className="p-4 space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
-                      <span className="font-semibold text-zinc-900">
-                        {article.medioNombre} · D{article.dia}
-                      </span>
-                      <span className="font-mono text-zinc-600 tabular-nums">
-                        {article.autorNombre} · {article.tema} · {article.tono} · {Math.round(article.alcance)}%
-                        {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
-                      </span>
-                    </div>
-                    <h3 className="font-display text-base font-bold text-zinc-900 leading-snug">
-                      {article.titulo}
-                    </h3>
-                    <p className="text-sm text-zinc-700 leading-relaxed">{article.texto}</p>
-                    <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onInspectCausal(
-                            `${article.medioNombre}: ${article.titulo}`,
-                            article.causa || `noticia:${article.id}`,
-                            article.texto
-                          )
-                        }
-                        className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
-                      >
-                        <GitBranch className="w-3.5 h-3.5" />
-                        ¿Por qué?
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap gap-1 bg-zinc-800/70 p-1.5 rounded-xl text-[11px]">
+                {GAZETTE_TOPIC_FILTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setTopicFilter(f.id)}
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                      topicFilter === f.id
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <div className="bg-[#f6f4ef] text-zinc-900 rounded-xl divide-y divide-zinc-300 max-h-[395px] overflow-y-auto">
+                {state.noticias.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-zinc-600">
+                    Sin noticias publicadas (sin medios activos).
+                  </div>
+                ) : filteredArticles.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-zinc-600">
+                    Sin noticias en este filtro temático.
+                  </div>
+                ) : (
+                  filteredArticles.map((article) => (
+                    <article key={article.id} className="p-4 space-y-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs text-zinc-600">
+                        <span className="font-semibold text-zinc-900">
+                          {article.medioNombre} · D{article.dia}
+                        </span>
+                        <span className="font-mono text-zinc-600 tabular-nums">
+                          {article.autorNombre} · {article.tema}
+                          {article.origen?.includes('rareza') ? ' (rareza)' : ''} · {article.tono} · {Math.round(article.alcance)}%
+                          {article.zonaOrigen ? ` · ${article.zonaOrigen}` : ''}
+                        </span>
+                      </div>
+                      <h3 className="font-display text-base font-bold text-zinc-900 leading-snug">
+                        {article.titulo}
+                      </h3>
+                      <p className="text-sm text-zinc-700 leading-relaxed">{article.texto}</p>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onInspectCausal(
+                              `${article.medioNombre}: ${article.titulo}`,
+                              article.causa || `noticia:${article.id}`,
+                              article.texto
+                            )
+                          }
+                          className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
+                        >
+                          <GitBranch className="w-3.5 h-3.5" />
+                          ¿Por qué?
+                        </button>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
             </div>
           ) : (
             <div className="space-y-4">

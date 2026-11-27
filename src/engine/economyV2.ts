@@ -1,4 +1,5 @@
 import {
+  AUTOPILOT_CONSTANTS,
   BUILDING_CATALOG,
   DEMOG_CONSTANTS,
   ECON_CONSTANTS,
@@ -9,6 +10,7 @@ import {
   OBRAS_LEVEL_TABLE,
   PERIOD_DAYS,
   ROLE_CATALOG,
+  SERVICE_RADIUS_CONSTANTS,
   SPEND_CATEGORY_WEIGHTS,
   VIAL_CONSTANTS,
 } from '../data/catalogs';
@@ -30,15 +32,16 @@ import {
 } from '../types/game';
 import {
   computeMaintenanceBreakdown,
-  getBuildingJobCaps,
   isObserverMode,
 } from './policies';
 import { nextSeqId, nextSubRand, subRandInt } from './rng';
 import {
+  buildTraversableZoneStepMap,
   canBuildTypeInParcela,
   clamp,
   computeDailyFoodPriceForZone,
   computeDemandaSuelo,
+  computeZoneServiceCoverage,
   emitSimEvent,
   getActivePhenomena,
   getEffectivePropensionEmprender,
@@ -1286,18 +1289,42 @@ export function runPaydayEconomyV2(state: GameState): void {
     }
   }
 
-  // Operation maintenance feeds constructora ventas if active (zero leak!)
+  const payDirectWorksWages = (amount: number): boolean => {
+    if (amount <= 0) return false;
+    const unemployedAdults = state.npcs.filter(
+      (n) => n.vivo && n.edad >= 18 && n.edad < 65 && n.rol === 'desempleado'
+    );
+    const recipients =
+      unemployedAdults.length > 0
+        ? unemployedAdults
+        : state.npcs.filter((n) => n.vivo && n.edad >= 18 && n.edad < 65);
+    if (recipients.length === 0) return false;
+    state.gobierno.reserva -= amount;
+    const perWorker = amount / recipients.length;
+    let credited = 0;
+    for (const w of recipients) {
+      const h = hogarById.get(w.hogarId);
+      if (h) {
+        h.dinero += perWorker;
+        credited += perWorker;
+      }
+    }
+    if (Math.abs(amount - credited) > 0.0001) {
+      state.gobierno.reserva += amount - credited;
+    }
+    return credited > 0;
+  };
+
+  // Operation maintenance feeds constructora ventas if active, else direct works wages (zero leak!)
+  let opActuallyPaid = 0;
   if (opPaid > 0) {
     if (constructoras.length > 0) {
       state.gobierno.reserva -= opPaid;
       const share = opPaid / constructoras.length;
       for (const cf of constructoras) cf.ventas += share;
-    } else {
-      const anyActive = state.firmas.find((f) => f.activa);
-      if (anyActive) {
-        state.gobierno.reserva -= opPaid;
-        anyActive.ventas += opPaid;
-      }
+      opActuallyPaid = opPaid;
+    } else if (payDirectWorksWages(opPaid)) {
+      opActuallyPaid = opPaid;
     }
   }
 
@@ -1378,7 +1405,7 @@ export function runPaydayEconomyV2(state: GameState): void {
   fin.mantenimientoEdificios = Number(opBreak.mantenimientoEdificios.toFixed(2));
   fin.mantenimiento = Number(opBreak.mantenimientoTotal.toFixed(2));
   fin.operacionObras = Number(opBreak.operacionObras.toFixed(2));
-  fin.operacion = Number(opPaid.toFixed(2));
+  fin.operacion = Number(opActuallyPaid.toFixed(2));
   fin.obras = Number((acum.obras ?? 0).toFixed(2));
   fin.subsidios = Number((acum.subsidios ?? 0).toFixed(2));
   fin.prensa = Number(prensaPaid.toFixed(2));
@@ -1445,71 +1472,191 @@ export function runPaydayEconomyV2(state: GameState): void {
   acum.importaciones = 0;
   acum.exportaciones = 0;
 
-  // Autopilot public service & road builds when estadoAutomatico is enabled (MUNDO_V2 §9, EDIFICIOS_V2 §3)
+  // Autopilot: 4-rule state management when estadoAutomatico is enabled (MUNDO §9, EDIFICIOS §3, ECONOMIA §10)
   // oficina_publica is preset-only and never built by autopilot.
   const autoState = isObserverMode(state.config);
+  const periodIngresos = Math.max(fin.ingresos, taxCollectedTotal);
+  const avgDailyExpense = Math.max(
+    4,
+    (fin.nomina +
+      fin.pensiones +
+      fin.ayudaSocial +
+      fin.operacion +
+      fin.prensa +
+      fin.garantiaAlimentaria +
+      fin.comidaMenores +
+      fin.acogidaMenores +
+      fin.subsidios) /
+      PERIOD_DAYS
+  );
+  const floorReserva = avgDailyExpense * AUTOPILOT_CONSTANTS.reservaMinDias;
+  const ceilReserva = avgDailyExpense * AUTOPILOT_CONSTANTS.reservaMaxDias;
+  const canPassWorkBrake = (workCost: number, addedMaintPerPeriod: number): boolean => {
+    if (state.gobierno.reserva - workCost < floorReserva) return false;
+    if (periodIngresos > 0) {
+      const projectedMaint = opBreak.mantenimientoTotal + addedMaintPerPeriod;
+      if (projectedMaint > periodIngresos * (AUTOPILOT_CONSTANTS.pctMantMax / 100)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Regla 1: Ajuste fiscal automático cada periodosAjusteFiscal
+  if (
+    autoState &&
+    state.reloj.periodo - (state.ultimoAjusteFiscalPeriodo ?? -99) >= AUTOPILOT_CONSTANTS.periodosAjusteFiscal
+  ) {
+    const curTax = state.gobierno.palancasVigentes.impuesto;
+    let nextTax = curTax;
+    if (fin.impago || state.gobierno.reserva < floorReserva) {
+      nextTax = Math.min(AUTOPILOT_CONSTANTS.tasaMaxAuto, curTax + 2);
+    } else if (state.gobierno.reserva > ceilReserva) {
+      nextTax = Math.max(AUTOPILOT_CONSTANTS.tasaMinAuto, curTax - 2);
+    }
+    if (nextTax !== curTax) {
+      state.gobierno.palancasVigentes.impuesto = nextTax;
+      state.gobierno.palancasObjetivo.impuesto = nextTax;
+      state.ultimoAjusteFiscalPeriodo = state.reloj.periodo;
+      const evId = nextSeqId(state, 'ev_ctrl');
+      state.ultimaCausaPalanca = evId;
+      emitSimEvent(state, {
+        id: evId,
+        dia: state.reloj.dia,
+        tipo: 'control',
+        zona: zones[0] ?? 'centro',
+        control: 'tasa_impuesto',
+        palanca: 'impuesto',
+        valorAnterior: curTax,
+        valorNuevo: nextTax,
+        causa: 'estado:piloto_automatico',
+      });
+    }
+  }
+
+  // Regla 2 + 3: Servicios públicos por cobertura zonal dentro del radio, sujeto a Freno de obra
+  const covByZone = computeZoneServiceCoverage(state);
+  state.coberturaServiciosPorZona = covByZone;
   if (isM2Plus && autoState) {
     const vivosList = state.npcs.filter((n) => n.vivo);
-    const vivosCount = vivosList.length;
-    const caps = getBuildingJobCaps(
-      state.parcelas,
-      vivosCount,
-      state.gobierno.palancasVigentes.nivelObras,
-      state.gobierno.cuposFijos
+    const stepMap = buildTraversableZoneStepMap(state);
+    const minPreEgresoAge = EDUCATION_CONSTANTS.edadEgreso - SERVICE_RADIUS_CONSTANTS.aniosPreEgreso;
+    const popByZone = new Map<ZoneId, number>();
+    let hasMenores = false;
+    let hasPreEgreso = false;
+    for (const n of vivosList) {
+      popByZone.set(n.zona, (popByZone.get(n.zona) ?? 0) + 1);
+      if (n.edad < EDUCATION_CONSTANTS.edadEgreso) {
+        hasMenores = true;
+        if (n.edad >= minPreEgresoAge) hasPreEgreso = true;
+      }
+    }
+
+    const inObraTipos = new Set<BuildingType>(
+      state.parcelas
+        .filter((p) => p.estado === 'en_obra' && p.edificio)
+        .map((p) => p.edificio!.tipo)
     );
-    const targetMed = Math.max(1, Math.round(vivosCount * ECON_CONSTANTS.objetivoCobertura.medico));
-    const targetPol = Math.max(1, Math.round(vivosCount * ECON_CONSTANTS.objetivoCobertura.policia));
-    const menoresCount = vivosList.filter((n) => n.edad < EDUCATION_CONSTANTS.edadEgreso).length;
-    const jovenesCount = vivosList.filter(
-      (n) => n.edad >= EDUCATION_CONSTANTS.edadEgreso && n.edad <= EDUCATION_CONSTANTS.edadMaxJovenUniv
-    ).length;
-    let escuelaCupo = 0;
-    let univCupo = 0;
-    for (const p of state.parcelas) {
-      const b = p.edificio;
-      if (!b || (b.estado !== 'ocupada' && b.estado !== 'en_obra')) continue;
-      if (b.tipo === 'escuela') escuelaCupo += BUILDING_CATALOG.escuela.lugaresEstudio ?? 18;
-      if (b.tipo === 'universidad') univCupo += BUILDING_CATALOG.universidad.lugaresEstudio ?? 14;
+
+    const prioritySpecs: Array<{
+      tipo: 'hospital' | 'comisaria' | 'escuela' | 'universidad';
+      covKey: 'salud' | 'policia' | 'escuela' | 'universidad';
+      radius: number;
+      enabled: boolean;
+    }> = [
+      { tipo: 'hospital', covKey: 'salud', radius: SERVICE_RADIUS_CONSTANTS.radioHospital, enabled: true },
+      { tipo: 'comisaria', covKey: 'policia', radius: SERVICE_RADIUS_CONSTANTS.radioComisaria, enabled: true },
+      { tipo: 'escuela', covKey: 'escuela', radius: SERVICE_RADIUS_CONSTANTS.radioEscuela, enabled: hasMenores },
+      { tipo: 'universidad', covKey: 'universidad', radius: SERVICE_RADIUS_CONSTANTS.radioUniversidad, enabled: hasPreEgreso },
+    ];
+
+    let chosenBuild: {
+      tipo: 'hospital' | 'comisaria' | 'escuela' | 'universidad';
+      parcela: Parcela;
+      effectiveCost: number;
+      diasObra: number;
+      isDirect: boolean;
+    } | null = null;
+
+    if (!state.autopilotLastBuildDay || state.reloj.dia - state.autopilotLastBuildDay >= 21) {
+      for (const spec of prioritySpecs) {
+        if (!spec.enabled || inObraTipos.has(spec.tipo)) continue;
+        const def = BUILDING_CATALOG[spec.tipo];
+        const lowZones = new Set(
+          zones.filter((z) => (covByZone[z]?.[spec.covKey] ?? 0) < SERVICE_RADIUS_CONSTANTS.coberturaMin)
+        );
+        if (lowZones.size === 0) continue;
+
+        let bestParcela: Parcela | null = null;
+        let bestGain = 0;
+        let bestCost = 0;
+
+        for (const p of state.parcelas) {
+          if (
+            p.tipoParcela !== 'publica' ||
+            p.estado !== 'libre' ||
+            isLotIsolated(state, p) ||
+            !canBuildTypeInParcela(p, spec.tipo)
+          ) {
+            continue;
+          }
+          const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false);
+          if (!tInfo.buildable) continue;
+          const baseCost = Number((def.costoObra * tInfo.multiplier).toFixed(2));
+          const isDirect = constructoras.length === 0;
+          const effCost = isDirect
+            ? Number((baseCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2))
+            : baseCost;
+          if (!canPassWorkBrake(effCost, def.mantenimientoPeriodo)) continue;
+
+          let coveredPopGain = 0;
+          for (const lz of lowZones) {
+            const dist = stepMap[p.zona]?.[lz];
+            if (typeof dist === 'number' && dist <= spec.radius) {
+              coveredPopGain += Math.max(1, popByZone.get(lz) ?? 0);
+            }
+          }
+          if (coveredPopGain > bestGain || (coveredPopGain === bestGain && bestGain > 0 && effCost < bestCost)) {
+            bestGain = coveredPopGain;
+            bestParcela = p;
+            bestCost = effCost;
+          }
+        }
+
+        if (bestParcela && bestGain > 0) {
+          const isDirect = constructoras.length === 0;
+          const diasObra = isDirect
+            ? Math.max(1, Math.round(def.diasObra * AUTOPILOT_CONSTANTS.kDiasObraDirecta))
+            : def.diasObra;
+          chosenBuild = {
+            tipo: spec.tipo,
+            parcela: bestParcela,
+            effectiveCost: bestCost,
+            diasObra,
+            isDirect,
+          };
+          break;
+        }
+      }
     }
 
-    let toBuild: 'hospital' | 'comisaria' | 'escuela' | 'universidad' | null = null;
-    if (caps.medico < targetMed * 0.8 && state.gobierno.reserva >= BUILDING_CATALOG.hospital.costoObra * 1.4) {
-      toBuild = 'hospital';
-    } else if (caps.policia < targetPol * 0.8 && state.gobierno.reserva >= BUILDING_CATALOG.comisaria.costoObra * 1.4) {
-      toBuild = 'comisaria';
-    } else if (
-      menoresCount > 0 &&
-      escuelaCupo < menoresCount * EDUCATION_CONSTANTS.umbralCoberturaEscuela &&
-      state.gobierno.reserva >= BUILDING_CATALOG.escuela.costoObra * 1.4
-    ) {
-      toBuild = 'escuela';
-    } else if (
-      jovenesCount > 0 &&
-      univCupo < jovenesCount * EDUCATION_CONSTANTS.umbralCoberturaUniversidad &&
-      state.gobierno.reserva >= BUILDING_CATALOG.universidad.costoObra * 1.4
-    ) {
-      toBuild = 'universidad';
-    }
+    if (chosenBuild) {
+      const { tipo: toBuild, parcela: freePub, effectiveCost, diasObra, isDirect } = chosenBuild;
+      let paid = false;
+      if (!isDirect) {
+        const payee = constructoras.find((f) => f.zona === freePub.zona) ?? constructoras[0];
+        if (payee && state.gobierno.reserva >= effectiveCost) {
+          state.gobierno.reserva -= effectiveCost;
+          payee.ventas += effectiveCost;
+          paid = true;
+        }
+      } else if (state.gobierno.reserva >= effectiveCost && payDirectWorksWages(effectiveCost)) {
+        state.obrasSinCapacidadEnPeriodo = (state.obrasSinCapacidadEnPeriodo ?? 0) + 1;
+        paid = true;
+      }
 
-    const freePub = toBuild
-      ? state.parcelas.find(
-          (p) =>
-            p.tipoParcela === 'publica' &&
-            p.estado === 'libre' &&
-            !isLotIsolated(state, p) &&
-            canBuildTypeInParcela(p, toBuild!) &&
-            getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, p), false).buildable
-        )
-      : undefined;
-    if (toBuild && freePub && (!state.autopilotLastBuildDay || state.reloj.dia - state.autopilotLastBuildDay >= 21)) {
-      const def = BUILDING_CATALOG[toBuild];
-      const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getParcelTerrainTiles(state, freePub), false);
-      const effectiveCost = Number((def.costoObra * tInfo.multiplier).toFixed(2));
-      const payee = constructoras[0] ?? state.firmas.find((f) => f.activa);
-      if (payee && tInfo.buildable && state.gobierno.reserva >= effectiveCost * 1.35) {
-        state.gobierno.reserva -= effectiveCost;
+      if (paid) {
         state.gobierno.acumuladoPeriodo.obras += effectiveCost;
-        payee.ventas += effectiveCost;
         freePub.estado = 'en_obra';
         freePub.edificio = {
           id: nextSeqId(state, 'ed'),
@@ -1520,8 +1667,8 @@ export function runPaydayEconomyV2(state: GameState): void {
           estado: 'en_obra',
           activo: false,
           estadoSalud: 100,
-          diasObraRestantes: def.diasObra,
-          diasObraTotal: def.diasObra,
+          diasObraRestantes: diasObra,
+          diasObraTotal: diasObra,
           zona: freePub.zona,
         };
         state.autopilotLastBuildDay = state.reloj.dia;
@@ -1534,14 +1681,14 @@ export function runPaydayEconomyV2(state: GameState): void {
           edificio: toBuild,
           dueno: 'estado',
           costo: effectiveCost,
-          diasObra: def.diasObra,
-          causa: 'estado:piloto_automatico',
+          diasObra,
+          causa: isDirect ? 'estado:obra_directa' : 'estado:piloto_automatico',
         });
       }
     }
   }
 
-  // Update demandaSuelo streaks & trigger road autopilot when exceeded (MUNDO_V2 §9)
+  // Update demandaSuelo streaks & trigger road autopilot when exceeded (MUNDO §9, sujeto a Freno de obra)
   const newDemanda = computeDemandaSuelo(state);
   state.demandaSuelo = newDemanda;
   for (const [k, val] of Object.entries(newDemanda)) {
@@ -1564,14 +1711,18 @@ export function runPaydayEconomyV2(state: GameState): void {
     if (hotEntry) {
       const [hotZone, hotTipo] = hotEntry[0].split(':');
       const connectable = (state.tramos ?? []).filter((t) => isViaConnectableToNetwork(state, t));
+      const isDirect = constructoras.length === 0;
       let bestTramo: { tramo: (typeof connectable)[number]; cost: number } | null = null;
       let bestScore = Infinity;
 
       for (const t of connectable) {
         const tInfo = getTerrainBuildCostInfo(state.mapaGrid, getViaTerrainTiles(state, t), t.tipo === 'puente');
         if (!tInfo.buildable) continue;
-        const effectiveCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
-        if (state.gobierno.reserva < effectiveCost * 1.35) continue;
+        const baseCost = Number((t.costoObra * tInfo.multiplier + tInfo.bridgeExtraCost).toFixed(2));
+        const effectiveCost = isDirect
+          ? Number((baseCost * AUTOPILOT_CONSTANTS.kObraDirecta).toFixed(2))
+          : baseCost;
+        if (!canPassWorkBrake(effectiveCost, t.mantenimientoPeriodo)) continue;
         const opensMatchingType = t.parcelasAbiertas.filter((pid) => {
           const p = parcelById.get(pid);
           return p && (p.zona === hotZone || t.zonaAbierta === p.zona) && p.tipoParcela === hotTipo;
@@ -1588,16 +1739,28 @@ export function runPaydayEconomyV2(state: GameState): void {
 
       if (bestTramo) {
         const { tramo: chosenTramo, cost: effectiveCost } = bestTramo;
-        const payee =
-          constructoras.find((f) => f.zona === chosenTramo.zonaA || f.zona === chosenTramo.zonaB) ??
-          constructoras[0] ??
-          state.firmas.find((f) => f.activa);
-        if (payee) {
-          state.gobierno.reserva -= effectiveCost;
+        let paid = false;
+        if (!isDirect) {
+          const payee =
+            constructoras.find((f) => f.zona === chosenTramo.zonaA || f.zona === chosenTramo.zonaB) ??
+            constructoras[0];
+          if (payee && state.gobierno.reserva >= effectiveCost) {
+            state.gobierno.reserva -= effectiveCost;
+            payee.ventas += effectiveCost;
+            paid = true;
+          }
+        } else if (state.gobierno.reserva >= effectiveCost && payDirectWorksWages(effectiveCost)) {
+          state.obrasSinCapacidadEnPeriodo = (state.obrasSinCapacidadEnPeriodo ?? 0) + 1;
+          paid = true;
+        }
+
+        if (paid) {
           state.gobierno.acumuladoPeriodo.obras += effectiveCost;
-          payee.ventas += effectiveCost;
           const diasFactor = OBRAS_LEVEL_TABLE[state.gobierno.palancasVigentes.nivelObras].diasObraFactor;
-          const dias = Math.max(2, Math.round(chosenTramo.diasObraTotal * diasFactor));
+          const baseDias = Math.max(2, Math.round(chosenTramo.diasObraTotal * diasFactor));
+          const dias = isDirect
+            ? Math.max(2, Math.round(baseDias * AUTOPILOT_CONSTANTS.kDiasObraDirecta))
+            : baseDias;
           chosenTramo.enObra = true;
           chosenTramo.diasObraRestantes = dias;
           state.autopilotLastViaDay = state.reloj.dia;
@@ -1614,12 +1777,20 @@ export function runPaydayEconomyV2(state: GameState): void {
             parcelasAbiertas: [...chosenTramo.parcelasAbiertas],
             costo: effectiveCost,
             diasObra: dias,
-            causa: 'estado:demanda_suelo',
+            causa: isDirect ? 'estado:obra_directa' : 'estado:demanda_suelo',
           });
         }
       }
     }
   }
+
+  // Track consecutive periods with direct works / lack of construction capacity (ECONOMIA §8)
+  if ((state.obrasSinCapacidadEnPeriodo ?? 0) >= AUTOPILOT_CONSTANTS.umbralObraSinCapacidad) {
+    state.obraDirectaSinCapacidadPeriodos = (state.obraDirectaSinCapacidadPeriodos ?? 0) + 1;
+  } else {
+    state.obraDirectaSinCapacidadPeriodos = 0;
+  }
+  state.obrasSinCapacidadEnPeriodo = 0;
 
   // Phase 1B: Settle constructora & medio firms AFTER maintenance, public works & press budgets were credited!
   settleFirmList(state.firmas.filter((f) => f.activa && f.rubro === 'construccion'));
@@ -2247,7 +2418,12 @@ export function runPaydayEconomyV2(state: GameState): void {
       },
       {
         rubro: 'construccion',
-        score: (activeByRubro.construccion === 0 ? 70 : 12 + state.mercadoStats.construccionesPeriodo * 6) / Math.max(0.4, activeByRubro.construccion),
+        score:
+          ((activeByRubro.construccion === 0 ? 70 : 12 + state.mercadoStats.construccionesPeriodo * 6) +
+            ((state.obraDirectaSinCapacidadPeriodos ?? 0) >= AUTOPILOT_CONSTANTS.periodosObraSinCapacidad
+              ? 85
+              : 0)) /
+          Math.max(0.4, activeByRubro.construccion),
         buildings: ['oficina_constructora'],
         cause: 'mercado:demanda_construccion',
       },

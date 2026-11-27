@@ -2,11 +2,13 @@ import {
   AGENDA_CONSTANTS,
   BUILDING_CATALOG,
   ECON_CONSTANTS,
+  EDUCATION_CONSTANTS,
   HOUSING_CONSTANTS,
   LAND_CONSTANTS,
   LOT_CLASS_MIN_TILES,
   LOT_CLASS_RANK,
   RITMO_CONSTANTS,
+  SERVICE_RADIUS_CONSTANTS,
   TERRAIN_CONSTANTS,
   VIAL_CONSTANTS,
 } from '../data/catalogs';
@@ -160,6 +162,46 @@ function buildZoneStepMap(
   return dist;
 }
 
+export function buildTraversableZoneStepMap(
+  state: Pick<GameState, 'zonas' | 'tramos' | 'distanciasZonas'>
+): Record<ZoneId, Record<ZoneId, number>> {
+  const zonas = state.zonas || {};
+  const tramos = state.tramos || [];
+  const activeZones = Object.keys(zonas).filter((z) => zonas[z]?.estado !== 'no_urbanizada');
+  const activeSet = new Set(activeZones);
+
+  const isTraversableEdge = (a: ZoneId, b: ZoneId): boolean => {
+    if (!activeSet.has(a) || !activeSet.has(b)) return false;
+    const directTramos = tramos.filter(
+      (t) => (t.zonaA === a && t.zonaB === b) || (t.zonaA === b && t.zonaB === a)
+    );
+    if (directTramos.length > 0) {
+      return directTramos.some((t) => t.construida && t.estado > 0);
+    }
+    if (state.distanciasZonas?.[a] && typeof state.distanciasZonas[a][b] === 'number') {
+      return Number.isFinite(state.distanciasZonas[a][b]);
+    }
+    return true;
+  };
+
+  const dist: Record<ZoneId, Record<ZoneId, number>> = {};
+  for (const start of activeZones) {
+    dist[start] = { [start]: 0 };
+    const queue: ZoneId[] = [start];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      const d = dist[start][cur];
+      for (const nb of zonas[cur]?.vecinas ?? []) {
+        if (dist[start][nb] === undefined && isTraversableEdge(cur, nb)) {
+          dist[start][nb] = d + 1;
+          queue.push(nb);
+        }
+      }
+    }
+  }
+  return dist;
+}
+
 function terrainStepRng(seedRef: { s: number }): number {
   const next = (seedRef.s + 0x6d2b79f5) >>> 0;
   let t = Math.imul(next ^ (next >>> 15), 1 | next);
@@ -204,7 +246,8 @@ function generateTerrainLayerAttempt(
   ancho: number,
   alto: number,
   seed: number,
-  hasRibera: boolean
+  hasRibera: boolean,
+  terrainOpts?: { nivelAgua?: number; nRios?: number }
 ): GeneratedTerrainData & { valid: boolean } {
   const rng = { s: normalizeSeed(seed) };
   const oct1 = makeNoiseSampler(6, 6, rng);
@@ -235,10 +278,11 @@ function generateTerrainLayerAttempt(
   }
 
   // 2. Water below nivelAgua + mountain above umbralMontana
+  const nivelAgua = terrainOpts?.nivelAgua ?? TERRAIN_CONSTANTS.nivelAgua;
   for (let ty = 0; ty < alto; ty++) {
     for (let tx = 0; tx < ancho; tx++) {
       const h = height[ty][tx];
-      if (h < TERRAIN_CONSTANTS.nivelAgua) {
+      if (h < nivelAgua) {
         terrainRows[ty][tx] = '~';
       } else if (h >= TERRAIN_CONSTANTS.umbralMontana) {
         terrainRows[ty][tx] = '^';
@@ -314,7 +358,8 @@ function generateTerrainLayerAttempt(
   };
 
   const usedStarts: Array<{ x: number; y: number }> = [];
-  for (let r = 0; r < TERRAIN_CONSTANTS.nRios; r++) {
+  const nRios = terrainOpts?.nRios ?? TERRAIN_CONSTANTS.nRios;
+  for (let r = 0; r < nRios; r++) {
     const picked = highCandidates.find((cand) =>
       usedStarts.every((u) => Math.hypot(u.x - cand.x, u.y - cand.y) > ancho * 0.28)
     );
@@ -454,7 +499,8 @@ function generateValidatedTerrain(
   ancho: number,
   alto: number,
   semilla: number,
-  hasRibera: boolean
+  hasRibera: boolean,
+  terrainOpts?: { nivelAgua?: number; nRios?: number }
 ): GeneratedTerrainData {
   const baseSeed = normalizeSeed((semilla ^ 0x517cc1b7) >>> 0);
   let fallback: GeneratedTerrainData | null = null;
@@ -463,7 +509,8 @@ function generateValidatedTerrain(
       ancho,
       alto,
       (baseSeed + attempt * 0x9e3779b9) >>> 0,
-      hasRibera
+      hasRibera,
+      terrainOpts
     );
     if (!fallback || candidate.sueloUtilPct > fallback.sueloUtilPct) {
       fallback = candidate;
@@ -478,9 +525,10 @@ function generateValidatedTerrain(
 function getGridDimensionsForPopulation(
   pop: number,
   semilla = 1,
-  hasRibera = true
+  hasRibera = true,
+  terrainOpts?: { nivelAgua?: number; nRios?: number }
 ): { ancho: number; alto: number; sueloUtilPct: number } {
-  const probe = generateValidatedTerrain(48, 48, semilla, hasRibera);
+  const probe = generateValidatedTerrain(48, 48, semilla, hasRibera, terrainOpts);
   const lado = clamp(
     Math.round(
       Math.sqrt(
@@ -737,13 +785,14 @@ export function buildTileGridAndSyncMap(
   parcelas: Parcela[],
   tramos: ViaTramo[],
   targetPop: number,
-  semilla = 1
+  semilla = 1,
+  terrainOpts?: { nivelAgua?: number; nRios?: number }
 ): MapaV2Grid {
   const hasRibera = Boolean(zonas.ribera);
-  const { ancho, alto } = getGridDimensionsForPopulation(targetPop, semilla, hasRibera);
+  const { ancho, alto } = getGridDimensionsForPopulation(targetPop, semilla, hasRibera, terrainOpts);
   const zoneIds = Object.keys(zonas);
 
-  const generated = generateValidatedTerrain(ancho, alto, semilla, hasRibera);
+  const generated = generateValidatedTerrain(ancho, alto, semilla, hasRibera, terrainOpts);
   const terrainRows = generated.terrainRows;
   const alturaRows = generated.alturaRows;
   const zoneRows: string[][] = Array.from({ length: alto }, () => Array(ancho).fill(' '));
@@ -2154,6 +2203,191 @@ export function getNpcProductivity(
   return Number(base.toFixed(1));
 }
 
+export function computeZoneServiceCoverage(
+  state: Pick<GameState, 'zonas' | 'tramos' | 'distanciasZonas' | 'parcelas' | 'npcs'>
+): Record<ZoneId, { escuela: number; universidad: number; salud: number; policia: number }> {
+  const steps = buildTraversableZoneStepMap(state);
+  const activeZones = getWorldZones(state);
+  const zoneCount = activeZones.length;
+  const activeBuildings = getActiveBuildings(state.parcelas);
+  const vivos = state.npcs.filter((n) => n.vivo);
+
+  const popTotalByZone = new Map<ZoneId, number>();
+  const menoresByZone = new Map<ZoneId, number>();
+  const preEgresoByZone = new Map<ZoneId, number>();
+  const minPreEgresoAge = EDUCATION_CONSTANTS.edadEgreso - SERVICE_RADIUS_CONSTANTS.aniosPreEgreso;
+  for (const z of activeZones) {
+    popTotalByZone.set(z, 0);
+    menoresByZone.set(z, 0);
+    preEgresoByZone.set(z, 0);
+  }
+  for (const n of vivos) {
+    const ez = getEffectiveZone(n, zoneCount, activeZones);
+    popTotalByZone.set(ez, (popTotalByZone.get(ez) ?? 0) + 1);
+    if (n.edad < EDUCATION_CONSTANTS.edadEgreso) {
+      menoresByZone.set(ez, (menoresByZone.get(ez) ?? 0) + 1);
+      if (n.edad >= minPreEgresoAge) {
+        preEgresoByZone.set(ez, (preEgresoByZone.get(ez) ?? 0) + 1);
+      }
+    }
+  }
+
+  const hospFacilities = computeHospitalFacilities(
+    state.parcelas,
+    state.npcs,
+    state.zonas,
+    state.distanciasZonas
+  );
+
+  // Assign active teachers (docente) between escuela and universidad buildings within reachable zones
+  const escuelas = activeBuildings.filter((b) => b.tipo === 'escuela');
+  const universidades = activeBuildings.filter((b) => b.tipo === 'universidad');
+  const eduBuildings = [...escuelas, ...universidades];
+  const docentesPorEdificio = new Map<string, number>();
+  for (const eb of eduBuildings) docentesPorEdificio.set(eb.id, 0);
+  const activeDocentes = vivos.filter(
+    (n) => n.rol === 'docente' && !n.hospital.internado && !n.accionIa?.fueraDePuesto && !n.capacitacion
+  );
+  if (eduBuildings.length > 0) {
+    for (const d of activeDocentes) {
+      let best: BuildingInstance | undefined;
+      let bestScore = Infinity;
+      for (const eb of eduBuildings) {
+        const sDist = steps[d.zona]?.[eb.zona];
+        if (typeof sDist !== 'number') continue;
+        const load = docentesPorEdificio.get(eb.id) ?? 0;
+        const cap = getBuildingRoleCapacity(eb).docente ?? 4;
+        const overPenalty = load >= cap ? 50 : 0;
+        const score = sDist * 4 + load * 0.6 + overPenalty;
+        if (score < bestScore) {
+          bestScore = score;
+          best = eb;
+        }
+      }
+      if (!best) best = eduBuildings[0];
+      docentesPorEdificio.set(best.id, (docentesPorEdificio.get(best.id) ?? 0) + 1);
+    }
+  }
+
+  const comisarías = activeBuildings.filter((b) => b.tipo === 'comisaria');
+  const activePolicias = vivos.filter(
+    (n) => n.rol === 'policia' && !n.hospital.internado && !n.accionIa?.fueraDePuesto && !n.capacitacion
+  );
+
+  const out: Record<ZoneId, { escuela: number; universidad: number; salud: number; policia: number }> = {};
+
+  for (const z of Object.keys(state.zonas || {})) {
+    if (state.zonas[z]?.estado === 'no_urbanizada') {
+      out[z] = { escuela: 0, universidad: 0, salud: 0, policia: 0 };
+      continue;
+    }
+
+    // 1. Escuela coverage
+    const escInArea = escuelas.filter(
+      (b) => (steps[z]?.[b.zona] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioEscuela
+    );
+    let covEsc = 0;
+    if (escInArea.length > 0) {
+      let docentesArea = 0;
+      for (const b of escInArea) docentesArea += docentesPorEdificio.get(b.id) ?? 0;
+      let menoresArea = 0;
+      for (const y of activeZones) {
+        if ((steps[z]?.[y] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioEscuela) {
+          menoresArea += menoresByZone.get(y) ?? 0;
+        }
+      }
+      covEsc =
+        menoresArea <= 0
+          ? docentesArea > 0
+            ? 1
+            : 0
+          : clamp(docentesArea / (menoresArea / SERVICE_RADIUS_CONSTANTS.habitantesPorDocente), 0, 1);
+    }
+
+    // 2. Universidad coverage
+    const univInArea = universidades.filter(
+      (b) => (steps[z]?.[b.zona] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioUniversidad
+    );
+    let covUniv = 0;
+    if (univInArea.length > 0) {
+      let docentesArea = 0;
+      for (const b of univInArea) docentesArea += docentesPorEdificio.get(b.id) ?? 0;
+      let preArea = 0;
+      for (const y of activeZones) {
+        if ((steps[z]?.[y] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioUniversidad) {
+          preArea += preEgresoByZone.get(y) ?? 0;
+        }
+      }
+      covUniv =
+        preArea <= 0
+          ? docentesArea > 0
+            ? 1
+            : 0
+          : clamp(docentesArea / (preArea / SERVICE_RADIUS_CONSTANTS.habitantesPorUniversidad), 0, 1);
+    }
+
+    // 3. Salud coverage
+    const hospInArea = hospFacilities.filter(
+      (f) => (steps[z]?.[f.zona] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioHospital
+    );
+    let covSalud = 0;
+    if (hospInArea.length > 0) {
+      let medicosArea = 0;
+      for (const f of hospInArea) {
+        if (f.esCampana) {
+          medicosArea += f.camasEfectivas / Math.max(1, ECON_CONSTANTS.pacientesPorMedico);
+        } else {
+          medicosArea += f.medicosAsignados;
+        }
+      }
+      let popArea = 0;
+      for (const y of activeZones) {
+        if ((steps[z]?.[y] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioHospital) {
+          popArea += popTotalByZone.get(y) ?? 0;
+        }
+      }
+      covSalud =
+        popArea <= 0
+          ? medicosArea > 0
+            ? 1
+            : 0
+          : clamp(medicosArea / (popArea / SERVICE_RADIUS_CONSTANTS.habitantesPorMedico), 0, 1);
+    }
+
+    // 4. Policía coverage (presencia atenuada dentro del radioComisaria)
+    const hasComisariaInRange = comisarías.some(
+      (c) => (steps[c.zona]?.[z] ?? Infinity) <= SERVICE_RADIUS_CONSTANTS.radioComisaria
+    );
+    let covPol = 0;
+    if (hasComisariaInRange) {
+      let presencia = 0;
+      for (const p of activePolicias) {
+        const py = getEffectiveZone(p, zoneCount, activeZones);
+        const d = steps[py]?.[z];
+        if (typeof d === 'number' && d <= SERVICE_RADIUS_CONSTANTS.radioComisaria) {
+          presencia += Math.pow(SERVICE_RADIUS_CONSTANTS.atenuacionPolicia, d);
+        }
+      }
+      const popZ = popTotalByZone.get(z) ?? 0;
+      covPol =
+        popZ <= 0
+          ? presencia > 0
+            ? 1
+            : 0
+          : clamp(presencia / (popZ / SERVICE_RADIUS_CONSTANTS.habitantesPorPolicia), 0, 1);
+    }
+
+    out[z] = {
+      escuela: Number(covEsc.toFixed(3)),
+      universidad: Number(covUniv.toFixed(3)),
+      salud: Number(covSalud.toFixed(3)),
+      policia: Number(covPol.toFixed(3)),
+    };
+  }
+
+  return out;
+}
+
 export function deriveCommunityStats(state: GameState): CommunityDerived {
   const total = Math.max(1, state.config.poblacionInicial);
   const vivos = state.npcs.filter((n) => n.vivo);
@@ -2193,6 +2427,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   for (const z of zoneIds) vivosByZone.set(z, []);
 
   let satSum = 0;
+  let electoresCount = 0;
   let apoyoCount = 0;
   let descCount = 0;
   let hambreCrit = 0;
@@ -2204,15 +2439,22 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   let menores = 0;
   let jubilados = 0;
   let laborales = 0;
+  const minFoodCost = Math.max(
+    1,
+    (state.alimento?.precio ?? ECON_CONSTANTS.precioBaseAlimento) * ECON_CONSTANTS.consumoPorNpc
+  );
 
   for (const n of vivos) {
     roles[n.rol] = (roles[n.rol] ?? 0) + 1;
     satSum += n.variables.satisfaccion;
-    if (n.variables.lealtad >= 50) apoyoCount++;
-    if (n.variables.satisfaccion < 35) descCount++;
-    if (n.variables.hambre >= 70) hambreCrit++;
     const h = hogarById.get(n.hogarId);
-    if (!h || h.dinero <= 1) sinDinero++;
+    if (n.edad >= 18) {
+      electoresCount++;
+      if (n.variables.lealtad >= 50) apoyoCount++;
+      if (!h || h.dinero < minFoodCost) sinDinero++;
+    }
+    if (n.variables.satisfaccion < 30) descCount++;
+    if (n.variables.hambre > SERVICE_RADIUS_CONSTANTS.umbralHambreCritica) hambreCrit++;
     if (n.hospital.internado) internados++;
     if (n.hospital.esperandoCama) esperandoCama++;
     prodSum += getNpcProductivity(n, state, prodCtx);
@@ -2281,6 +2523,7 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
   const defensa: Record<ZoneId, number> = {};
   const orden: Record<ZoneId, number> = {};
   const amenazaPercibida = computeAmenazaPercibida(state);
+  const serviceCoverage = computeZoneServiceCoverage(state);
 
   const activeBuildings = getActiveBuildings(state.parcelas);
   const comisariaBonusByZone = new Map<ZoneId, number>();
@@ -2299,26 +2542,17 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     }
   }
 
+  const seguridadGlobal = state.gobierno.indicadores.seguridad ?? 50;
   for (const z of zoneIds) {
-    const zNpcs = vivosByZone.get(z) ?? [];
-    let zPol = 0;
-    let zOut = 0;
-    let zFearSum = 0;
-    for (const n of zNpcs) {
-      if (n.rol === 'policia' && !n.hospital.internado && !n.accionIa?.fueraDePuesto) zPol++;
-      if (n.accionIa?.fueraDePuesto) zOut++;
-      zFearSum += n.variables.miedo;
-    }
+    const covPol = serviceCoverage[z]?.policia ?? 0;
     const bonusComisaria = comisariaBonusByZone.get(z) ?? 0;
     const bonusMuralla = murallaBonusByZone.get(z) ?? 0;
     const integ = state.gobierno.integridad[z] ?? 100;
-    defensa[z] = Number(clamp(zPol * 10 + bonusComisaria + bonusMuralla + (integ - 100) * 0.25, 0, 100).toFixed(1));
-
-    const zStreet = streetByZone.get(z) ?? 0;
-    const zFear = zNpcs.length > 0 ? zFearSum / zNpcs.length : 0;
-    const neededPol = Math.max(1, zNpcs.length * ECON_CONSTANTS.objetivoOrden);
-    const ordRatio = clamp(zPol / neededPol, 0, 1.3);
-    orden[z] = Number(clamp(48 + ordRatio * 42 - zOut * 5 - zStreet * 3 - zFear * 0.15, 0, 100).toFixed(1));
+    const rawDef = Math.min(100, seguridadGlobal * covPol) + bonusComisaria + bonusMuralla;
+    defensa[z] = Number(
+      clamp(rawDef * (1 - ECON_CONSTANTS.kIntegridad * (1 - integ / 100)), 0, 100).toFixed(1)
+    );
+    orden[z] = Number((covPol * 100).toFixed(1));
   }
 
   const activeFirmas = state.firmas.filter((f) => f.activa);
@@ -2371,12 +2605,12 @@ export function deriveCommunityStats(state: GameState): CommunityDerived {
     vivos: vivosCount,
     bajas,
     satisfaccionMedia: vivosCount > 0 ? Number((satSum / vivosCount).toFixed(1)) : 0,
-    apoyoPct: vivosCount > 0 ? Number(((apoyoCount / vivosCount) * 100).toFixed(1)) : 0,
+    apoyoPct: electoresCount > 0 ? Number(((apoyoCount / electoresCount) * 100).toFixed(1)) : 0,
     descontentosPct: vivosCount > 0 ? Number(((descCount / vivosCount) * 100).toFixed(1)) : 0,
     desempleoPct:
       laborales > 0 ? Number(((roles.desempleado / laborales) * 100).toFixed(1)) : 0,
     hambreCriticaPct: vivosCount > 0 ? Number(((hambreCrit / vivosCount) * 100).toFixed(1)) : 0,
-    sinDineroPct: vivosCount > 0 ? Number(((sinDinero / vivosCount) * 100).toFixed(1)) : 0,
+    sinDineroPct: electoresCount > 0 ? Number(((sinDinero / electoresCount) * 100).toFixed(1)) : 0,
     despensaMediaDias: Number((despensaSum / hogCount).toFixed(2)),
     hospitalOcupacionPct,
     camasHospital,

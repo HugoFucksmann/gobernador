@@ -17,6 +17,7 @@ import {
 import {
   CameraTarget,
   CityTab,
+  CoverageServiceFilter,
   DespachoTab,
   MapFilter,
   MapHoverPreview,
@@ -72,6 +73,7 @@ export function useGameSession() {
   const [followSelected, setFollowSelected] = useState<boolean>(false);
   const [mapFilter, setMapFilter] = useState<MapFilter>('todos');
   const [mapLens, setMapLens] = useState<MapLens>('ninguna');
+  const [coverageService, setCoverageService] = useState<CoverageServiceFilter>('salud');
   const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [zoomRequest, setZoomRequest] = useState<{ delta: number; seq: number } | null>(null);
   const [hoverInfo, setHoverInfo] = useState<string | null>(null);
@@ -649,6 +651,7 @@ export function useGameSession() {
     followSelected,
     mapFilter,
     mapLens,
+    coverageService,
     cameraTarget,
     zoomRequest,
     hoverInfo,
@@ -679,6 +682,7 @@ export function useGameSession() {
     cancelFollow,
     setMapFilter,
     setMapLens,
+    setCoverageService,
     setHoverInfo,
     setHoveredPreview,
     setShowConfigModal,

@@ -24,12 +24,15 @@ import {
   GOVERNOR_BUILDABLE_TYPES,
   OBRAS_LEVEL_TABLE,
   ROLE_CATALOG,
+  SCENARIO_PRESETS,
+  SERVICE_RADIUS_CONSTANTS,
 } from '../../data/catalogs';
 import { interlocutor } from '../../engine/lecturaV2';
 import { evaluateNpcTopMoodFactor, getNpcZoneName } from '../../utils/npcInsights';
 import {
   getBuildingJobCaps,
   getGovernorLevel,
+  isGovernorAtLeast,
   isObserverMode,
 } from '../../engine/policies';
 import {
@@ -43,6 +46,8 @@ import {
   TICKS_PER_DAY,
 } from '../../engine/simulation';
 import {
+  buildTraversableZoneStepMap,
+  computeZoneServiceCoverage,
   getFranjaDia,
   getNpcDailyAgenda,
   getParcelLandPrice,
@@ -267,8 +272,9 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
 
   const govLevel = getGovernorLevel(state.config);
   const isG0 = isObserverMode(state.config);
-  const isG1 = govLevel === 'G1';
-  const isG3 = govLevel === 'G3';
+  const isG1OrG2 = govLevel === 'G1' || govLevel === 'G2';
+  const isG2Plus = isGovernorAtLeast(state.config, 'G2');
+  const isG4 = govLevel === 'G4';
 
   const hasPanelOpen = Boolean(
     selectedNpc ||
@@ -289,69 +295,78 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
           {demandNote}
         </div>
       )}
-      {state.demandasActivas.map((dem) => (
-        <div
-          key={dem.id}
-          className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-zinc-800"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <UiTooltip text={`${dem.razon} · Si rechazas o vence: ${dem.amenaza}`} placement="left">
-              <span className="font-semibold text-xs sm:text-sm text-white truncate cursor-help">
-                {dem.actorNombre}
+      {state.demandasActivas.map((dem) => {
+        const actorRel = state.actoresEstado?.[dem.actorId];
+        return (
+          <div
+            key={dem.id}
+            className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-zinc-800"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <UiTooltip text={`${dem.razon} · Si rechazas o vence: ${dem.amenaza}`} placement="left">
+                <span className="font-semibold text-xs sm:text-sm text-white truncate cursor-help">
+                  {dem.esExtorsion && <span className="text-rose-400 mr-1">Extorsión ·</span>}
+                  {dem.actorNombre}
+                  {actorRel && (
+                    <span className="text-[11px] font-normal text-zinc-400 ml-1">
+                      ({actorRel.postura})
+                    </span>
+                  )}
+                </span>
+              </UiTooltip>
+              <span className="font-mono text-xs font-semibold text-amber-300 shrink-0 tabular-nums">
+                {dem.diasRestantes}d
               </span>
-            </UiTooltip>
-            <span className="font-mono text-xs font-semibold text-amber-300 shrink-0 tabular-nums">
-              {dem.diasRestantes}d
-            </span>
-          </div>
+            </div>
 
-          <div className="text-xs sm:text-sm text-zinc-200 leading-snug">{dem.pedido.etiqueta}</div>
+            <div className="text-xs sm:text-sm text-zinc-200 leading-snug">{dem.pedido.etiqueta}</div>
 
-          <div className={`grid ${isG3 ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 pt-0.5`}>
-            <UiTooltip text={`Aceptar compromiso (${dem.diasCompromiso}d)`} placement="top">
-              <button
-                type="button"
-                disabled={isG0}
-                onClick={() => {
-                  setDemandNote(null);
-                  onRespondDemand(dem.id, true);
-                }}
-                className="w-full py-1.5 px-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
-              >
-                Aceptar
-              </button>
-            </UiTooltip>
-            {isG3 && (
-              <UiTooltip text="Proponer término medio (G3)" placement="top">
+            <div className={`grid ${isG4 ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 pt-0.5`}>
+              <UiTooltip text={`Aceptar compromiso (${dem.diasCompromiso}d)`} placement="top">
                 <button
                   type="button"
                   disabled={isG0}
                   onClick={() => {
-                    const res = onCounterOffer(dem.id);
-                    setDemandNote(res.texto ?? res.error ?? null);
+                    setDemandNote(null);
+                    onRespondDemand(dem.id, true);
                   }}
-                  className="w-full py-1.5 px-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
+                  className="w-full py-1.5 px-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
                 >
-                  Contraoferta
+                  Aceptar
                 </button>
               </UiTooltip>
-            )}
-            <UiTooltip text={`Rechazar: ${dem.amenaza}`} placement="top">
-              <button
-                type="button"
-                disabled={isG0}
-                onClick={() => {
-                  setDemandNote(null);
-                  onRespondDemand(dem.id, false);
-                }}
-                className="w-full py-1.5 px-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
-              >
-                Rechazar
-              </button>
-            </UiTooltip>
+              {isG4 && (
+                <UiTooltip text="Proponer término medio (G4)" placement="top">
+                  <button
+                    type="button"
+                    disabled={isG0}
+                    onClick={() => {
+                      const res = onCounterOffer(dem.id);
+                      setDemandNote(res.texto ?? res.error ?? null);
+                    }}
+                    className="w-full py-1.5 px-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
+                  >
+                    Contraoferta
+                  </button>
+                </UiTooltip>
+              )}
+              <UiTooltip text={`Rechazar: ${dem.amenaza}`} placement="top">
+                <button
+                  type="button"
+                  disabled={isG0}
+                  onClick={() => {
+                    setDemandNote(null);
+                    onRespondDemand(dem.id, false);
+                  }}
+                  className="w-full py-1.5 px-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl disabled:opacity-40 transition-colors whitespace-nowrap"
+                >
+                  Rechazar
+                </button>
+              </UiTooltip>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -487,8 +502,8 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       {districtName} ({effZone}) · {stage}
                     </span>
                     {notableInfo && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold capitalize">
-                        <Award className="w-3 h-3" />
+                      <span className="inline-flex items-center gap-1 text-amber-300 font-semibold capitalize">
+                        · <Award className="w-3 h-3" />
                         {notableInfo.tipo}
                       </span>
                     )}
@@ -1048,50 +1063,130 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                       )}
 
                       <div className="space-y-2.5">
-                        {GOVERNOR_BUILDABLE_TYPES.map((tipo) => {
-                          const def = BUILDING_CATALOG[tipo];
-                          const effectiveCost = Math.round(def.costoObra * terrainInfo.multiplier);
-                          const gatedG2 = Boolean(def.requiereG2) && isG1;
-                          const noFunds = state.gobierno.reserva < effectiveCost;
-                          const estDays = Math.max(
-                            1,
-                            Math.round(def.diasObra * obrasRow.diasObraFactor * infraFactor)
-                          );
-                          const disabled = isG0 || gatedG2 || noFunds || !terrainInfo.buildable;
+                        {(() => {
+                          const stepMap = buildTraversableZoneStepMap(state);
+                          const covMap =
+                            state.coberturaServiciosPorZona ?? computeZoneServiceCoverage(state);
+                          const preset = SCENARIO_PRESETS[state.config.escenarioId];
+                          const activeZones = getWorldZones(state);
+                          const zonePop: Record<string, number> = {};
+                          for (const n of state.npcs) {
+                            if (!n.vivo) continue;
+                            zonePop[n.zona] = (zonePop[n.zona] ?? 0) + 1;
+                          }
 
-                          return (
-                            <div
-                              key={tipo}
-                              className="bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
-                            >
-                              <div className="min-w-0 space-y-1">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-semibold text-white truncate">{def.nombre}</span>
-                                  <HintIcon
-                                    text={`${describeBuilding(def)} · Mant. $${def.mantenimientoPeriodo}/per${def.requiereG2 ? ' · Requiere G2+' : ''}`}
-                                    placement="left"
-                                  />
-                                </div>
-                                <div className="font-mono text-xs text-amber-300 tabular-nums">
-                                  ${effectiveCost} · {estDays}d · Mant. ${def.mantenimientoPeriodo}/per
-                                </div>
-                              </div>
+                          return GOVERNOR_BUILDABLE_TYPES.map((tipo) => {
+                            const def = BUILDING_CATALOG[tipo];
+                            const effectiveCost = Math.round(def.costoObra * terrainInfo.multiplier);
+                            const gatedSuceso = Boolean(def.requiereG2) && isG1OrG2;
+                            const unlockers = isG2Plus
+                              ? (preset?.hitos ?? []).filter((h) => h.desbloquea?.includes(tipo))
+                              : [];
+                            const missingHito =
+                              unlockers.length > 0 &&
+                              !unlockers.some((h) => state.hitosCumplidos.includes(h.id))
+                                ? unlockers[0]
+                                : null;
+                            const noFunds = state.gobierno.reserva < effectiveCost;
+                            const estDays = Math.max(
+                              1,
+                              Math.round(def.diasObra * obrasRow.diasObraFactor * infraFactor)
+                            );
+                            const disabled =
+                              isG0 ||
+                              gatedSuceso ||
+                              Boolean(missingHito) ||
+                              noFunds ||
+                              !terrainInfo.buildable;
 
-                              <button
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => {
-                                  setParcelError(null);
-                                  const res = onBuildInParcela(selectedParcela.id, tipo);
-                                  if (!res.ok) setParcelError(res.error ?? 'No se pudo construir.');
-                                }}
-                                className="px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors whitespace-nowrap"
+                            const svcInfo =
+                              tipo === 'escuela'
+                                ? { key: 'escuela' as const, r: SERVICE_RADIUS_CONSTANTS.radioEscuela }
+                                : tipo === 'universidad'
+                                ? { key: 'universidad' as const, r: SERVICE_RADIUS_CONSTANTS.radioUniversidad }
+                                : tipo === 'hospital' || tipo === 'hospital_campana'
+                                ? { key: 'salud' as const, r: SERVICE_RADIUS_CONSTANTS.radioHospital }
+                                : tipo === 'comisaria'
+                                ? { key: 'policia' as const, r: SERVICE_RADIUS_CONSTANTS.radioComisaria }
+                                : null;
+
+                            let newlyCoveredPopulation: number | undefined;
+                            if (svcInfo) {
+                              let sum = 0;
+                              for (const zk of activeZones) {
+                                const dist = stepMap[selectedParcela.zona]?.[zk] ?? Infinity;
+                                if (dist <= svcInfo.r) {
+                                  const cov = covMap[zk]?.[svcInfo.key] ?? 0;
+                                  sum += (zonePop[zk] ?? 0) * Math.max(0, 1 - cov);
+                                }
+                              }
+                              newlyCoveredPopulation = Math.round(sum);
+                            }
+
+                            return (
+                              <div
+                                key={tipo}
+                                onMouseEnter={() =>
+                                  svcInfo
+                                    ? onHoverPreview?.({
+                                        parcelaId: selectedParcela.id,
+                                        buildingType: tipo,
+                                        newlyCoveredPopulation,
+                                      })
+                                    : onHoverPreview?.({ parcelaId: selectedParcela.id })
+                                }
+                                onMouseLeave={() => onHoverPreview?.(null)}
+                                className="bg-zinc-800/65 hover:bg-zinc-800 border border-zinc-700/70 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-colors"
                               >
-                                {!terrainInfo.buildable ? 'No apta' : gatedG2 ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
-                              </button>
-                            </div>
-                          );
-                        })}
+                                <div className="min-w-0 space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-semibold text-white truncate">{def.nombre}</span>
+                                    <HintIcon
+                                      text={`${describeBuilding(def)} · Mant. $${def.mantenimientoPeriodo}/per${
+                                        def.requiereG2 ? ' · Suceso (G3+)' : ''
+                                      }${missingHito ? ` · Requiere hito: ${missingHito.nombre}` : ''}`}
+                                      placement="left"
+                                    />
+                                  </div>
+                                  <div className="font-mono text-xs text-amber-300 tabular-nums">
+                                    ${effectiveCost} · {estDays}d · Mant. ${def.mantenimientoPeriodo}/per
+                                    {newlyCoveredPopulation !== undefined && newlyCoveredPopulation > 0 && (
+                                      <span className="text-sky-300 ml-1.5">
+                                        · +{newlyCoveredPopulation} sin cob.
+                                      </span>
+                                    )}
+                                  </div>
+                                  {missingHito && (
+                                    <div className="text-[11px] text-amber-200/80 truncate">
+                                      Hito: {missingHito.nombre}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => {
+                                    setParcelError(null);
+                                    const res = onBuildInParcela(selectedParcela.id, tipo);
+                                    if (!res.ok) setParcelError(res.error ?? 'No se pudo construir.');
+                                  }}
+                                  className="px-3.5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shrink-0 transition-colors whitespace-nowrap"
+                                >
+                                  {!terrainInfo.buildable
+                                    ? 'No apta'
+                                    : gatedSuceso
+                                    ? 'G3+'
+                                    : missingHito
+                                    ? 'Hito'
+                                    : noFunds
+                                    ? 'Sin caja'
+                                    : 'Construir'}
+                                </button>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     </>
                   )}
@@ -1300,7 +1395,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
         {selectedTramo && (() => {
           const connectable = isViaConnectableToNetwork(state, selectedTramo);
           const canBuild = !selectedTramo.construida && !selectedTramo.enObra && connectable;
-          const viaBlocked = isG0 || isG1;
+          const viaBlocked = isG0;
           const noFunds = state.gobierno.reserva < selectedTramo.costoObra;
           const zA = state.zonas[selectedTramo.zonaA]?.nombre ?? selectedTramo.zonaA;
           const zB = selectedTramo.zonaB
@@ -1382,7 +1477,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                   className="w-full py-2.5 px-4 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 transition-colors"
                 >
                   {viaBlocked
-                    ? 'Requiere gobernador G2+'
+                    ? 'Modo automático'
                     : noFunds
                     ? `Sin caja ($${selectedTramo.costoObra})`
                     : `Construir vía ($${selectedTramo.costoObra})`}
@@ -1422,7 +1517,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                   </span>
                 </div>
                 <div>
-                  <span className="font-sans text-zinc-400 block">Meses sin pagar</span>
+                  <span className="font-sans text-zinc-400 block">Períodos sin pagar</span>
                   <span className={`text-sm font-bold ${selectedHogar.periodosSinPagar > 0 ? 'text-rose-400' : 'text-zinc-200'}`}>
                     {selectedHogar.periodosSinPagar}
                   </span>
@@ -2129,7 +2224,7 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                 <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
                   {connectableVias.map((t) => {
                     const noFunds = state.gobierno.reserva < t.costoObra;
-                    const viaBlocked = isG0 || isG1;
+                    const viaBlocked = isG0;
                     return (
                       <div
                         key={t.id}
@@ -2155,11 +2250,11 @@ export const SideInspectorPanel: React.FC<SideInspectorPanelProps> = ({
                           disabled={viaBlocked || noFunds}
                           onClick={() => {
                             const res = onBuildVia(t.id);
-                            if (!res.ok) setParcelError(res.error ?? 'No se pudo iniciar vía.');
+                            if (!res.ok) setParcelError(res.error ?? 'No se pudo iniciar la vía.');
                           }}
                           className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
                         >
-                          {viaBlocked ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
+                          {viaBlocked ? 'Auto' : noFunds ? 'Sin caja' : 'Construir'}
                         </button>
                       </div>
                     );

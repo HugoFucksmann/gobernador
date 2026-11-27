@@ -58,11 +58,23 @@ const EVENT_TYPE_LABELS: Partial<Record<SimEvent['tipo'], string>> = {
   firma_quiebra: 'Quiebra',
   via_fin: 'Vía habilitada',
   ruta_cortada: 'Ruta cortada',
+  obra_inicio: 'Inicio de obra',
+  obra_fin: 'Fin de obra',
+  hito: 'Hito cumplido',
   fenomeno_inicio: 'Fenómeno climático',
   noticia: 'Noticia',
   ataque: 'Ataque en zona',
   golpe: 'Golpe a vecino',
   capacitacion_fin: 'Capacitación',
+  accion_inicio: 'Acción / Rareza',
+  demanda: 'Demanda de actor',
+  demanda_aceptada: 'Demanda aceptada',
+  demanda_rechazada: 'Demanda rechazada',
+  demanda_incumplida: 'Compromiso incumplido',
+  contraoferta: 'Contraoferta',
+  extorsion: 'Extorsión',
+  medida: 'Medida de presión',
+  colapso: 'Colapso comunitario',
 };
 
 export const DespachoWindow: React.FC<DespachoWindowProps> = ({
@@ -177,9 +189,7 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
                         >
                           {INDICATOR_LABELS[ind.id]}
                         </button>
-                        <span
-                          className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border ${badge.bg} ${badge.text}`}
-                        >
+                        <span className={`text-[11px] font-semibold shrink-0 ${badge.text}`}>
                           {badge.label}
                         </span>
                       </div>
@@ -460,9 +470,7 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
                             >
                               {INDICATOR_LABELS[c.indicador]}
                             </button>
-                            <span
-                              className={`px-2 py-0.5 text-[10px] font-semibold rounded border ${badge.bg} ${badge.text}`}
-                            >
+                            <span className={`text-[11px] font-semibold shrink-0 ${badge.text}`}>
                               {c.estadoAntes} → {c.estadoDespues}
                             </span>
                           </div>
@@ -585,6 +593,45 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
                 <div className="space-y-2 max-h-[360px] overflow-y-auto">
                   {notablesList.map((n) => {
                     const inter = interlocutor(state, n.npcId);
+                    const matchedMedio =
+                      n.tipo === 'medio'
+                        ? state.medios.find(
+                            (m) => m.columnistas.includes(n.npcId) || state.actoresEstado?.[m.id]
+                          )
+                        : undefined;
+                    const actorRel =
+                      state.actoresEstado?.[n.npcId] ??
+                      (matchedMedio ? state.actoresEstado?.[matchedMedio.id] : undefined);
+                    const actorDemands = state.demandasActivas.filter(
+                      (d) =>
+                        d.actorId === n.npcId ||
+                        (matchedMedio && d.actorId === matchedMedio.id)
+                    );
+                    const actorCommitments = (state.compromisosObra ?? []).filter(
+                      (c) =>
+                        c.actorId === n.npcId ||
+                        (matchedMedio && c.actorId === matchedMedio.id)
+                    );
+                    const posturaLabel = actorRel?.postura ?? (
+                      inter
+                        ? inter.posturaHaciaEstado >= 35
+                          ? 'aliado'
+                          : inter.posturaHaciaEstado <= -35
+                          ? 'hostil'
+                          : 'neutral'
+                        : 'neutral'
+                    );
+                    const favorVal = actorRel ? actorRel.favor : inter?.posturaHaciaEstado ?? 0;
+                    const posturaColor =
+                      posturaLabel === 'aliado'
+                        ? 'text-emerald-300'
+                        : posturaLabel === 'hostil'
+                        ? 'text-rose-300'
+                        : 'text-zinc-300';
+                    const precedentActive =
+                      actorRel?.precedenteHastaDia !== undefined &&
+                      actorRel.precedenteHastaDia >= state.reloj.dia;
+
                     return (
                       <div
                         key={n.npcId}
@@ -598,29 +645,84 @@ export const DespachoWindow: React.FC<DespachoWindowProps> = ({
                               <Newspaper className="w-4 h-4 text-rose-400 shrink-0" />
                             )}
                             <span className="font-bold text-white truncate">{n.nombre}</span>
-                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-zinc-900 text-zinc-300 capitalize">
-                              {n.tipo}
+                            <span className="text-[11px] text-zinc-400 capitalize shrink-0">
+                              · {n.tipo}
                             </span>
                           </div>
-                          <span className="font-mono font-bold text-amber-300 shrink-0">
+                          <span className="font-mono font-bold text-amber-300 tabular-nums shrink-0">
                             Peso {Math.round(n.peso)}
                           </span>
                         </div>
 
-                        <div className="text-zinc-300 flex items-center justify-between">
-                          <span>{n.motivo}</span>
-                          <span className="text-zinc-400">
+                        <div className="text-zinc-300 flex items-center justify-between gap-2">
+                          <span className="truncate">{n.motivo}</span>
+                          <span className="text-zinc-400 shrink-0 tabular-nums">
                             {state.zonas[n.zona]?.nombre ?? n.zona} · desde D{n.diaIngreso}
                           </span>
                         </div>
 
-                        {inter && (
-                          <div className="text-[11px] text-zinc-400 flex items-center justify-between">
-                            <span>Intereses: {inter.intereses.join(', ')}</span>
-                            <span className="font-mono">
-                              Postura: {inter.posturaHaciaEstado > 0 ? '+' : ''}
-                              {inter.posturaHaciaEstado}
-                            </span>
+                        <div className="text-[11px] text-zinc-400 flex flex-wrap items-center justify-between gap-2">
+                          <span className="truncate">
+                            {inter ? `Intereses: ${inter.intereses.join(', ')}` : 'Actor comunitario'}
+                          </span>
+                          <span className={`font-mono tabular-nums capitalize shrink-0 ${posturaColor}`}>
+                            {posturaLabel} · Favor {favorVal > 0 ? '+' : ''}
+                            {Math.round(favorVal)}
+                            {precedentActive && actorRel?.precedenteHastaDia
+                              ? ` · Precedente hasta D${actorRel.precedenteHastaDia}`
+                              : ''}
+                          </span>
+                        </div>
+
+                        {actorRel && actorRel.causasRecientes.length > 0 && (
+                          <div className="text-[11px] text-zinc-400 space-y-0.5 pt-1 border-t border-zinc-700/50">
+                            {actorRel.causasRecientes.slice(0, 2).map((c, idx) => (
+                              <div key={`${c.dia}-${idx}`} className="flex items-center justify-between gap-2">
+                                <span className="truncate">{c.motivo}</span>
+                                <span
+                                  className={`font-mono tabular-nums shrink-0 ${
+                                    c.delta >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                  }`}
+                                >
+                                  {c.delta >= 0 ? '+' : ''}
+                                  {c.delta} · D{c.dia}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {(actorDemands.length > 0 || actorCommitments.length > 0) && (
+                          <div className="text-[11px] space-y-1 pt-1 border-t border-zinc-700/50">
+                            {actorDemands.map((d) => (
+                              <div
+                                key={d.id}
+                                className={`flex items-center justify-between gap-2 ${
+                                  d.esExtorsion ? 'text-rose-300' : 'text-amber-300'
+                                }`}
+                              >
+                                <span className="truncate">
+                                  {d.esExtorsion ? 'Extorsión · ' : 'Demanda · '}
+                                  {d.titulo}
+                                </span>
+                                <span className="font-mono tabular-nums shrink-0">
+                                  {d.diasRestantes}d
+                                </span>
+                              </div>
+                            ))}
+                            {actorCommitments.map((c) => (
+                              <div
+                                key={c.id}
+                                className="flex items-center justify-between gap-2 text-sky-300"
+                              >
+                                <span className="truncate">
+                                  Compromiso de {c.tipoPedido === 'via' ? 'vía' : 'obra'}
+                                </span>
+                                <span className="font-mono tabular-nums shrink-0">
+                                  hasta D{c.hastaDia}
+                                </span>
+                              </div>
+                            ))}
                           </div>
                         )}
 

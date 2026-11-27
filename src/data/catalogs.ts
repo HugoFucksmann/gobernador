@@ -1153,7 +1153,7 @@ export const ROLE_CATALOG: Record<RoleId, RoleDefinition> = {
     nombre: 'Estudiante',
     color: ROLE_COLORS.estudiante,
     edadMin: 0,
-    edadMax: 24,
+    edadMax: 17,
     educMin: 0,
     afinidad: null,
     publico: false,
@@ -2012,6 +2012,7 @@ const HITOS_ELECCIONES: HitoDefinition[] = [
       op: '>=',
       umbral: 52,
     },
+    desbloquea: ['silo', 'riego'],
   },
   {
     id: 'hito_prosperidad',
@@ -2023,6 +2024,7 @@ const HITOS_ELECCIONES: HitoDefinition[] = [
       op: '>=',
       umbral: 55,
     },
+    desbloquea: ['muralla', 'hospital_campana'],
   },
 ];
 
@@ -2037,6 +2039,7 @@ const HITOS_ZOMBIES: HitoDefinition[] = [
       op: '<=',
       umbral: 15,
     },
+    desbloquea: ['muralla', 'hospital_campana'],
   },
   {
     id: 'hito_prosperidad',
@@ -2048,6 +2051,7 @@ const HITOS_ZOMBIES: HitoDefinition[] = [
       op: '>=',
       umbral: 80,
     },
+    desbloquea: ['silo', 'riego'],
   },
 ];
 

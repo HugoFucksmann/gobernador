@@ -647,7 +647,7 @@ export function updateLecturaDaily(state: GameState, derived: CommunityDerived):
   lectura.ultimoDiaActualizado = dia;
 }
 
-function deriveNotablesPayday(state: GameState, prevNotables: LecturaNotable[]): LecturaNotable[] {
+export function deriveNotablesPayday(state: GameState, prevNotables: LecturaNotable[]): LecturaNotable[] {
   const vivos = state.npcs.filter((n) => n.vivo);
   const pop = Math.max(1, vivos.length);
   const cap = Math.min(

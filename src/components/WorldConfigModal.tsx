@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { AlertCircle, FolderOpen, Save, X } from 'lucide-react';
-import { DEFAULT_CHAOS_LIMITS, SCENARIO_PRESETS } from '../data/catalogs';
+import { DEFAULT_CHAOS_LIMITS, SCENARIO_PRESETS, STABILITY_PROFILES } from '../data/catalogs';
 import { SaveSlotMeta } from '../engine/gameController';
 import { getGovernorLevel } from '../engine/policies';
 import { isTestConfig, resolveComplexityConfig } from '../engine/worldGenerator';
 import {
   EconomyModule,
   GovernorComplexityLevel,
+  StabilityProfileId,
   WorldComplexityLevel,
   WorldConfig,
 } from '../types/game';
@@ -69,6 +70,7 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
       nivelMundo: resolved.nivelMundo,
       nivelGobernador: resolved.nivelGobernador,
       estadoAutomatico: resolved.estadoAutomatico,
+      perfilEstabilidad: config.perfilEstabilidad ?? 'normal',
       cantidadMedios: nextPreset.mediosDefault,
       poblacionInicial: config.poblacionInicial || nextPreset.poblacionDefault,
       caos: { ...nextPreset.caosDefault },
@@ -281,6 +283,33 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
                     {m.label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
+                <span>Perfil de estabilidad</span>
+                <HintIcon
+                  text="Regula frecuencia de fenómenos, holgura fiscal inicial, cobertura de servicios y factor de contagio social."
+                  placement="top"
+                />
+              </div>
+              <div className="grid grid-cols-4 gap-1 p-1 bg-zinc-800 rounded-xl">
+                {(['estable', 'normal', 'fragil', 'extremo'] as StabilityProfileId[]).map((pid) => {
+                  const active = (config.perfilEstabilidad ?? 'normal') === pid;
+                  return (
+                    <button
+                      key={pid}
+                      type="button"
+                      onClick={() => setConfig({ ...config, perfilEstabilidad: pid })}
+                      className={`py-2 px-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                        active ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {STABILITY_PROFILES[pid].nombre}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

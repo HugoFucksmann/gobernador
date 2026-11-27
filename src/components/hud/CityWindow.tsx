@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  ACTION_TABLE,
   BUILDING_CATALOG,
   ROLE_CATALOG,
   SCENARIO_PRESETS,
@@ -45,7 +46,16 @@ type FactCategoryFilter =
   | 'obras'
   | 'clima'
   | 'caos'
+  | 'rarezas'
   | 'prensa';
+
+const RAREZA_ACTION_IDS = new Set(
+  ACTION_TABLE.filter(
+    (a) =>
+      a.tipo === 'espontanea' &&
+      a.efectos.every((e) => e.id === 'decorativa' || (e.id === 'anima' && (e.intensidad ?? 'baja') === 'baja'))
+  ).map((a) => a.id)
+);
 
 function classifyFactCategory(
   simEvent: SimEvent | undefined,
@@ -102,8 +112,15 @@ function classifyFactCategory(
       case 'aviso':
         return 'clima';
       case 'accion_inicio':
+        return RAREZA_ACTION_IDS.has(simEvent.accion) ? 'rarezas' : 'caos';
       case 'golpe':
       case 'demanda':
+      case 'demanda_aceptada':
+      case 'demanda_rechazada':
+      case 'demanda_incumplida':
+      case 'contraoferta':
+      case 'extorsion':
+      case 'colapso':
       case 'medida':
         return 'caos';
       case 'noticia':
@@ -115,6 +132,7 @@ function classifyFactCategory(
     }
   }
   const hay = `${titulo} ${detalle}`.toLowerCase();
+  if (bitCat === 'rarezas' || hay.includes('rareza:')) return 'rarezas';
   if (bitCat === 'clima') return 'clima';
   if (bitCat === 'caos') return 'caos';
   if (bitCat === 'prensa') return 'prensa';
@@ -246,8 +264,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
   const announcedFenomenos = getAnnouncedPhenomena(state);
   const govLevel = getGovernorLevel(state.config);
   const isG0 = isObserverMode(state.config);
-  const isG1 = govLevel === 'G1';
-  const isG3 = govLevel === 'G3';
+  const isG4 = govLevel === 'G4';
 
   const activeAlerts: Array<{
     id: string;
@@ -432,8 +449,11 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                       className="rounded-xl p-3.5 border border-amber-500/50 bg-amber-950/35 text-sm space-y-2"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <UiTooltip text={`${dem.razon} · Si rechazas: ${dem.amenaza}`}>
+                        <UiTooltip text={`${dem.razon} · Si rechazas o vence: ${dem.amenaza}`}>
                           <div className="font-semibold text-white cursor-help">
+                            {dem.esExtorsion && (
+                              <span className="text-rose-400 mr-1.5">Extorsión ·</span>
+                            )}
                             {dem.actorNombre}: {dem.pedido.etiqueta}
                           </div>
                         </UiTooltip>
@@ -453,7 +473,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                         >
                           Aceptar
                         </button>
-                        {isG3 && (
+                        {isG4 && (
                           <button
                             type="button"
                             disabled={isG0}
@@ -484,7 +504,9 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                 </div>
               )}
 
-              {(state.medidasVigentes.length > 0 || state.bloqueosPalanca.length > 0) && (
+              {(state.medidasVigentes.length > 0 ||
+                state.bloqueosPalanca.length > 0 ||
+                (state.compromisosObra?.length ?? 0) > 0) && (
                 <div className="bg-zinc-800/55 rounded-xl p-3.5 space-y-1.5 text-xs">
                   <div className="font-semibold text-zinc-200">Vigentes</div>
                   {state.bloqueosPalanca.map((b) => (
@@ -494,6 +516,16 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                         {b.motivo}
                       </span>
                       <span className="font-mono tabular-nums">D{b.hastaDia}</span>
+                    </div>
+                  ))}
+                  {(state.compromisosObra ?? []).map((c) => (
+                    <div key={c.id} className="flex items-center justify-between text-amber-200">
+                      <span className="flex items-center gap-1.5">
+                        <Hammer className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        {c.esExtorsion ? 'Extorsión · ' : ''}
+                        {c.actorNombre}: {c.tipoPedido === 'via' ? 'abrir vía' : `construir ${c.obraPedido.tipoEdificio ?? 'obra'}`}
+                      </span>
+                      <span className="font-mono tabular-nums shrink-0 ml-2">hasta D{c.hastaDia}</span>
                     </div>
                   ))}
                   {state.medidasVigentes.map((m) => (
@@ -813,7 +845,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                     const connectable = isViaConnectableToNetwork(state, t);
                     const isOpenable = !t.construida && !t.enObra && connectable;
                     const noFunds = state.gobierno.reserva < t.costoObra;
-                    const viaBlockedByGov = isG0 || isG1;
+                    const viaBlockedByGov = isG0;
                     const zA = state.zonas[t.zonaA]?.nombre ?? t.zonaA;
                     const zB = t.zonaB ? state.zonas[t.zonaB]?.nombre ?? t.zonaB : null;
 
@@ -882,7 +914,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
                               }}
                               className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl disabled:opacity-40 whitespace-nowrap shrink-0"
                             >
-                              {viaBlockedByGov ? 'G2+' : noFunds ? 'Sin caja' : 'Construir'}
+                              {viaBlockedByGov ? 'Auto' : noFunds ? 'Sin caja' : 'Construir'}
                             </button>
                           )}
                         </div>
@@ -1201,7 +1233,7 @@ export const CityWindow: React.FC<CityWindowProps> = ({
 
                 <div className="flex flex-wrap items-center gap-1.5">
                   {(
-                    ['todas', 'vida', 'familia', 'mercado', 'vivienda', 'obras', 'clima', 'caos', 'prensa'] as const
+                    ['todas', 'vida', 'familia', 'mercado', 'vivienda', 'obras', 'clima', 'caos', 'rarezas', 'prensa'] as const
                   ).map((c) => (
                     <button
                       key={c}

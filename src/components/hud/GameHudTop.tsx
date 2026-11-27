@@ -435,20 +435,28 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
                     onClick={onOpenEconomia}
                     className="px-2 py-1 rounded-lg bg-zinc-800/75 hover:bg-zinc-800 text-zinc-200 whitespace-nowrap shrink-0"
                   >
-                    Pago {daysToClose}d
+                    Cierre {daysToClose}d
                   </button>
                 </UiTooltip>
-                {state.demandasActivas.length > 0 && (
-                  <UiTooltip text="Demandas abiertas que requieren respuesta del gobernador">
-                    <button
-                      type="button"
-                      onClick={onOpenDemandas}
-                      className="px-2 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-200 hover:bg-amber-900/60 whitespace-nowrap shrink-0"
-                    >
-                      Demanda {state.demandasActivas[0].diasRestantes}d
-                    </button>
-                  </UiTooltip>
-                )}
+                {state.demandasActivas.length > 0 && (() => {
+                  const ext = state.demandasActivas.find((d) => d.esExtorsion);
+                  const d = ext ?? state.demandasActivas[0];
+                  return (
+                    <UiTooltip text="Demandas abiertas que requieren respuesta del gobernador">
+                      <button
+                        type="button"
+                        onClick={onOpenDemandas}
+                        className={`px-2 py-1 rounded-lg border whitespace-nowrap shrink-0 ${
+                          ext
+                            ? 'bg-rose-950/75 border-rose-500/50 text-rose-200 hover:bg-rose-900/60'
+                            : 'bg-amber-950/70 border-amber-500/40 text-amber-200 hover:bg-amber-900/60'
+                        }`}
+                      >
+                        {ext ? 'Extorsión' : 'Demanda'} {d.diasRestantes}d
+                      </button>
+                    </UiTooltip>
+                  );
+                })()}
               </div>
             </>
           )}

@@ -28,8 +28,10 @@ import {
   getBuildingJobCaps,
   getGovernorLevel,
   getObrasTargetJobs,
+  isGovernorAtLeast,
   isObserverMode,
 } from '../../engine/policies';
+import { EXTRA_LEVER_BOUNDS } from '../../engine/simulation';
 import {
   CommunityDerived,
   GameState,
@@ -142,8 +144,10 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
   const govLevel = getGovernorLevel(state.config);
   const isG0 = isObserverMode(state.config);
   const isG1 = govLevel === 'G1';
-  const isG3 = govLevel === 'G3';
-  const showTopeEmision = mod === 'fiscal' && isG3;
+  const isG2Plus = isGovernorAtLeast(state.config, 'G2');
+  const isG3Plus = isGovernorAtLeast(state.config, 'G3');
+  const isG4 = govLevel === 'G4';
+  const showTopeEmision = mod === 'fiscal' && isG4;
 
   const obj = state.gobierno.palancasObjetivo;
   const vig = state.gobierno.palancasVigentes;
@@ -195,29 +199,35 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
 
   const hasPendingCore =
     Math.abs(obj.impuesto - vig.impuesto) >= 0.01 ||
-    Math.abs(obj.ayudaSocial - vig.ayudaSocial) >= 0.01 ||
-    Math.abs(obj.garantiaAlimentaria - vig.garantiaAlimentaria) >= 0.01 ||
-    (!isG1 &&
-      (Math.abs(obj.salarioPublico - vig.salarioPublico) >= 0.01 ||
-        Math.abs(obj.prensa - vig.prensa) >= 0.01 ||
+    Math.abs(obj.salarioPublico - vig.salarioPublico) >= 0.01 ||
+    obj.nivelObras !== vig.nivelObras ||
+    (isG2Plus &&
+      (Math.abs(obj.ayudaSocial - vig.ayudaSocial) >= 0.01 ||
+        Math.abs(obj.garantiaAlimentaria - vig.garantiaAlimentaria) >= 0.01)) ||
+    (isG3Plus &&
+      (Math.abs(obj.prensa - vig.prensa) >= 0.01 ||
         obj.precioMaximo !== vig.precioMaximo ||
-        obj.comercioExterior !== vig.comercioExterior ||
-        obj.nivelObras !== vig.nivelObras)) ||
+        obj.comercioExterior !== vig.comercioExterior)) ||
     (showTopeEmision && Math.abs(obj.topeEmision - vig.topeEmision) >= 0.01);
 
   const hasPendingExtras =
-    isG3 &&
-    (Math.abs(extrasObj.subsidioAlimento - extrasVig.subsidioAlimento) >= 0.01 ||
-      Math.abs(extrasObj.presion - extrasVig.presion) >= 0.01 ||
-      Math.abs(extrasObj.acceso - extrasVig.acceso) >= 0.01);
+    (isG3Plus &&
+      (Math.abs(extrasObj.subsidioAlimento - extrasVig.subsidioAlimento) >= 0.01 ||
+        Math.abs(extrasObj.nivelEducacion - extrasVig.nivelEducacion) >= 0.01)) ||
+    (isG4 &&
+      (Math.abs(extrasObj.presion - extrasVig.presion) >= 0.01 ||
+        Math.abs(extrasObj.acceso - extrasVig.acceso) >= 0.01));
 
   const hasPendingChanges = !isG0 && (hasPendingCore || hasPendingExtras);
 
   const resetPending = () => {
     if (isG0) return;
     onUpdateLevers(() => ({ ...vig }));
-    if (isG3 && onSetExtraLever) {
+    if (isG3Plus && onSetExtraLever) {
       onSetExtraLever('subsidioAlimento', extrasVig.subsidioAlimento);
+      onSetExtraLever('nivelEducacion', extrasVig.nivelEducacion);
+    }
+    if (isG4 && onSetExtraLever) {
       onSetExtraLever('presion', extrasVig.presion);
       onSetExtraLever('acceso', extrasVig.acceso);
     }
@@ -265,7 +275,7 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                 ? 'Estado automático activo: el gobierno ajusta las palancas solo.'
                 : govLevel === 'G0'
                 ? 'Modo G0: controles automáticos.'
-                : 'Modo G1: impuesto, ayuda, garantía y parcelas.'}
+                : 'Modo G1: construir (edificios y vías), impuesto, salario público y nivel de obras.'}
             </div>
           )}
 
@@ -342,41 +352,41 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               onChange={(val) => onUpdateLevers((p) => ({ ...p, impuesto: val }))}
             />
 
-            {!isG1 && (
+            <NumericSlider
+              label="Salario público"
+              tooltip={`${publicEmployeesNow}/${budget.totalPublicJobs} puestos · Nómina est.: $${budget.nominaEst.toFixed(0)}/per ($${dailyWagePerEmp.toFixed(2)}/d por empleado).`}
+              vigente={vig.salarioPublico}
+              objetivo={obj.salarioPublico}
+              min={LEVER_BOUNDS.salarioPublico.min}
+              max={LEVER_BOUNDS.salarioPublico.max}
+              step={LEVER_BOUNDS.salarioPublico.step}
+              lockNote={getLockNote('salarioPublico')}
+              disabled={isG0}
+              valueLabel={`${obj.salarioPublico}%`}
+              vigenteLabel={`${vig.salarioPublico}%`}
+              onChange={(val) => onUpdateLevers((p) => ({ ...p, salarioPublico: val }))}
+            />
+
+            {isG2Plus && (
               <NumericSlider
-                label="Salario público"
-                tooltip={`${publicEmployeesNow}/${budget.totalPublicJobs} puestos · Nómina est.: $${budget.nominaEst.toFixed(0)}/per ($${dailyWagePerEmp.toFixed(2)}/d por empleado).`}
-                vigente={vig.salarioPublico}
-                objetivo={obj.salarioPublico}
-                min={LEVER_BOUNDS.salarioPublico.min}
-                max={LEVER_BOUNDS.salarioPublico.max}
-                step={LEVER_BOUNDS.salarioPublico.step}
-                lockNote={getLockNote('salarioPublico')}
+                label="Ayuda social"
+                tooltip={`${socialBeneficiaries} beneficiarios (desempleados y jubilados) · Costo est.: $${budget.ayudaSocialEst.toFixed(0)}/per.`}
+                vigente={vig.ayudaSocial}
+                objetivo={obj.ayudaSocial}
+                min={LEVER_BOUNDS.ayudaSocial.min}
+                max={LEVER_BOUNDS.ayudaSocial.max}
+                step={LEVER_BOUNDS.ayudaSocial.step}
+                unit=" $/d"
+                accent="amber"
+                lockNote={getLockNote('ayudaSocial')}
                 disabled={isG0}
-                valueLabel={`${obj.salarioPublico}%`}
-                vigenteLabel={`${vig.salarioPublico}%`}
-                onChange={(val) => onUpdateLevers((p) => ({ ...p, salarioPublico: val }))}
+                valueLabel={`$${obj.ayudaSocial.toFixed(1)}/d`}
+                vigenteLabel={`$${vig.ayudaSocial.toFixed(1)}/d`}
+                onChange={(val) => onUpdateLevers((p) => ({ ...p, ayudaSocial: val }))}
               />
             )}
 
-            <NumericSlider
-              label="Ayuda social"
-              tooltip={`${socialBeneficiaries} beneficiarios (desempleados y jubilados) · Costo est.: $${budget.ayudaSocialEst.toFixed(0)}/per.`}
-              vigente={vig.ayudaSocial}
-              objetivo={obj.ayudaSocial}
-              min={LEVER_BOUNDS.ayudaSocial.min}
-              max={LEVER_BOUNDS.ayudaSocial.max}
-              step={LEVER_BOUNDS.ayudaSocial.step}
-              unit=" $/d"
-              accent="amber"
-              lockNote={getLockNote('ayudaSocial')}
-              disabled={isG0}
-              valueLabel={`$${obj.ayudaSocial.toFixed(1)}/d`}
-              vigenteLabel={`$${vig.ayudaSocial.toFixed(1)}/d`}
-              onChange={(val) => onUpdateLevers((p) => ({ ...p, ayudaSocial: val }))}
-            />
-
-            {!isG1 && (
+            {isG3Plus && (
               <NumericSlider
                 label="Prensa (pauta)"
                 tooltip={`Reparto parejo entre ${state.medios.length} medio(s): $${(obj.prensa / Math.max(1, state.medios.length)).toFixed(1)}/per cada uno.`}
@@ -428,60 +438,58 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               )}
             </div>
 
-            {!isG1 && (
-              <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between gap-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="font-semibold text-white">Nivel de Obras</span>
-                    <HintIcon
-                      text={`${obrasRow.label}: ${derived.roles.ingeniero}/${obrasTarget} ingenieros · velocidad x${obrasRow.diasObraFactor.toFixed(2)} días · repara vías y edificios.`}
-                      placement="top"
-                    />
-                    {obrasLockNote && (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-300">
-                        <Lock className="w-3 h-3" />
-                        {obrasLockNote}
-                      </span>
-                    )}
-                  </div>
-                  <span
-                    className={`font-mono text-sm font-bold tabular-nums ${
-                      state.gobierno.indicadores.infraestructura < 35 ? 'text-rose-400' : 'text-emerald-400'
-                    }`}
-                  >
-                    {Math.round(state.gobierno.indicadores.infraestructura)}%
-                  </span>
+            <div className="bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <Wrench className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="font-semibold text-white">Nivel de Obras</span>
+                  <HintIcon
+                    text={`${obrasRow.label}: ${derived.roles.ingeniero}/${obrasTarget} ingenieros · velocidad x${obrasRow.diasObraFactor.toFixed(2)} días · repara vías y edificios.`}
+                    placement="top"
+                  />
+                  {obrasLockNote && (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-300">
+                      <Lock className="w-3 h-3" />
+                      {obrasLockNote}
+                    </span>
+                  )}
                 </div>
-
-                <div className="grid grid-cols-6 gap-1.5">
-                  {([0, 1, 2, 3, 4, 5] as ServiceLevel[]).map((lvl) => {
-                    const row = OBRAS_LEVEL_TABLE[lvl];
-                    const selected = obj.nivelObras === lvl;
-                    return (
-                      <UiTooltip
-                        key={lvl}
-                        text={`${row.label}: ${row.puestosPct}% puestos · $${row.operacionPeriodo}/per`}
-                        placement="top"
-                      >
-                        <button
-                          type="button"
-                          disabled={isG0 || Boolean(obrasLockNote)}
-                          onClick={() => onUpdateLevers((p) => ({ ...p, nivelObras: lvl }))}
-                          className={`w-full py-2 px-1 rounded-xl border text-center transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
-                            selected
-                              ? 'bg-emerald-600 border-emerald-400 text-white'
-                              : 'bg-zinc-900/80 hover:bg-zinc-800 border-zinc-700 text-zinc-300'
-                          }`}
-                        >
-                          <div className="text-xs font-mono font-bold">N{lvl}</div>
-                        </button>
-                      </UiTooltip>
-                    );
-                  })}
-                </div>
+                <span
+                  className={`font-mono text-sm font-bold tabular-nums ${
+                    state.gobierno.indicadores.infraestructura < 35 ? 'text-rose-400' : 'text-emerald-400'
+                  }`}
+                >
+                  {Math.round(state.gobierno.indicadores.infraestructura)}%
+                </span>
               </div>
-            )}
+
+              <div className="grid grid-cols-6 gap-1.5">
+                {([0, 1, 2, 3, 4, 5] as ServiceLevel[]).map((lvl) => {
+                  const row = OBRAS_LEVEL_TABLE[lvl];
+                  const selected = obj.nivelObras === lvl;
+                  return (
+                    <UiTooltip
+                      key={lvl}
+                      text={`${row.label}: ${row.puestosPct}% puestos · $${row.operacionPeriodo}/per`}
+                      placement="top"
+                    >
+                      <button
+                        type="button"
+                        disabled={isG0 || Boolean(obrasLockNote)}
+                        onClick={() => onUpdateLevers((p) => ({ ...p, nivelObras: lvl }))}
+                        className={`w-full py-2 px-1 rounded-xl border text-center transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
+                          selected
+                            ? 'bg-emerald-600 border-emerald-400 text-white'
+                            : 'bg-zinc-900/80 hover:bg-zinc-800 border-zinc-700 text-zinc-300'
+                        }`}
+                      >
+                        <div className="text-xs font-mono font-bold">N{lvl}</div>
+                      </button>
+                    </UiTooltip>
+                  );
+                })}
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
               <UiTooltip text={`Policías ${derived.roles.policia}/${caps.policia} · Construir en parcelas`} placement="top">
@@ -525,20 +533,22 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
               </span>
             </div>
 
-            <NumericSlider
-              label="Garantía alimentaria"
-              tooltip={`Cubre el faltante a quien no alcanza a comprar (menores siempre 100%). Costo est.: ~$${budget.garantiaEst.toFixed(0)}/per.`}
-              vigente={vig.garantiaAlimentaria}
-              objetivo={obj.garantiaAlimentaria}
-              min={LEVER_BOUNDS.garantiaAlimentaria.min}
-              max={LEVER_BOUNDS.garantiaAlimentaria.max}
-              step={LEVER_BOUNDS.garantiaAlimentaria.step}
-              lockNote={getLockNote('garantiaAlimentaria')}
-              disabled={isG0}
-              onChange={(val) => onUpdateLevers((p) => ({ ...p, garantiaAlimentaria: val }))}
-            />
+            {isG2Plus && (
+              <NumericSlider
+                label="Garantía alimentaria"
+                tooltip={`Cubre el faltante a quien no alcanza a comprar (menores siempre 100%). Costo est.: ~$${budget.garantiaEst.toFixed(0)}/per.`}
+                vigente={vig.garantiaAlimentaria}
+                objetivo={obj.garantiaAlimentaria}
+                min={LEVER_BOUNDS.garantiaAlimentaria.min}
+                max={LEVER_BOUNDS.garantiaAlimentaria.max}
+                step={LEVER_BOUNDS.garantiaAlimentaria.step}
+                lockNote={getLockNote('garantiaAlimentaria')}
+                disabled={isG0}
+                onChange={(val) => onUpdateLevers((p) => ({ ...p, garantiaAlimentaria: val }))}
+              />
+            )}
 
-            {!isG1 && (
+            {isG3Plus && (
               <>
                 <div className="space-y-2.5 bg-zinc-800/50 border border-zinc-700/60 rounded-xl p-3.5">
                   <div className="flex items-center justify-between text-sm">
@@ -634,12 +644,12 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
             )}
           </section>
 
-          {/* 4. Controles G3 avanzados */}
-          {isG3 && onSetExtraLever && (
+          {/* 4. Controles G3 / G4 avanzados */}
+          {isG3Plus && onSetExtraLever && (
             <section className="pt-3 border-t border-zinc-800 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-white">
                 <GraduationCap className="w-4 h-4 text-emerald-400" />
-                <span>Profundidad G3</span>
+                <span>Políticas sectoriales (G3+)</span>
               </div>
 
               <NumericSlider
@@ -647,9 +657,9 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                 tooltip={`Impulsa +${(LEVEL11_CONSTANTS.subsidioProdPorPunto * 100).toFixed(1)}% producción agro por cada punto porcentual, pagado por el Estado.`}
                 vigente={extrasVig.subsidioAlimento}
                 objetivo={extrasObj.subsidioAlimento}
-                min={0}
-                max={30}
-                step={1}
+                min={EXTRA_LEVER_BOUNDS.subsidioAlimento.min}
+                max={EXTRA_LEVER_BOUNDS.subsidioAlimento.max}
+                step={EXTRA_LEVER_BOUNDS.subsidioAlimento.step}
                 unit="%"
                 disabled={isG0}
                 onChange={(val) => {
@@ -657,41 +667,60 @@ export const LeversWindow: React.FC<LeversWindowProps> = ({
                 }}
               />
 
-              <div className="pt-2 border-t border-zinc-800/80 space-y-4">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
-                  <Newspaper className="w-3.5 h-3.5" />
-                  <span>Relación con medios (G3)</span>
+              <NumericSlider
+                label="Presupuesto educativo"
+                tooltip={`Fija el impulso formativo N0–N5 ($${extrasObj.nivelEducacion * 18}/per estimado) para acelerar escuelas y capacitación técnica.`}
+                vigente={extrasVig.nivelEducacion}
+                objetivo={extrasObj.nivelEducacion}
+                min={EXTRA_LEVER_BOUNDS.nivelEducacion.min}
+                max={EXTRA_LEVER_BOUNDS.nivelEducacion.max}
+                step={EXTRA_LEVER_BOUNDS.nivelEducacion.step}
+                unit=""
+                valueLabel={`N${extrasObj.nivelEducacion}`}
+                vigenteLabel={`N${extrasVig.nivelEducacion}`}
+                disabled={isG0}
+                onChange={(val) => {
+                  onSetExtraLever('nivelEducacion', val);
+                }}
+              />
+
+              {isG4 && (
+                <div className="pt-2 border-t border-zinc-800/80 space-y-4">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
+                    <Newspaper className="w-3.5 h-3.5" />
+                    <span>Relación con medios (G4)</span>
+                  </div>
+
+                  <NumericSlider
+                    label="Acceso oficial a medios"
+                    tooltip={`Aumenta alcance y credibilidad mediática; costo $${LEVEL11_CONSTANTS.accesoCostoPorPunto}/punto por período.`}
+                    vigente={extrasVig.acceso}
+                    objetivo={extrasObj.acceso}
+                    min={EXTRA_LEVER_BOUNDS.acceso.min}
+                    max={EXTRA_LEVER_BOUNDS.acceso.max}
+                    step={EXTRA_LEVER_BOUNDS.acceso.step}
+                    disabled={isG0}
+                    onChange={(val) => {
+                      onSetExtraLever('acceso', val);
+                    }}
+                  />
+
+                  <NumericSlider
+                    label="Presión editorial"
+                    tooltip={`Fuerza afinidad editorial, pero sobre ${LEVEL11_CONSTANTS.presionUmbral}% reduce credibilidad de la prensa.`}
+                    vigente={extrasVig.presion}
+                    objetivo={extrasObj.presion}
+                    min={EXTRA_LEVER_BOUNDS.presion.min}
+                    max={EXTRA_LEVER_BOUNDS.presion.max}
+                    step={EXTRA_LEVER_BOUNDS.presion.step}
+                    accent="amber"
+                    disabled={isG0}
+                    onChange={(val) => {
+                      onSetExtraLever('presion', val);
+                    }}
+                  />
                 </div>
-
-                <NumericSlider
-                  label="Acceso oficial a medios"
-                  tooltip={`Aumenta alcance y credibilidad mediática; costo $${LEVEL11_CONSTANTS.accesoCostoPorPunto}/punto por período.`}
-                  vigente={extrasVig.acceso}
-                  objetivo={extrasObj.acceso}
-                  min={0}
-                  max={100}
-                  step={5}
-                  disabled={isG0}
-                  onChange={(val) => {
-                    onSetExtraLever('acceso', val);
-                  }}
-                />
-
-                <NumericSlider
-                  label="Presión editorial"
-                  tooltip={`Fuerza afinidad editorial, pero sobre ${LEVEL11_CONSTANTS.presionUmbral}% reduce credibilidad de la prensa.`}
-                  vigente={extrasVig.presion}
-                  objetivo={extrasObj.presion}
-                  min={0}
-                  max={100}
-                  step={5}
-                  accent="amber"
-                  disabled={isG0}
-                  onChange={(val) => {
-                    onSetExtraLever('presion', val);
-                  }}
-                />
-              </div>
+              )}
             </section>
           )}
         </div>

@@ -268,11 +268,35 @@ export const EconomyWindow: React.FC<EconomyWindowProps> = ({
                 </div>
                 <div className="bg-zinc-800/55 rounded-xl p-3">
                   <span className="font-sans text-zinc-400 block">Constructoras</span>
-                  <span className="font-bold text-sm text-emerald-400">
+                  <span
+                    className={`font-bold text-sm ${
+                      (derived.constructoraSalud?.firmas ?? 0) === 0 ? 'text-amber-300' : 'text-emerald-400'
+                    }`}
+                  >
                     {derived.constructoraSalud?.firmas ?? 0} ({Math.round((derived.constructoraSalud?.factorMedio ?? 1) * 100)}%)
                   </span>
                 </div>
               </div>
+
+              {((derived.constructoraSalud?.firmas ?? 0) === 0 ||
+                (state.obrasSinCapacidadEnPeriodo ?? 0) > 0 ||
+                (state.obraDirectaSinCapacidadPeriodos ?? 0) > 0) && (
+                <div className="bg-amber-950/35 border border-amber-500/40 rounded-xl px-3 py-2 text-xs text-amber-200 flex items-center justify-between gap-2">
+                  <span>
+                    {(derived.constructoraSalud?.firmas ?? 0) === 0
+                      ? 'Obra directa sin constructora (+35% costo y +40% plazo)'
+                      : 'Obras con capacidad saturada en el período'}
+                  </span>
+                  <span className="font-mono tabular-nums shrink-0 text-amber-300">
+                    {(state.obrasSinCapacidadEnPeriodo ?? 0) > 0
+                      ? `${state.obrasSinCapacidadEnPeriodo} obra(s)`
+                      : ''}
+                    {(state.obraDirectaSinCapacidadPeriodos ?? 0) > 0
+                      ? ` · racha ${state.obraDirectaSinCapacidadPeriodos}/2`
+                      : ''}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

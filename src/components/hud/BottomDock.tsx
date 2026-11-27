@@ -18,9 +18,16 @@ import {
 import { ROLE_CATALOG } from '../../data/catalogs';
 import { isObserverMode } from '../../engine/policies';
 import { GameState, ZoneId } from '../../types/game';
-import { MapFilter, MapLens, WindowId } from '../../types/ui';
+import { CoverageServiceFilter, MapFilter, MapLens, WindowId } from '../../types/ui';
 import { InspectorDirectoryTab } from '../../hooks/useGameSession';
 import { UiTooltip } from './UiTooltip';
+
+const COVERAGE_SERVICE_OPTIONS: Array<{ id: CoverageServiceFilter; label: string }> = [
+  { id: 'escuela', label: 'Escuela' },
+  { id: 'universidad', label: 'Universidad' },
+  { id: 'salud', label: 'Salud' },
+  { id: 'policia', label: 'Policía' },
+];
 
 interface BottomDockProps {
   state: GameState;
@@ -28,6 +35,7 @@ interface BottomDockProps {
   directoryOpen?: InspectorDirectoryTab | null;
   openWindows: WindowId[];
   mapLens: MapLens;
+  coverageService?: CoverageServiceFilter;
   mapFilter: MapFilter;
   devMode: boolean;
   hasConditionAlert?: boolean;
@@ -35,6 +43,7 @@ interface BottomDockProps {
   onOpenDirectory: (tab: InspectorDirectoryTab) => void;
   onToggleWindow: (win: WindowId) => void;
   onChangeLens: (lens: MapLens) => void;
+  onChangeCoverageService?: (svc: CoverageServiceFilter) => void;
   onChangeFilter: (filter: MapFilter) => void;
   onJumpZone: (z: ZoneId | 'all') => void;
   onZoom: (delta: number) => void;
@@ -153,6 +162,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   directoryOpen,
   openWindows,
   mapLens,
+  coverageService = 'salud',
   mapFilter,
   devMode,
   hasConditionAlert,
@@ -160,6 +170,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   onOpenDirectory,
   onToggleWindow,
   onChangeLens,
+  onChangeCoverageService,
   onChangeFilter,
   onJumpZone,
   onZoom,
@@ -205,7 +216,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
         <div className="pointer-events-auto w-[360px] max-w-[calc(100vw-24px)] bg-zinc-900/95 backdrop-blur-md border border-zinc-700/80 rounded-2xl p-4 shadow-2xl space-y-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-400">Capas del mapa (12)</span>
+              <span className="text-xs font-semibold text-zinc-400">Capas del mapa (13)</span>
               {mapLens !== 'ninguna' && (
                 <button
                   type="button"
@@ -235,6 +246,29 @@ export const BottomDock: React.FC<BottomDockProps> = ({
                 );
               })}
             </div>
+            {mapLens === 'cobertura' && onChangeCoverageService && (
+              <div className="pt-2 space-y-1.5 border-t border-zinc-800/80">
+                <span className="text-[11px] font-semibold text-zinc-400 block">
+                  Servicio a medir
+                </span>
+                <div className="grid grid-cols-4 gap-1 bg-zinc-950/60 p-1 rounded-xl">
+                  {COVERAGE_SERVICE_OPTIONS.map((svc) => (
+                    <button
+                      key={svc.id}
+                      type="button"
+                      onClick={() => onChangeCoverageService(svc.id)}
+                      className={`py-1.5 px-1 rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                        coverageService === svc.id
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {svc.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2 pt-2 border-t border-zinc-800">
@@ -439,7 +473,29 @@ export const BottomDock: React.FC<BottomDockProps> = ({
 
       {/* Active Lens Legend (only when a layer is active) */}
       {legendItems.length > 0 && popover !== 'capas' && (
-        <div className="pointer-events-none flex flex-wrap items-center justify-center gap-3 bg-zinc-900/90 backdrop-blur-sm border border-zinc-700/70 rounded-xl px-3.5 py-1.5 text-xs text-zinc-200 shadow-lg">
+        <div
+          className={`${
+            mapLens === 'cobertura' ? 'pointer-events-auto' : 'pointer-events-none'
+          } flex flex-wrap items-center justify-center gap-3 bg-zinc-900/90 backdrop-blur-sm border border-zinc-700/70 rounded-xl px-3.5 py-1.5 text-xs text-zinc-200 shadow-lg`}
+        >
+          {mapLens === 'cobertura' && onChangeCoverageService && (
+            <div className="flex items-center gap-1 pr-2 border-r border-zinc-700/80">
+              {COVERAGE_SERVICE_OPTIONS.map((svc) => (
+                <button
+                  key={svc.id}
+                  type="button"
+                  onClick={() => onChangeCoverageService(svc.id)}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                    coverageService === svc.id
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                  }`}
+                >
+                  {svc.label}
+                </button>
+              ))}
+            </div>
+          )}
           {legendItems.map((item) => (
             <span key={item.label} className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: item.color }} />

@@ -137,8 +137,8 @@ export const TemaDrawer: React.FC<TemaDrawerProps> = ({
             <h3 className="text-sm font-bold text-white truncate">
               {INDICATOR_LABELS[indicatorId]}
             </h3>
-            <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-lg border ${badge.bg} ${badge.text}`}>
-              {badge.label}
+            <span className={`text-[11px] font-semibold shrink-0 ${badge.text}`}>
+              · {badge.label}
             </span>
           </div>
           <p className="text-xs text-zinc-400 truncate mt-0.5">{formatLecturaTexto(ind.texto)}</p>

@@ -3,6 +3,7 @@ import {
   ACTION_TABLE,
   BUILDING_CATALOG,
   ROLE_CATALOG,
+  SERVICE_RADIUS_CONSTANTS,
 } from '../data/catalogs';
 import {
   evaluateNpcBubbleText,
@@ -15,7 +16,11 @@ import {
   HospitalFacilityInfo,
   TICKS_PER_DAY,
 } from '../engine/simulation';
-import { isViaConnectableToNetwork } from '../engine/worldHelpers';
+import {
+  buildTraversableZoneStepMap,
+  computeZoneServiceCoverage,
+  isViaConnectableToNetwork,
+} from '../engine/worldHelpers';
 import {
   BuildingType,
   Casa,
@@ -32,7 +37,7 @@ import {
   ZoneDefinition,
   ZoneId,
 } from '../types/game';
-import { CameraTarget, MapFilter, MapHoverPreview, MapLens } from '../types/ui';
+import { CameraTarget, CoverageServiceFilter, MapFilter, MapHoverPreview, MapLens } from '../types/ui';
 
 export type { CameraTarget, MapFilter, MapLens };
 
@@ -48,6 +53,7 @@ interface CityWorldCanvasProps {
   hoveredPreview?: MapHoverPreview | null;
   filter: MapFilter;
   lens: MapLens;
+  coverageService?: CoverageServiceFilter;
   lecturaHeatIndicator?: LecturaIndicadorId | null;
   followSelected: boolean;
   cameraTarget: CameraTarget | null;
@@ -1132,6 +1138,7 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   hoveredPreview = null,
   filter,
   lens,
+  coverageService = 'salud',
   lecturaHeatIndicator = null,
   followSelected,
   cameraTarget,
@@ -1171,6 +1178,8 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
   filterRef.current = filter;
   const lensRef = useRef(lens);
   lensRef.current = lens;
+  const coverageServiceRef = useRef(coverageService);
+  coverageServiceRef.current = coverageService;
   const lecturaHeatRef = useRef(lecturaHeatIndicator);
   lecturaHeatRef.current = lecturaHeatIndicator;
   const followRef = useRef(followSelected);
@@ -1810,9 +1819,10 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
             ctx.restore();
           }
 
-          // Zone Lens Overlay (defensa / orden / integridad / amenaza / alquiler / firmas / vias)
+          // Zone Lens Overlay (cobertura / defensa / orden / integridad / amenaza / alquiler / firmas / vias)
           const activeLens = lensRef.current;
           if (
+            activeLens === 'cobertura' ||
             activeLens === 'defensa' ||
             activeLens === 'orden' ||
             activeLens === 'integridad' ||
@@ -1823,13 +1833,50 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
           ) {
             const curDerived = derivedRef.current;
             const zoneKeys = getWorldZones(st);
+            const curCovService = coverageServiceRef.current;
+            const covByZone =
+              activeLens === 'cobertura'
+                ? st.coberturaServiciosPorZona ?? computeZoneServiceCoverage(st)
+                : null;
+            const covStepMap =
+              activeLens === 'cobertura' ? buildTraversableZoneStepMap(st) : null;
+            const covRadius =
+              curCovService === 'escuela'
+                ? SERVICE_RADIUS_CONSTANTS.radioEscuela
+                : curCovService === 'universidad'
+                ? SERVICE_RADIUS_CONSTANTS.radioUniversidad
+                : curCovService === 'salud'
+                ? SERVICE_RADIUS_CONSTANTS.radioHospital
+                : SERVICE_RADIUS_CONSTANTS.radioComisaria;
+            const svcTipos: BuildingType[] =
+              curCovService === 'escuela'
+                ? ['escuela']
+                : curCovService === 'universidad'
+                ? ['universidad']
+                : curCovService === 'salud'
+                ? ['hospital', 'hospital_campana']
+                : ['comisaria'];
+
             ctx.save();
             for (const zk of zoneKeys) {
               const zr = st.zonas[zk]?.rect;
               if (!zr) continue;
               let strokeCol = '#10b981';
               let labelText = '';
-              if (activeLens === 'alquiler') {
+              let isUncovered = false;
+              if (activeLens === 'cobertura') {
+                const covVal = covByZone?.[zk]?.[curCovService] ?? 0;
+                isUncovered = covVal <= 0.001;
+                strokeCol =
+                  covVal >= SERVICE_RADIUS_CONSTANTS.coberturaMin
+                    ? '#10b981'
+                    : covVal > 0.001
+                    ? '#f59e0b'
+                    : '#ef4444';
+                labelText = isUncovered
+                  ? `${zk.toUpperCase()} · SIN COBERTURA`
+                  : `${zk.toUpperCase()} ${Math.round(covVal * 100)}%`;
+              } else if (activeLens === 'alquiler') {
                 const rent = st.ultimaSalidaEconomica?.alquilerMedio?.[zk] ?? 0;
                 strokeCol = rent > 22 ? '#ef4444' : rent > 14 ? '#f59e0b' : '#10b981';
                 labelText = `${zk.toUpperCase()} $${rent.toFixed(1)}`;
@@ -1859,19 +1906,23 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               }
 
               isoQuadPath(ctx, zr.wx, zr.wy, zr.ww, zr.wh);
-              ctx.globalAlpha = 0.16;
+              ctx.globalAlpha = isUncovered ? 0.22 : 0.16;
               ctx.fillStyle = strokeCol;
               ctx.fill();
-              ctx.globalAlpha = 0.72;
+              ctx.globalAlpha = 0.78;
               ctx.strokeStyle = strokeCol;
               ctx.lineWidth = 2.4;
+              if (isUncovered) ctx.setLineDash([7, 5]);
+              else ctx.setLineDash([]);
               ctx.stroke();
 
               const lblPos = worldToIso(zr.wx + zr.ww * 0.5, zr.wy + zr.wh * 0.5);
+              ctx.setLineDash([]);
               ctx.globalAlpha = 0.92;
-              ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+              const boxW = Math.max(112, labelText.length * 6.4 + 18);
+              ctx.fillStyle = isUncovered ? 'rgba(127, 29, 29, 0.92)' : 'rgba(15, 23, 42, 0.85)';
               ctx.beginPath();
-              ctx.roundRect(lblPos.ix - 56, lblPos.iy - 11, 112, 20, 4);
+              ctx.roundRect(lblPos.ix - boxW / 2, lblPos.iy - 11, boxW, 20, 4);
               ctx.fill();
               ctx.fillStyle = '#f8fafc';
               ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
@@ -1879,7 +1930,97 @@ export const CityWorldCanvas: React.FC<CityWorldCanvasProps> = ({
               ctx.fillText(labelText, lblPos.ix, lblPos.iy + 2.5);
               ctx.textAlign = 'start';
             }
+
+            // Draw facility reach links for active service facilities in cobertura lens
+            if (activeLens === 'cobertura' && covStepMap) {
+              for (const p of st.parcelas) {
+                const b = p.edificio;
+                if (!b || b.estado !== 'ocupada' || !b.activo || !svcTipos.includes(b.tipo)) continue;
+                const pIso = worldToIso(p.wx + p.ww * 0.5, p.wy + p.wh * 0.5);
+                ctx.globalAlpha = 0.85;
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.ellipse(pIso.ix, pIso.iy, 34, 17, 0, 0, Math.PI * 2);
+                ctx.stroke();
+
+                for (const zk of zoneKeys) {
+                  if (zk === p.zona) continue;
+                  const dist = covStepMap[p.zona]?.[zk] ?? Infinity;
+                  if (dist <= covRadius && st.zonas[zk]?.rect) {
+                    const zr = st.zonas[zk].rect!;
+                    const zIso = worldToIso(zr.wx + zr.ww * 0.5, zr.wy + zr.wh * 0.5);
+                    ctx.globalAlpha = 0.55;
+                    ctx.setLineDash([5, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(pIso.ix, pIso.iy);
+                    ctx.lineTo(zIso.ix, zIso.iy);
+                    ctx.stroke();
+                  }
+                }
+                ctx.setLineDash([]);
+              }
+            }
             ctx.restore();
+          }
+
+          // Hover Building Service Radius Preview (from SideInspectorPanel build cards)
+          if (preview?.parcelaId && preview?.buildingType) {
+            const hovParcel = st.parcelas.find((p) => p.id === preview.parcelaId);
+            const bType = preview.buildingType;
+            const previewRadius =
+              bType === 'escuela'
+                ? SERVICE_RADIUS_CONSTANTS.radioEscuela
+                : bType === 'universidad'
+                ? SERVICE_RADIUS_CONSTANTS.radioUniversidad
+                : bType === 'hospital' || bType === 'hospital_campana'
+                ? SERVICE_RADIUS_CONSTANTS.radioHospital
+                : bType === 'comisaria'
+                ? SERVICE_RADIUS_CONSTANTS.radioComisaria
+                : null;
+            if (hovParcel && previewRadius !== null) {
+              const stepMap = buildTraversableZoneStepMap(st);
+              const zoneKeys = getWorldZones(st);
+              const pIso = worldToIso(hovParcel.wx + hovParcel.ww * 0.5, hovParcel.wy + hovParcel.wh * 0.5);
+              ctx.save();
+              for (const zk of zoneKeys) {
+                const dist = stepMap[hovParcel.zona]?.[zk] ?? Infinity;
+                const zr = st.zonas[zk]?.rect;
+                if (dist <= previewRadius && zr) {
+                  isoQuadPath(ctx, zr.wx, zr.wy, zr.ww, zr.wh);
+                  ctx.globalAlpha = 0.18;
+                  ctx.fillStyle = '#38bdf8';
+                  ctx.fill();
+                  ctx.globalAlpha = 0.85;
+                  ctx.strokeStyle = '#38bdf8';
+                  ctx.lineWidth = 2.6;
+                  ctx.setLineDash([6, 4]);
+                  ctx.stroke();
+                }
+              }
+              ctx.setLineDash([]);
+              if (preview.newlyCoveredPopulation !== undefined) {
+                const badgeText =
+                  preview.newlyCoveredPopulation > 0
+                    ? `+${preview.newlyCoveredPopulation} hab. sin cobertura`
+                    : `Radio ${previewRadius} zona(s)`;
+                const bw = Math.max(132, badgeText.length * 6.2 + 18);
+                ctx.globalAlpha = 0.96;
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+                ctx.beginPath();
+                ctx.roundRect(pIso.ix - bw / 2, pIso.iy - 42, bw, 22, 6);
+                ctx.fill();
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.fillStyle = '#e0f2fe';
+                ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(badgeText, pIso.ix, pIso.iy - 27.5);
+                ctx.textAlign = 'start';
+              }
+              ctx.restore();
+            }
           }
 
           // Lectura Indicator Zone Heatmap Overlay (from Tema panel)

@@ -85,13 +85,17 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Zombies: sin derrota extra', !SCENARIO_PRESETS.zombies.derrotasExtra);
 }
 
-// ───── 3. Nivel 1.1: palancas solo con G3
+// ───── 3. Nivel 1.1: palancas G3 (subsidio/educación) y G4 (prensa/contraofertas)
 {
   const g2 = mk({ g: 'G2' });
-  const r = setExtraLever(g2, 'presion', 50);
-  check('1.1: las palancas nuevas se rechazan fuera de G3', !r.ok, r.error ?? '');
+  const rSub = setExtraLever(g2, 'subsidioAlimento', 10);
+  check('1.1: subsidioAlimento se rechaza en G2', !rSub.ok, rSub.error ?? '');
   const g3 = mk({ g: 'G3', fiscal: true, m: 'M2' });
-  check('1.1: con G3 se aceptan', setExtraLever(g3, 'presion', 50).ok);
+  check('1.1: subsidioAlimento y nivelEducacion se aceptan en G3', setExtraLever(g3, 'subsidioAlimento', 10).ok && setExtraLever(g3, 'nivelEducacion', 3).ok);
+  const rPresG3 = setExtraLever(g3, 'presion', 50);
+  check('1.1: palancas de prensa (presion/acceso) se rechazan en G3', !rPresG3.ok, rPresG3.error ?? '');
+  const g4 = mk({ g: 'G4', fiscal: true, m: 'M4' });
+  check('1.1: palancas de prensa se aceptan en G4', setExtraLever(g4, 'presion', 50).ok && setExtraLever(g4, 'acceso', 40).ok);
 }
 
 // ───── 4. Subsidio al alimento: entra al día siguiente, emite control, conserva el dinero y sube la producción
@@ -114,13 +118,13 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Subsidio: sube la producción diaria de comida', s.alimento.produccionDiaria > base.alimento.produccionDiaria, `${s.alimento.produccionDiaria.toFixed(1)} vs ${base.alimento.produccionDiaria.toFixed(1)}`);
 }
 
-// ───── 5. Presión y acceso sobre la prensa
+// ───── 5. Presión y acceso sobre la prensa (G4)
 {
-  const base = days(mk({ g: 'G3', seed: 9 }), 49);
-  let p = mk({ g: 'G3', seed: 9 });
+  const base = days(mk({ g: 'G4', seed: 9 }), 49);
+  let p = mk({ g: 'G4', seed: 9 });
   setExtraLever(p, 'presion', 90);
   p = days(p, 49);
-  let a = mk({ g: 'G3', seed: 9 });
+  let a = mk({ g: 'G4', seed: 9 });
   setExtraLever(a, 'acceso', 90);
   a = days(a, 49);
   const avg = (s: GameState, f: (m: GameState['medios'][number]) => number) => s.medios.reduce((x, m) => x + f(m), 0) / s.medios.length;
@@ -138,11 +142,11 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Educación: nivelEducacion funciona en G3 y no se fuerza a 0', r.ok && (e.gobierno.extras?.vigentes.nivelEducacion ?? 0) === 5 && Boolean(ctrlEd), `vig=${e.gobierno.extras?.vigentes.nivelEducacion}`);
 }
 
-// ───── 7. Contraofertas
+// ───── 7. Contraofertas (solo G4)
 {
   let accepted = 0, rejected = 0, lockOk = true, measureOk = true;
   for (let seed = 1; seed <= 24; seed++) {
-    let s = days(mk({ g: 'G3', seed }), 3);
+    let s = days(mk({ g: 'G4', seed }), 3);
     s.demandasActivas = [];
     forceDemandForDev(s, 'bajen_impuestos');
     const d = s.demandasActivas.find((x) => x.demandaId === 'bajen_impuestos');
@@ -164,22 +168,26 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Contraoferta: hay aceptaciones y rechazos según la tirada', accepted > 0 && rejected > 0, `aceptadas=${accepted}, rechazadas=${rejected}`);
   check('Contraoferta aceptada: palanca a mitad de camino y compromiso a la mitad', lockOk);
   check('Contraoferta rechazada: aplica la medida del actor', measureOk);
-  const g2 = mk({ g: 'G2' });
-  forceDemandForDev(g2, 'bajen_impuestos');
-  check('Contraoferta: solo desde G3', !counterOfferDemand(g2, g2.demandasActivas[0]?.id ?? 'x').ok);
+  const g3 = mk({ g: 'G3' });
+  forceDemandForDev(g3, 'bajen_impuestos');
+  check('Contraoferta: solo desde G4', !counterOfferDemand(g3, g3.demandasActivas[0]?.id ?? 'x').ok);
 }
 
-// ───── 8. Más actores
+// ───── 8. Más actores (solo G4)
 {
-  let s = mk({ g: 'G3', seed: 5 });
+  let s = mk({ g: 'G4', seed: 5 });
   s.gobierno.palancasObjetivo.salarioPublico = 60;
   s = days(s, 40);
   const sind = s.eventos.find((e) => e.tipo === 'demanda' && (e as { actorId?: string }).actorId === 'sindicato');
   check('Actores: el sindicato de públicos demanda si los salarios bajan', !!sind, sind ? `día ${sind.dia}` : 'sin demanda');
-  let v = mk({ g: 'G3', seed: 6 });
+  let v = mk({ g: 'G4', seed: 6 });
   v.gobierno.palancasVigentes.garantiaAlimentaria = 0; v.gobierno.palancasObjetivo.garantiaAlimentaria = 0;
-  for (const n of v.npcs) if (n.zona === 'este') n.variables.hambre = 95;
-  for (const h of v.hogares) if (h.zona === 'este') { h.despensa = 0; h.dinero = 0; }
+  const targetZone =
+    Object.values(v.zonas).find(
+      (z) => z.estado === 'activa' && v.npcs.filter((n) => n.vivo && n.zona === z.id).length >= 3
+    )?.id ?? 'centro';
+  for (const n of v.npcs) if (n.zona === targetZone) n.variables.hambre = 95;
+  for (const h of v.hogares) if (h.zona === targetZone) { h.despensa = 0; h.dinero = 0; }
   v.demandasActivas = [];
   v.cooldownActorDemanda = { empresarios: 9999 };
   for (const m of v.medios) v.cooldownActorDemanda[m.id] = 9999;
@@ -204,11 +212,11 @@ function days(s: GameState, n: number, each?: (s: GameState, d: number) => void)
   check('Guardado: un guardado anterior (sin extras ni extra por NPC) carga y corre', oldRun.reloj.dia === old.reloj.dia + 10);
 }
 
-// ───── 10. Determinismo con palancas 1.1
+// ───── 10. Determinismo con palancas 1.1 (G4 completo)
 {
   const run = () => {
-    let s = mk({ g: 'G3', seed: 13 });
-    setExtraLever(s, 'subsidioAlimento', 10); setExtraLever(s, 'presion', 40); setExtraLever(s, 'acceso', 60);
+    let s = mk({ g: 'G4', seed: 13 });
+    setExtraLever(s, 'subsidioAlimento', 10); setExtraLever(s, 'presion', 40); setExtraLever(s, 'acceso', 60); setExtraLever(s, 'nivelEducacion', 2);
     s = days(s, 60);
     return JSON.stringify([s.gobierno.reserva, deriveCommunityStats(s).apoyoPct, s.rngState, s.eventos.length]);
   };

@@ -1,4 +1,5 @@
 import {
+  AUTOPILOT_CONSTANTS,
   BUILDING_CATALOG,
   DEFAULT_TRAMOS,
   DEFAULT_ZONAS,
@@ -10,8 +11,10 @@ import {
   ROLE_CATALOG,
   SAVE_FORMAT_VERSION,
   SCENARIO_PRESETS,
+  SERVICE_RADIUS_CONSTANTS,
   SPANISH_LAST_NAMES,
   SPANISH_NAMES,
+  STABILITY_PROFILES,
 } from '../data/catalogs';
 import {
   BuildingInstance,
@@ -48,6 +51,7 @@ import {
   clamp,
   computeDemandaSuelo,
   computeTotalWorldMoney,
+  computeZoneServiceCoverage,
   deriveCommunityStats,
   inferLotClassFromParcel,
   recomputeRoadDistances,
@@ -104,6 +108,19 @@ export function isTestConfig(config: WorldConfig): boolean {
   if (nivelGobernador === 'G3' || nivelGobernador === 'G4') return true;
   if (config.poblacionInicial !== preset.poblacionDefault) return true;
   if (config.cantidadMedios !== preset.mediosDefault) return true;
+  if (config.perfilEstabilidad && config.perfilEstabilidad !== 'normal') return true;
+  if (config.caos) {
+    const d = preset.caosDefault;
+    if (
+      config.caos.maxAccionesPorPeriodo !== d.maxAccionesPorPeriodo ||
+      config.caos.periodoDias !== d.periodoDias ||
+      config.caos.maxPctRolFueraDePuesto !== d.maxPctRolFueraDePuesto ||
+      config.caos.duracionMaxDias !== d.duracionMaxDias ||
+      config.caos.respiroSiSatisfaccionMediaMenorA !== d.respiroSiSatisfaccionMediaMenorA
+    ) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -137,7 +154,8 @@ function buildScaledParcelas(
         : 'comercial');
 
     const zona = def.zona;
-    let estadoInicial = def.estadoInicial;
+    const isZoneInactive = zonas[zona]?.estado === 'no_urbanizada';
+    let estadoInicial = isZoneInactive ? 'sin_calle' : def.estadoInicial;
     let edificio: BuildingInstance | null = null;
     const isM0NonBasePrivate =
       isM0 &&
@@ -147,7 +165,9 @@ function buildScaledParcelas(
         def.edificioInicial === 'oficina_inmobiliaria');
     const isDisabledMedio = cantidadMedios === 0 && def.edificioInicial === 'oficina_medio';
 
-    if (isM0NonBasePrivate || isDisabledMedio) {
+    if (isZoneInactive) {
+      estadoInicial = 'sin_calle';
+    } else if (isM0NonBasePrivate || isDisabledMedio) {
       estadoInicial = 'libre';
     } else if (estadoInicial === 'ocupada' && def.edificioInicial) {
       edificio = {
@@ -206,6 +226,36 @@ function buildScaledParcelas(
       edificio,
     };
   });
+
+  // MUNDO §12: at least 1 universidad in central zone even at pop=100 (without occupying p_centro_libre)
+  if (!base.some((p) => p.estado === 'ocupada' && p.edificio?.tipo === 'universidad')) {
+    base.push({
+      id: 'p_univ_centro',
+      nombre: 'Universidad Central',
+      zona: 'centro',
+      distrito: 'civico',
+      tipoParcela: 'publica',
+      clase: 'L',
+      orden: 6,
+      wx: 642,
+      wy: 462,
+      ww: 48,
+      wh: 28,
+      estado: 'ocupada',
+      edificio: {
+        id: 'ed_univ_centro',
+        tipo: 'universidad',
+        parcelaId: 'p_univ_centro',
+        dueno: 'estado',
+        estado: 'ocupada',
+        activo: true,
+        estadoSalud: 100,
+        diasObraRestantes: 0,
+        diasObraTotal: 0,
+        zona: 'centro',
+      },
+    });
+  }
 
   // Dynamically expand parcels for larger population targets (120..5000) across active zones only
   const scale = Math.max(1, pop / 100);
@@ -314,10 +364,11 @@ function buildScaledParcelas(
 
     if (!isM0) {
       const extraFactories = Math.max(0, Math.floor((pop - 120) / 180));
-      const indZones = ['este', 'oeste'];
+      const indZones = ['este', 'oeste'].filter((z) => zonas[z]?.estado !== 'no_urbanizada');
+      const indFallback = indZones.length > 0 ? indZones : zoneList;
       for (let i = 0; i < extraFactories; i++) {
-        const z = indZones[i % indZones.length];
-        const rect = zonas[z]?.rect ?? zonas.este.rect;
+        const z = indFallback[i % Math.max(1, indFallback.length)] ?? 'oeste';
+        const rect = zonas[z]?.rect ?? zonas.centro.rect;
         const pid = `p_fab_ext_${i + 1}`;
         base.push({
           id: pid,
@@ -348,7 +399,10 @@ function buildScaledParcelas(
       }
 
       const extraOffices = Math.max(0, Math.floor((pop - 120) / 160));
-      const officeZones = ['centro', 'norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'];
+      const rawOfficeZones = ['centro', 'norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'].filter(
+        (z) => zonas[z]?.estado !== 'no_urbanizada'
+      );
+      const officeZones = rawOfficeZones.length > 0 ? rawOfficeZones : zoneList;
       for (let i = 0; i < extraOffices; i++) {
         const zC = officeZones[i % officeZones.length] ?? 'centro';
         const rectC = zonas[zC]?.rect ?? zonas.centro.rect;
@@ -413,7 +467,10 @@ function buildScaledParcelas(
     }
 
     const extraHosp = Math.max(0, Math.floor((pop - 120) / 140));
-    const pubZones = ['norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'];
+    const rawPubZones = ['norte', 'sur', 'este', 'oeste', 'noreste', 'suroeste'].filter(
+      (z) => zonas[z]?.estado !== 'no_urbanizada'
+    );
+    const pubZones = rawPubZones.length > 0 ? rawPubZones : zoneList;
     for (let i = 0; i < extraHosp; i++) {
       const z = pubZones[i % pubZones.length] ?? 'norte';
       const rect = zonas[z].rect;
@@ -561,12 +618,49 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const rng: RngHolder = { rngState: semilla };
   const subRng = initSubsystemRng(semilla);
   const preset = SCENARIO_PRESETS[config.escenarioId];
+  const profile = STABILITY_PROFILES[config.perfilEstabilidad ?? 'normal'] ?? STABILITY_PROFILES.normal;
   const pop = clamp(Math.round(config.poblacionInicial || 100), 50, 5000);
   const scale = pop / 100;
   const zonas = structuredClone(preset.zonas);
-  const activeZoneIds = Object.keys(zonas).filter((z) => zonas[z].estado !== 'no_urbanizada');
-  const allZoneIds = Object.keys(zonas);
   const tramos = structuredClone(preset.tramos ?? DEFAULT_TRAMOS);
+
+  const allZoneIds = Object.keys(zonas);
+  const urbanizableZones = allZoneIds.filter((z) => zonas[z].estado !== 'no_urbanizada');
+  const ZONE_PRIORITY = ['centro', 'oeste', 'norte', 'sur', 'este', 'noroeste', 'noreste', 'suroeste', 'sureste'];
+  const orderedUrban = [
+    ...ZONE_PRIORITY.filter((z) => urbanizableZones.includes(z)),
+    ...urbanizableZones.filter((z) => !ZONE_PRIORITY.includes(z)),
+  ];
+  const targetActiveZones = clamp(
+    Math.round(pop / AUTOPILOT_CONSTANTS.personasPorZona),
+    Math.min(4, orderedUrban.length),
+    Math.min(12, orderedUrban.length)
+  );
+  const activeZoneSet = new Set(orderedUrban.slice(0, targetActiveZones));
+  for (const z of urbanizableZones) {
+    if (!activeZoneSet.has(z)) {
+      zonas[z].estado = 'no_urbanizada';
+      if (!zonas[z].viaAperturaId) {
+        const openingTramo = tramos.find(
+          (t) => (t.zonaA === z && activeZoneSet.has(t.zonaB ?? '')) || (t.zonaB === z && activeZoneSet.has(t.zonaA))
+        );
+        if (openingTramo) zonas[z].viaAperturaId = openingTramo.id;
+      }
+    }
+  }
+  for (const t of tramos) {
+    const zAInactive = zonas[t.zonaA]?.estado === 'no_urbanizada';
+    const zBInactive = t.zonaB ? zonas[t.zonaB]?.estado === 'no_urbanizada' : false;
+    if (zAInactive || zBInactive) {
+      t.construida = false;
+      t.enObra = false;
+      if (!t.zonaAbierta) {
+        t.zonaAbierta = zBInactive ? t.zonaB : zAInactive ? t.zonaA : undefined;
+      }
+    }
+  }
+
+  const activeZoneIds = Object.keys(zonas).filter((z) => zonas[z].estado !== 'no_urbanizada');
   const mediaCount = clamp(config.cantidadMedios ?? preset.mediosDefault, 0, 3);
 
   const parcelas = buildScaledParcelas(config.escenarioId, config.nivelMundo, pop, zonas, mediaCount);
@@ -578,7 +672,16 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
 
   const jobCaps = getBuildingJobCaps(parcelas, pop, initialLevers.nivelObras, cuposFijos);
 
-  // Build role counts that fit exact initial vacancies + balanced minors/retirees
+  const initPolicia = Math.min(
+    jobCaps.policia,
+    Math.max(1, Math.round((pop / SERVICE_RADIUS_CONSTANTS.habitantesPorPolicia) * profile.coberturaInicial))
+  );
+  const initMedico = Math.min(
+    jobCaps.medico,
+    Math.max(1, Math.round((pop / SERVICE_RADIUS_CONSTANTS.habitantesPorMedico) * profile.coberturaInicial))
+  );
+
+  // Build role counts that fit exact initial vacancies + balanced minors/retirees per stability profile
   const roleDistribution: Array<{ rol: RoleId; count: number }> = [
     { rol: 'agricultor', count: jobCaps.agricultor },
     { rol: 'tecnico', count: jobCaps.tecnico },
@@ -588,30 +691,30 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     { rol: 'inmobiliario', count: config.nivelMundo === 'M0' ? 0 : Math.max(1, jobCaps.inmobiliario) },
     { rol: 'empresario', count: Math.max(2, Math.round(3 * scale)) },
     { rol: 'periodista', count: mediaCount === 0 ? 0 : Math.max(mediaCount, jobCaps.periodista) },
-    { rol: 'policia', count: jobCaps.policia },
-    { rol: 'medico', count: jobCaps.medico },
+    { rol: 'policia', count: initPolicia },
+    { rol: 'medico', count: initMedico },
     { rol: 'ingeniero', count: getObrasTargetJobs(pop, initialLevers.nivelObras) },
     { rol: 'estatal', count: cuposFijos.estatal },
     { rol: 'docente', count: cuposFijos.docente },
-    { rol: 'estudiante', count: Math.round(20 * scale) },
-    { rol: 'jubilado', count: Math.round(8 * scale) },
+    { rol: 'estudiante', count: Math.round(pop * (profile.pctMenores / 100)) },
+    { rol: 'jubilado', count: Math.round(pop * (profile.pctJubilados / 100)) },
     { rol: 'desempleado', count: 0 },
   ];
 
   const sumAssigned = roleDistribution.reduce((s, r) => s + r.count, 0);
   if (sumAssigned < pop) {
     const slack = pop - sumAssigned;
-    const estSlot = roleDistribution.find((r) => r.rol === 'estudiante')!;
+    const obSlot = roleDistribution.find((r) => r.rol === 'obrero')!;
     const agSlot = roleDistribution.find((r) => r.rol === 'agricultor')!;
     const desSlot = roleDistribution.find((r) => r.rol === 'desempleado')!;
-    const extraStud = Math.floor(slack * 0.45);
+    const extraOb = Math.floor(slack * 0.45);
     const extraAg = Math.floor(slack * 0.35);
-    estSlot.count += extraStud;
+    obSlot.count += extraOb;
     agSlot.count += extraAg;
-    desSlot.count += slack - extraStud - extraAg;
+    desSlot.count += slack - extraOb - extraAg;
   } else if (sumAssigned > pop) {
     let over = sumAssigned - pop;
-    for (const r of ['estudiante', 'jubilado', 'obrero', 'agricultor'] as RoleId[]) {
+    for (const r of ['obrero', 'comerciante', 'tecnico', 'agricultor', 'estudiante', 'jubilado'] as RoleId[]) {
       const slot = roleDistribution.find((x) => x.rol === r)!;
       const cut = Math.min(over, Math.max(0, slot.count - 2));
       slot.count -= cut;
@@ -867,6 +970,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       }
     }
 
+    const scaledInitCaja = Math.round(initCaja * profile.holguraInicial);
     const f: Firma = {
       id: fid,
       rubro,
@@ -878,7 +982,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
       locales: [...locales],
       empleados: [],
       ventas: initVentas,
-      caja: initCaja,
+      caja: scaledInitCaja,
       parteSueldos: FIRM_CONSTANTS.parteSueldosBase,
       factor: 1.0,
       cuotaZona: {},
@@ -1216,8 +1320,8 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     casas.push(casa);
   }
 
-  // Calibrate initial household dinero, despensa & agro stock
-  const totalStockInicial = Math.round(preset.stockAlimentoInicial * scale);
+  // Calibrate initial household dinero, despensa & agro stock (scaled by holguraInicial)
+  const totalStockInicial = Math.round(preset.stockAlimentoInicial * scale * profile.holguraInicial);
   const agroFirms = firmas.filter((f) => f.rubro === 'agro');
   if (agroFirms.length > 0) {
     const perAgro = totalStockInicial / agroFirms.length;
@@ -1232,7 +1336,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     }).length;
     const baseNetPerPeriod = Math.max(24, earners * 42 + mCount * 10);
     h.ultimoIngresoNeto = baseNetPerPeriod;
-    h.dinero = Math.round(baseNetPerPeriod * 1.45 + mCount * 18);
+    h.dinero = Math.round((baseNetPerPeriod * 1.45 + mCount * 18) * profile.holguraInicial);
     h.despensa = h.estado === 'calle' ? 0 : Number((mCount * 3.1).toFixed(2));
   }
 
@@ -1265,9 +1369,12 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
   const initialPhenomena: ClimatePhenomenon[] =
     config.nivelMundo === 'M0' || config.nivelMundo === 'M1'
       ? []
-      : structuredClone(preset.fenomenosIniciales);
+      : structuredClone(preset.fenomenosIniciales).map((f) => ({
+          ...f,
+          intensidad: clamp(Math.round(f.intensidad * profile.escalaFenomenos), 5, 100),
+        }));
 
-  const initialReserva = Math.round(preset.reservaInicial * scale);
+  const initialReserva = Math.round(preset.reservaInicial * scale * profile.holguraInicial);
   const satMedia = Number(
     (npcs.reduce((s, n) => s + n.variables.satisfaccion, 0) / Math.max(1, pop)).toFixed(1)
   );
@@ -1419,7 +1526,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
               titulo:
                 config.escenarioId === 'zombies'
                   ? 'Alerta sanitaria en la periferia al iniciar la gestión'
-                  : 'Inicia el mandato en el valle con 9 zonas activas',
+                  : `Inicia el mandato en el valle con ${activeZoneIds.length} zonas activas`,
               texto:
                 config.escenarioId === 'zombies'
                   ? 'Los brotes perimetrales ponen a prueba las defensas zonales y la capacidad hospitalaria.'
@@ -1435,6 +1542,7 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     caosTracker: {
       ventanaInicioDia: 1,
       accionesEnVentana: 0,
+      rarezasEnVentana: 0,
       respiroActivo: false,
     },
     cooldownsCondicion: {
@@ -1525,8 +1633,12 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     },
   };
 
-  state.mapaGrid = buildTileGridAndSyncMap(state.zonas, state.parcelas, state.tramos, pop, semilla);
+  state.mapaGrid = buildTileGridAndSyncMap(state.zonas, state.parcelas, state.tramos, pop, semilla, {
+    nivelAgua: profile.nivelAgua,
+    nRios: profile.nRios,
+  });
   recomputeRoadDistances(state);
+  state.coberturaServiciosPorZona = computeZoneServiceCoverage(state);
   updateDailyNpcRitmoAndHabits(state);
   state.demandaSuelo = computeDemandaSuelo(state);
   state.ultimoDineroTotal = computeTotalWorldMoney(state);
