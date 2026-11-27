@@ -1,12 +1,12 @@
-# Edificios y parcelas (v2.0)
+# Edificios y parcelas
 
-> Catálogo de parcelas y edificios del mundo. Cómo funcionan las parcelas: MUNDO_V2 §8. Quién paga y cobra: ECONOMIA_V2. Costos, días de obra, capacidades y puestos: parámetros con nombre, sin calibrar acá. Lo marcado **[propuesta]** se pule.
+> Catálogo de parcelas, edificios y obras del mundo. Cómo funcionan las zonas y la expansión: MUNDO §8. Quién paga y cobra: ECONOMIA.md. Costos, días de obra, capacidades y puestos: parámetros con nombre del preset. Lo marcado **[propuesta]** se pule.
 
 ---
 
 ## 1. Parcelas (lotes)
 
-> Las parcelas son los **lotes** del mapa de baldosas (MAPA_V2.md): tienen posición, tamaño (`S`, `M`, `L`, `XL`) y un frente sobre una calle. Cada edificio exige una clase de lote mínima (MAPA_V2 §4).
+> Las parcelas son los **lotes** del mapa de baldosas (MAPA.md): tienen posición, tamaño (`S`, `M`, `L`, `XL`) y un frente sobre una calle. Cada edificio exige una clase de lote mínima (MAPA §4).
 
 | Tipo | Quién construye | Qué se levanta |
 |---|---|---|
@@ -20,6 +20,10 @@
 - Estados: `sin_calle`, `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` espera a que el estado construya la vía que la abre (sección 3b).
 - Cada parcela tiene su zona y un lugar fijo. El orden dentro de la zona decide quién ocupa primero.
 - Una parcela solo admite los edificios de su tipo y solo si tiene calle.
+- **Obra:** al ordenarla se paga el costo y la parcela queda en obra por los días del catálogo, acortados por la infraestructura. Al terminar, el edificio se activa (evento `obra_fin`) y genera sus puestos y capacidades.
+- **Mantenimiento:** cada edificio cuesta por período. Sin mantenimiento pagado, su servicio cae o el local pierde estado y puestos.
+- **Demoler:** libera la parcela y deja de pagar mantenimiento, sin devolver el costo. Sus empleados quedan sin puesto al ritmo de siempre y sus internados pasan a otro hospital con cama o a su casa.
+- **Zona:** lo que da un edificio actúa en su zona cuando el catálogo lo dice (comisaría, muralla, hospital).
 
 ## 2. Casas
 
@@ -46,11 +50,11 @@
 | `oficina_publica` | Nada en el mundo base; viene en el preset | Estatales | Educación 1 | — |
 
 - **Cupo educativo:** `lugares_por_escuela` y `lugares_por_universidad` no simulan estudiantes en aula. Fijan la cobertura: al egresar a los 18, el nivel 2 (o 3) se habilita si hay una escuela (o universidad) al alcance por ruta con lugares sobre los menores (o jóvenes) que cubre. La UI sí muestra a los menores en la escuela en su franja de estudio.
-- **`oficina_publica`:** parcela pública del preset, clase M (MAPA_V2 §4), puestos Estatales (educación 1) y sin construcción automática.
+- **`oficina_publica`:** parcela pública del preset, clase M (MAPA §4), puestos Estatales (educación 1) y sin construcción automática.
 - Costo de obra, días de obra, mantenimiento y lugares de escuela y universidad: parámetros con nombre en el catálogo, con valores razonables sin calibrar.
 - Cada edificio genera sus puestos; los cubren personas que cumplen el requisito. Sin personal, no funciona (camas = min(camas del edificio, médicos × `pacientes_por_medico`)).
-- Costo de obra (una vez, multiplicado por el factor del terreno, MAPA_V2 §3b), días de obra y mantenimiento por período, pagados por el estado.
-- **Estado en piloto automático:** construye hospitales, comisarías, escuelas y universidades en parcelas públicas libres según MUNDO_V2 §9. Las oficinas vienen con el preset.
+- Costo de obra (una vez, multiplicado por el factor del terreno, MAPA §3b), días de obra y mantenimiento por período, pagados por el estado.
+- **Estado en piloto automático:** construye hospitales, comisarías, escuelas y universidades en parcelas públicas libres según MUNDO §9. Las oficinas vienen con el preset.
 
 ## 3b. Vías (las construye el estado)
 
@@ -64,7 +68,7 @@
 - Un tramo solo puede conectarse a la red ya construida.
 - **Sin mantenimiento,** el `estado` baja; con la vía en mal estado baja la `infraestructura` de su zona y la capacidad de venta de los locales de su frente.
 - Las vías no se demuelen en el mundo base. Inaugurar una vía es buena noticia.
-- **Piloto automático:** el estado las construye con la regla de MUNDO_V2 §9. El gobernador las ordenará con `construir_via` (CONTROLES_V2 §3).
+- **Piloto automático:** el estado las construye con la regla de MUNDO §9. El gobernador las ordenará con `construir_via` (CONTROLES §3).
 
 ## 4. Privados
 
@@ -87,17 +91,24 @@
 | `oficina_inmobiliaria` | `inmobiliaria` | Sede de una inmobiliaria: administra casas | Comercial |
 | `oficina_medio` | `medio` | Redacción: columnistas y alcance base | Comercial |
 
-- Cada rubro vende una **categoría de gasto** (ECONOMIA_V2 §6b): almacén y supermercado la comida; tienda, kiosco y supermercado los bienes; restorán y bar la gastronomía; peluquería, taller y gimnasio los servicios; cine y club el entretenimiento.
+- Cada rubro vende una **categoría de gasto** (ECONOMIA §6b): almacén y supermercado la comida; tienda, kiosco y supermercado los bienes; restorán y bar la gastronomía; peluquería, taller y gimnasio los servicios; cine y club el entretenimiento.
 - Cada local tiene `estado` y pierde puestos si no se mantiene. El mantenimiento lo paga la firma.
 - La **capacidad diaria de ventas** de un local limita lo que puede vender; una firma con un solo local satura. Es una de las fricciones contra el monopolio.
 - **Obra:** la ordena una firma, la paga con su caja a una constructora y queda en obra `dias_obra_local` días.
 - Al arrancar, el preset trae los locales, campos y oficinas de las firmas iniciales.
-- Al quebrar una firma, sus locales quedan libres o salen a remate (ECONOMIA_V2 §9).
+- Al quebrar una firma, sus locales quedan libres o salen a remate (ECONOMIA §9).
 
-## 5. Obras de suceso
+## 5. Obras de suceso (capa del gobernador)
 
-Murallas, silos, riego y hospitales de campaña (v1) **no existen en el mundo base**: las construye el gobernador (capa posterior) antes del golpe. El catálogo de v1 (EDIFICIOS_V1 §2) sigue vigente para esa capa.
+No existen en el mundo base: las construye el gobernador antes del golpe (los avisos del clima dan la anticipación) y compiten por la misma reserva y los mismos lotes públicos que los servicios.
+
+| Tipo | Contra | Da | Dura |
+|---|---|---|---|
+| `muralla` | `plaga_zombie` | + `defensa_muralla` en su zona; se daña con la integridad de la zona | Permanente |
+| `silo` | `sequia`, `plaga` | + `silo_extra_dias` al tope de stock | Permanente |
+| `riego` | `sequia` | Reduce a la mitad la caída de producción por sequía | Permanente |
+| `hospital_campana` | `pandemia` | `camas_campana` que no necesitan médicos, con cura a la mitad de la de un hospital | `dias_campana`; después se desarma solo |
 
 ## 6. Fuera del mundo base
 
-Viviendas públicas, refugios, subsidios, dique (pide crecida), edificios con integridad propia (promoción por necesidad, MOTOR_V2 §8), servicios privados (clínicas, escuelas y universidades privadas) y bancos (extensión `fiscal`, ECONOMIA_V2 §14).
+Viviendas públicas, refugios, subsidios, dique (pide crecida), edificios con integridad propia (promoción por necesidad, MOTOR §8), servicios privados (clínicas, escuelas y universidades privadas) y bancos (extensión `fiscal`, ECONOMIA §14).

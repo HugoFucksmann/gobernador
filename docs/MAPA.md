@@ -1,6 +1,6 @@
-# Mapa y edificios (v2.0)
+# Mapa
 
-> Cómo se representa el territorio en el motor y en la UI 2D. Reemplaza lo territorial de MUNDO_V2 §4 y §8 y la parte de parcelas de EDIFICIOS_V2 §1 (esos docs apuntan acá). El terreno se genera por semilla (§3b) y la ciudad se construye encima. Lo marcado **[propuesta]** se pule.
+> Cómo se representa el territorio en el motor y en la UI 2D: grilla, terreno, lotes, zonas y red de rutas. Las reglas de zonas, expansión y vías: MUNDO §8 y EDIFICIOS §3b. El terreno se genera por semilla (§3b) y la ciudad se construye encima. Lo marcado **[propuesta]** se pule.
 
 ---
 
@@ -14,7 +14,7 @@ El motor y la UI comparten el mismo mapa: el motor conoce las coordenadas entera
 
 | Opción | Ventajas | Problemas |
 |---|---|---|
-| Parcelas abstractas por zona (lo de hoy) | Simple y barato | La UI inventa coordenadas y rutas; calles y expansión no se ven ni se pueden razonar; las rutas del motor no coinciden con lo que se dibuja |
+| Parcelas abstractas por zona | Simple y barato | La UI inventa coordenadas y rutas; calles y expansión no se ven ni se pueden razonar; las rutas del motor no coinciden con lo que se dibuja |
 | **Baldosas + lotes sobre calles (elegida)** | Una sola fuente de verdad; rutas, expansión y vecindad salen de la grilla; la UI 2D es casi directa; Godot 3D es la misma grilla extruida; un generador procedural futuro produce el mismo formato | Más datos que parcelas sueltas (manejables) |
 | Grafo de calles con lotes por frente, sin grilla | Rutas limpias | Hay que inventar la geometría para dibujar; difícil de generar y de editar a mano |
 | Coordenadas continuas libres | Máximo realismo | Caro, no determinista fácil y acopla las reglas a la geometría. No hace falta para esta etapa |
@@ -56,10 +56,10 @@ Cada baldosa tiene un **terreno** y, si la hay, una **vía**.
   "tipo": "comercial", "frente": [41, 41], "estado": "libre", "edificio": null }
 ```
 
-- `tipo` como MUNDO_V2 §8: `residencial`, `comercial`, `agricola`, `industrial`, `publica`, `especial`.
+- `tipo` como MUNDO §8: `residencial`, `comercial`, `agricola`, `industrial`, `publica`, `especial`.
 - `clase` de tamaño **[propuesta]**: `S` (2×2), `M` (3×3), `L` (4×4), `XL` (6×6). El preset la fija por lote.
 - `frente`: la baldosa de vía por la que se accede. Un lote cuyo frente no es vía construida está `sin_calle`.
-- Estados: `sin_calle`, `libre`, `en_obra`, `ocupada`. (`bloqueada` de v1 se retira: la expansión es solo por vías.)
+- Estados: `sin_calle`, `libre`, `en_obra`, `ocupada`. La expansión es solo por vías: no hay parcelas que se habiliten por otra causa.
 - **Un lote, un edificio.** El edificio necesita una clase mínima; en un lote más grande entra, y el resto del lote queda libre de uso.
 
 | Edificio | Clase mínima |
@@ -76,7 +76,7 @@ Cada baldosa tiene un **terreno** y, si la hay, una **vía**.
 
 - Una zona es un conjunto de baldosas, sin huecos. Se declara en el mapa como una capa (una letra por baldosa).
 - **La vecindad se deriva:** dos zonas son vecinas si tienen baldosas contiguas. Ya no hay grafo manual ni problema de cruces.
-- La distancia entre zonas para clima y ataques (MUNDO_V1 §4) es el número de pasos entre zonas vecinas, como antes.
+- La distancia entre zonas para clima y ataques (MUNDO §8) es el número de pasos entre zonas vecinas.
 - **Zonas `no_urbanizada`:** región del mapa que todavía no tiene vía; se activa cuando la red llega a ella.
 
 ## 6. Red de rutas
@@ -86,14 +86,15 @@ Cada baldosa tiene un **terreno** y, si la hay, una **vía**.
 - **Distancia entre dos lotes** = costo del camino mínimo entre sus frentes por la red.
 - **Cómputo:** distancias precomputadas entre nodos (Dijkstra) y cacheadas; solo se recalculan cuando un tramo cambia de estado o se construye. Nadie calcula rutas por persona en el día.
 - Si no hay ruta, el lote queda aislado: no se puede comprar ni trabajar en él.
-- Usos: elección de vendedor, de casa y de trabajo; hospital más cercano; tiempo de viaje de la agenda (MOTOR_V2 §7); traslado que baja la productividad.
+- Un tramo en estado 0 es intransitable: se usa otra ruta si existe (más larga y cara).
+- Usos: elección de vendedor, de casa y de trabajo; hospital más cercano; tiempo de viaje de la agenda (MOTOR §7); traslado que baja la productividad (MUNDO §8).
 
 ## 7. Expansión de la ciudad
 
 - El preset trae más lotes de los que se usan (`sin_calle`) y tramos posibles con lo que abre cada uno.
-- Solo el estado construye vías (EDIFICIOS_V2 §3b), con el costo de obra afectado por el terreno (§3b): un tramo en construcción pasa baldosa a baldosa a vía construida, y al terminar los lotes cuyo frente toca el tramo pasan a `libre`.
+- Solo el estado construye vías (EDIFICIOS §3b), con el costo de obra afectado por el terreno (§3b): un tramo en construcción pasa baldosa a baldosa a vía construida, y al terminar los lotes cuyo frente toca el tramo pasan a `libre`.
 - Una zona `no_urbanizada` se activa cuando un camino o puente llega a sus baldosas.
-- Hogares y firmas construyen sobre lotes libres según ECONOMIA_V2 §8.
+- Hogares y firmas construyen sobre lotes libres según ECONOMIA §8.
 
 ## 8. Tamaño del mapa [propuesta]
 
@@ -131,4 +132,4 @@ El preset ajusta la cantidad de lotes por tipo para que hogares, comercios y cam
 
 ## 10. UI 2D
 
-La UI dibuja el mapa baldosa por baldosa: terreno, vías con color según su estado, lotes con el ícono de su edificio y NPCs como puntos que se mueven por la red entre los lotes de su agenda. Ver UI_PROTOTIPO_MUNDO.md.
+La UI dibuja el mapa baldosa por baldosa: terreno, vías con color según su estado, lotes con el ícono de su edificio y personas como puntos que se mueven por la red entre los lotes de su agenda. Ver UI_PROTOTIPO_MUNDO.md.

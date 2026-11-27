@@ -1,4 +1,4 @@
-# Lectura del mundo (v2.0)
+# Lectura del mundo
 
 > Capa entre el motor y la UI que convierte el estado del mundo en **algo que se entiende**: indicadores con estado y tendencia, alertas, series, informe periódico y personajes destacados. Es **solo lectura y derivada**: no cambia la simulación ni consume azar. La usan la UI de observación (UI_PROTOTIPO_MUNDO) y, después, el despacho del gobernador. Lo marcado **[propuesta]** se pule.
 
@@ -8,8 +8,8 @@
 
 - **Derivada y de solo lectura.** No tiene reglas de mundo, no genera eventos con efecto, no consume RNG. Apagarla no cambia la partida.
 - **Contexto antes que números.** Cada indicador se mide contra la referencia del propio mundo, no contra un valor absoluto.
-- **Revelado progresivo en tres niveles:** *vistazo* (pocos indicadores y alertas), *tema* (causas y mapa de calor de un indicador) y *detalle* (todo lo de CONTROLES_V2 §4).
-- **Todo tiene causa.** Alertas, tendencias e informes apuntan a eventos con origen y causa (CONTROLES_V2 §5).
+- **Revelado progresivo en tres niveles:** *vistazo* (pocos indicadores y alertas), *tema* (causas y mapa de calor de un indicador) y *detalle* (todo lo de CONTROLES §4).
+- **Todo tiene causa.** Alertas, tendencias e informes apuntan a eventos con origen y causa (CONTROLES §5).
 - **Texto por claves.** El motor entrega claves y parámetros (`vivienda.calle_sube`, `{pct: 12}`), no frases; la UI las traduce. Sin IA generativa en esta capa.
 
 ## 2. Indicadores de vistazo [propuesta]
@@ -50,8 +50,8 @@ Seis siempre; un séptimo cuando el módulo existe.
 
 ## 4. Series e historial
 
-- **Series:** una por indicador y por zona (para el mapa de calor). Diaria dentro de `ventana_serie_dias`; más atrás, agregada por período y por año. Se guardan (MOTOR_V2 §3).
-- **Historial consultable:** eventos por entidad, tipo, zona y período, paginados, con su cadena de causas (CONTROLES_V2 §4, *Causas*).
+- **Series:** una por indicador y por zona (para el mapa de calor). Diaria dentro de `ventana_serie_dias`; más atrás, agregada por período y por año. Se guardan (MOTOR §3).
+- **Historial consultable:** eventos por entidad, tipo, zona y período, paginados, con su cadena de causas (CONTROLES §4, *Causas*).
 - **Informe periódico:** cada `periodo_dias` (día de pago) el motor arma el informe: los 3 cambios más importantes del período (mayor cambio de estado o tendencia), cada uno con antes, después, causa principal y entidades; más los hechos de notables. Es determinista y se escribe con claves.
 
 ## 5. Notables (personajes destacados)
@@ -79,7 +79,7 @@ Pantalla que reúne la lectura con ayudas: **Resumen** (vistazo e informe), **Ci
 
 ## 8. Costo, determinismo y guardado
 
-- **Cadencia:** indicadores, alertas y series al cierre del día (MOTOR_V2 §2, paso 13); notables e informe en día de pago. Costo: O(indicadores + eventos nuevos); nunca por persona ni por tick.
+- **Cadencia:** indicadores, alertas y series al cierre del día (MOTOR §2, paso 13); notables e informe en día de pago. Costo: O(indicadores + eventos nuevos); nunca por persona ni por tick.
 - **Modo sin dibujo:** solo series y alertas; el resto se calcula a pedido.
 - **Determinismo:** no usa RNG ni modifica el estado de la simulación; misma semilla, mismas alertas e informes.
 - **Guardado:** series, alertas abiertas, notables e informes.
