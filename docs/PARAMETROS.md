@@ -22,18 +22,18 @@ Estos 12 parámetros fueron incorporados en las últimas revisiones de los docum
 
 | Parámetro | Dominio | Propósito resumido | Valor / rango en docs | Fuente |
 |---|---|---|---|---|
-| `personas_por_zona` | Zonas / generación | Divisor de `poblacion_inicial` para calcular zonas activas iniciales (acotado entre `4` y `12` salvo que el preset suba el tope) | Pendiente (ejemplo: con 100 hab → 4 zonas; con 500+ → 8-12) | `MUNDO §8` |
-| `reserva_min_dias` | Piloto automático | Piso de reserva (en días de gasto corriente) para subir impuesto y para frenar obras nuevas | Pendiente (unidad: días de gasto corriente) | `MUNDO §9` |
-| `reserva_max_dias` | Piloto automático | Techo de reserva (en días de gasto corriente) sobre el cual el piloto automático baja `tasa_impuesto` | Pendiente (unidad: días de gasto corriente) | `MUNDO §9` |
-| `tasa_min_auto` | Piloto automático | Límite inferior de `tasa_impuesto` dentro del cual opera el ajuste fiscal automático | Pendiente (unidad: %) | `MUNDO §9` |
-| `tasa_max_auto` | Piloto automático | Límite superior de `tasa_impuesto` dentro del cual opera el ajuste fiscal automático | Pendiente (unidad: %) | `MUNDO §9` |
-| `periodos_ajuste_fiscal` | Piloto automático | Cantidad de períodos entre cada paso de ajuste automático de `tasa_impuesto` | Pendiente (unidad: períodos) | `MUNDO §9` |
-| `pct_mant_max` | Piloto automático | % máximo de los ingresos del estado en el período que puede ocupar el mantenimiento total proyectado | Pendiente (unidad: % de ingresos del estado) | `MUNDO §9`, `ECONOMIA §16`, `ALCANCE §5` |
-| `n_constructoras_inicial` | Generación / economía | Cantidad mínima de firmas de rubro `construccion` creadas al iniciar el mundo | Pendiente (unidad: firmas) | `MUNDO §12` |
-| `k_obra_directa` | Estado / construcción | Multiplicador de costo cuando el estado ejecuta obra directa por falta de constructoras con capacidad | Pendiente (restricción: `> 1`) | `ECONOMIA §10` |
-| `k_dias_obra_directa` | Estado / construcción | Multiplicador de duración en días cuando el estado ejecuta obra directa | Pendiente | `ECONOMIA §10` |
-| `umbral_obra_sin_capacidad` | Economía / emprendimiento | Umbral de obra directa o demanda de obras sin atender que atrae emprendimientos de `construccion` | Pendiente (unidad y valor sin definir) | `ECONOMIA §8` |
-| `periodos_obra_sin_capacidad` | Economía / emprendimiento | Períodos consecutivos superando `umbral_obra_sin_capacidad` para contar como demanda no cubierta | Pendiente (unidad: períodos) | `ECONOMIA §8` |
+| `personas_por_zona` | Zonas / generación | Divisor de `poblacion_inicial` para calcular zonas activas iniciales (acotado entre `4` y `12` salvo que el preset suba el tope) | `25` (*valor inicial de prototipo, no decidido*; ejemplo: con 100 hab → 4 zonas; con 500+ → 8-12) | `MUNDO §8` |
+| `reserva_min_dias` | Piloto automático | Piso de reserva (en días de gasto corriente) para subir impuesto y para frenar obras nuevas | `21` días (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `reserva_max_dias` | Piloto automático | Techo de reserva (en días de gasto corriente) sobre el cual el piloto automático baja `tasa_impuesto` | `55` días (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `tasa_min_auto` | Piloto automático | Límite inferior de `tasa_impuesto` dentro del cual opera el ajuste fiscal automático | `20` % (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `tasa_max_auto` | Piloto automático | Límite superior de `tasa_impuesto` dentro del cual opera el ajuste fiscal automático | `48` % (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `periodos_ajuste_fiscal` | Piloto automático | Cantidad de períodos entre cada paso de ajuste automático de `tasa_impuesto` | `2` períodos (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `pct_mant_max` | Piloto automático | % máximo de los ingresos del estado en el período que puede ocupar el mantenimiento total proyectado | `35` % (*valor inicial de prototipo, no decidido*) | `MUNDO §9`, `ECONOMIA §16`, `ALCANCE §5` |
+| `n_constructoras_inicial` | Generación / economía | Cantidad mínima de firmas de rubro `construccion` creadas al iniciar el mundo | `1` firma (*valor inicial de prototipo, no decidido*) | `MUNDO §12` |
+| `k_obra_directa` | Estado / construcción | Multiplicador de costo cuando el estado ejecuta obra directa por falta de constructoras con capacidad | `1.35` (*valor inicial de prototipo, no decidido*; restricción: `> 1`) | `ECONOMIA §10` |
+| `k_dias_obra_directa` | Estado / construcción | Multiplicador de duración en días cuando el estado ejecuta obra directa | `1.4` (*valor inicial de prototipo, no decidido*) | `ECONOMIA §10` |
+| `umbral_obra_sin_capacidad` | Economía / emprendimiento | Umbral de obra directa o demanda de obras sin atender que atrae emprendimientos de `construccion` | `2` obras directas/período (*valor inicial de prototipo, no decidido*) | `ECONOMIA §8` |
+| `periodos_obra_sin_capacidad` | Economía / emprendimiento | Períodos consecutivos superando `umbral_obra_sin_capacidad` para contar como demanda no cubierta | `2` períodos (*valor inicial de prototipo, no decidido*) | `ECONOMIA §8` |
 
 ---
 
@@ -373,63 +373,63 @@ Fuentes: `MUNDO.md`, `MAPA.md`, `CAOS_PRENSA.md`, `ACTORES.md`, `UI.md`, `CONTRO
 
 | Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
 |---|---|---|---|---|---|
-| `radio_escuela` | Radio de acción de una escuela, en pasos entre zonas | Fuera del radio el menor no estudia (tope de educación 1) | pasos de zona | Pendiente (0 = solo su zona) | `MUNDO §9`, `EDIFICIOS §3` |
-| `radio_universidad` | Radio de acción de una universidad | Fuera del radio el tope de educación es 2 | pasos de zona | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
-| `radio_hospital` | Radio de acción de un hospital | Fuera del radio nadie se interna: espera en casa sin cura asistida | pasos de zona | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
-| `radio_comisaria` | Radio dentro del cual los policías de una comisaría pueden destacarse y aportar presencia | Sin comisaría en el radio la cobertura policial de la zona es 0 | pasos de zona | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
-| `atenuacion_policia` | Peso con que un policía destacado en la zona y aporta a otra zona a distancia d: `atenuacion_policia^d` | Modela que tarden más en llegar | factor 0-1 | Pendiente | `MUNDO §9` |
-| `habitantes_por_policia` | Población que cubre un policía para cobertura policial 1 | `cobertura = presencia ÷ (población ÷ habitantes_por_policia)` | personas / policía | Pendiente | `MUNDO §9` |
-| `habitantes_por_<rol>` | Referencia de población por profesional para médico y docente (escuela y universidad) | Define la cobertura por zona de salud y educación | personas / profesional | Pendiente (un valor por rol) | `MUNDO §9` |
-| `anios_pre_egreso` | Últimos años de menor que cuentan como población relevante de la universidad | Denominador de la cobertura universitaria | años | Pendiente | `MUNDO §9` |
-| `puestos_por_comisaria` | Cantidad máxima de policías que da una comisaría | Tope de policías por puesto | puestos | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
-| `cobertura_min` | Cobertura de zona bajo la cual el piloto automático construye un servicio y los actores piden `seguridad_en_mi_zona` | Dispara obras automáticas y demandas | 0-1 | Pendiente | `MUNDO §9`, `ACTORES §4` |
-| `k_miedo_sin_policia` | Recargo diario de miedo por cobertura policial baja | `k × (1 − cobertura policial)` | factor | Pendiente | `MUNDO §9` |
-| `k_malestar_sin_salud` | Recargo diario de malestar por cobertura médica baja | `k × (1 − cobertura médica)` | factor | Pendiente | `MUNDO §9` |
+| `radio_escuela` | Radio de acción de una escuela, en pasos entre zonas | Fuera del radio el menor no estudia (tope de educación 1) | pasos de zona | `1` (*valor inicial de prototipo, no decidido*; 0 = solo su zona) | `MUNDO §9`, `EDIFICIOS §3` |
+| `radio_universidad` | Radio de acción de una universidad | Fuera del radio el tope de educación es 2 | pasos de zona | `2` (*valor inicial de prototipo, no decidido*) | `MUNDO §9`, `EDIFICIOS §3` |
+| `radio_hospital` | Radio de acción de un hospital | Fuera del radio nadie se interna: espera en casa sin cura asistida | pasos de zona | `1` (*valor inicial de prototipo, no decidido*) | `MUNDO §9`, `EDIFICIOS §3` |
+| `radio_comisaria` | Radio dentro del cual los policías de una comisaría pueden destacarse y aportar presencia | Sin comisaría en el radio la cobertura policial de la zona es 0 | pasos de zona | `1` (*valor inicial de prototipo, no decidido*) | `MUNDO §9`, `EDIFICIOS §3` |
+| `atenuacion_policia` | Peso con que un policía destacado en la zona y aporta a otra zona a distancia d: `atenuacion_policia^d` | Modela que tarden más en llegar | factor 0-1 | `0.55` (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `habitantes_por_policia` | Población que cubre un policía para cobertura policial 1 | `cobertura = presencia ÷ (población ÷ habitantes_por_policia)` | personas / policía | `25` (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `habitantes_por_<rol>` | Referencia de población por profesional para médico y docente (escuela y universidad) | Define la cobertura por zona de salud y educación | personas / profesional | `medico: 25`, `docente: 14`, `universidad: 18` (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `anios_pre_egreso` | Últimos años de menor que cuentan como población relevante de la universidad | Denominador de la cobertura universitaria | años | `4` (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `puestos_por_comisaria` | Cantidad máxima de policías que da una comisaría | Tope de policías por puesto | puestos | `4` (*valor inicial de prototipo, no decidido*) | `MUNDO §9`, `EDIFICIOS §3` |
+| `cobertura_min` | Cobertura de zona bajo la cual el piloto automático construye un servicio y los actores piden `seguridad_en_mi_zona` | Dispara obras automáticas y demandas | 0-1 | `0.65` (*valor inicial de prototipo, no decidido*) | `MUNDO §9`, `ACTORES §4` |
+| `k_miedo_sin_policia` | Recargo diario de miedo por cobertura policial baja | `k × (1 − cobertura policial)` | factor | `2.2` (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
+| `k_malestar_sin_salud` | Recargo diario de malestar por cobertura médica baja | `k × (1 − cobertura médica)` | factor | `1.8` (*valor inicial de prototipo, no decidido*) | `MUNDO §9` |
 | `umbral_hambre_critica` | Nivel de hambre sobre el cual hay daño diario y cuenta para `hambre_critica_pct` | Unifica el umbral de daño y el de indicador | escala 0-100 | `80` (definido por `MUNDO §11`) | `MUNDO §6`, `§11` |
 
 ### Estabilidad, colapso, mapa y UI (`MUNDO §14`, `MAPA §8`)
 
 | Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
 |---|---|---|---|---|---|
-| `escala_fenomenos` | Cuántos fenómenos de clima hay y qué tan intensos | Perilla de estabilidad | factor | Pendiente (por perfil) | `MUNDO §14` |
-| `holgura_inicial` | Holgura económica al arrancar: reserva, colchón de hogares, caja de firmas, producción sobre consumo | Perilla de estabilidad | factor | Pendiente (por perfil) | `MUNDO §14` |
-| `cobertura_inicial` | Qué tan cubierta de servicios arranca la ciudad | Perilla de estabilidad | 0-1 | Pendiente (por perfil) | `MUNDO §14` |
-| `n_rios` | Cantidad de ríos que genera el terreno | Perilla de territorio (aislamiento) | ríos | Pendiente | `MAPA §3b`, `MUNDO §14` |
-| `nivel_agua` | Altura bajo la cual el terreno es agua | Perilla de territorio | altura | Pendiente | `MAPA §3b`, `MUNDO §14` |
-| `pct_menores / pct_jubilados` | Composición de edades de la pirámide inicial | Perilla demográfica | % | Pendiente | `MUNDO §12`, `§14` |
-| `umbral_colapso_poblacion` | `poblacion_pct` bajo el cual el mundo se considera colapsado | Define el evento `colapso` | % | Pendiente | `MUNDO §14` |
-| `umbral_colapso_hambre` | `hambre_critica_pct` sobre el cual el mundo se considera colapsado | Define el evento `colapso` | % | Pendiente | `MUNDO §14` |
-| `umbral_colapso_descontento` | `descontentos_pct` sobre el cual el mundo se considera colapsado | Define el evento `colapso` | % | Pendiente | `MUNDO §14` |
-| `dias_colapso` | Días que deben sostenerse las condiciones de colapso | Evita declarar colapso por un pico | días | Pendiente | `MUNDO §14` |
-| `lado_min, baldosas_por_persona, suelo_util_pct` | Piso del lado del mapa, densidad y proporción de suelo útil | `lado = máx(lado_min, raíz(población × baldosas_por_persona ÷ suelo_util_pct))` | baldosas / baldosas por persona / % | Ejemplo: `48`, `8`, `60 %` (no decididos) | `MAPA §8` |
-| `periodos_balance` | Cada cuántos períodos sale el balance de apoyo en la UI | Tarjeta de balance | períodos | Pendiente | `UI §3` |
-| `salario_base_publico` | Valor base del salario público al que se aplica el % de `salario_publico` | Monto diario = base × %/100 | dinero / día | Pendiente | `CONTROLES §2`, `ECONOMIA §3` |
+| `escala_fenomenos` | Cuántos fenómenos de clima hay y qué tan intensos | Perilla de estabilidad | factor | `estable: 0.75`, `normal: 1.0`, `fragil: 1.25`, `extremo: 1.5` (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `holgura_inicial` | Holgura económica al arrancar: reserva, colchón de hogares, caja de firmas, producción sobre consumo | Perilla de estabilidad | factor | `estable: 1.25`, `normal: 1.0`, `fragil: 0.8`, `extremo: 0.65` (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `cobertura_inicial` | Qué tan cubierta de servicios arranca la ciudad | Perilla de estabilidad | 0-1 | `estable: 0.9`, `normal: 0.7`, `fragil: 0.55`, `extremo: 0.4` (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `n_rios` | Cantidad de ríos que genera el terreno | Perilla de territorio (aislamiento) | ríos | `normal: 2` (`1–3` por perfil; *valor inicial de prototipo, no decidido*) | `MAPA §3b`, `MUNDO §14` |
+| `nivel_agua` | Altura bajo la cual el terreno es agua | Perilla de territorio | altura | `normal: 0.21` (`0.18–0.27` por perfil; *valor inicial de prototipo, no decidido*) | `MAPA §3b`, `MUNDO §14` |
+| `pct_menores / pct_jubilados` | Composición de edades de la pirámide inicial | Perilla demográfica | % | `normal: 22% / 12%` (*valor inicial de prototipo, no decidido*) | `MUNDO §12`, `§14` |
+| `umbral_colapso_poblacion` | `poblacion_pct` bajo el cual el mundo se considera colapsado | Define el evento `colapso` | % | `45` % (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `umbral_colapso_hambre` | `hambre_critica_pct` sobre el cual el mundo se considera colapsado | Define el evento `colapso` | % | `55` % (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `umbral_colapso_descontento` | `descontentos_pct` sobre el cual el mundo se considera colapsado | Define el evento `colapso` | % | `75` % (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `dias_colapso` | Días que deben sostenerse las condiciones de colapso | Evita declarar colapso por un pico | días | `7` días (*valor inicial de prototipo, no decidido*) | `MUNDO §14` |
+| `lado_min, baldosas_por_persona, suelo_util_pct` | Piso del lado del mapa, densidad y proporción de suelo útil | `lado = máx(lado_min, raíz(población × baldosas_por_persona ÷ suelo_util_pct))` | baldosas / baldosas por persona / % | `lado_min: 48`, `baldosas_por_persona: 14`, `suelo_minimo_pct: 0.54` (*valor inicial de prototipo, no decidido*) | `MAPA §8` |
+| `periodos_balance` | Cada cuántos períodos sale el balance de apoyo en la UI | Tarjeta de balance | períodos | `4` períodos (`28` días; *valor inicial de prototipo, no decidido*) | `UI §3` |
+| `salario_base_publico` | Valor base del salario público al que se aplica el % de `salario_publico` | Monto diario = base × %/100 | dinero / día | `4.25` (*valor inicial de prototipo, no decidido*) | `CONTROLES §2`, `ECONOMIA §3` |
 
 ### Caos, contagio y rarezas (`CAOS_PRENSA §2`, `§3`, `§4`, `§6`)
 
 | Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
 |---|---|---|---|---|---|
-| `k_contagio_global` | Escala todo el contagio; 0 lo apaga | Probabilidad diaria de contagio × `k_contagio_global`; perilla de estabilidad | factor | Pendiente | `CAOS_PRENSA §4`, `MUNDO §14` |
-| `max_rarezas_por_periodo` | Tope de rarezas por período (no cuentan contra `max_acciones_por_periodo`) | Da vida sin quitarle lugar al caos que importa | acciones / período | Pendiente | `CAOS_PRENSA §2`, `§6` |
-| `umbral_protesta, umbral_saqueo, umbral_ocupacion, umbral_boicot, umbral_recorte_paro` | Umbral propio de cada acción de condición | Cada uno es independiente del umbral de la noticia correspondiente | según indicador | Pendiente | `CAOS_PRENSA §3` |
-| `umbral_noticia_<tema>` | Umbral de disparo de noticias por tema (`hambre`, `precio`, `vivienda`, …) | Independiente de los umbrales de acciones | según indicador | Pendiente | `CAOS_PRENSA §3`, `§8` |
+| `k_contagio_global` | Escala todo el contagio; 0 lo apaga | Probabilidad diaria de contagio × `k_contagio_global`; perilla de estabilidad | factor | `1.0` (`0.75–1.4` por perfil; *valor inicial de prototipo, no decidido*) | `CAOS_PRENSA §4`, `MUNDO §14` |
+| `max_rarezas_por_periodo` | Tope de rarezas por período (no cuentan contra `max_acciones_por_periodo`) | Da vida sin quitarle lugar al caos que importa | acciones / período | `2` (*valor inicial de prototipo, no decidido*) | `CAOS_PRENSA §2`, `§6` |
+| `umbral_protesta, umbral_saqueo, umbral_ocupacion, umbral_boicot, umbral_recorte_paro` | Umbral propio de cada acción de condición | Cada uno es independiente del umbral de la noticia correspondiente | según indicador | `protesta: 35`, `saqueo: 20`, `ocupacion: 8`, `boicot: 38`, `recorte_paro: 82` (*valor inicial de prototipo, no decidido*) | `CAOS_PRENSA §3` |
+| `umbral_noticia_<tema>` | Umbral de disparo de noticias por tema (`hambre`, `precio`, `vivienda`, …) | Independiente de los umbrales de acciones | según indicador | `hambre: 12%`, `precio: 18%`, `vivienda: 8%` (*valor inicial de prototipo, no decidido*) | `CAOS_PRENSA §3`, `§8` |
 
 ### Actores: favor y extorsión (`ACTORES §3`, `§4`, `§5`)
 
 | Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
 |---|---|---|---|---|---|
-| `decaimiento_favor` | Cuánto decae el `favor` hacia 0 por período | Relación con los actores | puntos / período | Pendiente | `ACTORES §3` |
-| `favor_aliado / favor_hostil` | Umbrales de `favor` para postura aliado y hostil | Definen la `postura` | puntos (−100 a 100) | Pendiente | `ACTORES §3` |
-| `k_aliado` | Multiplicador que suaviza y espacia las medidas de un aliado | Menos presión de aliados | factor | Pendiente | `ACTORES §3` |
-| `pct_despido_medida` | % de empleados de las firmas del actor que despide `despido_forzado` | Reemplaza el conteo `despidos_medida` | % | Pendiente | `ACTORES §4` |
-| `periodos_sin_lote` | Períodos sin lotes libres que disparan `via_a_mi_zona` | Disparador de demanda de obra | períodos | Pendiente | `ACTORES §4` |
-| `peso_extorsion` | `peso` mínimo del actor para poder extorsionar | Condición 1 de extorsión | 0-100 | Pendiente | `ACTORES §5` |
-| `periodos_memoria_rechazo` | Ventana en la que un rechazo o incumplimiento cuenta como hostilidad | Condición 2 de extorsión | períodos | Pendiente | `ACTORES §5` |
-| `margen_vulnerable` | Puntos de `apoyo_pct` a la meta o al límite que cuentan como gobernador débil | Condición 3 de extorsión | puntos | Pendiente | `ACTORES §5` |
-| `dias_respuesta_extorsion` | Plazo de una extorsión (más corto que el de una demanda) | Presión de tiempo | días | Pendiente | `ACTORES §5` |
-| `k_extorsion, pct_despido_extorsion` | Multiplicador y % de despido de la medida de una extorsión rechazada | Medida más fuerte | factor / % | Pendiente | `ACTORES §5` |
-| `periodos_precedente` | Períodos durante los cuales ceder a una extorsión acelera nuevas demandas | Costo de ceder | períodos | Pendiente | `ACTORES §5` |
-| `max_extorsiones_activas, dias_entre_extorsiones` | Topes de extorsión simultánea y de espera por actor | Límites | extorsiones / días | Pendiente | `ACTORES §5` |
+| `decaimiento_favor` | Cuánto decae el `favor` hacia 0 por período | Relación con los actores | puntos / período | `2` (*valor inicial de prototipo, no decidido*) | `ACTORES §3` |
+| `favor_aliado / favor_hostil` | Umbrales de `favor` para postura aliado y hostil | Definen la `postura` | puntos (−100 a 100) | `35` / `-35` (*valor inicial de prototipo, no decidido*) | `ACTORES §3` |
+| `k_aliado` | Multiplicador que suaviza y espacia las medidas de un aliado | Menos presión de aliados | factor | `0.5` (*valor inicial de prototipo, no decidido*) | `ACTORES §3` |
+| `pct_despido_medida` | % de empleados de las firmas del actor que despide `despido_forzado` | Reemplaza el conteo `despidos_medida` | % | `15` % (*valor inicial de prototipo, no decidido*) | `ACTORES §4` |
+| `periodos_sin_lote` | Períodos sin lotes libres que disparan `via_a_mi_zona` | Disparador de demanda de obra | períodos | `2` (*valor inicial de prototipo, no decidido*) | `ACTORES §4` |
+| `peso_extorsion` | `peso` mínimo del actor para poder extorsionar | Condición 1 de extorsión | 0-100 | `55` (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
+| `periodos_memoria_rechazo` | Ventana en la que un rechazo o incumplimiento cuenta como hostilidad | Condición 2 de extorsión | períodos | `4` (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
+| `margen_vulnerable` | Puntos de `apoyo_pct` a la meta o al límite que cuentan como gobernador débil | Condición 3 de extorsión | puntos | `8` (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
+| `dias_respuesta_extorsion` | Plazo de una extorsión (más corto que el de una demanda) | Presión de tiempo | días | `3` días (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
+| `k_extorsion, pct_despido_extorsion` | Multiplicador y % de despido de la medida de una extorsión rechazada | Medida más fuerte | factor / % | `1.75` / `25%` (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
+| `periodos_precedente` | Períodos durante los cuales ceder a una extorsión acelera nuevas demandas | Costo de ceder | períodos | `6` (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
+| `max_extorsiones_activas, dias_entre_extorsiones` | Topes de extorsión simultánea y de espera por actor | Límites | extorsiones / días | `1` / `21` días (*valor inicial de prototipo, no decidido*) | `ACTORES §5` |
 
 ---
 

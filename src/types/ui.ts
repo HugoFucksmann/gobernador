@@ -1,4 +1,4 @@
-import { ZoneId } from './game';
+import { BuildingType, EventFoco, ZoneId } from './game';
 
 export type WindowId = 'palancas' | 'economia' | 'ciudad' | 'gaceta' | 'despacho';
 
@@ -6,8 +6,11 @@ export type DespachoTab = 'resumen' | 'historial' | 'informe' | 'notables';
 
 export type MapFilter = 'todos' | 'acciones' | 'descontentos' | 'hambre' | 'calle';
 
+export type CoverageServiceFilter = 'escuela' | 'universidad' | 'salud' | 'policia';
+
 export type MapLens =
   | 'ninguna'
+  | 'cobertura'
   | 'satisfaccion'
   | 'roles'
   | 'vivienda'
@@ -42,6 +45,7 @@ export interface CameraTarget {
   zone?: ZoneId | 'all';
   wx?: number;
   wy?: number;
+  foco?: EventFoco;
   seq: number;
 }
 
@@ -49,6 +53,8 @@ export interface MapHoverPreview {
   zona?: ZoneId;
   parcelaId?: string;
   tramoId?: string;
+  buildingType?: BuildingType;
+  newlyCoveredPopulation?: number;
 }
 
 export interface PaydaySummary {

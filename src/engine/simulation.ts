@@ -5656,7 +5656,7 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         zona: ev.zona,
         npcId: ev.npcIds[0],
         titulo: `Acción colectiva: ${ev.accion}`,
-        detalle: `${ev.npcIds.length} participante(s) en zona ${ev.zonaDestino}.`,
+        detalle: ev.texto || `${ev.npcIds.length} participante(s) en zona ${ev.zonaDestino}.`,
       };
     case 'accion_fin':
       return {
@@ -5664,8 +5664,9 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
         dia: ev.dia,
         tipo: ev.tipo,
         zona: ev.zona,
+        npcId: ev.npcIds[0],
         titulo: `Fin de acción: ${ev.accion}`,
-        detalle: `Zona ${ev.zona}.`,
+        detalle: ev.texto || `Zona ${ev.zona}.`,
       };
     case 'reubicacion':
       return {
@@ -5794,6 +5795,33 @@ export function describeSimEvent(ev: SimEvent, state: GameState): CausalStep {
           ? `Demanda vencida (${ev.actorId})`
           : `Demanda rechazada (${ev.actorId})`,
         detalle: `Desencadena medida de presión por ${ev.demandaId}.`,
+      };
+    case 'demanda_incumplida':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Compromiso incumplido (${ev.actorId})`,
+        detalle: `Venció el plazo de compromiso para ${ev.demandaId}.`,
+      };
+    case 'extorsion':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Extorsión de ${ev.actorId}: ${ev.demandaId}`,
+        detalle: `Plazo urgente de ${ev.diasRespuesta} días para responder.`,
+      };
+    case 'colapso':
+      return {
+        id: ev.id,
+        dia: ev.dia,
+        tipo: ev.tipo,
+        zona: ev.zona,
+        titulo: `Colapso de la ciudad (${ev.causaColapso})`,
+        detalle: `La condición de colapso alcanzó ${ev.valor.toFixed(1)}%.`,
       };
     case 'medida':
       return {

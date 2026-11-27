@@ -2,13 +2,16 @@ export type ScenarioId = 'elecciones' | 'zombies';
 
 export type EconomyModule = 'base' | 'fiscal';
 export type WorldComplexityLevel = 'M0' | 'M1' | 'M2' | 'M3' | 'M4';
-export type GovernorComplexityLevel = 'G0' | 'G1' | 'G2' | 'G3';
+export type GovernorComplexityLevel = 'G0' | 'G1' | 'G2' | 'G3' | 'G4';
+export type StabilityProfileId = 'estable' | 'normal' | 'fragil' | 'extremo';
 export type PriceCapMode = 'libre' | 'moderado' | 'estricto';
 export type ForeignTradeStep = -100 | -50 | 0 | 50 | 100;
 export type ServiceLevel = 0 | 1 | 2 | 3 | 4 | 5;
 export type EnterpriseTramo = 'aumento' | 'normal' | 'recorte' | 'despido';
 export type DemandId =
   | 'bajen_impuestos'
+  | 'via_a_mi_zona'
+  | 'seguridad_en_mi_zona'
   | 'liberen_precio'
   | 'abran_exportacion'
   | 'mas_pauta'
@@ -16,6 +19,11 @@ export type DemandId =
   | 'sindicato_salarios'
   | 'vecinos_comida'
   | 'vecinos_obras';
+
+export interface EventFoco {
+  tipo: 'persona' | 'lote' | 'zona';
+  id: string;
+}
 
 export type ZoneId = string;
 
@@ -667,6 +675,14 @@ export interface ActiveDemand {
   titulo: string;
   razon: string;
   amenaza: string;
+  esExtorsion?: boolean;
+  tipoPedido?: 'palanca' | 'obra' | 'via';
+  obraPedido?: {
+    tipoEdificio?: BuildingType;
+    tramoId?: string;
+    zonaId?: ZoneId;
+  };
+  foco?: EventFoco;
   pedido: {
     palanca: LeverKey;
     nuevoValor: number | string;
@@ -676,6 +692,26 @@ export interface ActiveDemand {
   diasRestantes: number;
   diasCompromiso: number;
   causaId?: string;
+}
+
+export type ActorPostura = 'aliado' | 'neutral' | 'hostil';
+
+export interface ActorFavorCause {
+  dia: number;
+  delta: number;
+  motivo: string;
+  causaId?: string;
+}
+
+export interface ActorRelationState {
+  actorId: string;
+  favor: number; // -100 a 100
+  postura: ActorPostura;
+  causasRecientes: ActorFavorCause[];
+  ultimoRechazoDia?: number;
+  ultimoIncumplimientoDia?: number;
+  ultimaExtorsionDia?: number;
+  precedenteHastaDia?: number;
 }
 
 export interface ActorMeasure {
@@ -860,6 +896,7 @@ export interface WorldConfig {
   economiaModulo: EconomyModule;
   nivelMundo: WorldComplexityLevel;
   nivelGobernador?: GovernorComplexityLevel;
+  perfilEstabilidad?: StabilityProfileId;
   estadoAutomatico?: boolean;
   cantidadMedios: number;
   poblacionInicial: number;
@@ -1107,6 +1144,7 @@ export type SimEvent = (
       npcIds: string[];
       zonaDestino: ZoneId;
       origen: string;
+      texto?: string;
       causa?: string;
     }
   | {
@@ -1190,11 +1228,30 @@ export type SimEvent = (
   | {
       id: string;
       dia: number;
-      tipo: 'demanda_rechazada';
+      tipo: 'demanda_rechazada' | 'demanda_incumplida';
       zona: ZoneId;
       actorId: string;
       demandaId: DemandId;
       porVencimiento: boolean;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'extorsion';
+      zona: ZoneId;
+      actorId: string;
+      demandaId: DemandId;
+      diasRespuesta: number;
+      causa?: string;
+    }
+  | {
+      id: string;
+      dia: number;
+      tipo: 'colapso';
+      zona: ZoneId;
+      causaColapso: 'poblacion' | 'hambre' | 'descontento';
+      valor: number;
       causa?: string;
     }
   | {
@@ -1463,7 +1520,7 @@ export type SimEvent = (
       costo?: number;
       causa?: string;
     }
-) & { notable?: boolean };
+) & { notable?: boolean; foco?: EventFoco };
 
 export interface CausalStep {
   id: string;
@@ -1544,6 +1601,7 @@ export interface LecturaAlerta {
   indicador: LecturaIndicadorId;
   entidad: string;
   causa?: string;
+  foco?: EventFoco;
   dia: number;
   activa: boolean;
   texto: LecturaTexto;
@@ -1638,6 +1696,7 @@ export interface GameState {
   firmas: Firma[];
   alimento: {
     stock: number;
+    stockEstado?: number;
     produccionDiaria: number;
     consumoDiario: number;
     diasStock: number;
@@ -1652,6 +1711,20 @@ export interface GameState {
   medidasVigentes: ActorMeasure[];
   bloqueosPalanca: LeverLock[];
   cooldownActorDemanda: Record<string, number>;
+  actoresEstado?: Record<string, ActorRelationState>;
+  colapsoDiasConsecutivos?: number;
+  obraDirectaSinCapacidadPeriodos?: number;
+  obrasSinCapacidadEnPeriodo?: number;
+  ultimoAjusteFiscalPeriodo?: number;
+  coberturaServiciosPorZona?: Record<
+    ZoneId,
+    {
+      escuela: number;
+      universidad: number;
+      salud: number;
+      policia: number;
+    }
+  >;
   clima: ClimateState;
   medios: MediaOutlet[];
   noticias: NewsArticle[];

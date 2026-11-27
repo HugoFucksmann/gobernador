@@ -839,6 +839,7 @@ export const GameHudTop: React.FC<GameHudTopProps> = ({
               <option value="G1">G1</option>
               <option value="G2">G2</option>
               <option value="G3">G3</option>
+              <option value="G4">G4</option>
             </select>
             <label className="flex items-center gap-1.5 cursor-pointer text-zinc-200 px-1.5 whitespace-nowrap">
               <input

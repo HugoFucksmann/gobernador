@@ -101,7 +101,7 @@ export function isTestConfig(config: WorldConfig): boolean {
   const preset = SCENARIO_PRESETS[config.escenarioId];
   const { nivelMundo, nivelGobernador } = resolveComplexityConfig(config);
   if (nivelMundo !== 'M3' && nivelMundo !== 'M4') return true;
-  if (nivelGobernador === 'G1') return true;
+  if (nivelGobernador === 'G3' || nivelGobernador === 'G4') return true;
   if (config.poblacionInicial !== preset.poblacionDefault) return true;
   if (config.cantidadMedios !== preset.mediosDefault) return true;
   return false;
@@ -1387,6 +1387,11 @@ export function createInitialGameState(rawConfig: WorldConfig): GameState {
     medidasVigentes: [],
     bloqueosPalanca: [],
     cooldownActorDemanda: {},
+    actoresEstado: {},
+    colapsoDiasConsecutivos: 0,
+    obraDirectaSinCapacidadPeriodos: 0,
+    obrasSinCapacidadEnPeriodo: 0,
+    ultimoAjusteFiscalPeriodo: 0,
     clima: {
       fenomenos: initialPhenomena,
       proximoEventoDia:

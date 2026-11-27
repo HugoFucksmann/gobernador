@@ -44,6 +44,7 @@ interface BottomDockProps {
 
 const LENS_OPTIONS: Array<{ id: MapLens; label: string }> = [
   { id: 'ninguna', label: 'Normal' },
+  { id: 'cobertura', label: 'Cobertura' },
   { id: 'satisfaccion', label: 'Ánimo' },
   { id: 'roles', label: 'Oficios' },
   { id: 'vivienda', label: 'Vivienda' },
@@ -67,6 +68,13 @@ const FILTER_OPTIONS: Array<{ id: MapFilter; label: string }> = [
 
 function getLensLegend(lens: MapLens): Array<{ color: string; label: string }> {
   if (lens === 'ninguna') return [];
+  if (lens === 'cobertura') {
+    return [
+      { color: '#10b981', label: 'Cubierta (≥65%)' },
+      { color: '#f59e0b', label: 'Parcial' },
+      { color: '#ef4444', label: 'Descubierta' },
+    ];
+  }
   if (lens === 'roles') {
     return [
       { color: ROLE_CATALOG.agricultor.color, label: 'Agro' },

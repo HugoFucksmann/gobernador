@@ -215,25 +215,32 @@ export const WorldConfigModal: React.FC<WorldConfigModalProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
-                <span>Nivel de gobernador (G0–G3)</span>
+                <span>Nivel de gobernador (G0–G4)</span>
                 <HintIcon
-                  text="G0: sin intervención manual · G1: parcelas + 3 palancas · G2: palancas completas + obras y vías · G3: G2 + emisión, subsidio, educación, prensa y contraofertas."
+                  text="G0: piloto automático (Observador) · G1: construir/vías/demoler + impuesto, salario público y nivel de obras · G2: + ayuda, garantía, hitos y actores/extorsión · G3: 8 palancas completas · G4: + emisión, prensa y contraofertas."
                   placement="top"
                 />
               </div>
-              <div className="grid grid-cols-4 gap-1.5 p-1 bg-zinc-800 rounded-xl">
+              <div className="grid grid-cols-5 gap-1 p-1 bg-zinc-800 rounded-xl">
                 {(
                   [
                     { id: 'G0', label: 'G0' },
                     { id: 'G1', label: 'G1' },
                     { id: 'G2', label: 'G2' },
                     { id: 'G3', label: 'G3' },
+                    { id: 'G4', label: 'G4' },
                   ] as Array<{ id: GovernorComplexityLevel; label: string }>
                 ).map((g) => (
                   <button
                     key={g.id}
                     type="button"
-                    onClick={() => setConfig({ ...config, nivelGobernador: g.id })}
+                    onClick={() =>
+                      setConfig({
+                        ...config,
+                        nivelGobernador: g.id,
+                        estadoAutomatico: g.id === 'G0',
+                      })
+                    }
                     className={`py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                       govLevel === g.id
                         ? 'bg-emerald-600 text-white'

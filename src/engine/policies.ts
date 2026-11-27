@@ -22,8 +22,23 @@ import {
   WorldConfig,
 } from '../types/game';
 
+export const GOVERNOR_LEVEL_ORDER: Record<GovernorComplexityLevel, number> = {
+  G0: 0,
+  G1: 1,
+  G2: 2,
+  G3: 3,
+  G4: 4,
+};
+
 export function getGovernorLevel(config: Pick<WorldConfig, 'nivelGobernador'>): GovernorComplexityLevel {
   return config.nivelGobernador ?? 'G0';
+}
+
+export function isGovernorAtLeast(
+  config: Pick<WorldConfig, 'nivelGobernador'>,
+  minLevel: GovernorComplexityLevel
+): boolean {
+  return GOVERNOR_LEVEL_ORDER[getGovernorLevel(config)] >= GOVERNOR_LEVEL_ORDER[minLevel];
 }
 
 export function isObserverMode(config: Pick<WorldConfig, 'nivelGobernador' | 'estadoAutomatico'>): boolean {
@@ -35,6 +50,7 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
   economiaModulo: 'base',
   nivelMundo: 'M3',
   nivelGobernador: 'G0',
+  perfilEstabilidad: 'normal',
   estadoAutomatico: true,
   cantidadMedios: SCENARIO_PRESETS.elecciones.mediosDefault,
   poblacionInicial: SCENARIO_PRESETS.elecciones.poblacionDefault,

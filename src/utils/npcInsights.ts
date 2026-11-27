@@ -145,6 +145,13 @@ export function evaluateNpcLensColor(
   const zones = state ? getWorldZones(state) : undefined;
   const zone: ZoneId = getEffectiveZone(npc, zones?.length ?? 9, zones);
 
+  if (lens === 'cobertura') {
+    const cov = state?.coberturaServiciosPorZona?.[zone];
+    const avg = cov
+      ? (cov.salud + cov.policia + cov.escuela + cov.universidad) / 4
+      : 0.7;
+    return avg >= 0.65 ? '#10b981' : avg >= 0.35 ? '#f59e0b' : '#ef4444';
+  }
   if (lens === 'alquiler') {
     const rent = state?.ultimaSalidaEconomica?.alquilerMedio?.[zone] ?? 12;
     return rent > 22 ? '#ef4444' : rent > 14 ? '#f59e0b' : '#10b981';

@@ -18,6 +18,7 @@ import {
   ServiceLevel,
   ServicePublicRoleId,
   SpendCategory,
+  StabilityProfileId,
   ViaTramo,
   ZoneDefinition,
   ZoneId,
@@ -638,11 +639,28 @@ export const ACTOR_CONSTANTS = {
   diasEntreDemandas: 14,
   umbralImpuestoDemanda: 42,
   umbralPautaPct: 24,
+  /** @deprecated Reemplazado por pctDespidoMedida en Etapa 4 (ACTORES §4) */
   despidosMedida: 2,
   pctVentaRetencionStock: 0.45,
   maxDemandasSimultaneas: 2,
   periodosParaInvertirPrivado: 2,
   periodosBajoParaDemanda: 2,
+  // Favor, postura y extorsión (ACTORES §3-§5, valor inicial de prototipo)
+  decaimientoFavor: 2,
+  favorAliado: 35,
+  favorHostil: -35,
+  kAliado: 0.5,
+  pctDespidoMedida: 15,
+  periodosSinLote: 2,
+  pesoExtorsion: 55,
+  periodosMemoriaRechazo: 4,
+  margenVulnerable: 8,
+  diasRespuestaExtorsion: 3,
+  kExtorsion: 1.75,
+  pctDespidoExtorsion: 25,
+  periodosPrecedente: 6,
+  maxExtorsionesActivas: 1,
+  diasEntreExtorsiones: 21,
 } as const;
 
 export const PRICE_CAP_FACTORS: Record<PriceCapMode, number | null> = {
@@ -912,6 +930,127 @@ export const LECTURA_CONSTANTS = {
   pesoAlto: 45,
   pesoBajo: 25,
   diasMinNotable: 14,
+} as const;
+
+export const SERVICE_RADIUS_CONSTANTS = {
+  radioEscuela: 1,
+  radioUniversidad: 2,
+  radioHospital: 1,
+  radioComisaria: 1,
+  atenuacionPolicia: 0.55,
+  habitantesPorPolicia: 25,
+  habitantesPorMedico: 25,
+  habitantesPorDocente: 14,
+  habitantesPorUniversidad: 18,
+  aniosPreEgreso: 4,
+  puestosPorComisaria: 4,
+  coberturaMin: 0.65,
+  kMiedoSinPolicia: 2.2,
+  kMalestarSinSalud: 1.8,
+  umbralHambreCritica: 80,
+} as const;
+
+export const AUTOPILOT_CONSTANTS = {
+  personasPorZona: 25,
+  reservaMinDias: 21,
+  reservaMaxDias: 55,
+  tasaMinAuto: 20,
+  tasaMaxAuto: 48,
+  periodosAjusteFiscal: 2,
+  pctMantMax: 35,
+  nConstructorasInicial: 1,
+  kObraDirecta: 1.35,
+  kDiasObraDirecta: 1.4,
+  umbralObraSinCapacidad: 2,
+  periodosObraSinCapacidad: 2,
+} as const;
+
+export const CHAOS_THRESHOLDS = {
+  kContagioGlobal: 1.0,
+  maxRarezasPorPeriodo: 2,
+  umbralProtesta: 35,
+  umbralSaqueo: 20,
+  umbralOcupacion: 8,
+  umbralBoicot: 38,
+  umbralRecorteParo: 82,
+  umbralNoticiaHambre: 12,
+  umbralNoticiaPrecio: 18,
+  umbralNoticiaVivienda: 8,
+} as const;
+
+export interface StabilityProfileDef {
+  id: StabilityProfileId;
+  nombre: string;
+  escalaFenomenos: number;
+  holguraInicial: number;
+  coberturaInicial: number;
+  nRios: number;
+  nivelAgua: number;
+  pctMenores: number;
+  pctJubilados: number;
+  kContagioGlobal: number;
+}
+
+export const STABILITY_PROFILES: Record<StabilityProfileId, StabilityProfileDef> = {
+  estable: {
+    id: 'estable',
+    nombre: 'Estable',
+    escalaFenomenos: 0.75,
+    holguraInicial: 1.25,
+    coberturaInicial: 0.9,
+    nRios: 1,
+    nivelAgua: 0.18,
+    pctMenores: 20,
+    pctJubilados: 10,
+    kContagioGlobal: 0.75,
+  },
+  normal: {
+    id: 'normal',
+    nombre: 'Normal',
+    escalaFenomenos: 1.0,
+    holguraInicial: 1.0,
+    coberturaInicial: 0.7,
+    nRios: 2,
+    nivelAgua: 0.21,
+    pctMenores: 22,
+    pctJubilados: 12,
+    kContagioGlobal: 1.0,
+  },
+  fragil: {
+    id: 'fragil',
+    nombre: 'Frágil',
+    escalaFenomenos: 1.25,
+    holguraInicial: 0.8,
+    coberturaInicial: 0.55,
+    nRios: 2,
+    nivelAgua: 0.24,
+    pctMenores: 24,
+    pctJubilados: 14,
+    kContagioGlobal: 1.2,
+  },
+  extremo: {
+    id: 'extremo',
+    nombre: 'Extremo',
+    escalaFenomenos: 1.5,
+    holguraInicial: 0.65,
+    coberturaInicial: 0.4,
+    nRios: 3,
+    nivelAgua: 0.27,
+    pctMenores: 25,
+    pctJubilados: 16,
+    kContagioGlobal: 1.4,
+  },
+};
+
+export const COLLAPSE_CONSTANTS = {
+  umbralColapsoPoblacion: 45,
+  umbralColapsoHambre: 55,
+  umbralColapsoDescontento: 75,
+  diasColapso: 7,
+} as const;
+
+export const UI_CONSTANTS = {
+  periodosBalance: 4,
 } as const;
 
 export const SPEND_CATEGORY_WEIGHTS: Record<SpendCategory, number> = {
