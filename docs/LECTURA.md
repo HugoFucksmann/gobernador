@@ -44,7 +44,7 @@ Seis siempre; un séptimo cuando el módulo existe.
 ## 3. Alertas
 
 - Se crean cuando un indicador cambia de estado, mantiene una tendencia mala durante `periodos_tendencia_mala`, o ocurre un hecho grave (muerte masiva, quiebra de una firma grande, zona aislada, ataque).
-- Campos: `id`, `severidad` (1-3), `indicador`, `entidad` (zona, firma, persona), `causa`, `dia`, `texto` (clave y parámetros).
+- Campos: `id`, `severidad` (1-3), `indicador`, `entidad` (zona, firma, persona), `foco` (a dónde va la cámara al tocarla, como en CONTROLES §5), `causa`, `dia`, `texto` (clave y parámetros).
 - **Prioridad:** severidad, luego novedad. **Deduplicación** por indicador y entidad, con `enfriamiento_alerta_dias`. Se cierran solas cuando el estado vuelve a `bien`.
 - El motor guarda la cola completa; la UI muestra como máximo 3 en el vistazo (`alertas_visibles`).
 
@@ -60,14 +60,15 @@ Se **derivan**, no se asignan. Una persona es notable por su peso en uno de esto
 
 | Tipo | Quién | Peso |
 |---|---|---|
-| `empresario` | Dueño con parte mayoritaria de una firma | cuota de mercado, empleados, caja |
-| `medio` | Dueño o director de un medio, o su columnista | alcance × credibilidad |
+| `empresario` | Dueño con parte mayoritaria de una o más firmas (un **magnate** emerge al sumar firmas, empleados, caja o patrimonio) | cantidad de firmas, cuota de mercado, empleados, caja, patrimonio |
+| `medio` | Quien funda, compra o hereda un medio, o su columnista estrella | alcance × credibilidad |
 
 - **Tope:** `min(notables_max, notables_pct × población)`.
 - **Histéresis:** entra sobre `peso_alto`, sale bajo `peso_bajo` y permanece al menos `dias_min_notable`, para que la lista no cambie todos los días.
 - **Campo derivado:** `notable: { tipo, motivo, peso }`.
 - **Hechos marcados:** todo evento que involucra a un notable lleva `notable: true` (compró una firma, quebró, cambió la línea editorial, fue noticia). La prensa y el historial pueden filtrar por eso.
-- **`interlocutor`** [solo la forma, vacía en esta etapa]: `{ npc, tipo, postura_hacia_estado, intereses, pedidos: [] }`. La postura sale de lealtad, satisfacción y línea editorial. Los pedidos y las respuestas llegan con el gobernador.
+- **`interlocutor`:** `{ npc, tipo, peso, postura, favor, intereses, pedidos: [] }`. Sin gobernador, `favor` es 0, `postura` sale de lealtad, satisfacción y línea editorial y `pedidos` está vacío. Con gobernador, `favor`, `postura` y `pedidos` los completa la capa del gobernador (ACTORES.md).
+- **Una sola regla, dos usos:** el cálculo de notables es una función compartida. LECTURA la muestra; la capa del gobernador la usa para definir sus actores (ACTORES §1). Apagar la capa de lectura no apaga a los actores.
 
 ## 6. Despacho del gobernador (etapa posterior)
 
@@ -94,4 +95,4 @@ Pantalla que reúne la lectura con ayudas: **Resumen** (vistazo e informe), **Ci
 
 ## 10. Fuera de esta etapa
 
-Interacción con interlocutores, palancas, textos generativos y el despacho completo.
+Textos generativos y el despacho completo. La interacción con interlocutores vive en ACTORES.md.

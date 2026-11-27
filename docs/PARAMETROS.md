@@ -246,7 +246,7 @@ Fuentes: `CAOS_PRENSA.md`, `ACCIONES.md`.
 
 | Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
 |---|---|---|---|---|---|
-| `k_orden` | Freno del `orden` de la zona sobre el contagio espontáneo | `contagio_efectivo = contagio × (1 − k_orden × orden/100) × (1 − k_satisfaccion × satisfaccion/100)` | factor | Pendiente | `CAOS_PRENSA §4` |
+| `k_orden` | Freno del `orden` de la zona sobre el contagio espontáneo | `p_contagio = contagio × exposición × (1 − k_orden × orden/100) × (1 − k_satisfaccion × satisfacción/100) × k_contagio_global × afinidad` | factor | Pendiente | `CAOS_PRENSA §4` |
 | `k_satisfaccion` | Freno de la `satisfaccion_media` de la zona sobre el contagio espontáneo | Reduce el contagio en zonas satisfechas | factor | Pendiente | `CAOS_PRENSA §4` |
 | `max_pct_rol_fuera_de_puesto` | % máximo de un rol que puede quedar `fuera_de_puesto` | Frena solo al caos espontáneo (las acciones de condición ocupan cupo pero no se frenan) | % | Pendiente | `CAOS_PRENSA §3`, `§5`, `§6` |
 | `max_pct_despensa_cedida` | % máximo de despensa cedida por día en efecto `comparte` | Acota la cesión solidaria diaria de comida entre vecinos | % / día | Pendiente | `CAOS_PRENSA §5` |
@@ -309,7 +309,7 @@ Fuentes: `CONTROLES.md`, `GOBERNADOR.md`, `ACTORES.md`, `ESCENARIOS.md`.
 | Parámetro / Control | Propósito y qué controla | Unidad | Rango / valores definidos en docs | Fuente |
 |---|---|---|---|---|
 | `tasa_impuesto` | Impuesto sobre ingresos de hogares (salvo pensiones y ayuda social) | % sobre ingreso | Rango del preset pendiente (en piloto automático: `[tasa_min_auto, tasa_max_auto]`) | `CONTROLES §2`, `ECONOMIA §3`, `MUNDO §9` |
-| `salario_publico` | Nivel salarial de empleados públicos | `%` del valor base (`salarioBasePublico`) | Rango: `50` a `150` (ver §13 sobre `ECONOMIA §3` y nombre camelCase) | `CONTROLES §2`, `GOBERNADOR §2` |
+| `salario_publico` | Nivel salarial de empleados públicos | `%` del valor base (`salario_base_publico`) | Rango: `50` a `150` | `CONTROLES §2`, `GOBERNADOR §2` |
 | `nivel_obras` | Fija `puestos[ingeniero]` y `operacion[obras]` a la vez | Nivel entero | `0` a `5` (cantidades de puestos y operación por nivel pendientes) | `CONTROLES §2`, `GOBERNADOR §2` |
 | `ayuda_social` | Monto diario entregado a cada desempleado o jubilado | dinero / día | Rango y valor inicial pendientes | `CONTROLES §2`, `ECONOMIA §3` |
 | `garantia_pct` | % del faltante de comida cubierto por el estado a adultos que no alcanzan a comprarla | % | Rango del preset pendiente (conceptual `0-100`) | `CONTROLES §2`, `ECONOMIA §6` |
@@ -326,7 +326,7 @@ Fuentes: `CONTROLES.md`, `GOBERNADOR.md`, `ACTORES.md`, `ESCENARIOS.md`.
 | `dias_compromiso` | Días durante los cuales la palanca aceptada queda bloqueada (y duración de tono favorable en `silencio_pagado`) | días | Pendiente | `ACTORES §1`, `§3` |
 | `dias_entre_demandas` | Enfriamiento mínimo entre dos demandas del mismo actor | días | Pendiente | `ACTORES §1` |
 | `umbral_impuesto_demanda` | Tasa de impuesto sobre la cual los empresarios disparan `bajen_impuestos` | % | Pendiente (alternativa del disparador: `factor < 1` en alguna firma durante `2` períodos) | `ACTORES §3` |
-| `despidos_medida` | Cantidad de empleados despedidos en `despido_forzado` al rechazar `bajen_impuestos` | personas | Pendiente | `ACTORES §3` |
+| `despidos_medida` | *Reemplazado por `pct_despido_medida`* (sección 15) | — | — | `ACTORES §4` |
 | `dias_medida` | Duración de las medidas `retencion_stock`, `sin_inversion` y `campana` | días | Pendiente | `ACTORES §3` |
 | `umbral_pauta` | Nivel de dependencia bajo el cual un medio pide `mas_pauta` | % (o proporción) | Pendiente | `ACTORES §3` |
 
@@ -365,29 +365,97 @@ Los documentos mencionan los siguientes parámetros conceptuales (en catálogo, 
 
 ---
 
+## 15. Parámetros agregados en la segunda revisión
+
+Fuentes: `MUNDO.md`, `MAPA.md`, `CAOS_PRENSA.md`, `ACTORES.md`, `UI.md`, `CONTROLES.md`.
+
+### Servicios por radio y cobertura (`MUNDO §9`)
+
+| Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
+|---|---|---|---|---|---|
+| `radio_escuela` | Radio de acción de una escuela, en pasos entre zonas | Fuera del radio el menor no estudia (tope de educación 1) | pasos de zona | Pendiente (0 = solo su zona) | `MUNDO §9`, `EDIFICIOS §3` |
+| `radio_universidad` | Radio de acción de una universidad | Fuera del radio el tope de educación es 2 | pasos de zona | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
+| `radio_hospital` | Radio de acción de un hospital | Fuera del radio nadie se interna: espera en casa sin cura asistida | pasos de zona | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
+| `radio_comisaria` | Radio dentro del cual los policías de una comisaría pueden destacarse y aportar presencia | Sin comisaría en el radio la cobertura policial de la zona es 0 | pasos de zona | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
+| `atenuacion_policia` | Peso con que un policía destacado en la zona y aporta a otra zona a distancia d: `atenuacion_policia^d` | Modela que tarden más en llegar | factor 0-1 | Pendiente | `MUNDO §9` |
+| `habitantes_por_policia` | Población que cubre un policía para cobertura policial 1 | `cobertura = presencia ÷ (población ÷ habitantes_por_policia)` | personas / policía | Pendiente | `MUNDO §9` |
+| `habitantes_por_<rol>` | Referencia de población por profesional para médico y docente (escuela y universidad) | Define la cobertura por zona de salud y educación | personas / profesional | Pendiente (un valor por rol) | `MUNDO §9` |
+| `anios_pre_egreso` | Últimos años de menor que cuentan como población relevante de la universidad | Denominador de la cobertura universitaria | años | Pendiente | `MUNDO §9` |
+| `puestos_por_comisaria` | Cantidad máxima de policías que da una comisaría | Tope de policías por puesto | puestos | Pendiente | `MUNDO §9`, `EDIFICIOS §3` |
+| `cobertura_min` | Cobertura de zona bajo la cual el piloto automático construye un servicio y los actores piden `seguridad_en_mi_zona` | Dispara obras automáticas y demandas | 0-1 | Pendiente | `MUNDO §9`, `ACTORES §4` |
+| `k_miedo_sin_policia` | Recargo diario de miedo por cobertura policial baja | `k × (1 − cobertura policial)` | factor | Pendiente | `MUNDO §9` |
+| `k_malestar_sin_salud` | Recargo diario de malestar por cobertura médica baja | `k × (1 − cobertura médica)` | factor | Pendiente | `MUNDO §9` |
+| `umbral_hambre_critica` | Nivel de hambre sobre el cual hay daño diario y cuenta para `hambre_critica_pct` | Unifica el umbral de daño y el de indicador | escala 0-100 | `80` (definido por `MUNDO §11`) | `MUNDO §6`, `§11` |
+
+### Estabilidad, colapso, mapa y UI (`MUNDO §14`, `MAPA §8`)
+
+| Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
+|---|---|---|---|---|---|
+| `escala_fenomenos` | Cuántos fenómenos de clima hay y qué tan intensos | Perilla de estabilidad | factor | Pendiente (por perfil) | `MUNDO §14` |
+| `holgura_inicial` | Holgura económica al arrancar: reserva, colchón de hogares, caja de firmas, producción sobre consumo | Perilla de estabilidad | factor | Pendiente (por perfil) | `MUNDO §14` |
+| `cobertura_inicial` | Qué tan cubierta de servicios arranca la ciudad | Perilla de estabilidad | 0-1 | Pendiente (por perfil) | `MUNDO §14` |
+| `n_rios` | Cantidad de ríos que genera el terreno | Perilla de territorio (aislamiento) | ríos | Pendiente | `MAPA §3b`, `MUNDO §14` |
+| `nivel_agua` | Altura bajo la cual el terreno es agua | Perilla de territorio | altura | Pendiente | `MAPA §3b`, `MUNDO §14` |
+| `pct_menores / pct_jubilados` | Composición de edades de la pirámide inicial | Perilla demográfica | % | Pendiente | `MUNDO §12`, `§14` |
+| `umbral_colapso_poblacion` | `poblacion_pct` bajo el cual el mundo se considera colapsado | Define el evento `colapso` | % | Pendiente | `MUNDO §14` |
+| `umbral_colapso_hambre` | `hambre_critica_pct` sobre el cual el mundo se considera colapsado | Define el evento `colapso` | % | Pendiente | `MUNDO §14` |
+| `umbral_colapso_descontento` | `descontentos_pct` sobre el cual el mundo se considera colapsado | Define el evento `colapso` | % | Pendiente | `MUNDO §14` |
+| `dias_colapso` | Días que deben sostenerse las condiciones de colapso | Evita declarar colapso por un pico | días | Pendiente | `MUNDO §14` |
+| `lado_min, baldosas_por_persona, suelo_util_pct` | Piso del lado del mapa, densidad y proporción de suelo útil | `lado = máx(lado_min, raíz(población × baldosas_por_persona ÷ suelo_util_pct))` | baldosas / baldosas por persona / % | Ejemplo: `48`, `8`, `60 %` (no decididos) | `MAPA §8` |
+| `periodos_balance` | Cada cuántos períodos sale el balance de apoyo en la UI | Tarjeta de balance | períodos | Pendiente | `UI §3` |
+| `salario_base_publico` | Valor base del salario público al que se aplica el % de `salario_publico` | Monto diario = base × %/100 | dinero / día | Pendiente | `CONTROLES §2`, `ECONOMIA §3` |
+
+### Caos, contagio y rarezas (`CAOS_PRENSA §2`, `§3`, `§4`, `§6`)
+
+| Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
+|---|---|---|---|---|---|
+| `k_contagio_global` | Escala todo el contagio; 0 lo apaga | Probabilidad diaria de contagio × `k_contagio_global`; perilla de estabilidad | factor | Pendiente | `CAOS_PRENSA §4`, `MUNDO §14` |
+| `max_rarezas_por_periodo` | Tope de rarezas por período (no cuentan contra `max_acciones_por_periodo`) | Da vida sin quitarle lugar al caos que importa | acciones / período | Pendiente | `CAOS_PRENSA §2`, `§6` |
+| `umbral_protesta, umbral_saqueo, umbral_ocupacion, umbral_boicot, umbral_recorte_paro` | Umbral propio de cada acción de condición | Cada uno es independiente del umbral de la noticia correspondiente | según indicador | Pendiente | `CAOS_PRENSA §3` |
+| `umbral_noticia_<tema>` | Umbral de disparo de noticias por tema (`hambre`, `precio`, `vivienda`, …) | Independiente de los umbrales de acciones | según indicador | Pendiente | `CAOS_PRENSA §3`, `§8` |
+
+### Actores: favor y extorsión (`ACTORES §3`, `§4`, `§5`)
+
+| Parámetro | Propósito y qué controla | Relación con el mundo | Unidad | Valor / rango / defecto en docs | Fuente |
+|---|---|---|---|---|---|
+| `decaimiento_favor` | Cuánto decae el `favor` hacia 0 por período | Relación con los actores | puntos / período | Pendiente | `ACTORES §3` |
+| `favor_aliado / favor_hostil` | Umbrales de `favor` para postura aliado y hostil | Definen la `postura` | puntos (−100 a 100) | Pendiente | `ACTORES §3` |
+| `k_aliado` | Multiplicador que suaviza y espacia las medidas de un aliado | Menos presión de aliados | factor | Pendiente | `ACTORES §3` |
+| `pct_despido_medida` | % de empleados de las firmas del actor que despide `despido_forzado` | Reemplaza el conteo `despidos_medida` | % | Pendiente | `ACTORES §4` |
+| `periodos_sin_lote` | Períodos sin lotes libres que disparan `via_a_mi_zona` | Disparador de demanda de obra | períodos | Pendiente | `ACTORES §4` |
+| `peso_extorsion` | `peso` mínimo del actor para poder extorsionar | Condición 1 de extorsión | 0-100 | Pendiente | `ACTORES §5` |
+| `periodos_memoria_rechazo` | Ventana en la que un rechazo o incumplimiento cuenta como hostilidad | Condición 2 de extorsión | períodos | Pendiente | `ACTORES §5` |
+| `margen_vulnerable` | Puntos de `apoyo_pct` a la meta o al límite que cuentan como gobernador débil | Condición 3 de extorsión | puntos | Pendiente | `ACTORES §5` |
+| `dias_respuesta_extorsion` | Plazo de una extorsión (más corto que el de una demanda) | Presión de tiempo | días | Pendiente | `ACTORES §5` |
+| `k_extorsion, pct_despido_extorsion` | Multiplicador y % de despido de la medida de una extorsión rechazada | Medida más fuerte | factor / % | Pendiente | `ACTORES §5` |
+| `periodos_precedente` | Períodos durante los cuales ceder a una extorsión acelera nuevas demandas | Costo de ceder | períodos | Pendiente | `ACTORES §5` |
+| `max_extorsiones_activas, dias_entre_extorsiones` | Topes de extorsión simultánea y de espera por actor | Límites | extorsiones / días | Pendiente | `ACTORES §5` |
+
+---
+
 ## 13. Contradicciones y ambigüedades detectadas en la documentación
 
-En cumplimiento de las instrucciones, se registran las discrepancias encontradas entre documentos sin resolverlas:
+Se registran las discrepancias que encontró este documento. **Estado tras la segunda revisión de los docs:** los puntos 1 a 7 quedaron **resueltos en los docs** (ver nota en cada uno); lo que queda abierto está en la sección 14.
 
-1. **Unidad de `salario_publico` y nombre de base (`ECONOMIA §3` y `MUNDO §7` vs `CONTROLES §2` y `GOBERNADOR §2`):**
+1. **Unidad de `salario_publico` y nombre de base (`ECONOMIA §3` y `MUNDO §7` vs `CONTROLES §2` y `GOBERNADOR §2`):** *Resuelto:* `salario_publico` es un % del valor base `salario_base_publico` (nombre unificado en snake_case); `ECONOMIA §3` lo dice igual.
    - `ECONOMIA §3` y `MUNDO §7` lo describen como el monto que cobra el rol público (`"Público | salario_publico (no se ajusta solo con la inflación)"`).
    - `CONTROLES §2` y `GOBERNADOR §2` definen `salario_publico` como `% del valor base (50-150)` referido a `salarioBasePublico` (escrito además en camelCase, a diferencia de la convención `parametro_en_codigo` de `README.md`).
-2. **Edad del rol `estudiante` vs egreso a los 18 (`MUNDO §2`, `§5` y `§7`):**
+2. **Edad del rol `estudiante` vs egreso a los 18 (`MUNDO §2`, `§5` y `§7`):** *Resuelto:* el rol `estudiante` pasó a `[0, 17]` (`MUNDO §7`).
    - `MUNDO §2` define menor `< 18` ("estudia") y adulto `18-64` ("trabaja"), y `MUNDO §5` y `§7` indican que el menor es `estudiante` y egresa cuando `edad >= 18` para elegir rol.
    - Sin embargo, el JSON de roles en `MUNDO §7` define `{ "id": "estudiante", "edad": [0, 24], "educ_min": 0, "estudia": true }`, superponiéndose con el tramo `18-24`.
-3. **Tamaño del mapa a 5.000 personas y fórmula de escala (`MAPA §2` vs `MAPA §8`):**
+3. **Tamaño del mapa a 5.000 personas y fórmula de escala (`MAPA §2` vs `MAPA §8`):** *Resuelto:* `MAPA §8` usa una sola regla con `lado_min` y un ejemplo coherente (`48`, `82`, `258`); `MAPA §2` dice unas 66.000 baldosas.
    - `MAPA §2` menciona `"unas 16.000 baldosas para 5.000 personas"`.
    - `MAPA §8` muestra en su tabla `5.000 personas → 160 × 160` (`25.600` baldosas), y a la vez propone `lado = raíz(poblacion_inicial × baldosas_por_persona ÷ suelo_util_pct)` (con factor lineal bajo raíz, `50×` población respecto a `100` hab daría `~7,07×` el lado: de `48` pasaría a `~339`, no a `160`), aclarando luego que la tabla `"son valores de referencia, no una regla"`.
-4. **Existencia inicial de `universidad` vs hito de desbloqueo (`MUNDO §5`, `§12` vs `GOBERNADOR §4` y `ESCENARIOS §2`):**
+4. **Existencia inicial de `universidad` vs hito de desbloqueo (`MUNDO §5`, `§12` vs `GOBERNADOR §4` y `ESCENARIOS §2`):** *Resuelto:* el hito de ejemplo ya no desbloquea `universidad` y `ESCENARIOS §2` arranca con hospital, comisaría, escuela y universidad.
    - `MUNDO §5` y `§12` establecen que el generador siempre crea como mínimo un hospital, una comisaría, una escuela y una `universidad` en la zona central (incluso en mundos de 100 personas) para permitir el nivel educativo `3` y la capacitación.
    - `GOBERNADOR §4` da como ejemplo de hito `h1` desbloquear `["universidad", "muralla"]`, y `ESCENARIOS §2` describe el arranque de Elecciones como `"núcleo chico con un hospital y una comisaría insuficientes"` sin mencionar escuela ni universidad.
-5. **Unidad temporal de períodos: `periodo_dias` vs `30 días` / `meses` (`ECONOMIA §1`, `LECTURA §4` vs `UI §3`, `CONTROLES §4`, `UI_PROTOTIPO_MUNDO §3`):**
+5. **Unidad temporal de períodos: `periodo_dias` vs `30 días` / `meses` (`ECONOMIA §1`, `LECTURA §4` vs `UI §3`, `CONTROLES §4`, `UI_PROTOTIPO_MUNDO §3`):** *Resuelto:* la UI usa `períodos` y `periodos_balance`; no hay meses ni 30 días fijos.
    - El motor y la economía usan `periodo_dias` (`periodos_sin_pagar_alquiler`, informe cada `periodo_dias`).
    - `UI §3` menciona por separado `"resumen de cada día de pago"` y `"balance cada 30 días"`, y `CONTROLES §4` / `UI_PROTOTIPO_MUNDO §3` muestran `"meses sin pagar"` en lugar de períodos. No se especifica si `periodo_dias = 30` o si el balance de 30 días es independiente.
-6. **Cantidad de series en el historial y capas del mapa (`MUNDO §11`, `LECTURA §4` vs `UI §3`; `UI_PROTOTIPO_MUNDO §1` vs `§4`):**
+6. **Cantidad de series en el historial y capas del mapa (`MUNDO §11`, `LECTURA §4` vs `UI §3`; `UI_PROTOTIPO_MUNDO §1` vs `§4`):** *Resuelto:* la UI remite a las series de `MUNDO §11` y las capas son las del selector (`UI_PROTOTIPO_MUNDO §4`, 13).
    - `UI §3` menciona `"las seis series"` en la ventana de historial, mientras `MUNDO §11` lista `9` series y `LECTURA §4` indica una serie por cada indicador (`6` o `7` con M2) y por zona.
    - `UI_PROTOTIPO_MUNDO §1` dibuja 8 opciones en la barra de capas, mientras `UI_PROTOTIPO_MUNDO §4` afirma `"Son 12"` (listando `ninguna` más 11 capas).
-7. **Umbrales compartidos o independientes en condición, noticias y hambre crítica (`MUNDO §6`, `§11`, `CAOS_PRENSA §3`, `§8`, `ACCIONES §3`, `ACTORES §3`):**
+7. **Umbrales compartidos o independientes en condición, noticias y hambre crítica (`MUNDO §6`, `§11`, `CAOS_PRENSA §3`, `§8`, `ACCIONES §3`, `ACTORES §3`):** *Resuelto:* `umbral_hambre_critica` es único para daño e indicador; cada acción de condición y cada tema de noticia tiene su umbral propio (`CAOS_PRENSA §3`).
    - `MUNDO §11` fija `hambre_critica_pct` como `hambre > 80`, pero `MUNDO §6` habla genéricamente de `"su umbral"` para daño por hambre crítica y cura natural.
    - `CAOS_PRENSA §3` y `§8` hablan de `"su umbral"` tanto para disparar acciones de condición (`saqueo`, `ocupacion`) como noticias (`hambre`, `vivienda`), sin precisar si son el mismo parámetro o dos distintos (aunque `ACTORES §3` refiere expresamente al `"umbral de noticia"`).
    - Para `paro_firma`, `CAOS_PRENSA §3` dice `"sobre su umbral de recorte"` y `ACCIONES §3` dice `"Recorte o despido fuerte de una firma"`, sin precisar un parámetro único.

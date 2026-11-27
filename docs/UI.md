@@ -36,10 +36,11 @@ De atrás hacia adelante:
 | **Reloj** | Día, hora del día, pausa y velocidades; estado de la IA si está activa |
 
    Después de cada decisión, el cambio flota sobre el medidor (+3, −$200) con una flecha de tendencia.
-3. **Barra inferior:** palancas en tres grupos (finanzas, obras, alimento), capas del mapa y accesos a ventanas.
+3. **Barra inferior:** palancas según el nivel G (en G1: `impuesto`, `salario_publico` y `nivel_obras`; luego en tres grupos: finanzas, obras, alimento), el botón de construir, capas del mapa y accesos a ventanas.
 4. **Panel lateral único:** lo seleccionado (lote, edificio, persona, zona), las demandas abiertas y las noticias del día.
-5. **Tarjetas que no pausan,** en una esquina: demandas nuevas, avisos de clima, inauguraciones, resumen de cada día de pago (ingresos, gastos, cambio de apoyo y 3 hechos principales) y balance cada 30 días (apoyo frente a la meta y los 3 factores que más lo mueven). Las alertas menores se agrupan en el resumen.
-6. **Ventanas** de detalle **[propuesta: gestor central que recuerda posición]**: economía (empresas, precio, despensas), finanzas del estado, comunidad (por zona y grupo), prensa (noticias y medios), historial (las seis series y el registro de hechos con filtro), clima y objetivo.
+5. **Tarjetas que no pausan,** en una esquina: demandas nuevas, avisos de clima, inauguraciones, resumen de cada día de pago (ingresos, gastos, cambio de apoyo y 3 hechos principales) y balance cada `periodos_balance` períodos (apoyo frente a la meta y los 3 factores que más lo mueven). Las alertas menores se agrupan en el resumen.
+6. **Ventana de notables:** los actores con su peso, postura, favor y demandas abiertas (desde G2), con la línea de causas de cada cambio de favor.
+7. **Ventanas** de detalle **[propuesta: gestor central que recuerda posición]**: economía (empresas, precio, despensas), finanzas del estado, comunidad (por zona y grupo), prensa (noticias y medios), historial (las seis series y el registro de hechos con filtro), clima y objetivo.
 
 **Palancas:** cada una muestra antes de confirmar su valor, sus opciones, su costo por período y a quién afecta. Se pueden operar en pausa.
 
@@ -47,12 +48,12 @@ De atrás hacia adelante:
 
 | Clic en | Qué pasa |
 |---|---|
-| **Lote público libre** | Menú de construcción: edificios disponibles con costo, días de obra y mantenimiento. Al pasar por cada opción se ilumina su área de efecto en el terreno |
+| **Lote público libre** | Menú de construcción: edificios disponibles con costo, días de obra y mantenimiento. Al pasar por cada opción se ilumina su **radio de servicio** en el terreno y se marca cuánta población hoy sin cobertura alcanzaría (MUNDO §9) |
 | **Tramo de vía posible** | Costo, días de obra, mantenimiento y qué lotes abre; construir |
 | **Edificio** | Estado (activo, en obra, sin personal, lleno), personal, capacidad y demoler (si es público). La cámara lo enmarca |
 | **Persona** | Ficha: una frase con el factor que más pesa en su ánimo ("No hay camas", "Me bajaron el sueldo"), rol, zona, ánimo, acción y "¿por qué?". Opción de seguirlo con la cámara |
 | **Zona** | Resumen y necesidad principal |
-| **Alerta o noticia** | La cámara va al lugar del hecho |
+| **Alerta, noticia o hecho del registro** | La cámara va al `foco` del hecho (CONTROLES §5): la persona más relevante, que sigue, o el lote o la zona. Lo mismo vale para los avisos de rarezas y acciones de condición |
 
 - **Cámara:** orbitar, inclinar, zoom y desplazar, entre "ver una persona" y "ver toda la ciudad", sin pasar el terreno ni el borde (límites del preset). Atajos para saltar a cada zona.
 - **Capas de lectura,** una a la vez y apagadas por defecto: ánimo, roles, acciones, defensa, orden, integridad y amenaza por zona, ocupación de hospitales y necesidades. Tiñen el terreno y las personas. Son las del prototipo (UI_PROTOTIPO_MUNDO §4).

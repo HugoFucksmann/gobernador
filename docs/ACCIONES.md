@@ -11,12 +11,14 @@
 - **Afinidad:** rasgos que la hacen más probable (`+`) o menos probable (`−`).
 - **Efectos:** del catálogo (CAOS_PRENSA §5), con intensidad `baja`, `media` o `alta` cuando aplica.
 - **Días:** duración en días de juego, siempre finita.
-- **Contagio:** de 0 a 1 (CAOS_PRENSA §4). Solo las espontáneas se frenan con orden y satisfacción.
+- **Contagio:** de 0 a 1, la base de la probabilidad de contagio (CAOS_PRENSA §4). Solo las espontáneas se frenan con orden y satisfacción; los contagiados nunca contagian.
 - **Zona:** `zona_destino` si la acción mueve a los participantes.
 
 ## 2. Acciones espontáneas (27)
 
-Las elige el director y cuentan contra los límites del caos.
+Las elige el director y cuentan contra los límites del caos, **salvo las rarezas** (`cavar_pozo`, `ver_nubes`, `coleccionar_piedras`, `hablar_con_gallinas`, `cantar_en_plaza`, `mudarse_a_otro_barrio`): son color de vida cotidiana con su propio tope y sin respiro (CAOS_PRENSA §2). Las que no tienen `fuera_de_puesto` ni `moviliza` ocurren en el tiempo libre de la persona y no tocan su turno.
+
+`centro` es la zona de carácter comercial del núcleo inicial (MUNDO §8).
 
 ### Rarezas y trabajo
 
@@ -26,8 +28,8 @@ Las elige el director y cuentan contra los límites del caos.
 | `abandonar_trabajo` | {nombre} deja su puesto sin avisar | Adulto con empleo, no policía | Siempre | laboriosidad−, rebeldía+ | `fuera_de_puesto` | 2-6 | 0,10 | |
 | `ver_nubes` | {nombre} se pasa el día mirando las nubes | Adulto | Siempre | resiliencia+ | `decorativa` | 1-3 | 0,02 | |
 | `coleccionar_piedras` | {nombre} empieza a coleccionar piedras raras | Adulto | Siempre | laboriosidad− | `decorativa` | 2-5 | 0,03 | |
-| `hablar_con_gallinas` | {nombre} se pone a conversar con las gallinas | Adulto | Siempre | valentía+ | `decorativa`, `anima` baja | 2-4 | 0,03 | |
-| `cantar_en_plaza` | {nombre} canta en la plaza y junta curiosos | Adulto | Siempre | resiliencia+ | `anima` baja (zona) | 1-3 | 0,10 | |
+| `hablar_con_gallinas` | {nombre} se pone a conversar con las gallinas | Adulto | Su zona tiene lotes agrícolas | valentía+ | `decorativa`, `anima` baja | 2-4 | 0,03 | |
+| `cantar_en_plaza` | {nombre} canta en la plaza y junta curiosos | Adulto | Su zona o una vecina tiene una plaza (lote `especial`) | resiliencia+ | `anima` baja (zona) | 1-3 | 0,10 | |
 
 ### Ánimo y palabra
 
@@ -47,11 +49,11 @@ Las elige el director y cuentan contra los límites del caos.
 | Id | Texto base | Quién puede | Contexto | Afinidad | Efectos | Días | Contagio | Zona |
 |---|---|---|---|---|---|---|---|---|
 | `acaparar_comida` | {nombre} llena la despensa por si acaso | Adulto | Siempre | codicia+, valentía− | `acapara` media | 3-7 | 0,15 | |
-| `ahorro_obsesivo` | {nombre} decide no gastar ni un peso de más | Adulto con dinero | Siempre | codicia+ | `ahorra` media | 3-8 | 0,10 | |
-| `compras_compulsivas` | {nombre} sale a comprar de todo | Adulto con dinero | Siempre | codicia−, resiliencia− | `gasta` alta | 1-3 | 0,10 | |
-| `compartir_comida` | {nombre} reparte comida con los vecinos | Adulto con despensa | Algún vecino con la despensa baja | valentía+, codicia− | `comparte` baja, `anima` baja | 2-5 | 0,10 | |
-| `idea_de_negocio` | {nombre} anda con una idea de negocio entre manos | Adulto con ahorro | Siempre | codicia+, rebeldía+ | `emprendedor`, `anima` baja | 2-6 | 0,10 | |
-| `apostar_los_ahorros` | {nombre} apuesta todo a una corazonada | Adulto con ahorro | Siempre | codicia+, resiliencia− | `gasta` alta | 1-3 | 0,05 | |
+| `ahorro_obsesivo` | {nombre} decide no gastar ni un peso de más | Adulto de un hogar con dinero | Siempre | codicia+ | `ahorra` media | 3-8 | 0,10 | |
+| `compras_compulsivas` | {nombre} sale a comprar de todo | Adulto de un hogar con dinero | Siempre | codicia−, resiliencia− | `gasta` alta | 1-3 | 0,10 | |
+| `compartir_comida` | {nombre} reparte comida con los vecinos | Adulto de un hogar con despensa | Algún hogar vecino con la despensa baja | valentía+, codicia− | `comparte` baja, `anima` baja | 2-5 | 0,10 | |
+| `idea_de_negocio` | {nombre} anda con una idea de negocio entre manos | Adulto de un hogar con ahorro | Siempre | codicia+, rebeldía+ | `emprendedor`, `anima` baja | 2-6 | 0,10 | |
+| `apostar_los_ahorros` | {nombre} apuesta todo a una corazonada | Adulto de un hogar con ahorro | Siempre | codicia+, resiliencia− | `gasta` alta | 1-3 | 0,05 | |
 
 ### Cuidado y defensa
 
@@ -66,12 +68,12 @@ Las elige el director y cuentan contra los límites del caos.
 |---|---|---|---|---|---|---|---|---|
 | `reunion_familiar` | {nombre} junta a toda la familia a comer | Adulto con hogar de 3 o más | Siempre | resiliencia+ | `anima` media (hogar), `gasta` baja | 1-2 | 0,10 | |
 | `cuidar_abuelos` | {nombre} se pasa los días cuidando a los mayores | Adulto con jubilado en el hogar | Siempre | laboriosidad+, valentía+ | `cuida` baja | 3-8 | 0,05 | |
-| `dar_posada` | {nombre} acoge a un vecino sin casa | Adulto con casa | Algún hogar en calle en la zona | valentía+, codicia− | `comparte` baja, `anima` baja | 3-8 | 0,10 | |
+| `dar_posada` | {nombre} le da de comer a un vecino sin casa | Adulto con casa | Algún hogar en calle en la zona | valentía+, codicia− | `comparte` baja, `anima` baja | 3-8 | 0,10 | |
 | `remodelar_casa` | {nombre} se pone a arreglar la casa | Adulto con casa | Casa en estado bajo | laboriosidad+ | `repara` media (casa), `anima` baja | 2-6 | 0,10 | |
-| `mudarse_a_otro_barrio` | {nombre} decide mudarse a otro barrio | Adulto con casa | Siempre | rebeldía+ | `decorativa` | 1-3 | 0,03 | |
+| `mudarse_a_otro_barrio` | {nombre} se pasa los días mirando casas en otro barrio | Adulto con casa | Siempre | rebeldía+ | `decorativa` | 1-3 | 0,03 | |
 
 - `remodelar_casa` actúa sobre el `estado` de la casa propia, no sobre la integridad de la zona **[propuesta]**.
-- `dar_posada` y `mudarse_a_otro_barrio` son rarezas de vida cotidiana: la mudanza real la decide el mercado de vivienda, no esta acción.
+- `dar_posada` solo reparte comida (`comparte`); no mueve al hogar en calle. `mudarse_a_otro_barrio` es pura rareza: la mudanza real la decide el mercado de vivienda, no esta acción.
 
 ## 3. Acciones de condición (6)
 

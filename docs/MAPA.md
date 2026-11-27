@@ -19,7 +19,7 @@ El motor y la UI comparten el mismo mapa: el motor conoce las coordenadas entera
 | Grafo de calles con lotes por frente, sin grilla | Rutas limpias | Hay que inventar la geometría para dibujar; difícil de generar y de editar a mano |
 | Coordenadas continuas libres | Máximo realismo | Caro, no determinista fácil y acopla las reglas a la geometría. No hace falta para esta etapa |
 
-Costo de la elegida: una grilla de unas 16.000 baldosas para 5.000 personas es chica para el motor. No se calcula ruta por persona: se precomputa por nodos de la red (sección 6).
+Costo de la elegida: una grilla de unas 66.000 baldosas para 5.000 personas (§8) es chica para el motor. No se calcula ruta por persona: se precomputa por nodos de la red (sección 6).
 
 ## 3. Baldosa
 
@@ -98,13 +98,15 @@ Cada baldosa tiene un **terreno** y, si la hay, una **vía**.
 
 ## 8. Tamaño del mapa [propuesta]
 
-| Escala | Personas | Baldosas aprox. |
-|---|---|---|
-| Depuración | 100 | 48 × 48 |
-| Referencia | 500 | 80 × 80 |
-| Máxima | 5.000 | 160 × 160 |
+**Regla del generador:** `lado` = máx(`lado_min`, raíz de (`poblacion_inicial` × `baldosas_por_persona` ÷ `suelo_util_pct`)), redondeado. `suelo_util_pct` es la parte del mapa que queda como suelo después del terreno (§3b), así que un mapa con más ríos y montañas sale más grande. El tamaño se puede fijar a mano en un preset o en el modo desarrollador.
 
-**Regla del generador [propuesta]:** el lado del mapa sale de la población inicial: `lado` = raíz de (`poblacion_inicial` × `baldosas_por_persona` ÷ `suelo_util_pct`), redondeado. `suelo_util_pct` es la parte del mapa que queda como suelo después del terreno (§3b), así que un mapa con más ríos y montañas sale más grande. La tabla de arriba son valores de referencia, no una regla. El tamaño se puede fijar a mano en un preset o en el modo desarrollador.
+Ejemplo con `lado_min` = 48, `baldosas_por_persona` = 8 y `suelo_util_pct` = 60 % (valores de ejemplo, no decididos):
+
+| Escala | Personas | Lado | Baldosas aprox. |
+|---|---|---|---|
+| Depuración | 100 | 48 (el piso) | 2.300 |
+| Referencia | 500 | 82 | 6.700 |
+| Máxima | 5.000 | 258 | 66.000 |
 
 **Lotes por escala:** el generador crea lotes en proporción a la población: lotes residenciales = hogares × (1 + `margen_lotes_residenciales`), de modo que al arrancar queden lotes `libre` para nacimientos, migración y mudanzas y el precio del suelo no sea cero. Un mundo no debe arrancar con hogares en la calle por falta de lotes (solo los que el preset pida).
 

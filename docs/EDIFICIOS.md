@@ -14,7 +14,7 @@
 | `comercial` | Firmas | Locales de comercio, gastronomía, servicios y entretenimiento; oficinas de medio, construcción e inmobiliaria |
 | `agricola` | Firmas `agro` | Campos |
 | `industrial` | Firmas `industria` | Fábricas |
-| `publica` | El estado | Hospital, comisaría, escuela, oficina pública |
+| `publica` | El estado | Hospital, comisaría, escuela, universidad, oficina pública |
 | `especial` | Nadie (la preset) | Plaza, puerto, muelle de comercio exterior |
 
 - Estados: `sin_calle`, `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` espera a que el estado construya la vía que la abre (sección 3b).
@@ -41,15 +41,17 @@
 
 ## 3. Públicos
 
-| Tipo | Da | Puestos | Requisito del personal | Ubicación |
+| Tipo | Da | Radio | Puestos | Requisito del personal |
 |---|---|---|---|---|
-| `hospital` | Camas (`camas_por_hospital`) | Médicos | Educación 3 | Los internados van al hospital con cama libre más cercano |
-| `comisaria` | Base de policía y `bonus_defensa` en su zona | Policías | Educación 1 | Los policías nuevos arrancan en su zona |
-| `escuela` | Lugares de estudio (`lugares_por_escuela`); permite educación 2 al egresar si está al alcance | Docentes | Educación 2 | Los menores estudian en la más cercana con lugar |
-| `universidad` | Lugares (`lugares_por_universidad`); permite educación 3 al egresar si está al alcance | Docentes | Educación 3 | Igual que la escuela |
-| `oficina_publica` | Nada en el mundo base; viene en el preset | Estatales | Educación 1 | — |
+| `hospital` | Camas (`camas_por_hospital`) | `radio_hospital` | Médicos | Educación 3 |
+| `comisaria` | Base de policía (hasta `puestos_por_comisaria`) y `bonus_defensa` en su zona | `radio_comisaria` | Policías | Educación 1 |
+| `escuela` | Lugares de estudio (`lugares_por_escuela`); permite educación 2 al egresar | `radio_escuela` | Docentes | Educación 2 |
+| `universidad` | Permite educación 3 al egresar | `radio_universidad` | Docentes | Educación 3 |
+| `oficina_publica` | Nada en el mundo base; viene en el preset | — | Estatales | Educación 1 |
 
-- **Cupo educativo:** `lugares_por_escuela` y `lugares_por_universidad` no simulan estudiantes en aula. Fijan la cobertura: al egresar a los 18, el nivel 2 (o 3) se habilita si hay una escuela (o universidad) al alcance por ruta con lugares sobre los menores (o jóvenes) que cubre. La UI sí muestra a los menores en la escuela en su franja de estudio.
+- **Radio de servicio:** cada edificio de servicio actúa solo sobre su zona y las zonas a ≤ su radio en pasos (MUNDO §9, *Alcance de los servicios*). Fuera del radio no hay servicio: el menor no estudia, el enfermo no se interna y la zona no tiene policía. Dónde se construye un servicio importa tanto como cuántos hay.
+- **Hospital:** los internados van al hospital con cama libre más cercano al alcance. **Escuela:** los menores van a la más cercana con lugar. **Comisaría:** los policías nuevos arrancan en su zona y se destacan solo dentro de su radio.
+- **Cupo educativo:** `lugares_por_escuela` limita cuántos menores estudian a la vez (los que no entran se quedan en casa); la universidad no simula estudiantes, solo habilita el nivel 3 de quien egresa dentro de su radio. La UI muestra a los menores en la escuela en su franja de estudio.
 - **`oficina_publica`:** parcela pública del preset, clase M (MAPA §4), puestos Estatales (educación 1) y sin construcción automática.
 - Costo de obra, días de obra, mantenimiento y lugares de escuela y universidad: parámetros con nombre en el catálogo, con valores razonables sin calibrar.
 - Cada edificio genera sus puestos; los cubren personas que cumplen el requisito. Sin personal, no funciona (camas = min(camas del edificio, médicos × `pacientes_por_medico`)).

@@ -63,7 +63,7 @@ Las órdenes del jugador (construir, demoler) se validan y ejecutan en el moment
 Cada día, en modo de prueba:
 
 - El dinero total no deriva fuera de lo permitido por ECONOMIA §12.
-- Todo hogar tiene al menos un adulto; toda persona viva tiene un hogar; toda casa ocupada tiene un hogar.
+- Todo hogar tiene al menos un adulto, salvo los de acogida; toda persona viva tiene un hogar; toda casa ocupada tiene un hogar.
 - Las `partes` de cada firma suman 100 o la firma es del estado.
 - Toda persona con `empleador` está en la nómina de esa firma.
 
@@ -76,8 +76,9 @@ Para que la gente se vea ir a su casa, a su trabajo y a comprar, el motor deriva
 - **Franjas del día** (valores del prototipo): `noche` (00-06), `manana` (06-12), `mediodia` (12-14), `tarde` (14-19), `anochecer` (19-24).
 - **Actividad por franja**, según etapa, rol y situación:
   - Adulto con empleo privado o público: en su local o edificio durante su turno, comiendo en la pausa (en casa o en un local de gastronomía según su gasto) y en tiempo libre el resto. Las franjas son solo el marco; la hora real sale del turno y del ritmo personal (abajo).
-  - Estudiante: en la escuela si existe, si no en casa. Jubilado y desempleado: en casa, de compras o de ocio.
-  - Quien tiene `accion` en curso, está internado, fuera de su puesto o en un lote de `zona_destino`: en ese lugar, no en su rutina.
+  - Estudiante: en la escuela más cercana con lugar si tiene una al alcance (MUNDO §9); si no, en casa. Jubilado y desempleado: en casa, de compras o de ocio.
+  - Quien tiene `accion` en curso con `fuera_de_puesto` o `moviliza`, está internado, fuera de su puesto o en un lote de `zona_destino`: en ese lugar, no en su rutina. Una acción sin esos efectos (rarezas, rumores) ocurre en su tiempo libre, cerca de su casa o zona, y no cambia su turno (CAOS_PRENSA §2).
+  - **Dónde está en un momento dado:** el motor responde la ubicación de una persona (lote o ruta, y la hora) para que la UI pueda llevar la cámara a ella con un clic en un suceso (CONTROLES §5, `foco`).
   - Hogar en calle: duerme en una baldosa de calle de su zona.
   - **Compras:** en la franja de compras cada hogar va al lote del vendedor que eligió ese día (ECONOMIA §6) y consume su capacidad de ventas.
 - **Turnos por local [propuesta, valores del prototipo]:** cada rubro tiene horario y días abiertos; el empleado toma un turno al asignarse el puesto (semilla), y el local reparte su plantel entre turnos. Oficina y estatal 9-17; escuela 8-13; almacén, supermercado y tienda 9-20 en 2 turnos; kiosco 7-23 en 2 turnos; gastronomía 11-24 en 2 turnos; industria 6-14 y 14-22; hospital 3 turnos de 24 h; agro 6-15; servicios 9-19; entretenimiento 16-02. Cada empleado tiene 1-2 `dias_descanso` por semana.

@@ -13,6 +13,7 @@ Antes de la partida, sobre el preset elegido:
 | Escenario | El preset |
 | Prensa | Cantidad inicial de medios (uno es monopolio; 0 a muchos) |
 | Economía | Base o con la extensión `fiscal` (M4, cuando exista) |
+| Estabilidad del mundo | Perfil `estable`, `tenso` o `fragil`, o las perillas sueltas (MUNDO §14): caos, clima, holgura económica, cobertura inicial, demografía y territorio |
 | Límites del caos | Los de CAOS_PRENSA §6 |
 
 - Todo valor distinto del preset se marca como **configuración de prueba**.
@@ -20,11 +21,11 @@ Antes de la partida, sobre el preset elegido:
 
 ## 2. Elecciones
 
-Se implementa primero.
+Se implementa primero, y se juega primero en G1 (construir + `impuesto`, `salario_publico` y `nivel_obras`); G2 suma ayuda, garantía y actores con demandas (GOBERNADOR §7).
 
 - **Historia:** gobernar un año y llegar a las elecciones con la comunidad a gusto.
-- **Dilema:** construir y gastar hoy (servicios, ayuda social) contra ahorrar la reserva. Si se agota, impago, huelga y servicios caídos. Los empresarios presionan por impuestos y precios; los medios, por pauta.
-- **Mundo:** núcleo chico con un hospital y una comisaría insuficientes, lotes libres y otros `sin_calle` que se abren construyendo vías. Sin fenómenos con daño; **[propuesta]** una sequía con aviso a mitad de año, para que silo y riego tengan sentido. La policía solo hace orden.
+- **Dilema:** construir y gastar hoy (servicios, vías, ayuda social) contra ahorrar la reserva. Si se agota, impago, huelga y servicios caídos. Dónde construir define quién queda cubierto. Con G2 en adelante, los empresarios grandes presionan por impuestos y vías, y los medios por pauta; con el gobernador débil, extorsionan (ACTORES §5).
+- **Mundo:** núcleo chico con un hospital, una comisaría, una escuela y una universidad insuficientes, lotes libres y otros `sin_calle` que se abren construyendo vías. Sin fenómenos con daño; **[propuesta]** una sequía con aviso a mitad de año, para que silo y riego tengan sentido. La policía solo hace orden.
 - **Objetivo:** `apoyo_pct` ≥ 50 al día 365.
 - **Derrota:** `hambre_critica_pct` > 50 o `poblacion_pct` < 50.
 

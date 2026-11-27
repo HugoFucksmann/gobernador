@@ -16,7 +16,7 @@
 │                                          ├───────────────────┤
 │                                          │ Registro de hechos│
 └──────────────────────────────────────────┴───────────────────┘
- Capas: ninguna · ánimo · roles · vivienda · firmas · alquiler · vías · acciones
+ Capas: ninguna · ánimo · roles · vivienda · firmas · … (selector, §4)
 ```
 
 ## 2. Mapa
@@ -25,7 +25,7 @@
 - **Lotes** según estado: `sin_calle` (gris con trama), `libre` (borde punteado), `en_obra` (barra de progreso), `ocupada` (ícono del edificio y, si es una casa, de su ocupación).
 - **Edificios:** ícono por tipo con su estado (activo, sin personal, lleno, en obra, mal estado).
 - **Personas:** puntos de color según su rol. Siguen su **agenda** (MOTOR §7): de noche en su casa, de día en su trabajo o escuela, y van a comprar, a comer o a hospital cuando corresponde. Se mueven por las vías, de un lote a otro, según la hora del motor.
-- Los que están en una acción, internados, fuera de su puesto o en la calle se ven distinto.
+- Los que están en una acción, internados, fuera de su puesto o en la calle se ven distinto. Quien hace algo fuera de lo común (una rareza, un rumor, una protesta) lleva un **marcador** con el ícono de su acción y, al pasar el cursor, su texto ("Marta se obsesiona con cavar un pozo").
 - **Cámara 2D:** arrastrar, zoom y atajos a cada zona.
 
 ## 3. Interacción (solo lectura)
@@ -34,12 +34,12 @@
 |---|---|
 | **Lote** | Tipo, estado, dueño, edificio, personal y ocupantes, alquiler si es una casa, ventas si es un local |
 | **Persona** | Ficha: rol, edad, hogar y familia, empleador y `partes`, casa, ánimo, personalidad y ritmo (turno, hábitos), acción en curso, agenda del día y "¿por qué?" |
-| **Hogar** | Miembros, casa, dinero, despensa, alquiler y meses sin pagar |
+| **Hogar** | Miembros, casa, dinero, despensa, alquiler y períodos sin pagar |
 | **Firma** | Rubro, dueños con %, locales, empleados, `factor`, caja, cuota de zona |
 | **Vía** | Tipo, estado, qué lotes abre |
 | **Zona** | Población, ánimo medio, vivienda, empleo y necesidad principal |
 | **Medio** | Dueños, línea, alcance, credibilidad, noticias |
-| **Hecho del registro** | La cámara va al lugar y muestra la cadena "¿por qué?" |
+| **Hecho del registro o aviso** | La cámara va a su `foco` (persona, lote o zona), sigue a la persona y muestra la cadena "¿por qué?" |
 
 - **Terreno:** relieve de `altura` y selector de semilla para generar otro mapa (modo desarrollador).
 - **Seguir a una persona:** la cámara la acompaña durante el día.
@@ -47,11 +47,13 @@
 
 ## 4. Capas del mapa
 
-Son **12**, en un selector desplegable de la barra inferior (`ninguna` por defecto), una a la vez: ánimo, roles, vivienda (casa propia, alquilada, hacinada, calle), firmas (por rubro o por dueño), alquiler por zona, estado de las vías, acciones en curso, y defensa, orden, integridad y amenaza por zona.
+Son **13**, en un selector desplegable de la barra inferior (`ninguna` por defecto), una a la vez: ánimo, roles, vivienda (casa propia, alquilada, hacinada, calle), firmas (por rubro o por dueño), alquiler por zona, estado de las vías, acciones en curso, defensa, orden, integridad y amenaza por zona, y **cobertura de servicios** (escuela, universidad, salud y policía por separado: tiñe cada zona según su cobertura y dibuja el radio de los edificios de ese servicio; las zonas sin cobertura se marcan).
 
 ## 5. Registro y paneles
 
-- **Registro de hechos** con filtro por tipo (vida, familia, mercado, vivienda, obras, clima, caos, prensa) y por zona. Cada hecho es clicable y lleva a su causa.
+- **Registro de hechos** ("Qué está pasando") con filtro por tipo (vida, familia, mercado, vivienda, obras, clima, caos, **rarezas**, prensa) y por zona. Cada hecho muestra su texto, su ícono y la zona.
+- **Un clic lleva la cámara al hecho:** a su `foco` (CONTROLES §5), que es la persona más relevante (quien inicia la acción, la víctima, quien murió), un lote o una zona. Si es una persona, la cámara la sigue durante el día hasta que el usuario suelta el seguimiento. Los hechos con varios participantes ofrecen "ver a todos" (la cámara pasa de uno en uno) y un segundo clic abre la cadena "¿por qué?".
+- **Avisos en el borde del mapa:** los hechos nuevos de severidad alta o de tipo raro (rareza, acción de condición, colapso) parpadean un momento en el borde del mapa, con la misma regla de clic; nunca pausan.
 - **Ventanas de detalle:** población (pirámide de edades, natalidad y mortalidad), economía (precios, alquileres, cuota de mercado por rubro), firmas (lista y ranking), vivienda, prensa (noticias y medios), historial (las series de MUNDO §11).
 
 ## 6. Controles del tiempo y modo desarrollador

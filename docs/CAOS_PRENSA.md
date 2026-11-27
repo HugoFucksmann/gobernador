@@ -32,6 +32,8 @@
 - `duracion_dias`: siempre finita. `zona_destino`: a dónde van los participantes mientras dura.
 - `textos`: al menos 3 variantes, en tercera persona y presente, sin cifras, con `{nombre}`, `{rol}` y `{zona}` (y `{firma}` si nombra una firma). No se repite la última usada. Cada acción tiene su animación en la vista.
 - Los efectos sobre dinero y comida actúan sobre el **hogar** de la persona. Catálogo de acciones: ACCIONES.md.
+- **Dónde y cuándo ocurre:** una acción con `fuera_de_puesto` o `moviliza` **reemplaza** la rutina de la persona (en vez de su turno, o en su `zona_destino`; MOTOR §7). Una acción sin esos efectos (las rarezas, un rumor, cuidar) ocurre en su **tiempo libre**, cerca de su casa o su zona, y no toca su turno ni su producción. Así el mundo se ve vivo sin frenar la economía.
+- **Rarezas:** acciones de color cuyos únicos efectos son `decorativa` o `anima` baja (`cavar_pozo`, `ver_nubes`, `coleccionar_piedras`, `hablar_con_gallinas`, `cantar_en_plaza`, `mudarse_a_otro_barrio`). Sirven para dar vida y para contar historias, no para mover números. Tienen su propio tope (`max_rarezas_por_periodo`): **no cuentan contra `max_acciones_por_periodo` ni las frena el respiro**, para que el color no le quite lugar al caos que importa ni desaparezca cuando la comunidad está mal.
 
 ## 3. Acciones de condición
 
@@ -46,19 +48,25 @@ Consecuencias de una situación del mundo, no caos. El **motor** decide si pasan
 | `ocupacion` | `calle_pct` sobre su umbral y casas vacías disponibles |
 | `boicot` | `cuota_zona` de una firma sobre `umbral_poder_precio` y precio de la comida sobre su umbral |
 
+- **Umbrales:** cada acción de condición tiene su umbral propio (`umbral_protesta`, `umbral_saqueo`, `umbral_ocupacion`, `umbral_boicot`, `umbral_recorte_paro`) y cada tema de noticia el suyo (`umbral_noticia_<tema>`). Son parámetros distintos aunque arranquen con el mismo valor. `hambre_critica_pct` usa `umbral_hambre_critica` (MUNDO §11), el mismo con el que la hambre daña la salud (MUNDO §6).
 - No cuentan contra `max_acciones_por_periodo` ni las frena el respiro. Sus participantes sí ocupan los topes de efecto, aunque el tope no los frena.
 - Su contagio no se modifica por orden ni satisfacción.
 - El origen registra quién eligió: `accion:huelga/motor` o `accion:huelga/clasificador`.
 
 ## 4. Contagio
 
-Misma mecánica que los fenómenos con daño (MUNDO §9): una fuente, una exposición, un freno y una tirada diaria por persona.
+Una ola nace de un **foco** y muere con él. Misma mecánica que los fenómenos con daño (MUNDO §9): una fuente, una exposición, un freno y una tirada diaria por persona.
 
-- **Fuente:** una acción en curso en la zona efectiva. **Exposición:** % de la zona que ya la hace.
-- **Contagio efectivo** (espontáneas) = `contagio` × (1 − `k_orden` × orden/100) × (1 − `k_satisfaccion` × satisfacción media de la zona/100).
-- Pueden contagiarse las personas que cumplen los requisitos; la afinidad pesa. El contagiado hace la misma acción hasta que termina la original: una ola nace de un foco y muere con él.
-- Los contagiados no cuentan contra `max_acciones_por_periodo`, pero sí contra los topes de efecto: con el tope lleno no se tira.
-- Origen `accion:<id>/contagio`, con causa en el evento de la fuente.
+- **Foco:** la acción que eligió el director o abrió una condición (§3). Es la **única fuente**: los contagiados no contagian a nadie. Si no, una protesta se encadenaría sola sin límite.
+- **Exposición** de una zona = % de sus personas que hoy hacen esa acción (foco más contagiados). Sin foco en la zona efectiva, no hay tirada.
+- **Probabilidad diaria** de contagiarse una persona de la zona = `contagio` de la acción × exposición × (1 − `k_orden` × orden/100) × (1 − `k_satisfaccion` × satisfacción media de la zona/100) × `k_contagio_global` × factor de afinidad (mismo peso que en §6). El freno de orden y satisfacción vale solo para las espontáneas; las de condición ignoran ambos frenos (§3).
+- **Quiénes:** pueden contagiarse las personas de la zona que cumplen los requisitos y no están internadas ni ya en otra acción. Cada acción contagia solo a su propia zona efectiva, no salta de zona.
+- **Cuánto dura:** el contagiado hace la misma acción hasta que termina el foco original; la duración de cada uno no pasa `duracion_max_dias`.
+- **Topes:** los contagiados no cuentan contra `max_acciones_por_periodo`, pero sí contra los topes de efecto (por ejemplo `max_pct_rol_fuera_de_puesto`): con el tope lleno no se tira. Así una ola nunca paraliza un rol entero.
+- **Costo:** solo se tira en zonas con foco activo, no en las 5.000 personas cada día.
+- **Efectos de hogar:** el contagio es por zona, no por hogar; los efectos sobre dinero y comida actúan sobre el hogar de cada contagiado.
+- **`k_contagio_global`** es un parámetro del mundo: escala todo el contagio y es una de las perillas de estabilidad (MUNDO §14). Valor 0 lo apaga.
+- Origen `accion:<id>/contagio`, con causa en el evento del foco.
 
 ## 5. Catálogo de efectos
 
@@ -98,14 +106,17 @@ Misma mecánica que los fenómenos con daño (MUNDO §9): una fuente, una exposi
 3. Sorteo con semilla por peso o, con el clasificador, por sus probabilidades (§9).
 4. Duración sorteada dentro de la de la acción, con tope `duracion_max_dias`.
 
+**Equilibrio entre caos y orden.** El director empuja y el mundo se defiende: de un lado el director, el contagio, las acciones de condición y las crisis de clima y mercado; del otro la policía (`orden`), la satisfacción y la resiliencia, el respiro, los topes y la recuperación espontánea. Cuánto pesa cada lado es configurable al empezar el mundo y decide si el mundo se sostiene, oscila o colapsa (MUNDO §14).
+
 **Límites del caos** (parámetros del mundo; cambiarlos es configuración de prueba):
 
 | Límite | Qué cuenta |
 |---|---|
-| `max_acciones_por_periodo` (en `periodo_dias_caos`) | Solo los focos que elige el director |
+| `max_acciones_por_periodo` (en `periodo_dias_caos`) | Solo los focos que elige el director, sin las rarezas |
 | `max_pct_rol_fuera_de_puesto` | Todos los que tienen el efecto, sea foco, contagio o condición |
 | `duracion_max_dias` | Las espontáneas |
-| `respiro_si_satisfaccion_media_menor_a` | Frena el caos espontáneo cuando la comunidad está al borde |
+| `respiro_si_satisfaccion_media_menor_a` | Frena el caos espontáneo cuando la comunidad está al borde (no a las rarezas) |
+| `max_rarezas_por_periodo` | Solo las rarezas (§2) |
 
 ## 7. Medios
 
@@ -119,6 +130,7 @@ Los medios son **firmas de rubro `medio`** (ECONOMIA §4). Hay de 0 a muchos; la
   "ingresos": { "publicidad": 30, "fondos_estado": 20, "dependencia_pct": 40 }, "caja": 15 }
 ```
 
+- **Dueño notable:** el dueño mayoritario de un medio es un actor del gobernador (ACTORES §1) y puede presionar o extorsionar con campañas.
 - **Dueños y línea editorial [propuesta]:** la línea inicial sale de los dueños (su lealtad media da la afinidad con el gobierno; su rebeldía, codicia y valentía dan el sensacionalismo). Al cambiar los dueños, la línea se mueve de a poco hacia la nueva (`k_linea` por período).
 - **Ingresos:** `publicidad` (las firmas la pagan, ECONOMIA §5, repartida por alcance × credibilidad) y `fondos_estado` (el control `fondos_prensa`, repartido parejo entre los medios, CONTROLES §2). Con los ingresos se pagan sueldos de columnistas; el resto va a dueños o caja.
 - **Alcance:** crece con los ingresos propios (rendimientos decrecientes, no se acumula) y con los fondos del estado.
@@ -145,7 +157,7 @@ Los medios son **firmas de rubro `medio`** (ECONOMIA §4). Hay de 0 a muchos; la
 | `empresas` | `empresa_despido`, `empresa_recorte`, `empresa_aumento` | Media | Mala o buena |
 | `gobierno` | `control` (cambio en vigencia) | Media | Según el control (CONTROLES §2) |
 | `obras` | `obra_fin` (edificio inaugurado), `via_fin`, `zona_abierta`, local o campo privado nuevo | Media | Buena |
-| `presiones` | `demanda_rechazada` y la medida que sigue | Alta | Mala |
+| `presiones` | `demanda_rechazada`, `demanda_incumplida`, `extorsion`, la medida que sigue y un cedido por extorsión | Alta | Mala |
 | `vecinos` | Acción espontánea con 3 o más participantes, o una rareza | Baja | Neutra |
 | `objetivo` | `victoria`, `objetivo_perdido` | Obligatoria | Buena o mala |
 | `vivienda` | `calle_pct` sobre su umbral, `desalojo` en masa, casa nueva | Alta | Mala o buena |

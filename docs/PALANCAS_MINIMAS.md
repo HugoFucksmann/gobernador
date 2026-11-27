@@ -33,7 +33,7 @@ Con estas cuatro, el jugador ya puede decidir qué construir, dónde y cuánto c
 | `ayuda_social` | Gastar en obra y subir impuesto lleva gente al desempleo y la calle; la ayuda amortigua |
 | `garantia_alimentaria` | Mismo caso con el hambre |
 
-Son las del nivel G1 (GOBERNADOR §7). Se pueden dejar fijas en el preset si se quiere un jugador de obra más puro.
+Son las del nivel G2 (GOBERNADOR §7). En G1 quedan fijas en el valor del preset: es el jugador de obra más puro.
 
 ## 5. No necesarias para la obra pública
 
@@ -43,7 +43,7 @@ Son las del nivel G1 (GOBERNADOR §7). Se pueden dejar fijas en el preset si se 
 
 - **3 palancas:** `impuesto`, `nivel_obras`, `salario_publico`.
 - **3 órdenes:** `construir`, `construir_via`, `demoler`.
-- **Opcionales:** `ayuda_social`, `garantia_alimentaria`.
+- **Decidido:** esto es el nivel **G1**, la versión mínima jugable. `ayuda_social` y `garantia_alimentaria` entran en G2 y el resto de las palancas en G3 (GOBERNADOR §7).
 
 ## 7. Decisiones y pendientes
 

@@ -42,7 +42,7 @@ Las obras se pagan en el momento de ordenarlas (§10), no el día de pago.
 | Dueño | Su % de la ganancia de la firma, aunque no trabaje en ella o esté fuera de su puesto |
 | Gerente sin partes | Sueldo de gerente de su firma **[propuesta]** |
 | Dueño de casa | Alquileres cobrados |
-| Público | `salario_publico` (no se ajusta solo con la inflación) |
+| Público | `salario_publico`: % del valor base (`salario_base_publico`) que fija el gobernador; no se ajusta solo con la inflación |
 | Periodista | Sueldo de su medio, sin productividad |
 | Jubilado | `pension_base` + ayuda social |
 | Desempleado | Ayuda social |
@@ -180,8 +180,8 @@ Cada día de pago, por firma:
 
 - **Entra:** el impuesto, más herencias sin herederos, remates de firmas y locales, excedente de firmas sin dueño y venta de lotes.
 - **Sale cada día** (de la `reserva`): garantía, importaciones y la comida de menores solo si el hogar no puede o el menor está en acogida (costo diario de acogida).
-- **Sale al ordenar una obra:** su costo, de una vez, a una firma de construcción. Si la reserva no alcanza, no se puede ordenar. Rige para edificios y vías (EDIFICIOS §3 y §3b).
-- **Obra directa:** si no hay ninguna firma de construcción con capacidad de obra libre (quebraron o están saturadas), el estado ejecuta la obra por su cuenta con costo × `k_obra_directa` (mayor que 1) y días × `k_dias_obra_directa`. El pago no sale del mundo: se reparte como jornales entre los hogares con adultos desempleados. Es el plan B; la obra directa sostenida atrae emprendimientos de construcción (§8).
+- **Sale al ordenar una obra:** su costo, de una vez, a una firma de construcción. Si la reserva no alcanza, no se puede ordenar. Rige para edificios y vías (EDIFICIOS §3 y §3b). **Qué constructora:** la de menor precio con capacidad de obra libre; en un empate, la más cercana por ruta y después el sorteo con semilla. La adjudicación dirigida a una firma amiga no existe en la versión jugable (ALCANCE_VERSION_JUGABLE).
+- **Obra directa:** si no hay ninguna firma de construcción con capacidad de obra libre (quebraron o están saturadas), el estado ejecuta la obra por su cuenta con costo × `k_obra_directa` (mayor que 1) y días × `k_dias_obra_directa`. El pago no sale del mundo: se reparte como jornales entre los hogares con adultos desempleados (y, si no hay, entre los de obreros de la zona). Es el plan B; la obra directa sostenida atrae emprendimientos de construcción (§8).
 - **Sale el día de pago** (paso 1 de §2), en este orden de prioridad: pensiones → nómina → ayuda social → mantenimiento de edificios y vías y operación de obras (a firmas de construcción) → fondos de prensa (a los medios).
 - **Si no alcanza:** se paga en ese orden y lo que queda se prorratea. Una importación se reduce a lo que cubre la reserva; la garantía se prorratea; la comida de menores en acogida se paga siempre, antes que nada.
 - **Impago:** cualquier faltante emite `impago {faltante, alcanza_nomina}` y dura hasta el primer día de pago sin faltante (`impago_fin`). Si alcanza la nómina, los públicos pierden satisfacción y productividad y se dispara la huelga (CAOS_PRENSA §3).
@@ -192,7 +192,7 @@ Cada día de pago, por firma:
 ## 11. Comercio exterior
 
 - **Capacidad diaria** = comerciantes × `intercambio_por_comerciante`. **Precio externo** = `precio_base` × (1 + inflación/100) × factor de clima; comprar cuesta más que vender.
-- **Importar:** el estado compra comida al precio externo, sin tope, con la reserva; la comida va al stock. El comercio importa bienes cuando la industria local no alcanza (§6b).
+- **Importar:** el estado compra comida al precio externo, sin tope, con la reserva, y la guarda en el `stock_estado`. El estado vende ese stock como una firma más y sin ganancia, al precio min(mercado, tope) de cada zona; la diferencia con el precio externo es costo del estado y lo que cobra vuelve a la reserva **[propuesta]**. El comercio importa bienes cuando la industria local no alcanza (§6b).
 - **Exportar:** las firmas `agro` e `industria` venden y cobran ellas, sin bajar de `stock_min_exportar_dias`.
 - Los medios no cobran del exterior: viven de publicidad y fondos del estado.
 

@@ -70,7 +70,7 @@
 
 - **Unidad de consumo, vivienda y herencia.** Cobra el ingreso de todos sus miembros y paga comida, alquiler, mantenimiento propio y gasto de vida (ECONOMIA §3).
 - **Estados:** `con_casa`, `calle` o `acogida`.
-- **Composición:** al menos un adulto. Un menor sin adulto en su hogar pasa al hogar de un pariente (hermano, abuelo, tío, por `padres`). Sin pariente, pasa a un **hogar de acogida** **[propuesta]**: lo paga el estado y no ocupa casa.
+- **Composición:** al menos un adulto, salvo los hogares de acogida. Un menor sin adulto en su hogar pasa al hogar de un pariente (hermano, abuelo, tío, por `padres`). Sin pariente, pasa a un **hogar de acogida** **[propuesta]**: lo paga el estado y no ocupa casa.
 - **Despensa:** días de comida de todos sus miembros; se conserva solo con casa.
 - Los hogares se crean al generar el mundo, por pareja, por independización o por separación por hacinamiento (§5), y se disuelven cuando mueren todos sus miembros.
 
@@ -91,7 +91,7 @@
 Cada evento que cambia la composición de un hogar genera un evento con origen (CONTROLES §5).
 
 - **Mortalidad por edad:** probabilidad diaria que crece con la edad (casi nula hasta la adultez, alta en la vejez), más las causas de §6 (golpes, hambre crítica). No es evitable por el estado: no suma `culpa`.
-- **Educación:** al egresar a los 18, el nivel sale de la aptitud (laboriosidad, resiliencia), del ingreso de su hogar y de los edificios educativos al alcance por ruta **[propuesta]**: el nivel 2 pide una `escuela` al alcance y el nivel 3 una `universidad`. Sin ellas, el tope es 1 y 2 respectivamente. No hay carreras ni pipeline por oficio.
+- **Educación:** el menor estudia solo si tiene una escuela al alcance con lugar (§9, *Alcance de los servicios*); si no, se queda en casa. Al egresar a los 18, el nivel sale de la aptitud (laboriosidad, resiliencia), del ingreso de su hogar y de los edificios educativos al alcance **[propuesta]**: el nivel 2 pide haber estudiado con una `escuela` al alcance y el nivel 3 además una `universidad` al alcance. Sin escuela el tope es 1; sin universidad, 2. No hay carreras ni pipeline por oficio.
 - **Parejas:** cada período demográfico, adultos solteros se emparejan por cercanía de zona, edades próximas y afinidad de personalidad. La pareja se muda a un solo hogar (el que tenga casa más grande; si ninguno tiene, a calle o al hogar de los padres).
 - **Nacimientos:** cada período demográfico, un hogar con una pareja en edad fértil (`edad_fertil`), casa con lugar y satisfacción sobre `umbral_natalidad` tira un nacimiento. La probabilidad baja con ingreso insuficiente o falta de espacio; hay un `tope_natalidad` global por período. El bebé nace menor, en ese hogar, con rasgos mezclados de sus padres más la semilla.
 - **Independización:** a partir de `edad_independizacion`, un hijo con ingreso suficiente y una casa libre que pueda pagar forma hogar propio; si no, se queda.
@@ -106,13 +106,13 @@ Cada evento que cambia la composición de un hogar genera un evento con origen (
 Solo estas causas restan salud, cada una con su forma de combatirla:
 
 1. **Golpes** de la plaga zombie y la pandemia (§9): seguridad (zombis) y hospital (los dos).
-2. **Hambre crítica:** daño diario con el hambre sobre su umbral; se combate con la comida (ECONOMIA §6).
+2. **Hambre crítica:** daño diario con el hambre sobre `umbral_hambre_critica` (el mismo de `hambre_critica_pct`, hambre > 80); se combate con la comida (ECONOMIA §6).
 3. **Vulnerabilidad por edad:** menores y mayores de 65 reciben más daño por golpe (`k_vulnerabilidad`) y los jubilados arrancan con menos salud **[propuesta]**.
 4. **Deriva diaria:** `salud` baja con la edad, la calle (recargo diario y cura natural frenada) y el hambre. No hay subsistema de enfermedad común: al caer bajo el umbral de internación la persona va al hospital, así que el hospital trabaja aunque no haya golpes.
 
 Orden diario: golpes → deriva y hambre crítica → internación → cura → muerte (salud 0).
 
-- **Hospital:** pide cama quien tiene salud < `umbral_hospital`. Camas de cada hospital = min(camas del edificio, sus médicos × `pacientes_por_medico`); un hospital de campaña suma sus camas sin médicos, con la mitad de la cura. Se interna primero a los de menor salud, en el hospital con cama libre más cercano por ruta (su zona pasa a ser la zona efectiva); el resto espera en su casa. El internado no produce ni recibe ataques, se cura `cura_base` × (0,5 + 0,5 × indicador `salud`/100) por día y sale con salud ≥ `alta`.
+- **Hospital:** pide cama quien tiene salud < `umbral_hospital`. Camas de cada hospital = min(camas del edificio, sus médicos × `pacientes_por_medico`); un hospital de campaña suma sus camas sin médicos, con la mitad de la cura. Se interna primero a los de menor salud, en el hospital con cama libre más cercano **al alcance** (§9; su zona pasa a ser la zona efectiva); el resto, y quien no tiene hospital al alcance, espera en su casa sin cura asistida. El internado no produce ni recibe ataques, se cura `cura_base` × (0,5 + 0,5 × indicador `salud`/100) por día y sale con salud ≥ `alta`.
 - **Cura natural:** quien no está internado se cura `cura_natural` por día si su hambre está bajo su umbral.
 - **Muerte:** sale de su hogar y de la población, su puesto queda vacante, si era columnista sale de su medio y se abre la herencia (§5). La mortalidad por edad es una causa más.
 - **Duelo:** cada muerte baja la satisfacción (−`duelo`) en su hogar y su zona. Si murió por una causa que el estado pudo evitar (esperando cama, hambre crítica o golpe zombie), suma también un modificador de lealtad (−`culpa`) en toda la ciudad, con causa en la muerte. Una comunidad que pierde gente lo siente y se lo cobra al gobierno.
@@ -121,7 +121,7 @@ Orden diario: golpes → deriva y hambre crítica → internación → cura → 
 
 ```json
 [
-  { "id": "estudiante",   "edad": [0, 24],   "educ_min": 0, "estudia": true },
+  { "id": "estudiante",   "edad": [0, 17],   "educ_min": 0, "estudia": true },
   { "id": "agricultor",   "edad": [18, 64],  "educ_min": 0, "afinidad": "laboriosidad", "rubro": "agro" },
   { "id": "tecnico",      "edad": [18, 64],  "educ_min": 2, "afinidad": "laboriosidad", "rubro": "agro|industria", "produce": "tecnificacion" },
   { "id": "obrero",       "edad": [18, 64],  "educ_min": 0, "afinidad": "laboriosidad", "rubro": "agro|industria|comercio|gastronomia|servicios|entretenimiento|construccion" },
@@ -163,10 +163,10 @@ Orden diario: golpes → deriva y hambre crítica → internación → cura → 
 - **Distancia entre zonas** = número de pasos entre vecinas (en un empate, el primero de la configuración). La usan el clima, los ataques y el orden.
 - **Tipos de parcela:** `residencial`, `comercial`, `agricola`, `industrial`, `publica` y `especial`. Cada zona define cuántas de cada tipo y en qué orden. `especial` reserva puntos de interés del mapa (plaza, puerto, muelle de comercio exterior) y no se edifica.
 - **Estados:** `sin_calle` (existe en el suelo urbanizable pero no tiene acceso), `libre`, `en_obra`, `ocupada`. Una parcela `sin_calle` no admite obra.
-- **Carácter de zona [propuesta]:** centro con comercios y edificios públicos, anillo residencial, periferia con campos. Los precios de alquiler y la demanda de comercio varían por zona.
+- **Carácter de zona [propuesta]:** centro con comercios y edificios públicos, anillo residencial, periferia con campos. **`centro`** es la zona de carácter comercial del núcleo inicial: es a donde van las acciones con `zona_destino: centro` (ACCIONES.md) y donde el generador pone los edificios públicos mínimos. Los precios de alquiler y la demanda de comercio varían por zona.
 - **La ciudad se expande solo por vías:** no hay parcelas nuevas sin una vía que las abra (EDIFICIOS §3b, MAPA §7). Solo el estado construye vías; los hogares y las firmas construyen sobre lo que el estado abre. El estado paga el mantenimiento de cada tramo el día de pago: sin pago el `estado` del tramo baja, y con él la `infraestructura` de la zona y la capacidad de venta de los locales de su frente.
 - **Red de rutas y distancia entre parcelas:** MAPA §6. Un tramo en estado 0 es intransitable: si hay otra ruta se usa (más larga y cara); si no, la parcela queda aislada.
-- **Dónde se usa la distancia por ruta:** elección de vendedor y de casa, búsqueda de trabajo (hasta `ruta_max_trabajo`), hospital más cercano y la rutina que dibuja la UI. Ataques, clima y orden usan la distancia entre zonas.
+- **Dónde se usa la distancia por ruta:** elección de vendedor y de casa, búsqueda de trabajo (hasta `ruta_max_trabajo`), el edificio de servicio más cercano dentro de su radio y la rutina que dibuja la UI. Ataques, clima, radios de servicio y presencia policial usan la distancia entre zonas.
 - **Traslado:** la productividad baja con el costo de la ruta casa-trabajo (`k_traslado`) **[propuesta]**. Cortar o deteriorar un tramo clave alarga rutas, baja ventas y productividad, y aparece en las noticias de obras.
 - **Demanda de suelo:** indicador por zona y tipo de parcela = demanda (hogares sin casa, firmas con caja para un local o campo) ÷ parcelas libres. Es lo que dispara la obra de vías en piloto automático (§9).
 - Las parcelas libres son compartidas: las ocupan firmas, hogares y el estado. Quien llega primero según el orden de ejecución de ese día la ocupa.
@@ -192,29 +192,46 @@ Orden diario: golpes → deriva y hambre crítica → internación → cura → 
 - **Ataques:** cada día, cada fenómeno con daño tira por cada persona viva no internada, con probabilidad `exposicion_max` × intensidad/100 × `atenuacion`^distancia (desde el origen a su zona efectiva). Si el tipo tiene protección, el ataque tiene que pasar cada zona del camino, incluida la suya: cada una lo repele con probabilidad `proteccion_max` × `defensa`/100. Si pasa todas, es un **golpe**: resta salud al azar dentro de `dano`, por la vulnerabilidad de su edad. Un golpe de `plaga_zombie` también daña la integridad de la zona.
 - En el mundo base los fenómenos del preset se usan con prudencia (con M2).
 
-### Servicios
+### Alcance de los servicios
+
+Cada edificio de servicio actúa sobre un **radio** medido en pasos entre zonas (la distancia de §8): `radio_escuela`, `radio_universidad`, `radio_hospital` y `radio_comisaria` (0 = solo su zona, 1 = también las vecinas, y así). Una persona está **al alcance** de un edificio si su zona está dentro de ese radio y hay una ruta transitable hasta él (MAPA §6). Fuera del radio el servicio **no existe** para ella: no hay "ir más lejos".
+
+| Servicio | Con edificio al alcance | Sin edificio al alcance |
+|---|---|---|
+| Escuela | El menor estudia: va a la escuela más cercana con lugar (agenda, MOTOR §7). Los que no entran por falta de lugares se quedan en casa | Se queda en casa y no estudia: baja un poco la satisfacción de su hogar y su tope de educación es 1 |
+| Universidad | Permite educación 3 al egresar | El tope de educación es 2 |
+| Hospital | La persona con salud bajo el umbral se interna en el más cercano con cama libre | Espera en su casa, sin cura asistida; si muere, cuenta como "esperando cama" (duelo y culpa, §6) |
+| Comisaría | Sus policías dan presencia, orden y defensa (*Seguridad por zona*) | La zona queda sin policía: más miedo, menos orden y sin defensa policial |
+
+La UI muestra el radio de cada edificio al elegirlo en el menú de construcción y en la capa de cobertura (UI_PROTOTIPO_MUNDO §4).
+
+### Servicios: cobertura e indicadores
 
 Indicadores de servicio: `seguridad`, `salud` (calidad de atención, no la salud de la gente) e `infraestructura`.
 
-- **Cobertura** = min(1, profesionales del rol ÷ profesionales de referencia). La referencia se calcula sobre la **población actual** de cada zona, así los nacimientos y las muertes ajustan sin desbalancear.
+- **Cobertura por zona.** El **área** de una zona es ella y las zonas a ≤ el radio del servicio. Para médicos, docentes y universidad: cobertura(z) = min(1, profesionales de ese rol en los edificios del área ÷ (población relevante del área ÷ `habitantes_por_<rol>`)). Población relevante: todos para médicos, los menores para escuela y los menores próximos a egresar (los últimos `anios_pre_egreso`) para universidad. La policía usa su propia cobertura (*Seguridad por zona*). Se calcula sobre la **población actual**, así nacimientos y muertes ajustan sin desbalancear.
+- **Cobertura global** = promedio de las zonales ponderado por población.
 - **Inversión** = fondos pagados al área (mantenimiento u operación) ÷ costo base del área (proporcional a la población), con rendimientos decrecientes sobre 1.
-- Indicador += cobertura × inversión − decaimiento.
+- Indicador += cobertura global × inversión − decaimiento.
 - Seguridad y salud dependen de lo construido: los puestos salen de comisarías y hospitales, y la inversión es su mantenimiento, que el estado paga en cada día de pago (si no lo paga, el indicador cae). Infraestructura depende del nivel de obras (puestos de ingeniero y operación) y del estado de las vías.
-- **Cobertura baja:** si la de policía o médico cae bajo un umbral, suma un recargo gradual de miedo (policía) o malestar (médicos).
+- **Cobertura baja, por zona:** recargo diario de miedo = `k_miedo_sin_policia` × (1 − cobertura policial) y de malestar = `k_malestar_sin_salud` × (1 − cobertura médica), sobre las personas de esa zona.
 
 | Indicador | Qué hace |
 |---|---|
-| `seguridad` | Baja el miedo y, repartida por zona como `defensa`, frena los ataques zombie |
+| `seguridad` | Escala la defensa por zona y baja el miedo; frena los ataques zombie |
 | `salud` | Rapidez de cura en el hospital (las camas las dan los médicos) |
 | `infraestructura` | Sube la productividad, acelera la reparación de las zonas y acorta los días de obra |
 
 ### Seguridad por zona
 
-- **Policía:** cada policía da defensa y orden en la zona donde está. Los nuevos arrancan en la zona de una comisaría. La defensa solo frena fenómenos con protección; el orden frena el caos espontáneo. La tensión está en dónde están.
-- **Reubicación:** cada día un % de los policías se muda a una zona sorteada con peso según su necesidad total = amenaza percibida + necesidad de orden, con necesidad de orden = min(100, % de la zona con acción espontánea + % de descontentos). Si todas valen 0, no se mueven. La **calle** suma miedo y necesidad de orden en su zona.
+- **Puesto y destaque:** cada policía pertenece a una comisaría (hasta `puestos_por_comisaria`) y está **destacado** en una zona dentro del `radio_comisaria` de esa comisaría; los nuevos arrancan en la zona de su comisaría. Sin comisaría no hay policías.
+- **Presencia:** un policía destacado en la zona y aporta a la zona z con peso `atenuacion_policia`^d(y, z), para d(y, z) ≤ el radio. Es lo que hace que **tarden más en llegar**: un policía en una zona vecina ayuda menos que uno en la propia. `presencia(z)` = suma de esos aportes.
+- **Cobertura policial** (derivada) = min(1, `presencia`(z) ÷ (población(z) ÷ `habitantes_por_policia`)), con la población por zona efectiva. Una zona fuera del radio de toda comisaría tiene cobertura 0.
+- **Orden** (derivado) = 100 × cobertura policial. Frena el contagio espontáneo (CAOS_PRENSA §4) y la **calle** suma necesidad de orden.
+- **Miedo:** además del recargo de cobertura baja (arriba), el miedo por plaga zombie baja con la defensa (§10).
+- **Defensa** (derivada) = min(100, `seguridad` × cobertura policial) + bonus de comisaría y muralla de la zona (EDIFICIOS §3 y §5), todo × (1 − `k_integridad` × (1 − integridad/100)) y con tope 100. La defensa solo frena fenómenos con protección.
+- **Reubicación:** cada día un % de los policías se destaca a otra zona **dentro del radio de su comisaría**, sorteada con peso según su necesidad total = amenaza percibida + necesidad de orden, con necesidad de orden = min(100, % de la zona con acción espontánea + % de descontentos). Si todas valen 0, no se mueven. Una zona fuera de todo radio no recibe policías por más amenaza que tenga: la solución es construir una comisaría cuyo radio la cubra.
 - **Amenaza percibida** (derivada): el mayor entre el aviso (en la zona de origen, el mejor alcance × credibilidad/100 de las noticias de aviso vigentes) y los golpes recientes en la zona (tope 100). La gente percibe, no sabe: un aviso tardío o poco creíble deja a la policía mal ubicada.
-- **Defensa** (derivada) = min(100, `seguridad` × (1 − c + c × n × parte)) + bonus de comisaría y muralla de la zona (EDIFICIOS §3 y §5), todo × (1 − `k_integridad` × (1 − integridad/100)) y con tope 100, con parte = policías de la zona ÷ policías totales (1/n sin policías), n = cantidad de zonas y c = `movilidad_defensa`.
-- **Orden** (derivado) = min(100, 100 × (policías de la zona ÷ población de la zona) ÷ `objetivo_orden`), con la población por zona efectiva. Frena el contagio espontáneo (CAOS_PRENSA §4).
 - **Integridad** (estado, 0-100, arranca en 100): cuánto aguanta la zona. Cada golpe de `plaga_zombie` le resta `dano_integridad`; una integridad baja reduce la defensa, así que el daño se acumula. Reparación diaria = `rep_por_npc` × reparadores × (0,5 + 0,5 × `infraestructura`/100), con tope 100. Reparadores: obreros e ingenieros de esa zona efectiva, no internados ni fuera de su puesto.
 
 ### Estado en piloto automático
@@ -223,7 +240,7 @@ Sin gobernador, el estado sostiene el mundo con reglas fijas que existen solo pa
 
 1. **Ajuste fiscal:** si hay impago, o la reserva queda bajo `reserva_min_dias` de gasto corriente, sube `tasa_impuesto` un paso; si supera `reserva_max_dias`, la baja un paso. Un paso por `periodos_ajuste_fiscal` y siempre dentro de [`tasa_min_auto`, `tasa_max_auto`]. Emite `control` con origen `estado_automatico`. No toca salarios ni ayuda. Si en el tope de la banda el impago sigue (huelga, servicios que caen), el mundo lo sufre: es una señal de calibración, no un error del motor.
 2. **Freno de obra:** no ordena una obra si tras pagarla la reserva queda bajo `reserva_min_dias`, ni si el mantenimiento total (edificios y vías) proyectado supera `pct_mant_max` de los ingresos del estado en el período. Esto evita que lo construido hunda al estado.
-3. **Servicios [propuesta]:** cuando la cobertura de policía, médico, escuela o universidad cae bajo la referencia y el freno de obra lo permite, construye una comisaría, un hospital, una escuela o una universidad en un lote público libre (la cobertura de escuela se mide sobre los menores y la de universidad sobre los jóvenes de la zona y su entorno). No demuele nunca; el freno de obra es lo que acota el crecimiento.
+3. **Servicios [propuesta]:** cuando la cobertura de policía, médico, escuela o universidad de alguna zona cae bajo `cobertura_min` y el freno de obra lo permite, construye el edificio faltante en el lote público libre cuyo radio alcance más población sin cobertura. No demuele nunca; el freno de obra es lo que acota el crecimiento.
 4. **Vías [propuesta]:** cuando la demanda de suelo de un tipo de parcela en una zona supera `umbral_demanda_suelo` durante `periodos_demanda_suelo` y el freno de obra lo permite, construye el tramo que abre más parcelas de ese tipo (calle dentro de la zona; camino o puente hacia una zona no urbanizada si la zona se llenó), el de menor costo por parcela abierta. Si no puede, espera: la salida es el ajuste fiscal del punto 1, que repone la reserva.
 
 Las obras del estado se pagan a firmas de construcción; si no hay ninguna con capacidad, rige la **obra directa** (ECONOMIA §10). Las viviendas y los locales no son del estado en el mundo base.
@@ -293,3 +310,32 @@ Cada nivel suma sin cambiar los controles (CONTROLES §2):
 | **M3** | + caos y prensa con medios como firmas |
 | **M4** | + extensión `fiscal` (emisión e inflación; sin banco ni crédito) |
 | Futuro | Zombis como agentes, edificios con integridad propia, coordenadas y combate (promoción por necesidad, MOTOR §8) |
+
+## 14. Estabilidad, caos y colapso
+
+El mundo arranca equilibrado y vive entre dos grupos de fuerzas. Qué tan fuerte es cada grupo se **configura al iniciar el mundo** y decide si se sostiene, oscila o colapsa.
+
+| Fuerzas de caos | Fuerzas de orden |
+|---|---|
+| Clima (sequía, plaga, pandemia, zombis), director de caos y contagio, acciones de condición (huelga, protesta, saqueo, ocupación, boicot), crisis de mercado (quiebras, burbuja, monopolio), olas de muertes, noticias alarmistas | Policía y `orden`, satisfacción y resiliencia, respiro y topes del caos, recuperación espontánea, hogares con colchón, migración, estado (piloto automático o gobernador), servicios cubiertos |
+
+**Perillas de estabilidad** (parámetros que fija el preset y el panel de configuración, ESCENARIOS §1):
+
+| Perilla | Qué mueve |
+|---|---|
+| Caos | `ofertas_por_dia`, `max_acciones_por_periodo`, `max_rarezas_por_periodo`, `k_contagio_global`, `respiro_si_satisfaccion_media_menor_a` |
+| Clima | `escala_fenomenos` (cuántos y qué tan intensos), `aviso_dias` |
+| Holgura económica | `holgura_inicial` (reserva, colchón de los hogares, caja de las firmas y producción sobre consumo al arrancar) |
+| Servicios | `cobertura_inicial` (qué tan cubierta empieza la ciudad) |
+| Demografía | población inicial, `pct_menores`, `pct_jubilados`, `max_llegadas` |
+| Territorio | semilla, `n_rios`, `nivel_agua` (cuánto queda aislado) |
+
+**Perfiles de estabilidad** (preajustes de esas perillas; cualquier valor propio es configuración de prueba):
+
+| Perfil | Comportamiento esperado, sin gobernador |
+|---|---|
+| `estable` | El caos es color: rarezas, algún rumor, olas chicas. La economía se sostiene décadas |
+| `tenso` | Hay crisis que se encadenan (hambre, calle, protesta) pero el mundo se recupera solo |
+| `fragil` | Una crisis encadenada puede romper el mundo: queda como prueba de qué tan frágil es y como dificultad futura |
+
+**Colapso:** el mundo está colapsado si `poblacion_pct` < `umbral_colapso_poblacion`, o `hambre_critica_pct` > `umbral_colapso_hambre`, o `descontentos_pct` > `umbral_colapso_descontento`, sostenido `dias_colapso`. Emite `colapso {causa}` (con la cadena de causas) y, sin gobernador, el modo sin dibujo puede detenerse ahí. Con gobernador la derrota la define el escenario (GOBERNADOR §6); el colapso no la reemplaza.
